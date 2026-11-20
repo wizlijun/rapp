@@ -787,8 +787,11 @@ class ComposerModel extends ChangeNotifier {
           o: Outgoing([t], voice: o.voice)..failure = o.failure ?? '没有发出去',
     };
     _failed.insertAll(0, made.values);
-    if (draft.isEmpty) draft = old.draftText;
-    pendingAi ??= old.pendingAi;
+    // The AI mark goes with the draft it belongs to, not onto a draft of this composer's own.
+    if (draft.isEmpty) {
+      draft = old.draftText;
+      if (draft.isNotEmpty) pendingAi ??= old.pendingAi;
+    }
     final e = old._editor;
     if (e != null) {
       final before = draft;

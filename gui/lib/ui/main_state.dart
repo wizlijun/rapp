@@ -14,6 +14,7 @@ import '../embed/session_port.dart';
 import '../embed/stream_choice.dart';
 import '../embed/voice_input.dart';
 import '../embed/voice_button.dart' show sendVoice, voiceBlocked;
+import '../embed/tidy_held.dart';
 import '../embed/voice_tidy.dart';
 import '../embed/linux_speech.dart';
 import '../embed/voice_key_gate.dart';
@@ -323,19 +324,55 @@ class MainState extends ChangeNotifier {
   // 长语音先让 AI 整理: one per session, keyed by sid like [remote]; a reconnect's swap moves it ([_dropOld]).
   final Map<Object, VoiceTidy> _tidies = {};
 
-  /// [sid]'s tidy, made on first use.
-  VoiceTidy tidyOf(Object sid) => _tidies[sid] ??= VoiceTidy(
+  late final _tidyHeld = TidyHeld(() => '${data.localDir}/tidy-held');
+
+  /// [sid]'s tidy, made on first use. One asked for a session that is gone (a last build of its layer) is not
+  /// kept: it could never begin, and nothing would end it.
+  VoiceTidy tidyOf(Object sid) {
+    final t = _tidies[sid];
+    if (t != null) return t;
+    final made = _makeTidy(sid);
+    if (!_disposed && remote.containsKey(sid)) _tidies[sid] = made;
+    return made;
+  }
+
+  String? _keyOfSid(Object sid) {
+    for (final r in _records.values) {
+      if (r.sid == sid || r.lastSid == sid) return r.key;
+    }
+    return null;
+  }
+
+  // A tidy of a session that is not on show tells the top bar (its card is not seen).
+  void _tidyAside(Object sid, String what) {
+    final rs = remote[sid];
+    if (rs == null || identical(rs, currentRemote)) return;
+    hint = '${rs.appName}：$what';
+    notifyListeners();
+  }
+
+  /// How long a done tidy's send waits for a click on 编辑.
+  @visibleForTesting
+  Duration tidySettle = const Duration(milliseconds: 1500);
+
+  VoiceTidy _makeTidy(Object sid) => VoiceTidy(
         sid: sid,
+        settle: tidySettle,
         endpoint: () => llm,
         api: llmApi,
         allowed: (s) => prefs.voiceAiTidy && llm.configured && !(remote[s]?.secureFocus ?? true),
         send: (s, text, voice) {
           final rs = remote[s], p = portOf(s);
           if (rs == null || p == null) {
-            if (rs != null) unawaited(rs.composer.keep(text));
+            if (rs != null) {
+              unawaited(rs.composer.keep(text));
+              if (voice.ai != null) rs.composer.pendingAi = voice.ai;
+            }
             return voiceBlocked;
           }
-          return sendVoice(state: this, session: rs, port: p, text: text, voice: voice);
+          final hint = sendVoice(state: this, session: rs, port: p, text: text, voice: voice);
+          if (hint == null && voice.ai != null) _tidyAside(s, '已用 AI 整理并发出');
+          return hint;
         },
         edit: (s, text, ai) {
           final c = remote[s]?.composer;
@@ -343,12 +380,18 @@ class MainState extends ChangeNotifier {
           unawaited(c.keep(text));
           if (ai != null) c.pendingAi = ai;
           c.open = true;
+          if (ai != null) _tidyAside(s, 'AI 整理好了，放在写作面板里');
         },
         keep: (s, text) {
           final c = remote[s]?.composer;
           if (c != null) unawaited(c.keep(text));
         },
-        log: debugPrint,
+        log: (l) => _log('rapp: $l'),
+        held: (s, original) {
+          final k = _keyOfSid(s);
+          if (k != null) _tidyHeld.set(k, original);
+        },
+        failed: (s, reason) => _tidyAside(s, 'AI 整理失败（$reason），回到这个窗口处理'),
       );
 
   /// [sid]'s tidy if one was made.
@@ -1966,6 +2009,11 @@ class MainState extends ChangeNotifier {
     rs.setProfile(prof);
     // Wired before any swap's adoptFrom; a reconnect's old session hands its text over itself.
     recorder.attach(rs, () => _metaOf(r, rs), restore: r.lastSid == null);
+    // A tidy that was waiting when the app last went: its original comes back once.
+    if (r.lastSid == null) {
+      final back = _tidyHeld.take(r.key);
+      if (back != null) rs.composer.keepNow(back);
+    }
     rs.composer.recall = () => [for (final e in recallOf(rs)) e.text];
     if (prof.name != null) _log('rapp: app 配置「${prof.name}」');
     rs.choice = r.choice;
@@ -3206,7 +3254,7 @@ class MainState extends ChangeNotifier {
 
   /// Saves a changed endpoint; an unchanged one writes nothing.
   void setLlm(LlmEndpoint e) {
-    if (e == llm) return;
+    if (_disposed || e == llm) return;
     llm = e;
     try {
       e.save(data.localDir);

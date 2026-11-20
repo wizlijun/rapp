@@ -1,31 +1,38 @@
-// The card of 长语音先让 AI 整理 (spec 2026-11-20-rapp-voice-ai-tidy-design.md §5.3): what the AI has written so far,
-// or why it failed, with 编辑 and 直接发送 always there; after an automatic send, one line that fades.
+// The card of 长语音先让 AI 整理 (spec 2026-11-20-rapp-voice-ai-tidy-design.md §5.3): the voice bubble itself, kept
+// where it stood at the release (user 2026-11-20), the AI's words taking the place of the heard ones from the front;
+// once they are done a send waits [VoiceTidy.settle], time to click 编辑. 编辑 and 直接发送 / 发送 always there; a
+// failure says why and waits. After a send, a hint (if any) shows a while.
 import 'package:flutter/material.dart';
 
 import '../ui/controls.dart';
 import '../ui/tokens.dart';
-import 'voice_overlay.dart' show voiceTail;
+import 'voice_overlay.dart' show VoiceBubbleFrame, voiceBubbleTail, voiceTail;
 import 'voice_ring.dart' show VoicePick;
 import 'voice_tidy.dart';
 
 const _fade = Duration(milliseconds: 160);
 
 class VoiceTidyCard extends StatelessWidget {
-  const VoiceTidyCard({super.key, required this.tidy});
+  const VoiceTidyCard({super.key, required this.tidy, this.right = true, this.tail = false});
 
   final VoiceTidy tidy;
+
+  /// The bubble's tail side and whether it has one (iOS's bubble has, the Mac's not).
+  final bool right, tail;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
         listenable: tidy,
         builder: (context, _) => AnimatedSwitcher(
           duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : _fade,
+          // The card comes in at once (it takes the voice bubble's place); only its going fades.
+          switchInCurve: const Threshold(0),
           layoutBuilder: (current, previous) =>
-              Stack(alignment: Alignment.bottomRight, children: [...previous, ?current]),
+              Stack(alignment: Alignment.topLeft, children: [...previous, ?current]),
           child: switch (tidy.phase) {
             TidyPhase.idle => const SizedBox.shrink(key: ValueKey('tidy-idle')),
             TidyPhase.note => _note(context),
-            TidyPhase.tidying || TidyPhase.failed => _card(context),
+            TidyPhase.tidying || TidyPhase.ready || TidyPhase.failed => _card(context),
           },
         ),
       );
@@ -44,53 +51,135 @@ class VoiceTidyCard extends StatelessWidget {
 
   Widget _card(BuildContext context) {
     final t = RappTokens.of(context);
-    final failed = tidy.phase == TidyPhase.failed;
-    final style = DefaultTextStyle.of(context).style;
-    final partial = !failed && tidy.shown.isNotEmpty;
-    final body = partial ? tidy.shown : tidy.original;
-    final bodyStyle = style.copyWith(color: partial ? t.text : t.muted);
+    final phase = tidy.phase;
     final editFirst = tidy.pick == VoicePick.edit;
+    final ready = phase == TidyPhase.ready;
+    final sendLabel = ready ? '发送' : '直接发送';
     final send = editFirst
-        ? RappButton.secondary(key: const Key('tidy-send'), label: '直接发送', onPressed: tidy.sendOriginal)
-        : RappButton.primary(key: const Key('tidy-send'), label: '直接发送', onPressed: tidy.sendOriginal);
+        ? RappButton.secondary(key: const Key('tidy-send'), label: sendLabel, onPressed: tidy.sendNow)
+        : RappButton.primary(key: const Key('tidy-send'), label: sendLabel, onPressed: tidy.sendNow);
     final edit = editFirst
-        ? RappButton.primary(key: const Key('tidy-edit'), label: '编辑', onPressed: tidy.editOriginal)
-        : RappButton.secondary(key: const Key('tidy-edit'), label: '编辑', onPressed: tidy.editOriginal);
-    return DecoratedBox(
+        ? RappButton.primary(key: const Key('tidy-edit'), label: '编辑', onPressed: tidy.editNow)
+        : RappButton.secondary(key: const Key('tidy-edit'), label: '编辑', onPressed: tidy.editNow);
+    return Column(
       key: const Key('tidy-card'),
-      decoration: t.floatBox(),
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _bubble(context, t),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: right ? MainAxisAlignment.end : MainAxisAlignment.start,
+          children: [edit, const SizedBox(width: 8), send],
+        ),
+      ],
+    );
+  }
+
+  // As the voice bubble: the same fill, padding and type, so the words stay where they were; the footer (where
+  // the level bars were) says what the AI is doing.
+  Widget _bubble(BuildContext context, RappTokens t) {
+    final phase = tidy.phase;
+    final (fill, ink, border) =
+        tidy.pick == VoicePick.edit ? (t.float.first, t.text, t.text) : (t.text, t.bg, null as Color?);
+    final style = TextStyle(color: ink, fontSize: 17, height: 1.35);
+    final rest = style.copyWith(color: ink.withValues(alpha: .55));
+    final small = TextStyle(color: ink.withValues(alpha: .75), fontSize: 13, height: 20 / 13);
+    final status = switch (phase) {
+      TidyPhase.ready => '整理好了，马上发送',
+      TidyPhase.failed => 'AI 整理失败',
+      _ => 'AI 整理中…',
+    };
+    // The AI's words so far, then what is left of the heard ones after as many characters.
+    final failed = phase == TidyPhase.failed;
+    final done = failed ? '' : tidy.shown;
+    final left = phase == TidyPhase.ready ? '' : String.fromCharCodes(tidy.original.runes.skip(done.runes.length));
+    return CustomPaint(
+      key: const Key('tidy-bubble'),
+      painter: VoiceBubbleFrame(
+          fill: fill, border: border, dashed: tidy.pick == VoicePick.edit, right: right, radius: t.r, tail: tail),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        padding: EdgeInsets.fromLTRB(16, tail ? 12 : 16, 16, (tail ? 12 : 16) + (tail ? voiceBubbleTail : 0)),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(failed ? 'AI 整理失败' : 'AI 整理中…',
-                key: const Key('tidy-title'), style: style.copyWith(fontWeight: FontWeight.w600)),
-            if (failed)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(tidy.reason ?? '',
-                    key: const Key('tidy-reason'), style: style.copyWith(color: Theme.of(context).colorScheme.error)),
-              ),
-            const SizedBox(height: 4),
-            // Up to 4 lines; a longer text shows its last 4, as the voice bubble does.
             LayoutBuilder(
-              builder: (context, c) => Text(
-                voiceTail(body, bodyStyle, c.maxWidth, MediaQuery.textScalerOf(context)),
-                key: const Key('tidy-body'),
-                style: bodyStyle,
-                maxLines: 4,
-              ),
+              builder: (context, c) =>
+                  _body(done, left, style, rest, c.maxWidth, MediaQuery.textScalerOf(context)),
             ),
             const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [edit, const SizedBox(width: 8), send],
+            SizedBox(
+              height: 20,
+              child: Row(
+                children: [
+                  Text(status, key: const Key('tidy-title'), style: small.copyWith(fontWeight: FontWeight.w600)),
+                  if (failed) ...[
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(tidy.reason ?? '',
+                          key: const Key('tidy-reason'), style: small, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ),
+                  ],
+                  const Spacer(),
+                  if (phase == TidyPhase.ready) _Drain(duration: tidy.settle, color: ink),
+                ],
+              ),
             ),
           ],
         ),
       ),
     );
   }
+
+  // Up to 4 lines; a longer text shows its last 4, as the voice bubble does.
+  Widget _body(String done, String left, TextStyle style, TextStyle rest, double width, TextScaler scaler) {
+    final all = done + left;
+    final tail = voiceTail(all, style, width, scaler);
+    final from = tail.length == all.length ? 0 : all.length - (tail.length - 1);
+    final lead = from == 0 ? '' : '…';
+    final a = from < done.length ? done.substring(from) : '';
+    final b = from <= done.length ? left : left.substring(from - done.length);
+    return Text.rich(
+      TextSpan(children: [
+        TextSpan(text: lead + a),
+        TextSpan(text: b, style: rest),
+      ]),
+      key: const Key('tidy-body'),
+      style: style,
+      maxLines: 4,
+    );
+  }
+}
+
+/// The wait before a done send goes: a short bar that empties.
+class _Drain extends StatelessWidget {
+  const _Drain({required this.duration, required this.color});
+
+  final Duration duration;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
+        tween: Tween(begin: 1, end: 0),
+        duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : duration,
+        builder: (context, v, _) => SizedBox(
+          key: const Key('tidy-drain'),
+          width: 66,
+          height: 3,
+          child: DecoratedBox(
+            decoration: BoxDecoration(color: color.withValues(alpha: .25), borderRadius: BorderRadius.circular(2)),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: FractionallySizedBox(
+                widthFactor: v,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2)),
+                  child: const SizedBox.expand(),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
 }

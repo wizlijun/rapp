@@ -1,3 +1,5 @@
+import 'dart:ui' show Rect;
+
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/composer_model.dart';
@@ -74,7 +76,7 @@ void main() {
     t.dispose();
   });
 
-  test('done sends the AI text with its origin', () {
+  test('done waits 1.5 s with the AI text, then sends it with its origin', () {
     fakeAsync((a) {
       final t = make();
       expect(t.begin(long, VoicePick.send), isTrue);
@@ -82,14 +84,101 @@ void main() {
       expect(t.phase, TidyPhase.tidying);
       api.calls.single.complete(const LlmDone(' 我们明天下午三点开会。 '));
       a.flushMicrotasks();
+      // Time to click 编辑 (user 2026-11-20): nothing goes yet.
+      expect(t.phase, TidyPhase.ready);
+      expect(t.shown, '我们明天下午三点开会。');
+      expect(sent, isEmpty);
+      a.elapse(const Duration(milliseconds: 1499));
+      expect(sent, isEmpty);
+      a.elapse(const Duration(milliseconds: 1));
       expect(sent.single.$2, '我们明天下午三点开会。');
       expect(sent.single.$3.ai, const VoiceAi(app: 'dictation', original: long, result: '我们明天下午三点开会。'));
-      expect(t.phase, TidyPhase.note);
-      expect(t.note, '已用 AI 整理');
-      a.elapse(const Duration(milliseconds: 1500));
       expect(t.phase, TidyPhase.idle);
       t.dispose();
     });
+  });
+
+  test('发送 while it waits sends the AI text at once', () {
+    fakeAsync((a) {
+      final t = make();
+      t.begin(long, VoicePick.send);
+      api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+      a.flushMicrotasks();
+      t.sendNow();
+      expect(sent.single.$2, '我们明天下午三点开会。');
+      expect(sent.single.$3.ai, isNotNull);
+      expect(t.phase, TidyPhase.idle);
+      a.elapse(const Duration(seconds: 3));
+      expect(sent, hasLength(1));
+      t.dispose();
+    });
+  });
+
+  test('编辑 while it waits puts the AI text in the panel, marked', () {
+    fakeAsync((a) {
+      final t = make();
+      t.begin(long, VoicePick.send);
+      api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+      a.flushMicrotasks();
+      t.editNow();
+      expect(edited.single, (1, '我们明天下午三点开会。', const VoiceAi(app: 'dictation', original: long, result: '我们明天下午三点开会。')));
+      a.elapse(const Duration(seconds: 3));
+      expect(sent, isEmpty);
+      expect(t.phase, TidyPhase.idle);
+      t.dispose();
+    });
+  });
+
+  test('a new press while it waits sends the AI text first', () {
+    fakeAsync((a) {
+      final t = make();
+      t.begin(long, VoicePick.send);
+      api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+      a.flushMicrotasks();
+      t.interrupt();
+      expect(sent.single.$2, '我们明天下午三点开会。');
+      expect(kept, isEmpty);
+      a.elapse(const Duration(seconds: 3));
+      expect(sent, hasLength(1));
+      t.dispose();
+    });
+  });
+
+  test('closing while it waits keeps the AI text, sends nothing', () {
+    fakeAsync((a) {
+      final t = make();
+      t.begin(long, VoicePick.send);
+      api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+      a.flushMicrotasks();
+      t.closed();
+      expect(kept.single, (1, '我们明天下午三点开会。'));
+      a.elapse(const Duration(seconds: 3));
+      expect(sent, isEmpty);
+      t.dispose();
+    });
+  });
+
+  test('end while it waits hands back the AI text', () {
+    fakeAsync((a) {
+      final t = make();
+      t.begin(long, VoicePick.send);
+      api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+      a.flushMicrotasks();
+      expect(t.end(), '我们明天下午三点开会。');
+      a.elapse(const Duration(seconds: 3));
+      expect(sent, isEmpty);
+      t.dispose();
+    });
+  });
+
+  test('begin keeps where the voice bubble stood', () {
+    final t = make();
+    t.begin(long, VoicePick.send, at: const Rect.fromLTWH(10, 20, 300, 80));
+    expect(t.at, const Rect.fromLTWH(10, 20, 300, 80));
+    t.interrupt();
+    t.begin(long, VoicePick.send);
+    expect(t.at, isNull);
+    t.dispose();
   });
 
   test('done on edit puts the AI text in the panel', () {
@@ -151,7 +240,7 @@ void main() {
   test('send original while tidying cancels and sends the original', () {
     final t = make();
     t.begin(long, VoicePick.send);
-    t.sendOriginal();
+    t.sendNow();
     expect(api.calls.single.cancelled, isTrue);
     expect(sent.single.$2, long);
     expect(sent.single.$3.ai, isNull);
@@ -165,7 +254,7 @@ void main() {
       t.begin(long, VoicePick.send);
       api.calls.single.complete(const LlmFailed('LLM 出错'));
       a.flushMicrotasks();
-      t.sendOriginal();
+      t.sendNow();
       expect(sent.single.$2, long);
       expect(t.phase, TidyPhase.idle);
       t.dispose();
@@ -175,7 +264,7 @@ void main() {
   test('edit original while tidying', () {
     final t = make();
     t.begin(long, VoicePick.send);
-    t.editOriginal();
+    t.editNow();
     expect(api.calls.single.cancelled, isTrue);
     expect(edited.single, (1, long, null));
     expect(t.phase, TidyPhase.idle);
@@ -209,10 +298,13 @@ void main() {
 
   test('interrupt while a note shows just clears it', () {
     fakeAsync((a) {
+      sendHint = voiceBusy;
       final t = make();
       t.begin(long, VoicePick.send);
       api.calls.single.complete(const LlmDone('好的。'));
       a.flushMicrotasks();
+      a.elapse(const Duration(milliseconds: 1500));
+      expect(t.phase, TidyPhase.note);
       t.interrupt();
       expect(t.phase, TidyPhase.idle);
       expect(kept, isEmpty);
@@ -225,7 +317,7 @@ void main() {
       final t = make();
       t.begin(long, VoicePick.send);
       final c = api.calls.single;
-      t.sendOriginal();
+      t.sendNow();
       c.complete(const LlmDone('迟到的结果'));
       a.flushMicrotasks();
       expect(sent.length, 1);
@@ -255,6 +347,7 @@ void main() {
       expect(t.sid, 2);
       api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
       a.flushMicrotasks();
+      a.elapse(const Duration(milliseconds: 1500));
       expect(sent.single.$1, 2);
       t.dispose();
     });
@@ -276,6 +369,7 @@ void main() {
       t.begin(long, VoicePick.send);
       api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
       a.flushMicrotasks();
+      a.elapse(const Duration(milliseconds: 1500));
       expect(t.phase, TidyPhase.note);
       expect(t.note, voiceBusy);
       a.elapse(const Duration(milliseconds: 1900));
@@ -288,10 +382,12 @@ void main() {
 
   test('a new begin drops a pending note', () {
     fakeAsync((a) {
+      sendHint = voiceBusy;
       final t = make();
       t.begin(long, VoicePick.send);
       api.calls.single.complete(const LlmDone('好的。'));
       a.flushMicrotasks();
+      a.elapse(const Duration(milliseconds: 1500));
       expect(t.begin(long, VoicePick.send), isTrue);
       expect(t.phase, TidyPhase.tidying);
       expect(t.note, isNull);

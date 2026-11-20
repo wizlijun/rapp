@@ -114,12 +114,18 @@ class VoiceHold extends ChangeNotifier {
     this.languageHintDue,
     this.languageHintShown,
     this.tidy,
+    this.wouldTidy,
     this.onPress,
   });
 
-  /// Offered each non-blank text a release gives (send or edit pick); true means it took the text (the AI tidy
-  /// runs and ends the send or edit itself), and nothing else happens here.
-  final bool Function(String text, VoicePick pick)? tidy;
+  /// Offered each non-blank text a release gives (send or edit pick) and where the bubble stood ([bubbleAt]);
+  /// true means it took the text (the AI tidy runs and ends the send or edit itself), and nothing else happens
+  /// here.
+  final bool Function(String text, VoicePick pick, Rect? at)? tidy;
+
+  /// At the release, on the words heard so far: true when [tidy] is likely to take them. The bubble then stays
+  /// up as it is ([handingOver]) until the stop is back, so the tidy card takes its place without a gap.
+  final bool Function(String text)? wouldTidy;
 
   /// Called at each press, before the recognizer starts (a tidy still running gives way to it).
   final VoidCallback? onPress;
@@ -159,6 +165,17 @@ class VoiceHold extends ChangeNotifier {
 
   /// The voice button's own opacity, which the overlay drives while it morphs.
   final buttonOpacity = ValueNotifier<double>(1);
+
+  /// The words bubble's global rect, set by the UI at the release, handed to [tidy].
+  Rect? bubbleAt;
+
+  /// From a release [wouldTidy] said yes to until the stop is back: the bubble stays as it is.
+  bool get handingOver => _handingOver;
+  bool _handingOver = false;
+
+  /// The last release's text was taken by [tidy] (its card now stands where the bubble was).
+  bool get handedOver => _handedOver;
+  bool _handedOver = false;
 
   bool _pressed = false;
   bool _open = false; // a press whose onEnd has not been called
@@ -307,6 +324,8 @@ class VoiceHold extends ChangeNotifier {
     voice.onError = null;
     final which = pick;
     final draft = _pressedFor;
+    _handedOver = false;
+    _handingOver = which != VoicePick.cancel && tidy != null && (wouldTidy?.call(voice.text) ?? false);
     notifyListeners();
     switch (which) {
       case VoicePick.cancel:
@@ -319,7 +338,12 @@ class VoiceHold extends ChangeNotifier {
           return;
         }
         // Taken by the tidy: it sends or edits when it is done, and no language hint shows over its card.
-        final taken = text.trim().isNotEmpty && (tidy?.call(text, which) ?? false);
+        final taken = text.trim().isNotEmpty && (tidy?.call(text, which, bubbleAt) ?? false);
+        _handedOver = taken;
+        if (_handingOver) {
+          _handingOver = false;
+          notifyListeners();
+        }
         if (taken) {
         } else if (which == VoicePick.send) {
           _setHint(send(text));

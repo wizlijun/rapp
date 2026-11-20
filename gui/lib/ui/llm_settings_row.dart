@@ -28,6 +28,8 @@ class _LlmSettingsRowState extends State<LlmSettingsRow> {
   LlmProbe? _probe;
   // The probe belongs to this endpoint; editing either field clears it.
   LlmEndpoint? _probed;
+  // A field was edited since the last save: only then does folding away write back.
+  bool _dirty = false;
 
   @override
   void initState() {
@@ -40,8 +42,10 @@ class _LlmSettingsRowState extends State<LlmSettingsRow> {
   void dispose() {
     // Folded away or the panel closed with an edit still in a field: save it, after the tree is unlocked
     // ([MainState.setLlm] notifies).
-    final typed = _typed, state = widget.state;
-    scheduleMicrotask(() => state.setLlm(typed));
+    if (_dirty) {
+      final typed = _typed, state = widget.state;
+      scheduleMicrotask(() => state.setLlm(typed));
+    }
     _url.dispose();
     _key.dispose();
     _urlFocus.dispose();
@@ -55,9 +59,13 @@ class _LlmSettingsRowState extends State<LlmSettingsRow> {
     if (!n.hasFocus) _commit();
   }
 
-  void _commit() => widget.state.setLlm(_typed);
+  void _commit() {
+    _dirty = false;
+    widget.state.setLlm(_typed);
+  }
 
   void _edited(String _) {
+    _dirty = true;
     if (_probed != null && _probed != _typed) setState(() => _probe = _probed = null);
   }
 

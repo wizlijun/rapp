@@ -1,7 +1,9 @@
 // 长语音先让 AI 整理 (spec 2026-11-20-rapp-voice-ai-tidy-design.md §5.2): a voice text longer than 10 characters
 // goes through the gateway's `dictation` before it is sent or put in the panel. The user can send or edit the
-// original at any time; a failure stops and waits for them, nothing is sent on its own.
+// original at any time; a failure stops and waits for them, nothing is sent on its own. A good result on a send
+// waits [VoiceTidy.settle] in the bubble before it goes, time to click 编辑 (user 2026-11-20).
 import 'dart:async';
+import 'dart:ui' show Rect;
 
 import 'package:flutter/foundation.dart';
 
@@ -12,9 +14,10 @@ import 'voice_ring.dart' show VoicePick;
 const tidyApp = 'dictation';
 const tidyNoResult = 'AI 没有给出结果';
 const tidyTooSlow = 'LLM 没有及时回应';
-const tidySent = '已用 AI 整理';
 
-enum TidyPhase { idle, tidying, failed, note }
+/// tidying: the AI is writing; ready: it is done and the send waits [VoiceTidy.settle]; failed: waits for a
+/// click; note: a hint after the end.
+enum TidyPhase { idle, tidying, ready, failed, note }
 
 /// One session's tidy: at most one runs at a time. The card shows [phase]; the callbacks do the sending and the
 /// keeping in whatever session [sid] is now (a reconnect moves it, [moveTo]).
@@ -28,7 +31,10 @@ class VoiceTidy extends ChangeNotifier {
     required this.edit,
     required this.keep,
     this.overall = const Duration(seconds: 30),
+    this.settle = const Duration(milliseconds: 1500),
     this.log,
+    this.held,
+    this.failed,
   });
 
   final LlmEndpoint Function() endpoint;
@@ -48,9 +54,18 @@ class VoiceTidy extends ChangeNotifier {
 
   /// From the start of the tidy to its end, whatever the stream does.
   final Duration overall;
+
+  /// A done send's wait before it goes.
+  final Duration settle;
   final void Function(String line)? log;
 
-  static const _sentLife = Duration(milliseconds: 1500);
+  /// The original while it waits (tidying or failed), null once it went somewhere. Not on [dispose]: a quit
+  /// leaves it held, for the next open to put back.
+  final void Function(Object sid, String? original)? held;
+
+  /// The tidy failed and waits for a click.
+  final void Function(Object sid, String reason)? failed;
+
   static const _hintLife = Duration(seconds: 2);
 
   /// The session it belongs to; a reconnect's swap changes it ([moveTo]).
@@ -76,8 +91,16 @@ class VoiceTidy extends ChangeNotifier {
   VoicePick get pick => _pick;
   VoicePick _pick = VoicePick.send;
 
+  /// Where the voice bubble stood at the release (global), for the card to take its place; null: its own place.
+  Rect? get at => _at;
+  Rect? _at;
+
+  /// The AI's finished text (ready only).
+  String? _result;
+
   LlmCall? _call;
   Timer? _cap;
+  Timer? _settleTimer;
   Timer? _noteTimer;
   final _watch = Stopwatch();
   bool _disposed = false;
@@ -87,14 +110,19 @@ class VoiceTidy extends ChangeNotifier {
 
   /// Takes [text] when it is long and the tidy is allowed: starts the call and shows the card. False: the caller
   /// sends or edits as before.
-  bool begin(String text, VoicePick pick) {
+  /// [begin] would take [text] now.
+  bool would(String text) => !_disposed && long(text) && allowed(sid);
+
+  bool begin(String text, VoicePick pick, {Rect? at}) {
     if (_disposed || !long(text) || !allowed(sid)) return false;
-    if (_phase == TidyPhase.tidying || _phase == TidyPhase.failed) interrupt();
+    if (_phase != TidyPhase.idle) interrupt();
     _clearNote();
     _original = text.trim();
     _shown = '';
+    _result = null;
     _reason = null;
     _pick = pick;
+    _at = at;
     _phase = TidyPhase.tidying;
     _watch
       ..reset()
@@ -113,6 +141,7 @@ class VoiceTidy extends ChangeNotifier {
       _fail(tidyTooSlow);
     });
     unawaited(call.result.then((r) => _ended(call, r)));
+    held?.call(sid, _original);
     _log('start (${_original.runes.length} chars)');
     notifyListeners();
     return true;
@@ -136,30 +165,38 @@ class VoiceTidy extends ChangeNotifier {
           return;
         }
         _log('done');
-        final ai = VoiceAi(app: tidyApp, original: _original, result: t);
         if (_pick == VoicePick.edit) {
           _phase = TidyPhase.idle;
-          edit(sid, t, ai);
+          edit(sid, t, _ai(t));
+          _release();
           notifyListeners();
         } else {
-          final hint = send(sid, t, VoiceOrigin(ai: ai));
-          _showNote(hint ?? tidySent, hint == null ? _sentLife : _hintLife);
+          _phase = TidyPhase.ready;
+          _shown = t;
+          _result = t;
+          held?.call(sid, t);
+          _settleTimer = Timer(settle, () {
+            _settleTimer = null;
+            if (_phase == TidyPhase.ready) _sendResult();
+          });
+          notifyListeners();
         }
     }
   }
 
-  void _fail(String reason) {
-    _phase = TidyPhase.failed;
-    _reason = reason;
-    notifyListeners();
+  VoiceAi _ai(String t) => VoiceAi(app: tidyApp, original: _original, result: t);
+
+  void _sendResult() {
+    final t = _result!;
+    _stop();
+    _log('send result');
+    final hint = send(sid, t, VoiceOrigin(ai: _ai(t)));
+    _release();
+    _endWith(hint);
   }
 
-  /// 直接发送: the original goes, as heard.
-  void sendOriginal() {
-    if (!_waiting) return;
-    _stop();
-    _log('send original');
-    final hint = send(sid, _original, const VoiceOrigin());
+  // After a send: a hint shows a while; otherwise the card goes.
+  void _endWith(String? hint) {
     if (hint != null) {
       _showNote(hint, _hintLife);
     } else {
@@ -168,18 +205,47 @@ class VoiceTidy extends ChangeNotifier {
     }
   }
 
-  /// 编辑: the original goes in the panel.
-  void editOriginal() {
-    if (!_waiting) return;
-    _stop();
-    _log('edit original');
-    _phase = TidyPhase.idle;
-    edit(sid, _original, null);
+  void _fail(String reason) {
+    _phase = TidyPhase.failed;
+    _reason = reason;
+    failed?.call(sid, reason);
     notifyListeners();
   }
 
-  /// A new press, or anything that takes the card away: the original stays in the draft, nothing is sent.
+  void _release() => held?.call(sid, null);
+
+  /// 发送 / 直接发送: what the card shows goes now — the AI's text once it is done, else the original as heard.
+  void sendNow() {
+    if (_phase == TidyPhase.ready) return _sendResult();
+    if (!_waiting) return;
+    _stop();
+    _log('send original');
+    final hint = send(sid, _original, const VoiceOrigin());
+    _release();
+    _endWith(hint);
+  }
+
+  /// 编辑: what the card shows goes in the panel (the AI's text with its mark once it is done).
+  void editNow() {
+    if (!_waiting) return;
+    final r = _result;
+    _stop();
+    _log(r != null ? 'edit result' : 'edit original');
+    _phase = TidyPhase.idle;
+    edit(sid, r ?? _original, r != null ? _ai(r) : null);
+    _release();
+    notifyListeners();
+  }
+
+  /// A new press: a done send goes first (it was about to); anything else waiting stays in the draft, unsent.
   void interrupt() {
+    if (_phase == TidyPhase.ready) return _sendResult();
+    closed();
+  }
+
+  /// The session is going for good, or something takes the card away: what waits stays in the draft, nothing
+  /// is sent.
+  void closed() {
     if (_phase == TidyPhase.note) {
       _clearNote();
       _phase = TidyPhase.idle;
@@ -187,39 +253,43 @@ class VoiceTidy extends ChangeNotifier {
       return;
     }
     if (!_waiting) return;
+    final text = _result ?? _original;
     _stop();
     _log('interrupted');
     _phase = TidyPhase.idle;
-    keep(sid, _original);
+    keep(sid, text);
+    _release();
     notifyListeners();
   }
-
-  /// The session is going for good: as [interrupt].
-  void closed() => interrupt();
 
   /// The session is going for good: stops without keeping anything itself, and hands back the
   /// original it was waiting with (null: nothing waiting), for the caller to put where the session's
   /// text goes. ([closed] keeps it through the composer, which an editor makes asynchronous.)
   String? end() {
     if (!_waiting) {
-      interrupt();
+      closed();
       return null;
     }
+    final text = _result ?? _original;
     _stop();
     _log('ended');
     _phase = TidyPhase.idle;
+    _release();
     notifyListeners();
-    return _original;
+    return text;
   }
 
   /// A reconnect's swap: the session is [sid] now.
   void moveTo(Object to) => sid = to;
 
-  bool get _waiting => _phase == TidyPhase.tidying || _phase == TidyPhase.failed;
+  bool get _waiting => _phase == TidyPhase.tidying || _phase == TidyPhase.ready || _phase == TidyPhase.failed;
 
   void _stop() {
     _cap?.cancel();
     _cap = null;
+    _settleTimer?.cancel();
+    _settleTimer = null;
+    _result = null;
     final c = _call;
     _call = null;
     c?.cancel();
