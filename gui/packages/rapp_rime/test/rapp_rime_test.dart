@@ -119,6 +119,47 @@ void main() {
     expect(notified, greaterThan(0));
   });
 
+  test('configure turning 「内」 off for an active owner commits the composition as typed, then deactivates', () async {
+    // Another session took the stage (its app profile says 「系」): its letters are not lost.
+    binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      if (call.method == 'flush') await push('update', {'commit': 'ni'});
+      return null;
+    });
+    final a = Object();
+    final got = <String>[];
+    bool? seen;
+    configure(onBuiltin: (b) => seen = b);
+    rime.attach(a, (u) => got.add(u.commit));
+    await rime.setActive(a, true);
+    calls.clear();
+    configure(builtin: false, onBuiltin: (b) => seen = b);
+    await Future<void>.delayed(Duration.zero);
+    expect(calls.map((c) => c.method), ['flush', 'active']);
+    expect(calls.last.arguments, {'on': false});
+    expect(got, ['ni']);
+    expect(rime.builtin, false);
+    expect(seen, isNull, reason: 'configure is the app telling, not the user choosing');
+    calls.clear();
+    configure();
+    await Future<void>.delayed(Duration.zero);
+    expect(calls.map((c) => c.method), ['active']);
+    expect(calls.last.arguments, {'on': true});
+  });
+
+  test('configure turning 「内」 off with no active owner, or with the switch, sends no flush', () async {
+    final a = Object();
+    configure();
+    configure(builtin: false);
+    configure();
+    rime.attach(a, (_) {});
+    await rime.setActive(a, true);
+    calls.clear();
+    configure(enabled: false, builtin: false); // the switch: cleared, not committed (native stops the engine)
+    await Future<void>.delayed(Duration.zero);
+    expect(calls.map((c) => c.method), ['configure', 'active']);
+  });
+
   test('update reaches only the current owner, synchronously', () async {
     final a = Object(), b = Object();
     final gotA = <RimeUpdate>[], gotB = <RimeUpdate>[];

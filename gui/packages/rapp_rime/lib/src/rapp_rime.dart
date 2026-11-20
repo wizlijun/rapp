@@ -84,6 +84,9 @@ class RappRime extends ChangeNotifier implements RimeLink {
     return SynchronousFuture<dynamic>(null);
   }
 
+  /// What the app wants, sent again whenever any of it may have changed (repeats cost nothing). [enabled]: the
+  /// master switch. [builtin]: 「内」 (true) or 「系」 for the panel the user is typing in now. [onBuiltin]: the user
+  /// tapped 「内」/「系」 ([toggleBuiltin]); the app keeps the choice and passes it back as [builtin].
   void configure({
     required bool enabled,
     required bool builtin,
@@ -91,6 +94,9 @@ class RappRime extends ChangeNotifier implements RimeLink {
     required void Function(bool builtin) onBuiltin,
   }) {
     final stateChanged = enabled != _enabled || builtin != _builtin;
+    // 「内」 to 「系」 from here is the app switching (another session's choice), not the user: what was being
+    // composed is committed as typed, like a blur. The switch going off drops it (the engine stops).
+    final commit = _owner != null && _on && _enabled && enabled && _builtin && !builtin;
     _enabled = enabled;
     _builtin = builtin;
     _onBuiltin = onBuiltin;
@@ -100,6 +106,7 @@ class RappRime extends ChangeNotifier implements RimeLink {
       _sentConfigure = key;
       _invoke<void>('configure', {'enabled': enabled, 'dictionary': dictionary.name});
     }
+    if (commit) flush();
     if (stateChanged && _owner != null) _sendActive();
     if (stateChanged) notifyListeners();
   }
