@@ -391,7 +391,6 @@ class MainState extends ChangeNotifier {
           final k = _keyOfSid(s);
           if (k != null) _tidyHeld.set(k, original);
         },
-        failed: (s, reason) => _tidyAside(s, 'AI 整理失败（$reason），回到这个窗口处理'),
       );
 
   /// [sid]'s tidy if one was made.
