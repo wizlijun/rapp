@@ -35,6 +35,7 @@ class RemoteSession extends ChangeNotifier {
       this.onSelectInput,
       this.onClick,
       this.onView,
+      this.onComposeKey,
       bool followNewTabs = true,
       DateTime Function()? clock})
       : policy = ResizePolicy(onResize ?? (_, _, _) {}),
@@ -78,6 +79,10 @@ class RemoteSession extends ChangeNotifier {
 
   /// Where the after-send Return goes (the runner presses key [returnKeyCode]).
   final VoidCallback? onReturn;
+
+  /// A letter on the picture is about to open the panel (type-to-compose): a voice tidy stops first, so its
+  /// original is in the draft before the letter (spec 2026-11-20-rapp-voice-ai-tidy-design.md §8.2).
+  final VoidCallback? onComposeKey;
 
   /// The composer's draft and whether it is open; kept per session (R18).
   late final ComposerModel composer;
@@ -404,6 +409,7 @@ class RemoteSession extends ChangeNotifier {
         // Not when the panel is off here (the tab just became noComposer): the runner drops its hold when
         // MainState sends compose:false for that picture.
         if (!composerAllowed || !composeArmed || secureFocus) break;
+        onComposeKey?.call();
         composer.replayPending = true;
         composer.openByLetter();
         composer.wantFocus();

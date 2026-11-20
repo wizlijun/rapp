@@ -1,7 +1,8 @@
 // 长语音先让 AI 整理 (spec 2026-11-20-rapp-voice-ai-tidy-design.md §5.2): a voice text longer than 10 characters
 // goes through the gateway's `dictation` before it is sent or put in the panel. The user can send or edit the
-// original at any time; a failure stops and waits for them, nothing is sent on its own. A good result on a send
-// waits [VoiceTidy.settle] in the bubble before it goes, time to click 编辑 (user 2026-11-20).
+// original at any time. A good result on a send waits [VoiceTidy.settle] in the bubble before it goes, time to click
+// 编辑 or 还原 (user 2026-11-20). A failure goes on quietly as if there had been no tidy: the original is sent or
+// put in the panel, the reason only in the log (§8.1 D3).
 import 'dart:async';
 import 'dart:ui' show Rect;
 
@@ -15,9 +16,8 @@ const tidyApp = 'dictation';
 const tidyNoResult = 'AI 没有给出结果';
 const tidyTooSlow = 'LLM 没有及时回应';
 
-/// tidying: the AI is writing; ready: it is done and the send waits [VoiceTidy.settle]; failed: waits for a
-/// click; note: a hint after the end.
-enum TidyPhase { idle, tidying, ready, failed, note }
+/// tidying: the AI is writing; ready: it is done and the send waits [VoiceTidy.settle]; note: a hint after the end.
+enum TidyPhase { idle, tidying, ready, note }
 
 /// One session's tidy: at most one runs at a time. The card shows [phase]; the callbacks do the sending and the
 /// keeping in whatever session [sid] is now (a reconnect moves it, [moveTo]).
@@ -34,7 +34,6 @@ class VoiceTidy extends ChangeNotifier {
     this.settle = const Duration(milliseconds: 1500),
     this.log,
     this.held,
-    this.failed,
   });
 
   final LlmEndpoint Function() endpoint;
@@ -59,12 +58,9 @@ class VoiceTidy extends ChangeNotifier {
   final Duration settle;
   final void Function(String line)? log;
 
-  /// The original while it waits (tidying or failed), null once it went somewhere. Not on [dispose]: a quit
+  /// The original while it waits (tidying or ready), null once it went somewhere. Not on [dispose]: a quit
   /// leaves it held, for the next open to put back.
   final void Function(Object sid, String? original)? held;
-
-  /// The tidy failed and waits for a click.
-  final void Function(Object sid, String reason)? failed;
 
   static const _hintLife = Duration(seconds: 2);
 
@@ -79,10 +75,6 @@ class VoiceTidy extends ChangeNotifier {
   String get shown => _shown;
   String _shown = '';
 
-  /// Why it failed (failed only).
-  String? get reason => _reason;
-  String? _reason;
-
   /// The line shown after the end (note only).
   String? get note => _note;
   String? _note;
@@ -94,6 +86,10 @@ class VoiceTidy extends ChangeNotifier {
   /// Where the voice bubble stood at the release (global), for the card to take its place; null: its own place.
   Rect? get at => _at;
   Rect? _at;
+
+  /// The original is open under the AI's words to compare (user 2026-11-20): a done send waits for a click.
+  bool get comparing => _comparing;
+  bool _comparing = false;
 
   /// The AI's finished text (ready only).
   String? _result;
@@ -120,7 +116,7 @@ class VoiceTidy extends ChangeNotifier {
     _original = text.trim();
     _shown = '';
     _result = null;
-    _reason = null;
+    _comparing = false;
     _pick = pick;
     _at = at;
     _phase = TidyPhase.tidying;
@@ -175,10 +171,12 @@ class VoiceTidy extends ChangeNotifier {
           _shown = t;
           _result = t;
           held?.call(sid, t);
-          _settleTimer = Timer(settle, () {
-            _settleTimer = null;
-            if (_phase == TidyPhase.ready) _sendResult();
-          });
+          if (!_comparing) {
+            _settleTimer = Timer(settle, () {
+              _settleTimer = null;
+              if (_phase == TidyPhase.ready) _sendResult();
+            });
+          }
           notifyListeners();
         }
     }
@@ -195,6 +193,21 @@ class VoiceTidy extends ChangeNotifier {
     _endWith(hint);
   }
 
+  // The original as heard, as the release's pick would have done without a tidy.
+  void _goOriginal() {
+    _stop();
+    if (_pick == VoicePick.edit) {
+      _phase = TidyPhase.idle;
+      edit(sid, _original, null);
+      _release();
+      notifyListeners();
+      return;
+    }
+    final hint = send(sid, _original, const VoiceOrigin());
+    _release();
+    _endWith(hint);
+  }
+
   // After a send: a hint shows a while; otherwise the card goes.
   void _endWith(String? hint) {
     if (hint != null) {
@@ -205,11 +218,10 @@ class VoiceTidy extends ChangeNotifier {
     }
   }
 
+  // Quietly (§8.1 D3): [reason] is for the log only.
   void _fail(String reason) {
-    _phase = TidyPhase.failed;
-    _reason = reason;
-    failed?.call(sid, reason);
-    notifyListeners();
+    _log('gave up: $reason');
+    _goOriginal();
   }
 
   void _release() => held?.call(sid, null);
@@ -223,6 +235,23 @@ class VoiceTidy extends ChangeNotifier {
     final hint = send(sid, _original, const VoiceOrigin());
     _release();
     _endWith(hint);
+  }
+
+  /// The original opens under the AI's words; a done send no longer goes on its own.
+  void compare() {
+    if (!_waiting || _comparing) return;
+    _comparing = true;
+    _settleTimer?.cancel();
+    _settleTimer = null;
+    _log('compare');
+    notifyListeners();
+  }
+
+  /// 还原 while a done send waits: the original goes instead, unmarked.
+  void restore() {
+    if (_phase != TidyPhase.ready) return;
+    _log('restore');
+    _goOriginal();
   }
 
   /// 编辑: what the card shows goes in the panel (the AI's text with its mark once it is done).
@@ -282,7 +311,7 @@ class VoiceTidy extends ChangeNotifier {
   /// A reconnect's swap: the session is [sid] now.
   void moveTo(Object to) => sid = to;
 
-  bool get _waiting => _phase == TidyPhase.tidying || _phase == TidyPhase.ready || _phase == TidyPhase.failed;
+  bool get _waiting => _phase == TidyPhase.tidying || _phase == TidyPhase.ready;
 
   void _stop() {
     _cap?.cancel();

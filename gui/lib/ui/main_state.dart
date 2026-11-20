@@ -377,7 +377,8 @@ class MainState extends ChangeNotifier {
         edit: (s, text, ai) {
           final c = remote[s]?.composer;
           if (c == null) return;
-          unawaited(c.keep(text));
+          // The AI's text over the original: one ⌘Z gives the original back (§8.2).
+          unawaited(c.keep(text, undo: ai?.original));
           if (ai != null) c.pendingAi = ai;
           c.open = true;
           if (ai != null) _tidyAside(s, 'AI 整理好了，放在写作面板里');
@@ -391,7 +392,6 @@ class MainState extends ChangeNotifier {
           final k = _keyOfSid(s);
           if (k != null) _tidyHeld.set(k, original);
         },
-        failed: (s, reason) => _tidyAside(s, 'AI 整理失败（$reason），回到这个窗口处理'),
       );
 
   /// [sid]'s tidy if one was made.
@@ -2004,6 +2004,7 @@ class MainState extends ChangeNotifier {
         onView: (w, rect, z) {
           if (_liveSid(s.sid)) portOf(s.sid)!.setView(s.sid, w, rect, z);
         },
+        onComposeKey: () => tidyIfAny(s.sid)?.closed(),
         followNewTabs: !term);
     final prof = profiles.resolve(r.app);
     rs.setProfile(prof);

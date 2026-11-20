@@ -45,8 +45,20 @@ class FakeEditor implements ComposerEditor {
   @override
   void chips(Map<int, String> labels) => this.labels = Map.of(labels);
 
+  /// What one undo after the last [replaceAll] gives back; null once something else set the text.
+  String? undoTo;
+
   @override
-  void setText(String text) => value = text;
+  void setText(String text) {
+    value = text;
+    undoTo = null;
+  }
+
+  @override
+  void replaceAll(String text) {
+    undoTo = value;
+    value = text;
+  }
 
   @override
   void insert(String text) {

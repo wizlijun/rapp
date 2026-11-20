@@ -124,6 +124,7 @@ class ComposerModel extends ChangeNotifier {
     _draftEpoch++;
     if (v.isEmpty) pendingAi = null;
     if (_draft == v) return;
+    _undoTo = null;
     _draft = v;
     onDraftChanged?.call(_plain(v));
   }
@@ -131,6 +132,10 @@ class ComposerModel extends ChangeNotifier {
   /// The tidy's text was put in the draft (the edit pick, or a voice send that could not go): the next panel
   /// send is marked AI with this. Goes when the draft empties, when ↑/↓ brings in another text, and on a send.
   VoiceAi? pendingAi;
+
+  /// What one undo in the next editor gives back ([keep] with `undo` while no editor was there): the next
+  /// [_start] puts it in first and the draft over it in one undoable step. Goes when the draft changes.
+  String? _undoTo;
 
   /// [draft] without the marks of the blocks held: what a record keeps.
   String get draftText => _plain(_draft);
@@ -338,7 +343,15 @@ class ComposerModel extends ChangeNotifier {
       _restoreMarks();
     }
     _showChips(e);
-    e.setText(draft);
+    final undo = _undoTo;
+    _undoTo = null;
+    if (undo == null) {
+      e.setText(draft);
+    } else {
+      e
+        ..setText(undo)
+        ..replaceAll(draft);
+    }
   }
 
   /// A detached native composer's text has no marks in it (its chips are held here). Put the marks of
@@ -704,21 +717,34 @@ class ComposerModel extends ChangeNotifier {
     if (t.isNotEmpty) draft = draft.isEmpty ? t : '$draft\n$t';
   }
 
-  Future<void> keep(String text) async {
+  ///
+  /// [undo]: what one undo in the editor gives back in [text]'s place (a voice tidy's original, spec
+  /// voice-ai-tidy §8.2): it goes in first, then [text] over it in one undoable step.
+  Future<void> keep(String text, {String? undo}) async {
     final t = text.trim();
     if (t.isEmpty) return;
+    final u = undo?.trim();
+    String join(String to, String add) => to.isEmpty ? add : '$to\n$add';
     final e = _editor;
     if (e == null) {
+      final before = draft;
       keepNow(t);
+      if (u != null && u.isNotEmpty) _undoTo = join(before, u);
       return;
     }
     final live = await e.read();
     if (!identical(_editor, e) || _disposed) {
-      draft = draft.isEmpty ? t : '$draft\n$t'; // the editor went while reading
+      draft = join(draft, t); // the editor went while reading
       return;
     }
     _showChips(e);
-    e.setText(live.isEmpty ? t : '$live\n$t');
+    if (u != null && u.isNotEmpty) {
+      e
+        ..setText(join(live, u))
+        ..replaceAll(join(live, t));
+    } else {
+      e.setText(join(live, t));
+    }
     editorChanged();
   }
 

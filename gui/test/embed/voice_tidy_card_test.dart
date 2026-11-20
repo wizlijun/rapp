@@ -21,10 +21,12 @@ import 'voice_button_test.dart' show FakeVoice;
 
 class _FakeApi extends LlmApi {
   final calls = <LlmCall>[];
+  void Function(String)? onText;
 
   @override
   LlmCall run(LlmEndpoint e, String app, String input,
       {Map<String, String>? vars, void Function(String text)? onText, Duration firstByte = const Duration(seconds: 10)}) {
+    this.onText = onText;
     final c = LlmCall.manual();
     calls.add(c);
     return c;
@@ -131,20 +133,96 @@ void main() {
     expect(card, findsNothing);
   });
 
-  macTest('failure shows the reason and the original', (tester) async {
+  macTest('a failure takes the card away and sends the original', (tester) async {
     final s = await goLive(tester);
     await tester.pumpWidget(layer(s));
     es.tidyOf(1).begin(long, VoicePick.send);
+    await tester.pump();
+    expect(card, findsOneWidget);
     api.calls.single.complete(const LlmFailed('连不上 LLM 接入点'));
     await tester.pump();
-    await tester.pump();
-    expect(text('tidy-title'), 'AI 整理失败');
-    expect(text('tidy-reason'), '连不上 LLM 接入点');
-    expect(text('tidy-body'), long);
-    await tester.tap(find.byKey(const Key('tidy-edit')));
     await tester.pumpAndSettle();
-    expect(s.composer.open, isTrue);
-    expect(s.composer.draftText, contains(long));
+    expect(card, findsNothing);
+    expect(find.textContaining('失败'), findsNothing);
+    expect(sends(), [
+      [
+        {'text': long}
+      ]
+    ]);
+  });
+
+  macTest('还原 shows once the AI is done and sends the original', (tester) async {
+    final s = await goLive(tester);
+    await tester.pumpWidget(layer(s));
+    es.tidyOf(1).begin(long, VoicePick.send);
+    await tester.pump();
+    expect(find.byKey(const Key('tidy-restore')), findsNothing);
+    api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byKey(const Key('tidy-restore')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('tidy-restore')));
+    await tester.pumpAndSettle();
+    expect(sends(), [
+      [
+        {'text': long}
+      ]
+    ]);
+    expect(card, findsNothing);
+  });
+
+  macTest('before the first word a shimmer runs over the original; then a caret follows the AI words',
+      (tester) async {
+    final s = await goLive(tester);
+    await tester.pumpWidget(layer(s));
+    final t = es.tidyOf(1);
+    t.begin(long, VoicePick.send);
+    await tester.pump();
+    expect(find.byKey(const Key('tidy-shimmer')), findsOneWidget);
+    expect(find.byKey(const Key('tidy-caret')), findsNothing);
+    expect(text('tidy-body'), contains(long));
+    api.onText!('我们明天');
+    await tester.pump();
+    expect(find.byKey(const Key('tidy-shimmer')), findsNothing);
+    expect(find.byKey(const Key('tidy-caret')), findsOneWidget);
+    await tester.pump(const Duration(seconds: 2)); // it blinks, and does not stop the test
+    api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+    await tester.pump();
+    expect(find.byKey(const Key('tidy-caret')), findsNothing);
+  });
+
+  macTest('the original stays under the AI words in one line; a tap opens it and holds the send', (tester) async {
+    final s = await goLive(tester);
+    await tester.pumpWidget(layer(s));
+    es.tidyOf(1).begin(long, VoicePick.send);
+    await tester.pump();
+    // Before the first word the original is the body itself: no second copy.
+    expect(find.byKey(const Key('tidy-original')), findsNothing);
+    api.onText!('我们明天');
+    await tester.pump();
+    expect(text('tidy-body'), startsWith('我们明天'));
+    expect(text('tidy-body'), isNot(contains('下午')));
+    final line = tester.widget<Text>(find.byKey(const Key('tidy-original')));
+    expect(text('tidy-original'), contains(long));
+    expect(line.maxLines, 1);
+    api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+    await tester.pump();
+    await tester.pump();
+    expect(text('tidy-original'), contains(long));
+    await tester.tap(find.byKey(const Key('tidy-original')));
+    await tester.pump();
+    expect(tester.widget<Text>(find.byKey(const Key('tidy-original'))).maxLines, greaterThan(1));
+    expect(find.byKey(const Key('tidy-drain')), findsNothing);
+    expect(text('tidy-title'), '整理好了');
+    await tester.pump(const Duration(seconds: 5));
+    expect(sends(), isEmpty);
+    await tester.tap(find.byKey(const Key('tidy-send')));
+    await tester.pumpAndSettle();
+    expect(sends(), [
+      [
+        {'text': '我们明天下午三点开会。'}
+      ]
+    ]);
   });
 
   macTest('stage buttons stay usable under the card', (tester) async {
@@ -153,7 +231,9 @@ void main() {
     es.tidyOf(1).begin(long, VoicePick.send);
     await tester.pump();
     await tester.tap(find.byKey(const Key('composer-open')));
-    await tester.pumpAndSettle();
+    // Not pumpAndSettle: the shimmer runs until the first word.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
     expect(s.composer.open, isTrue);
     expect(card, findsOneWidget);
   });

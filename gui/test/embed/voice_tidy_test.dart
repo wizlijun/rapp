@@ -208,33 +208,121 @@ void main() {
     t.dispose();
   });
 
-  test('failure stops and waits', () {
+  test('a failure on a send sends the original at once, as if never tidied (spec §8.1 D3)', () {
     fakeAsync((a) {
       final t = make();
       t.begin(long, VoicePick.send);
+      api.onText!('我们明天');
       api.calls.single.complete(const LlmFailed('连不上 LLM 接入点', log: 'Connection refused'));
       a.flushMicrotasks();
-      expect(t.phase, TidyPhase.failed);
-      expect(t.reason, '连不上 LLM 接入点');
+      expect(sent.single.$2, long);
+      expect(sent.single.$3.ai, isNull);
+      expect(t.phase, TidyPhase.idle);
+      expect(logs.where((l) => l.contains('failed Connection refused')), hasLength(1));
       a.elapse(const Duration(seconds: 60));
-      expect(sent, isEmpty);
+      expect(sent, hasLength(1));
       expect(kept, isEmpty);
-      expect(t.phase, TidyPhase.failed);
       t.dispose();
     });
   });
 
-  test('blank done is a failure', () {
+  test('a failure on an edit puts the original in the panel, unmarked', () {
+    fakeAsync((a) {
+      final t = make();
+      t.begin(long, VoicePick.edit);
+      api.calls.single.complete(const LlmFailed('LLM 出错'));
+      a.flushMicrotasks();
+      expect(edited.single, (1, long, null));
+      expect(sent, isEmpty);
+      expect(t.phase, TidyPhase.idle);
+      t.dispose();
+    });
+  });
+
+  test('a failure whose original cannot go shows the send hint a while', () {
+    fakeAsync((a) {
+      sendHint = voiceBusy;
+      final t = make();
+      t.begin(long, VoicePick.send);
+      api.calls.single.complete(const LlmFailed('LLM 出错'));
+      a.flushMicrotasks();
+      expect(sent.single.$2, long);
+      expect(t.phase, TidyPhase.note);
+      expect(t.note, voiceBusy);
+      t.dispose();
+    });
+  });
+
+  test('blank done is a failure: the original goes', () {
     fakeAsync((a) {
       final t = make();
       t.begin(long, VoicePick.send);
       api.calls.single.complete(const LlmDone('  \n'));
       a.flushMicrotasks();
-      expect(t.phase, TidyPhase.failed);
-      expect(t.reason, 'AI 没有给出结果');
-      expect(sent, isEmpty);
+      expect(sent.single.$2, long);
+      expect(sent.single.$3.ai, isNull);
+      expect(t.phase, TidyPhase.idle);
       t.dispose();
     });
+  });
+
+  test('还原 while a done send waits sends the original instead', () {
+    fakeAsync((a) {
+      final t = make();
+      t.begin(long, VoicePick.send);
+      api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+      a.flushMicrotasks();
+      t.restore();
+      expect(sent.single.$2, long);
+      expect(sent.single.$3.ai, isNull);
+      expect(t.phase, TidyPhase.idle);
+      a.elapse(const Duration(seconds: 3));
+      expect(sent, hasLength(1));
+      t.dispose();
+    });
+  });
+
+  test('opening the original to compare holds a done send until a click', () {
+    fakeAsync((a) {
+      final t = make();
+      t.begin(long, VoicePick.send);
+      api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+      a.flushMicrotasks();
+      expect(t.comparing, isFalse);
+      t.compare();
+      expect(t.comparing, isTrue);
+      a.elapse(const Duration(seconds: 10));
+      expect(sent, isEmpty);
+      expect(t.phase, TidyPhase.ready);
+      t.sendNow();
+      expect(sent.single.$2, '我们明天下午三点开会。');
+      t.dispose();
+    });
+  });
+
+  test('comparing while the AI writes: the done send waits too; a new tidy starts closed', () {
+    fakeAsync((a) {
+      final t = make();
+      t.begin(long, VoicePick.send);
+      t.compare();
+      api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+      a.flushMicrotasks();
+      a.elapse(const Duration(seconds: 10));
+      expect(sent, isEmpty);
+      t.sendNow();
+      t.begin(long, VoicePick.send);
+      expect(t.comparing, isFalse);
+      t.dispose();
+    });
+  });
+
+  test('还原 does nothing before the AI is done', () {
+    final t = make();
+    t.begin(long, VoicePick.send);
+    t.restore();
+    expect(sent, isEmpty);
+    expect(t.phase, TidyPhase.tidying);
+    t.dispose();
   });
 
   test('send original while tidying cancels and sends the original', () {
@@ -246,19 +334,6 @@ void main() {
     expect(sent.single.$3.ai, isNull);
     expect(t.phase, TidyPhase.idle);
     t.dispose();
-  });
-
-  test('send original after a failure sends the original', () {
-    fakeAsync((a) {
-      final t = make();
-      t.begin(long, VoicePick.send);
-      api.calls.single.complete(const LlmFailed('LLM 出错'));
-      a.flushMicrotasks();
-      t.sendNow();
-      expect(sent.single.$2, long);
-      expect(t.phase, TidyPhase.idle);
-      t.dispose();
-    });
   });
 
   test('edit original while tidying', () {
@@ -280,20 +355,6 @@ void main() {
     expect(sent, isEmpty);
     expect(t.phase, TidyPhase.idle);
     t.dispose();
-  });
-
-  test('interrupt while failed keeps the original, sends nothing', () {
-    fakeAsync((a) {
-      final t = make();
-      t.begin(long, VoicePick.send);
-      api.calls.single.complete(const LlmFailed('LLM 出错'));
-      a.flushMicrotasks();
-      t.interrupt();
-      expect(kept.single, (1, long));
-      expect(sent, isEmpty);
-      expect(t.phase, TidyPhase.idle);
-      t.dispose();
-    });
   });
 
   test('interrupt while a note shows just clears it', () {
@@ -326,15 +387,17 @@ void main() {
     });
   });
 
-  test('the overall cap fails the tidy', () {
+  test('the overall cap stops the call and sends the original', () {
     fakeAsync((a) {
       final t = make();
       t.begin(long, VoicePick.send);
-      a.elapse(const Duration(seconds: 30));
-      expect(api.calls.single.cancelled, isTrue);
-      expect(t.phase, TidyPhase.failed);
-      expect(t.reason, 'LLM 没有及时回应');
+      a.elapse(const Duration(milliseconds: 29999));
       expect(sent, isEmpty);
+      a.elapse(const Duration(milliseconds: 1));
+      expect(api.calls.single.cancelled, isTrue);
+      expect(sent.single.$2, long);
+      expect(sent.single.$3.ai, isNull);
+      expect(t.phase, TidyPhase.idle);
       t.dispose();
     });
   });

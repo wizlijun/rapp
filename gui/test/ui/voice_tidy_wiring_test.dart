@@ -206,9 +206,7 @@ void main() {
   test('the old session closing before the reconnect opens keeps the original', () async {
     final held = <void Function()>[];
     final (st, port) = await start(held: held);
-    st.tidyOf(sid).begin(long, VoicePick.send);
-    api.calls.single.complete(const LlmFailed('连不上 LLM 接入点'));
-    await pump();
+    st.tidyOf(sid).begin(long, VoicePick.send); // still tidying when the link drops
     port.emit(DisconnectedEvent(sid, 'boom'));
     await settle();
     unawaited(st.reconnect(key));
@@ -240,10 +238,9 @@ void main() {
   });
 
   // Review 2026-11-20 minors.
-  test('quitting while a failure waits brings the original back on the next open', () async {
+  test('quitting while a tidy runs brings the original back on the next open', () async {
     final (st, _) = await start();
     st.tidyOf(sid).begin(long, VoicePick.send);
-    api.calls.single.complete(const LlmFailed('连不上 LLM 接入点'));
     await pump();
     st.dispose(); // the app quits (or dies) with the card still waiting
     final (again, _) = await start();
@@ -302,15 +299,47 @@ void main() {
       ]
     ]);
     expect(st.hint, 'A：已用 AI 整理并发出');
+    // A failure goes on quietly (§8.1 D3): the original is sent, no word of the failure.
+    st.remote[sid]!.composer.done(1, null);
     st.tidyOf(sid).begin(long, VoicePick.send);
     api.calls.last.complete(const LlmFailed('连不上 LLM 接入点'));
     await pump();
-    expect(st.hint, 'A：AI 整理失败（连不上 LLM 接入点），回到这个窗口处理');
-    st.tidyOf(sid).editNow();
+    expect(sends(port, sid).last, [
+      {'text': long}
+    ]);
+    expect(st.hint, isNot(contains('失败')));
     st.tidyOf(sid).begin(long, VoicePick.edit);
     api.calls.last.complete(const LlmDone(tidied));
     await pump();
     expect(st.hint, 'A：AI 整理好了，放在写作面板里');
+    st.dispose();
+  });
+
+  test('a letter typed on the picture while tidying stops it: the original goes in the panel first (§8.2)',
+      () async {
+    final (st, _) = await start();
+    final rs = st.currentRemote!;
+    st.tidyOf(sid).begin(long, VoicePick.send);
+    rs.apply(ComposeKeyEvent(sid));
+    expect(api.calls.single.cancelled, isTrue);
+    expect(st.tidyOf(sid).phase, TidyPhase.idle);
+    expect(rs.composer.open, isTrue);
+    expect(rs.composer.draftText, long); // the letter comes after it, replayed into the editor
+    expect(rs.composer.takeReplay(), isTrue);
+    st.dispose();
+  });
+
+  test('the edit pick: the AI text opens in the panel over the original, one undo away (§8.2)', () async {
+    final (st, _) = await start();
+    final rs = st.currentRemote!;
+    st.tidyOf(sid).begin(long, VoicePick.edit);
+    api.calls.single.complete(const LlmDone(tidied));
+    await pump();
+    expect(rs.composer.open, isTrue);
+    final e = FakeEditor();
+    await rs.composer.attach(e);
+    expect(e.value, tidied);
+    expect(e.undoTo, long.trim());
     st.dispose();
   });
 

@@ -157,6 +157,47 @@ void main() {
     expect(outer, 0);
   });
 
+  for (final (platform, cmd) in [
+    (TargetPlatform.macOS, LogicalKeyboardKey.metaLeft),
+    (TargetPlatform.iOS, LogicalKeyboardKey.metaLeft),
+    (TargetPlatform.linux, LogicalKeyboardKey.controlLeft),
+  ]) {
+    Future<void> undo(WidgetTester tester) async {
+      addTearDown(() => lastHardwareKey = null); // the keys below say a hardware keyboard is there
+      await tester.sendKeyDownEvent(cmd);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+      await tester.sendKeyUpEvent(cmd);
+      await tester.pump();
+    }
+
+    testWidgets('${platform.name}: one undo after replaceAll gives back what was there', (tester) async {
+      await tester.pumpWidget(_host(ed));
+      ed.focus();
+      await tester.pump();
+      ed.setText('嗯那个原话');
+      await tester.pump();
+      ed.replaceAll('原话。');
+      await tester.pump();
+      expect(await ed.read(), '原话。');
+      await undo(tester);
+      expect(await ed.read(), '嗯那个原话');
+      expect(tester.widget<TextField>(find.byKey(const Key('composer-field'))).controller!.selection,
+          const TextSelection.collapsed(offset: 5));
+    }, variant: TargetPlatformVariant.only(platform));
+
+    testWidgets('${platform.name}: typing after replaceAll leaves undo to the field', (tester) async {
+      await tester.pumpWidget(_host(ed));
+      ed.focus();
+      await tester.pump();
+      ed.setText('嗯那个原话');
+      ed.replaceAll('原话。');
+      ed.insert('好');
+      await tester.pump();
+      await undo(tester);
+      expect(await ed.read(), isNot('嗯那个原话'));
+    }, variant: TargetPlatformVariant.only(platform));
+  }
+
   testWidgets('⌘V reports a paste and inserts nothing itself', (tester) async {
     await tester.pumpWidget(_host(ed));
     ed.focus();
