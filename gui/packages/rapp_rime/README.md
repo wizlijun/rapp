@@ -3,6 +3,17 @@
 Local Flutter plugin (iOS/iPadOS only) that embeds librime with the 雾凇 (rime-ice) schema, so a hardware
 keyboard can type Chinese in the input panel without the system IME. Design: `docs/superpowers/specs/2026-11-20-rapp-ios-rime-ime-design.md`.
 
+## 和 app 的边界
+
+插件不知道 prefs、app 配置和会话。app 只通过这几样用它：
+
+- `RappRime.configure(enabled:, builtin:, dictionary:, onBuiltin:)`：总开关、当前输入板是「内」还是「系」、词库；任何一样可能变了就再调一次（重复的不发通道）。从「内」变成「系」时，正在组的字按原文上屏；总开关关掉时组字丢掉。
+- `onBuiltin`：用户点了候选行上的「内 / 系」（`toggleBuiltin`），由 app 记下，下次 `configure` 再传回来。
+- `redeploy()`、`userFolder()`、`status`：设置里的「重新部署」、「我的目录」能不能选、状态行。
+- 编辑区用 `RimeLink`（`attach`、`setActive`、`flush` 等）和 `RimeCandidateRow`。
+
+app 一侧的接线都在 `gui/lib/embed/rime_glue.dart`：全局设置的开关和词库 → `enabled`、`dictionary`；画面上那个会话的 app 配置（`rime`，默认开）→ `builtin`；点「内 / 系」→ 写进那个会话的 app 配置。设置项在 `gui/lib/pages/rime_settings_section.dart`（全局设置里，只在 iOS 上、开关开着时出现）。
+
 ## 目录
 
 - `scripts/fetch.sh`: downloads and expands everything below (sha256-checked, idempotent). `scripts/build-ios.sh` runs it.
@@ -17,7 +28,7 @@ keyboard can type Chinese in the input panel without the system IME. Design: `do
 `simkey.m` 发真实的 HID 按键（退格、Esc、单独的 Shift、按住连发都能发），`hwkb.m` 打开模拟器的实体键盘；两者用 CoreSimulator/SimulatorKit 的私有接口，只做测试工具，不进 app。`sim.sh` 第一次用到时自己编：`clang -fobjc-arc -framework Foundation -o simkey simkey.m`（`hwkb` 同理）。
 
 1. `scripts/build-ios.sh sim --install <udid>`
-2. `tools/sim/sim.sh <udid> prep`：把系统简体拼音设成模拟器的第一个输入源、重启模拟器、在 app 的 `local/gui.json` 里打开「实体键盘用内置输入法」，再启动 app。app 没有读启动参数的办法，所以开关这样打开；如果设备已经有 id（prefs 在 `devices/<id>/`），就在模拟器的设置里**手动打开一次开关**，之后一直开着。
+2. `tools/sim/sim.sh <udid> prep`：把系统简体拼音设成模拟器的第一个输入源、重启模拟器、在 app 的 `local/gui.json` 里写上「实体键盘用内置输入法」开着，再启动 app。这个开关默认就是开的，写这一下只是防着以前关过；如果设备已经有 id（prefs 在 `devices/<id>/`）而开关被关过，就在侧栏「全局设置」里**手动打开一次**。
 3. 手动：接入、打开一个会话、打开输入板（光标在里面，空的）。脚本不会点屏幕。
 4. `tools/sim/sim.sh <udid> <label> builtin repeat compose`，截图在 `tools/sim/out/<label>/`。每个场景该看到什么写在 `sim.sh` 开头。
 

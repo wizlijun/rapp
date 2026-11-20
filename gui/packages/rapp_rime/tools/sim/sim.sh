@@ -42,7 +42,6 @@ try:
 except Exception:
     j = {}
 j["rime_enabled"] = True
-j["rime_builtin"] = True
 json.dump(j, open(p, "w"))
 print("rime_enabled on in", p)
 EOF
