@@ -49,6 +49,13 @@ class InputEntry {
   /// Written by this device (only those can be taken out of the record).
   final bool mine;
 
+  /// The heard text when the record's text is the AI's (`ai.original`, 长语音先让 AI 整理); else null.
+  String? get aiOriginal {
+    final ai = raw['ai'];
+    final o = ai is Map ? ai['original'] : null;
+    return o is String ? o : null;
+  }
+
   /// [raw] as an entry, or null when it lacks what every record has. [day]: its file's name;
   /// else the local date `ts` was written with.
   static InputEntry? parse(Map<String, Object?> raw, {String? day, String? me}) {

@@ -48,6 +48,15 @@ void main() {
 
   InputHistory history() => InputHistory(data: () => data);
 
+  test('aiOriginal reads the original', () {
+    InputEntry e(Object? ai) =>
+        InputEntry.parse({...rec('01A', '2026-11-15T09:00:00+09:00', '整理后'), 'ai': ?ai}, me: 'dev1')!;
+    expect(e({'app': 'dictation', 'original': '原话', 'result': '整理后'}).aiOriginal, '原话');
+    expect(e(null).aiOriginal, isNull);
+    expect(e('dictation').aiOriginal, isNull);
+    expect(e({'app': 'dictation', 'original': 3}).aiOriginal, isNull);
+  });
+
   test('records from every device merge newest first', () async {
     day('dev1', '2026-11-14', [
       rec('01A', '2026-11-14T10:00:00+09:00', 'one'),
