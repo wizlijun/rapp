@@ -1,5 +1,21 @@
 use super::{keys, Display, Image};
+mod applications;
+use super::hyprland_protocol::lock::{
+    hyprland_lock_notification_v1::{self, HyprlandLockNotificationV1},
+    hyprland_lock_notifier_v1::HyprlandLockNotifierV1,
+};
+use super::hyprland_protocol::{
+    export::{
+        hyprland_toplevel_export_frame_v1::{self, HyprlandToplevelExportFrameV1},
+        hyprland_toplevel_export_manager_v1::HyprlandToplevelExportManagerV1,
+    },
+    mapping::{
+        hyprland_toplevel_mapping_manager_v1::HyprlandToplevelMappingManagerV1,
+        hyprland_toplevel_window_mapping_handle_v1::{self, HyprlandToplevelWindowMappingHandleV1},
+    },
+};
 use anyhow::{ensure, Context, Result};
+use applications::Frame;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::File,
@@ -21,6 +37,10 @@ use wayland_protocols::xdg::xdg_output::zv1::client::{
 use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
     zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1,
     zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1,
+};
+use wayland_protocols_wlr::foreign_toplevel::v1::client::{
+    zwlr_foreign_toplevel_handle_v1::{self, ZwlrForeignToplevelHandleV1},
+    zwlr_foreign_toplevel_manager_v1::{self, ZwlrForeignToplevelManagerV1},
 };
 use wayland_protocols_wlr::{
     screencopy::v1::client::{
@@ -55,6 +75,13 @@ struct State {
     shm: Option<wl_shm::WlShm>,
     seat: Option<wl_seat::WlSeat>,
     capture: Option<ZwlrScreencopyManagerV1>,
+    export: Option<HyprlandToplevelExportManagerV1>,
+    mapping: Option<HyprlandToplevelMappingManagerV1>,
+    toplevel_manager: Option<ZwlrForeignToplevelManagerV1>,
+    toplevels: BTreeMap<u64, ZwlrForeignToplevelHandleV1>,
+    lock_notifier: Option<HyprlandLockNotifierV1>,
+    lock_notification: Option<HyprlandLockNotificationV1>,
+    locked: bool,
     pointers: Option<ZwlrVirtualPointerManagerV1>,
     keyboards: Option<ZwpVirtualKeyboardManagerV1>,
     xdg: Option<ZxdgOutputManagerV1>,
@@ -83,13 +110,15 @@ pub struct Wayland {
     conn: Connection,
     queue: EventQueue<State>,
     state: State,
-    selected: Option<Display>,
+    pub selected: Option<Display>,
     pointer: Option<ZwlrVirtualPointerV1>,
     keyboard: Option<ZwpVirtualKeyboardV1>,
+    keyboard_rules: Option<crate::input_source::Keyboard>,
     held: BTreeSet<u32>,
     buttons: BTreeSet<u32>,
     began: Instant,
     buffer: Option<CaptureBuffer>,
+    pub app: Option<super::application::Application>,
 }
 impl Wayland {
     pub fn connect() -> Result<Self> {
@@ -103,10 +132,12 @@ impl Wayland {
             selected: None,
             pointer: None,
             keyboard: None,
+            keyboard_rules: None,
             held: BTreeSet::new(),
             buttons: BTreeSet::new(),
             began: Instant::now(),
             buffer: None,
+            app: None,
         };
         w.sync()?;
         w.sync()?;
@@ -197,6 +228,9 @@ impl Wayland {
         out
     }
     pub fn select(&mut self, d: &Display) -> Result<()> {
+        self.select_input(d, true)
+    }
+    fn select_input(&mut self, d: &Display, bind_output: bool) -> Result<()> {
         let qh = self.queue.handle();
         let output = &self
             .state
@@ -211,7 +245,7 @@ impl Wayland {
                 .unwrap()
                 .create_virtual_pointer_with_output(
                     self.state.seat.as_ref(),
-                    Some(output),
+                    bind_output.then_some(output),
                     &qh,
                     (),
                 ),
@@ -224,11 +258,20 @@ impl Wayland {
             .create_virtual_keyboard(self.state.seat.as_ref().unwrap(), &qh, ());
         set_keymap(&keyboard, "xkb_keymap { xkb_keycodes { include \"evdev+aliases(qwerty)\" }; xkb_types { include \"complete\" }; xkb_compatibility { include \"complete\" }; xkb_symbols { include \"pc+us+inet(evdev)\" }; };\n")?;
         self.keyboard = Some(keyboard);
+        if let Ok(value) = crate::input_source::hypr_keyboard() {
+            if let Ok(rules) = crate::input_source::Keyboard::from_json(&value) {
+                self.update_keyboard(&rules)?;
+            }
+        }
         self.selected = Some(d.clone());
         self.sync()
     }
     pub fn select_capture(&mut self, d: &Display) {
         self.selected = Some(d.clone());
+    }
+    pub fn lock_state(&mut self) -> Result<Option<bool>> {
+        self.sync()?;
+        Ok(self.state.lock_notifier.as_ref().map(|_| self.state.locked))
     }
     pub fn capture(&mut self) -> Result<Image> {
         self.capture_size(None)
@@ -237,6 +280,14 @@ impl Wayland {
         self.capture_size(Some(density))
     }
     fn capture_size(&mut self, density: Option<f32>) -> Result<Image> {
+        if self.app.is_some() {
+            let image = self.capture_application()?;
+            return Ok(if let Some(density) = density {
+                image.scaled(self.selected.as_ref().unwrap(), density)
+            } else {
+                image
+            });
+        }
         // A compositor can miss a render during output reconfiguration or GPU
         // contention. Discard that frame and request a fresh one, retaining the
         // session and decoder reference. Permission failures are never retried.
@@ -274,12 +325,12 @@ impl Wayland {
         self.state.ready = false;
         self.state.failed = false;
         self.state.inverted = false;
-        let frame = self.state.capture.as_ref().unwrap().capture_output(
+        let frame = Frame::Output(self.state.capture.as_ref().unwrap().capture_output(
             1,
             &output.proxy,
             &self.queue.handle(),
             (),
-        );
+        ));
         let result = self.read_frame(&frame, transform, density);
         frame.destroy();
         if result.is_err() {
@@ -289,15 +340,10 @@ impl Wayland {
         self.conn.flush()?;
         result
     }
-    fn read_frame(
-        &mut self,
-        frame: &ZwlrScreencopyFrameV1,
-        transform: u32,
-        density: Option<f32>,
-    ) -> Result<Image> {
+    fn read_frame(&mut self, frame: &Frame, transform: u32, density: Option<f32>) -> Result<Image> {
         self.until(|s| {
             s.failed
-                || if frame.version() >= 3 {
+                || if frame.waits_buffer_done() {
                     s.buffer_done
                 } else {
                     s.format.is_some()
@@ -397,16 +443,34 @@ impl Wayland {
     fn time(&self) -> u32 {
         self.began.elapsed().as_millis() as u32
     }
+    pub fn update_keyboard(&mut self, rules: &crate::input_source::Keyboard) -> Result<()> {
+        let keyboard = self.keyboard.as_ref().context("no virtual keyboard")?;
+        if self
+            .keyboard_rules
+            .as_ref()
+            .is_none_or(|old| old.names != rules.names)
+        {
+            set_keymap(keyboard, &rules.keymap()?)?;
+        }
+        keyboard.modifiers(0, 0, rules.locked, rules.group);
+        self.keyboard_rules = Some(rules.clone());
+        self.conn.flush()?;
+        Ok(())
+    }
     pub fn key(&mut self, code: u16, flags: u64, down: bool) -> Result<()> {
         let Some(key) = keys::evdev(code) else {
             return Ok(());
         };
         let keyboard = self.keyboard.as_ref().context("no virtual keyboard")?;
-        keyboard.modifiers(keys::xkb_mods(flags), 0, 0, 0);
+        let (locked, group) = self
+            .keyboard_rules
+            .as_ref()
+            .map_or((0, 0), |r| (r.locked, r.group));
+        keyboard.modifiers(keys::xkb_mods(flags), 0, locked, group);
         keyboard.key(self.time(), key, down as u32);
         // v13 modifiers belong to this event; clients need not send a separate
         // Control/Shift release (macOS CGEvent flags work the same way).
-        keyboard.modifiers(0, 0, 0, 0);
+        keyboard.modifiers(0, 0, locked, group);
         if down {
             self.held.insert(key);
         } else {
@@ -479,10 +543,10 @@ impl Wayland {
             .unwrap()
             .create_virtual_keyboard(self.state.seat.as_ref().unwrap(), &self.queue.handle(), ());
         let result = (|| {
-            let chars: Vec<_> = text.chars().collect();
+            let chars = zeroize::Zeroizing::new(text.chars().collect::<Vec<_>>());
             for chunk in chars.chunks(200) {
                 let mut codes = String::new();
-                let mut symbols = String::new();
+                let mut symbols = zeroize::Zeroizing::new(String::new());
                 for (i, c) in chunk.iter().enumerate() {
                     codes += &format!("<K{i:03}> = {};", i + 8);
                     let sym = match c {
@@ -490,9 +554,9 @@ impl Wayland {
                         '\t' => "Tab".into(),
                         c => format!("U{:04X}", *c as u32),
                     };
-                    symbols += &format!("key <K{i:03}> {{ [ {sym} ] }};");
+                    symbols.push_str(&format!("key <K{i:03}> {{ [ {sym} ] }};"));
                 }
-                let map = format!("xkb_keymap {{ xkb_keycodes {{ minimum=8; maximum=255; {codes} }}; xkb_types {{ type \"ONE_LEVEL\" {{ modifiers=None; map[None]=Level1; }}; }}; xkb_compatibility {{ }}; xkb_symbols {{ {symbols} }}; }};");
+                let map = zeroize::Zeroizing::new(format!("xkb_keymap {{ xkb_keycodes {{ minimum=8; maximum=255; {codes} }}; xkb_types {{ type \"ONE_LEVEL\" {{ modifiers=None; map[None]=Level1; }}; }}; xkb_compatibility {{ }}; xkb_symbols {{ {} }}; }};", symbols.as_str()));
                 set_keymap(&kb, &map)?;
                 kb.modifiers(0, 0, 0, 0);
                 for i in 0..chunk.len() {
@@ -512,7 +576,11 @@ impl Wayland {
             for k in &self.held {
                 kb.key(self.time(), *k, 0);
             }
-            kb.modifiers(0, 0, 0, 0);
+            let (locked, group) = self
+                .keyboard_rules
+                .as_ref()
+                .map_or((0, 0), |r| (r.locked, r.group));
+            kb.modifiers(0, 0, locked, group);
         }
         if let Some(p) = &self.pointer {
             for b in &self.buttons {
@@ -526,7 +594,9 @@ impl Wayland {
     }
 }
 fn set_keymap(kb: &ZwpVirtualKeyboardV1, text: &str) -> Result<()> {
-    let mut file: File = tempfile::tempfile()?;
+    let fd = unsafe { libc::memfd_create(c"rapp-keymap".as_ptr(), libc::MFD_CLOEXEC) };
+    ensure!(fd >= 0, "cannot allocate keyboard map");
+    let mut file = unsafe { File::from_raw_fd(fd) };
     file.write_all(text.as_bytes())?;
     file.write_all(&[0])?;
     file.flush()?;
@@ -550,6 +620,18 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                 version,
             } => match interface.as_str() {
                 "wl_shm" => s.shm = Some(r.bind(name, 1, q, ())),
+                "hyprland_toplevel_export_manager_v1" => {
+                    s.export = Some(r.bind(name, version.min(2), q, ()))
+                }
+                "hyprland_toplevel_mapping_manager_v1" => s.mapping = Some(r.bind(name, 1, q, ())),
+                "hyprland_lock_notifier_v1" => {
+                    let manager: HyprlandLockNotifierV1 = r.bind(name, 1, q, ());
+                    s.lock_notification = Some(manager.get_lock_notification(q, ()));
+                    s.lock_notifier = Some(manager);
+                }
+                "zwlr_foreign_toplevel_manager_v1" => {
+                    s.toplevel_manager = Some(r.bind(name, version.min(3), q, ()))
+                }
                 "wl_seat" if s.seat.is_none() => s.seat = Some(r.bind(name, 1, q, ())),
                 "wl_output" => {
                     s.outputs.insert(
@@ -710,6 +792,22 @@ impl Dispatch<wl_buffer::WlBuffer, ()> for State {
     }
 }
 delegate_noop!(State: ignore wl_seat::WlSeat);
+delegate_noop!(State: ignore HyprlandLockNotifierV1);
+impl Dispatch<HyprlandLockNotificationV1, ()> for State {
+    fn event(
+        s: &mut Self,
+        _: &HyprlandLockNotificationV1,
+        event: hyprland_lock_notification_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            hyprland_lock_notification_v1::Event::Locked => s.locked = true,
+            hyprland_lock_notification_v1::Event::Unlocked => s.locked = false,
+        }
+    }
+}
 delegate_noop!(State: ignore ZwlrScreencopyManagerV1);
 delegate_noop!(State: ignore ZwlrVirtualPointerManagerV1);
 delegate_noop!(State: ignore ZwlrVirtualPointerV1);

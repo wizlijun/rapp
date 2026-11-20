@@ -43,6 +43,7 @@ cp gui/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_256.png "$stage/
 cp scripts/linux/rapp.desktop "$stage/rapp.desktop"
 cp LICENSE "$stage/LICENSE"
 cp -a rust/speech-linux/licenses "$stage/speech-licenses"
+cp -a rust/host-linux/licenses "$stage/host-licenses"
 python3 - "$stage" <<'PY'
 import hashlib, json, platform, subprocess, sys
 from pathlib import Path
@@ -53,7 +54,7 @@ info={'source_commit':commit,'source_url':f'https://github.com/wizlijun/rapp/tre
       'flutter':json.loads((stage/'FLUTTER-INFO.json').read_text()),
       'flutter_engine_sha256':hashlib.sha256((stage/'lib/libflutter_linux_gtk.so').read_bytes()).hexdigest(),
       'rust':subprocess.check_output(['rustc','--version'],text=True).strip(),
-      'runtime_packages':subprocess.check_output(['pacman','-Q','glibc','gtk3','gtk4','libayatana-appindicator'],text=True).splitlines()}
+      'runtime_packages':subprocess.check_output(['pacman','-Q','glibc','gtk3','gtk4','at-spi2-core','libxkbcommon','libayatana-appindicator'],text=True).splitlines()}
 (stage/'BUILD-INFO.json').write_text(json.dumps(info,ensure_ascii=False,indent=2)+'\n')
 (stage/'README-LINUX.txt').write_text('''rapp for Omarchy / Arch Linux x86_64 (SSE4.2 CPU required for local speech)
 
@@ -63,7 +64,7 @@ Open rapp from the application launcher or run `rapp`.
 Remove the installed package with `sudo pacman -R rapp-omarchy`.
 
 Portable bundle:
-  sudo pacman -S --needed gtk3 gtk4 libayatana-appindicator xdg-utils libpulse
+  sudo pacman -S --needed gtk3 gtk4 at-spi2-core libxkbcommon libayatana-appindicator xdg-utils libpulse
   ./rapp
 Keep the entire directory together (lib/, data/, and the worker executables).
 Requires glibc >= 2.39, GTK4 >= 4.12, and a graphical Wayland or X11 session.
@@ -79,12 +80,21 @@ Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and
 reattach without reconnecting. Text, images, files and typed clipboard data can
 be pasted, transferred, cancelled and pinned; files stream to disk with resume.
-Folders cannot be attached. Other rapp clients can connect to this machine's Desktop
-on Omarchy/Hyprland, compatible wlroots compositors, and X11. Desktop hosting
-includes per-monitor capture, mouse, keyboard and text insertion. X11 text
-insertion requires xdotool. GNOME/KDE Wayland portals, individual application
-hosting, host clipboard/file transfers and automatic password entry are not
-implemented. Unlock locally if the compositor blocks capture while locked.
+Folders cannot be attached. This machine can host desktops on Omarchy/Hyprland,
+compatible wlroots compositors, and X11. Hyprland (toplevel export/mapping) and
+X11 (Composite) also share isolated applications across monitors, with window
+focus, move, resize, close and cover protection. Other applications are excluded
+from app captures even when they cover the target. Host clipboard observation,
+typed paste, file upload/download, resume, view crops, adaptive network saving,
+input source selection and AT-SPI menus/focus/password-field hints are supported.
+X11 text insertion requires xdotool. Native features depend on the compositor
+and applications exposing their corresponding protocols/accessibility metadata.
+Hyprland toplevel export clips popups to their parent surface; X11 includes
+separate popup surfaces. GNOME/KDE Wayland portal hosting is not implemented.
+Verified Hyprland lock notifications allow password entry to a same-session
+hyprlock/swaylock. Other lock screens require local unlock; a logind hint alone
+never authorizes automatic password typing. Actual account unlock is not part
+of the isolated regression suite.
 Writing panels optionally render inline candidates with Fcitx5's sumicandidates
 addon (org.fcitx.Fcitx.SumiCandidates1). Without that separately installed addon,
 the system candidate window remains available. Rapp does not install or restart
@@ -128,7 +138,7 @@ pkgdesc='Remote apps, text terminals and port sharing (Omarchy/Arch)'
 arch=('x86_64')
 license=('GPL-3.0-only')
 url='https://github.com/wizlijun/rapp'
-depends=('glibc>=2.39' 'gcc-libs' 'gtk3' 'gtk4>=4.12' 'libayatana-appindicator' 'xdg-utils' 'systemd' 'libpulse')
+depends=('glibc>=2.39' 'gcc-libs' 'gtk3' 'gtk4>=4.12' 'at-spi2-core' 'libxkbcommon' 'libayatana-appindicator' 'xdg-utils' 'systemd' 'libpulse')
 optdepends=('git: data directory version history and remote synchronization' 'xdotool: text insertion into an X11 host desktop')
 provides=('rapp=$version')
 conflicts=('rapp')

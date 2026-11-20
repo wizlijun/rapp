@@ -17,7 +17,11 @@ fn run() -> anyhow::Result<()> {
         Some("version") => emit(json!({"version":env!("CARGO_PKG_VERSION"), "protocol":rapp_client_core::protocol::VERSION, "platform":"linux"})),
         Some(cmd @ ("check" | "list-apps")) => {
             let (apps, permissions) = match Desktop::connect() {
-                Ok(desktop) => (json!([{"app":"desktop:", "name":"桌面", "displays":desktop.displays().iter().map(|d| d.json()).collect::<Vec<_>>()}]), json!({"screen_recording":true, "accessibility":true, "platform":"linux"})),
+                Ok(desktop) => {
+                    let mut apps = vec![json!({"app":"desktop:", "name":"桌面", "displays":desktop.displays().iter().map(|d| d.json()).collect::<Vec<_>>()})];
+                    apps.extend(desktop.applications().unwrap_or_default());
+                    (json!(apps), json!({"screen_recording":true, "accessibility":true, "platform":"linux", "applications":desktop.application_capture_supported()}))
+                },
                 Err(e) => (json!([]), json!({"screen_recording":false, "accessibility":false, "platform":"linux", "error":e.to_string()})),
             };
             if cmd == "check" { emit(permissions); } else { emit(json!({"apps":apps,"permissions":permissions})); }
@@ -33,6 +37,22 @@ fn run() -> anyhow::Result<()> {
 }
 #[cfg(target_os = "linux")]
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--internal-accessibility") {
+        std::process::exit(if rapp_host_linux::accessibility::run_child().is_ok() {
+            0
+        } else {
+            1
+        });
+    }
+    if std::env::args().nth(1).as_deref() == Some("--internal-clipboard") {
+        std::process::exit(match rapp_host_linux::clipboard::run_child() {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("clipboard: {e}");
+                1
+            }
+        });
+    }
     match run() {
         Ok(()) => rapp_host_linux::server::emit(
             serde_json::json!({"event":"exit","code":0,"reason":"done"}),

@@ -81,6 +81,16 @@ void main() {
     port.dispose();
     await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
   }, skip: !Platform.isLinux);
+  test('view density increases detail within the full-window pixel budget', () {
+    double density(double zoom, ui.Size range, {bool original = false}) => linuxViewDensity(
+      base: original ? 8 : 2, original: original, zoom: zoom,
+      content: const ui.Size(800, 600), range: range);
+    expect(density(2, const ui.Size(400, 300)), 4);
+    expect(density(8, const ui.Size(400, 300)), 4);
+    expect(density(1, const ui.Size(800, 600)), 2);
+    expect(density(0.5, const ui.Size(400, 300)), 1);
+    expect(density(4, const ui.Size(400, 300), original: true), 8);
+  });
   test('side connections track the strict Rust protocol version', () {
     final source = File('../rust/client-core/src/protocol.rs').readAsStringSync();
     final version = RegExp(r'pub const VERSION: u8 = ([0-9]+);').firstMatch(source)!;

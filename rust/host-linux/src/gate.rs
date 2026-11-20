@@ -45,7 +45,7 @@ impl Gate {
             Input::Key(k, _, down) => {
                 transition(&mut self.keys, &mut self.dropped_keys, *k, *down, blocked)
             }
-            Input::Mouse(kind, button, _, _) => match kind {
+            Input::Mouse(kind, button, _, _, _) => match kind {
                 0 | 1 => transition(
                     &mut self.buttons,
                     &mut self.dropped_buttons,
@@ -132,7 +132,7 @@ mod tests {
     fn mouse_hover_does_not_steal_input_and_reports_are_deferred() {
         let mut g = Gate::default();
         let now = Instant::now();
-        assert!(!g.admit(&Input::Mouse(3, 0, 1., 1.), now).report);
+        assert!(!g.admit(&Input::Mouse(3, 0, 1, 1., 1.), now).report);
         assert!(g.admit(&Input::Text("a".into()), now).report);
         assert!(!g.admit(&Input::Text("b".into()), now).report);
         assert!(g.tick(now + Duration::from_millis(251)));

@@ -821,3 +821,10 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 ## iOS 输入/收起 + 按键区（feat/ios-input-toggle，2026-11-21）
 - 实机检查：规格 `docs/superpowers/specs/2026-11-21-rapp-ios-input-toggle-design.md` §7 第 1–22 条，Duo 和 iPad 各一遍
 - 以后再做：App 里 ⌃ 锁住时按「复制」发出的是 ⌃⌘C；AI 整理卡片开合时跟着 IosDock 的动画走，不跳；PullDown 和 FloatingComposer 的回弹代码合成一份；在 Caps Lock 下按 ⌥+字母大小写
+
+## Linux 非语音原生能力补齐（2026-11-21，0.15.9）
+
+- [x] 按用户要求同步至 main `b724666c`（含 0.15.8 和随后合并的 iOS 输入按键区），补齐 Linux host 的 v14 取景、剪贴板/typed paste/文件续传、独立应用与窗口操作、焦点/菜单/密码角色、输入源、弱网节流和锁状态；语音相关原生实现未改。
+- [x] X11 Composite 与 Hyprland toplevel export/mapping 使用独立表面采集；跨输出窗口坐标及输入经过隔离双显示器回归；Hyprland resize 保持窗口原点，跨显示器移动同步目标 workspace。
+- [x] Rust workspace、Flutter 2656 项及原生窗口 smoke 通过。更多验证及平台边界见 `docs/superpowers/plans/2026-11-21-linux-nonvoice-parity.md`。
+- [ ] 干净源码打包、上传 Linux 发行资产、网站发布记录更新与安装核验。

@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 # Arch/Omarchy: rust, gtk4, clang, cmake, ninja, pkgconf,
-# gtk3, libayatana-appindicator, and Flutter >= 3.50.0.
+# gtk3, at-spi2-core, libxkbcommon, libayatana-appindicator, and Flutter >= 3.50.0.
 flutter_bin="${FLUTTER:-flutter}"
 if ! command -v "$flutter_bin" >/dev/null && [[ -x "$HOME/development/flutter/bin/flutter" ]]; then
   flutter_bin="$HOME/development/flutter/bin/flutter"

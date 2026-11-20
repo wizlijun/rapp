@@ -98,7 +98,7 @@ pub fn capabilities(state: &State) -> Value {
     // older/native workers retain their existing capability contract.
     if state.permissions.lock().unwrap()["platform"] == "linux" {
         caps["desktop"] = json!(true);
-        caps["applications"] = json!(false);
+        caps["applications"] = json!(state.permissions.lock().unwrap()["applications"] == true);
     }
     caps
 }

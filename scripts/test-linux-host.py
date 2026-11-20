@@ -43,8 +43,17 @@ def stop(process):
 
 base = dict(os.environ)
 base.pop('WAYLAND_DEBUG', None)
+base.update({'GTK_A11Y': 'none', 'GIO_USE_VFS': 'local', 'GSK_RENDERER': 'cairo'})
 with tempfile.TemporaryDirectory(prefix='rapp-host-native-') as td:
     root = Path(td)
+    xruntime = root / 'xruntime'
+    xruntime.mkdir(mode=0o700)
+    bus = root / 'bus.conf'
+    bus.write_text('<busconfig><type>session</type><listen>unix:tmpdir=' + str(root) + '</listen><auth>EXTERNAL</auth><policy context="default"><allow send_destination="*"/><allow eavesdrop="true"/><allow own="*"/></policy></busconfig>')
+    for key, name in [('XDG_DATA_HOME', 'data'), ('XDG_CONFIG_HOME', 'settings'), ('XDG_CACHE_HOME', 'cache')]:
+        path = root / name
+        path.mkdir()
+        base[key] = str(path)
     with (root / 'xvfb.log').open('w') as log:
         process = subprocess.Popen([args.xvfb, '-displayfd', '1', '-screen', '0', '800x600x24',
             '-nolisten', 'tcp'], stdout=subprocess.PIPE, stderr=log, text=True)
@@ -53,9 +62,10 @@ with tempfile.TemporaryDirectory(prefix='rapp-host-native-') as td:
             assert select.select([process.stdout], [], [], 5)[0], 'Xvfb did not start'
             display = process.stdout.readline().strip()
             assert display.isdigit(), (root / 'xvfb.log').read_text()
-            env = {**base, 'DISPLAY': ':' + display, 'RAPP_TEST_ISOLATED_DESKTOP': '1'}
+            env = {**base, 'DISPLAY': ':' + display, 'RAPP_TEST_ISOLATED_DESKTOP': '1', 'XDG_RUNTIME_DIR': str(xruntime)}
             env.pop('WAYLAND_DISPLAY', None)
-            subprocess.run([binary, '--ignored', '--nocapture', '--test-threads=1'], env=env, check=True, timeout=45)
+            env.pop('HYPRLAND_INSTANCE_SIGNATURE', None)
+            subprocess.run(['dbus-run-session', '--config-file', str(bus), '--', binary, '--ignored', '--nocapture', '--test-threads=1'], env=env, check=True, timeout=45)
         finally:
             stop(process)
 
@@ -74,12 +84,14 @@ Path(os.environ['XDG_RUNTIME_DIR'], 'result').write_text(str(result.returncode))
 ''')
     env = {**base, 'XDG_RUNTIME_DIR': str(runtime), 'XDG_CONFIG_DIRS': str(config),
            'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman', 'WLR_HEADLESS_OUTPUTS': '1'}
+    if os.environ.get('RAPP_TRACE_CLIPBOARD'):
+        env['WAYLAND_DEBUG'] = 'client'
     for key in ['DISPLAY', 'WAYLAND_DISPLAY', 'HYPRLAND_INSTANCE_SIGNATURE']:
         env.pop(key, None)
     lib = Path(args.labwc).resolve().parent.parent / 'lib'
     env['LD_LIBRARY_PATH'] = str(lib) + ':' + env.get('LD_LIBRARY_PATH', '')
     with (root / 'wayland.log').open('w') as log:
-        process = subprocess.Popen([args.labwc, '-C', str(config), '-S',
+        process = subprocess.Popen(['dbus-run-session', '--config-file', str(bus), '--', args.labwc, '-C', str(config), '-S',
             shlex.join([sys.executable, str(startup), binary])], env=env, stdout=log, stderr=log)
         try:
             process.wait(timeout=50)

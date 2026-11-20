@@ -1,19 +1,21 @@
 use crate::{
     capture::{self, CaptureWorker, Job},
+    clipboard::Clipboard,
     desktop::Desktop,
+    transfers::Transfers,
     wire::{self, Input, Settings},
 };
 use anyhow::{bail, ensure, Context, Result};
 use rapp_client_core::protocol::{id_packet, packet};
 use serde_json::{json, Value};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::{BufRead, Read, Seek, SeekFrom, Write},
     net::{Shutdown, TcpListener, TcpStream},
     process::{Command, Stdio},
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
-        mpsc, Arc,
+        mpsc, Arc, Mutex, Weak,
     },
     time::{Duration, Instant},
 };
@@ -113,15 +115,31 @@ enum Event {
 struct Live {
     socket: TcpStream,
     settings: Settings,
+    view: Option<(u32, rapp_client_core::protocol::Rect)>,
+    transfers: Arc<Transfers>,
+    clipboard: Option<Clipboard>,
+    accessibility: crate::accessibility::Accessibility,
+    input_sources: crate::input_source::InputSources,
+    target: Value,
+    secure: bool,
+    menus: Vec<u8>,
+    focus: Vec<u8>,
     epoch: u64,
     unchanged: u32,
     pending: Vec<u8>,
     next_frame: Instant,
     active_after: Instant,
-    awaiting: Option<Instant>,
+    clock: Instant,
+    pacing: crate::pacing::Pacing,
+    saving: u8,
     gate: crate::gate::Gate,
     locked: Option<bool>,
     next_lock_check: Instant,
+    next_windows: Instant,
+    windows: Vec<u8>,
+    cover: Option<crate::desktop::Cover>,
+    last_opening_input: Option<Instant>,
+    covered_buttons: HashSet<u8>,
     _inhibit: Option<std::process::Child>,
 }
 fn next_epoch() -> u64 {
@@ -130,6 +148,9 @@ fn next_epoch() -> u64 {
 }
 impl Drop for Live {
     fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.pending.zeroize();
+        self.transfers.cancel();
         let _ = self.socket.shutdown(Shutdown::Both);
         if let Some(child) = &mut self._inhibit {
             let _ = child.kill();
@@ -156,6 +177,7 @@ impl Live {
             let n = self.socket.read(&mut buf)?;
             ensure!(n != 0, "client disconnected");
             self.pending.extend_from_slice(&buf[..n]);
+            buf[..n].fill(0);
         }
         ensure!(
             self.pending.len() <= wire::MAX_INPUT + 5,
@@ -170,35 +192,53 @@ impl Live {
             if self.pending.len() - offset < 5 + n {
                 break;
             }
-            messages.push(wire::input(
+            let parsed = wire::input(
                 self.pending[offset],
                 &self.pending[offset + 5..offset + 5 + n],
-            )?);
+            );
+            if self.pending[offset] == 35 {
+                self.pending[offset + 5..offset + 5 + n].fill(0);
+            }
+            messages.push(parsed?);
             offset += 5 + n;
         }
         self.pending.drain(..offset);
         Ok(messages)
     }
 }
-fn handshake(mut s: TcpStream, opts: &Options) -> Result<Authenticated> {
+fn handshake(
+    mut s: TcpStream,
+    opts: &Options,
+    transfers: &Mutex<Option<Weak<Transfers>>>,
+) -> Result<Option<Authenticated>> {
     s.set_read_timeout(Some(Duration::from_secs(5)))?;
     s.set_write_timeout(Some(Duration::from_secs(3)))?;
     s.set_nodelay(true)?;
     let mut header = [0; 5];
     s.read_exact(&mut header)?;
     let n = u32::from_le_bytes(header[1..].try_into().unwrap()) as usize;
-    if header[0] != 1 || n > 131100 {
-        let message = "first message must be a desktop hello; Linux clipboard file transfers are not supported";
+    if ![1, 22, 23].contains(&header[0]) || n > 131100 {
+        let message = "first message must be hello, fetch or put";
         let _ = s.write_all(&wire::text_packet(3, message));
         bail!(message);
     }
     let mut data = vec![0; n];
     s.read_exact(&mut data)?;
+    if header[0] != 1 {
+        let session = transfers.lock().unwrap().as_ref().and_then(Weak::upgrade);
+        let result = session
+            .context("no session")
+            .and_then(|session| session.side(&mut s, header[0], &data, &opts.token));
+        if let Err(e) = result {
+            let _ = s.write_all(&wire::text_packet(3, &e.to_string()));
+        }
+        return Ok(None);
+    }
     match wire::hello(&data, &opts.token, &opts.app) {
-        Ok(settings) => Ok(Authenticated {
+        Ok(settings) => Ok(Some(Authenticated {
             socket: s,
             settings,
-        }),
+        })),
         Err(e) => {
             let _ = s.write_all(&wire::text_packet(3, &e.to_string()));
             Err(e)
@@ -217,7 +257,15 @@ pub fn serve(opts: Options) -> Result<()> {
     let mut desktop = Desktop::connect()?;
     let display = desktop.select(&opts.app)?;
     let mut capture = CaptureWorker::start(opts.app.clone(), display.clone());
-    let title = format!("桌面 · {}", display.name);
+    let title = if desktop.is_application() {
+        desktop
+            .windows()?
+            .first()
+            .map(|w| w.title.clone())
+            .unwrap_or_else(|| "应用".into())
+    } else {
+        format!("桌面 · {}", display.name)
+    };
     let listener = TcpListener::bind((opts.bind.as_str(), opts.port))?;
     let port = listener.local_addr()?.port();
     let (tx, rx) = mpsc::sync_channel(64);
@@ -235,7 +283,10 @@ pub fn serve(opts: Options) -> Result<()> {
         }
         let _ = controls.send(Event::Eof);
     });
+    let clipboard_app = (!opts.app.starts_with("desktop:")).then(|| opts.app.clone());
     let opts = Arc::new(opts);
+    let transfers = Arc::new(Mutex::new(None::<Weak<Transfers>>));
+    let side_transfers = transfers.clone();
     std::thread::spawn(move || {
         let pending = Arc::new(AtomicUsize::new(0));
         for socket in listener.incoming().flatten() {
@@ -243,9 +294,14 @@ pub fn serve(opts: Options) -> Result<()> {
                 continue;
             }
             pending.fetch_add(1, Ordering::Relaxed);
-            let (opts, tx, pending) = (opts.clone(), tx.clone(), pending.clone());
+            let (opts, tx, pending, transfers) = (
+                opts.clone(),
+                tx.clone(),
+                pending.clone(),
+                side_transfers.clone(),
+            );
             std::thread::spawn(move || {
-                if let Ok(accepted) = handshake(socket, &opts) {
+                if let Ok(Some(accepted)) = handshake(socket, &opts, &transfers) {
                     let _ = tx.send(Event::Accepted(accepted));
                 }
                 pending.fetch_sub(1, Ordering::Relaxed);
@@ -311,23 +367,45 @@ pub fn serve(opts: Options) -> Result<()> {
                         .stderr(Stdio::null())
                         .spawn()
                         .ok();
+                    let directory = std::env::var_os("RAPP_DOWNLOADS")
+                        .filter(|p| !p.is_empty())
+                        .map(std::path::PathBuf::from)
+                        .unwrap_or_else(|| rapp_net::config::home().join("files/transfers"));
+                    let session_transfers = Arc::new(Transfers::new(directory));
+                    *transfers.lock().unwrap() = Some(Arc::downgrade(&session_transfers));
                     let mut l = Live {
                         socket: a.socket,
                         settings: a.settings,
+                        view: None,
+                        transfers: session_transfers,
+                        clipboard: Clipboard::start_for_application(clipboard_app.as_deref()).ok(),
+                        accessibility: crate::accessibility::Accessibility::start()?,
+                        input_sources: crate::input_source::InputSources::start(),
+                        target: Value::Null,
+                        secure: false,
+                        menus: vec![],
+                        focus: vec![],
                         epoch: next_epoch(),
                         unchanged: 0,
                         pending: vec![],
                         next_frame: now,
                         active_after: now,
-                        awaiting: None,
+                        clock: now,
+                        pacing: Default::default(),
+                        saving: 0,
                         gate: Default::default(),
                         locked: None,
                         next_lock_check: now,
+                        next_windows: now,
+                        windows: wire::window_table(&desktop.windows()?),
+                        cover: None,
+                        last_opening_input: None,
+                        covered_buttons: HashSet::new(),
                         _inhibit: inhibit,
                     };
                     let start = (|| {
                         l.send(&wire::ready(&title, display.width, display.height))?;
-                        l.send(&wire::windows(&title, display.width, display.height))?;
+                        l.send(&l.windows.clone())?;
                         l.send(&packet(33, vec![0]))
                     })();
                     if start.is_ok() {
@@ -340,46 +418,123 @@ pub fn serve(opts: Options) -> Result<()> {
         let completed = capture.completed();
         if let Some(l) = &mut live {
             let result = (|| -> Result<()> {
+                if Instant::now() >= l.next_lock_check {
+                    refresh_lock(l, &mut desktop)?;
+                }
                 if let Some(done) = completed.filter(|done| done.epoch == l.epoch) {
-                    if let Some(frame) = done.frame? {
+                    if done.frame.is_err() {
+                        refresh_lock(l, &mut desktop)?;
+                    }
+                    let frame = if l.locked == Some(true) {
+                        None
+                    } else {
+                        done.frame?
+                    };
+                    if let Some(frame) = frame {
                         l.send(&frame)?;
-                        l.awaiting = Some(Instant::now());
+                        l.pacing.sent(l.clock.elapsed().as_secs_f64());
                         l.unchanged = 0;
                     } else {
                         l.unchanged = l.unchanged.saturating_add(1);
                     }
-                    l.active_after =
-                        Instant::now() + capture::rest(l.settings.fps, done.elapsed, 0);
-                    l.next_frame =
-                        Instant::now() + capture::rest(l.settings.fps, done.elapsed, l.unchanged);
+                    l.active_after = Instant::now()
+                        + capture::rest(l.pacing.effective(l.settings).fps, done.elapsed, 0);
+                    l.next_frame = Instant::now()
+                        + capture::rest(
+                            l.pacing.effective(l.settings).fps,
+                            done.elapsed,
+                            l.unchanged,
+                        );
                 }
                 for input in l.read()? {
                     handle(l, &mut desktop, input)?;
                 }
+                while let Some(copy) = l.clipboard.as_ref().and_then(Clipboard::next) {
+                    if l.locked != Some(true) && desktop.target_active() {
+                        if let Ok(packet) = l.transfers.remember(copy) {
+                            l.send(&packet)?;
+                        }
+                    }
+                }
                 let now = Instant::now();
+                if now >= l.next_windows {
+                    let windows = wire::window_table(&desktop.windows()?);
+                    if windows != l.windows {
+                        l.send(&windows)?;
+                        l.windows = windows;
+                    }
+                    let target = if l.locked == Some(true) {
+                        Value::Null
+                    } else {
+                        desktop.focus_target()
+                    };
+                    if target != l.target {
+                        let sent = l
+                            .accessibility
+                            .send(&json!({"cmd":"target","target":target}));
+                        l.target = target;
+                        // Optional accessibility must not interrupt picture/input if
+                        // an application's accessibility bus has stopped responding.
+                        if sent.is_err() {
+                            metadata(l, &json!({"target":l.target}))?;
+                        }
+                    }
+                    if l.last_opening_input
+                        .is_some_and(|at| now.duration_since(at) <= Duration::from_secs(2))
+                    {
+                        if let Some((id, name)) = desktop.opened_application() {
+                            let mut p = vec![];
+                            rapp_client_core::protocol::string(&mut p, &id);
+                            rapp_client_core::protocol::string(&mut p, &name);
+                            l.send(&packet(39, p))?;
+                            l.last_opening_input = None;
+                        }
+                    }
+                    l.next_windows = now + Duration::from_millis(100);
+                }
+                while let Some(value) = l.accessibility.next() {
+                    if value["target"] == l.target {
+                        metadata(l, &value)?;
+                    }
+                }
+                while let Some(source) = l.input_sources.next() {
+                    match source {
+                        Ok(source) => {
+                            if let (Desktop::Wayland(backend), Some(rules)) =
+                                (&mut desktop, &source.keyboard)
+                            {
+                                backend.update_keyboard(rules)?;
+                            }
+                            let mut p = vec![];
+                            rapp_client_core::protocol::string(&mut p, &source.id);
+                            rapp_client_core::protocol::string(&mut p, &source.name);
+                            p.push(source.ascii as u8);
+                            l.send(&packet(29, p))?;
+                        }
+                        Err(error) => {
+                            l.send(&wire::text_packet(26, &error.to_string()))?;
+                        }
+                    }
+                }
                 if l.gate.tick(now) {
                     emit(json!({"event":"input"}));
                 }
-                if now >= l.next_lock_check {
-                    let current = locked();
-                    if current != l.locked {
-                        l.locked = current;
-                        if let Some(value) = current {
-                            l.send(&packet(34, vec![value as u8]))?;
-                        }
-                    }
-                    l.next_lock_check = Instant::now() + Duration::from_secs(2);
-                }
-                if let Some(since) = l.awaiting {
-                    ensure!(
-                        since.elapsed() < Duration::from_secs(15),
-                        "client stopped acknowledging frames"
-                    );
-                }
-                if now >= l.next_frame && l.awaiting.is_none() {
+                let elapsed = l.clock.elapsed().as_secs_f64();
+                l.pacing.observe(elapsed, false, l.settings);
+                update_saving(l)?;
+                ensure!(
+                    l.pacing.oldest_age(elapsed) < 15.,
+                    "client stopped acknowledging frames"
+                );
+                let settings = l.pacing.effective(l.settings);
+                if l.locked != Some(true)
+                    && now >= l.next_frame
+                    && l.pacing.ready(elapsed, settings.fps)
+                {
                     capture.submit(Job {
                         epoch: l.epoch,
-                        settings: l.settings,
+                        settings,
+                        view: l.view,
                     })?;
                 }
                 Ok(())
@@ -391,23 +546,66 @@ pub fn serve(opts: Options) -> Result<()> {
         std::thread::sleep(Duration::from_millis(4));
     }
 }
+fn update_saving(l: &mut Live) -> Result<()> {
+    if l.saving != l.pacing.level {
+        l.saving = l.pacing.level;
+        l.epoch = next_epoch();
+        l.next_frame = Instant::now();
+        l.send(&packet(33, vec![l.saving]))?;
+    }
+    Ok(())
+}
+fn refresh_lock(l: &mut Live, desktop: &mut Desktop) -> Result<()> {
+    let verified = desktop.lock_state()?;
+    let current = verified.or_else(locked);
+    if current != l.locked {
+        l.locked = current;
+        l.epoch = next_epoch();
+        l.next_frame = Instant::now();
+        if let Some(value) = current {
+            desktop.release();
+            l.send(&packet(34, vec![value as u8]))?;
+        }
+    }
+    l.next_lock_check = Instant::now()
+        + if verified.is_some() {
+            Duration::from_millis(250)
+        } else {
+            Duration::from_secs(2)
+        };
+    Ok(())
+}
 fn handle(l: &mut Live, desktop: &mut Desktop, input: Input) -> Result<()> {
     match input {
         Input::Ping(seq) => return l.send(&id_packet(32, seq)),
-        Input::Ack => {
-            l.awaiting = None;
-            return Ok(());
+        Input::Ack(ms) => {
+            l.pacing
+                .ack(l.clock.elapsed().as_secs_f64(), ms, l.settings);
+            return update_saving(l);
         }
         Input::Stream(s) => {
             if l.settings.mode != s.mode || l.settings.density != s.density {
                 l.epoch = next_epoch();
             }
             l.settings = s;
+            l.pacing.configure(s);
+            update_saving(l)?;
+            let _ = l
+                .accessibility
+                .send(&json!({"cmd":"target","target":l.target}));
             l.unchanged = 0;
             l.next_frame = Instant::now();
             return Ok(());
         }
-        Input::Ignore => return Ok(()),
+        Input::View(view) => {
+            if l.view != view {
+                l.view = view;
+                l.epoch = next_epoch();
+                l.unchanged = 0;
+                l.next_frame = Instant::now();
+            }
+            return Ok(());
+        }
         _ => {}
     }
     let decision = l.gate.admit(&input, Instant::now());
@@ -430,21 +628,176 @@ fn handle(l: &mut Live, desktop: &mut Desktop, input: Input) -> Result<()> {
     l.unchanged = 0;
     l.next_frame = l.next_frame.min(Instant::now().max(l.active_after));
     match input {
-        Input::Key(k, m, d) => desktop.key(k, m, d)?,
-        Input::Mouse(k, b, x, y) => desktop.mouse(k, b, x, y)?,
-        Input::Scroll(x, y, dx, dy) => desktop.scroll(x, y, dx, dy)?,
-        Input::Text(text) => { ensure!(l.locked != Some(true), "desktop is locked; unlock locally before sending text"); desktop.text(&text)?; }
-        Input::Paste(seq, text) => {
-            let result = if l.locked == Some(true) { Err(anyhow::anyhow!("desktop is locked; unlock locally before sending text")) }
-                else if let Some(text) = text { desktop.text(&text) }
-                else { Err(anyhow::anyhow!("Linux host currently supports text insertion only; file and image uploads are unavailable")) };
-            l.send(&wire::pasted(seq, &result.err().map(|e| e.to_string()).unwrap_or_default()))?;
+        Input::Key(k, m, d) => {
+            desktop.activate()?;
+            desktop.key(k, m, d)?;
+            if d {
+                l.last_opening_input = Some(Instant::now());
+            }
+        }
+        Input::Mouse(k, b, id, x, y) => {
+            if k == 1 && l.covered_buttons.remove(&b) || k == 2 && l.covered_buttons.contains(&b) {
+                return Ok(());
+            }
+            if let Ok((x, y)) = desktop.canvas_point(id, x, y) {
+                if k == 0 {
+                    desktop.focus_window(id)?;
+                    desktop.activate()?;
+                    if covered(l, desktop, x, y)? {
+                        l.covered_buttons.insert(b);
+                        return Ok(());
+                    }
+                    l.covered_buttons.remove(&b);
+                }
+                desktop.mouse(k, b, x, y)?;
+                if k <= 1 {
+                    l.last_opening_input = Some(Instant::now());
+                }
+            }
+        }
+        Input::Scroll(id, x, y, dx, dy) => {
+            if let Ok((x, y)) = desktop.canvas_point(id, x, y) {
+                desktop.focus_window(id)?;
+                desktop.activate()?;
+                if covered(l, desktop, x, y)? {
+                    return Ok(());
+                }
+                desktop.scroll(x, y, dx, dy)?;
+            }
+        }
+        Input::Resize(id, w, h) => desktop.resize_window(id, w, h)?,
+        Input::Move(id, x, y) => desktop.move_window(id, x, y)?,
+        Input::Focus(id) => desktop.focus_window(id)?,
+        Input::Close(id) => desktop.close_window(id)?,
+        Input::Dismiss(id) => {
+            if let Some(cover) = l.cover.as_ref().filter(|c| c.id == id) {
+                desktop.dismiss_cover(cover)?;
+                l.cover = None;
+            }
+        }
+        Input::Menu(path) => {
+            desktop.activate()?;
+            l.accessibility
+                .send(&json!({"cmd":"menu","target":l.target,"path":path}))?;
+        }
+        Input::SelectInput(id) => l.input_sources.select(id)?,
+        Input::Text(text) => {
+            ensure!(
+                desktop.lock_state()?.or_else(locked) != Some(true),
+                "screen locked"
+            );
+            desktop.activate()?;
+            desktop.text(&text)?;
+            l.last_opening_input = Some(Instant::now());
+        }
+        Input::Paste(seq, source) => {
+            let result = (|| -> Result<()> {
+                ensure!(
+                    desktop.lock_state()?.or_else(locked) != Some(true),
+                    "screen locked"
+                );
+                desktop.activate()?;
+                let copy = match source {
+                    wire::Paste::Text(text) => rapp_client_core::transfer::Copy::Text(text),
+                    wire::Paste::Item(id) => l.transfers.received(id)?,
+                };
+                l.clipboard
+                    .as_ref()
+                    .context("clipboard is unavailable on this desktop")?
+                    .set(&copy)?;
+                desktop.release();
+                desktop.key(9, 1 << 20, true)?;
+                desktop.key(9, 1 << 20, false)?;
+                desktop.release();
+                Ok(())
+            })();
+            l.send(&wire::pasted(
+                seq,
+                &result.err().map(|e| e.to_string()).unwrap_or_default(),
+            ))?;
         }
         // Do not type a password based on logind's hint: it does not prove focus is a lock field.
-        Input::Unlock => bail!("automatic password entry is not supported by the Linux host; unlock the desktop locally"),
+        Input::Unlock(password) => {
+            if desktop.lock_state()? == Some(true) {
+                desktop.unlock(password.as_str())?;
+                l.next_lock_check = Instant::now();
+            } else {
+                ensure!(
+                    l.locked != Some(true),
+                    "this desktop does not expose verified remote password entry"
+                );
+            }
+        }
         _ => {}
     }
     Ok(())
+}
+fn metadata(l: &mut Live, value: &Value) -> Result<()> {
+    let secure = value["secure"] == true;
+    if l.secure != secure {
+        l.send(&packet(40, vec![secure as u8]))?;
+        l.secure = secure;
+    }
+    fn menus(items: &Value, output: &mut Vec<u8>) {
+        let items = items.as_array().map(Vec::as_slice).unwrap_or_default();
+        output.extend((items.len() as u16).to_le_bytes());
+        for item in items {
+            rapp_client_core::protocol::string(output, item["title"].as_str().unwrap_or(""));
+            output.push(item["flags"].as_u64().unwrap_or(0) as u8);
+            rapp_client_core::protocol::string(output, item["key"].as_str().unwrap_or(""));
+            output.push(item["modifiers"].as_u64().unwrap_or(0) as u8);
+            menus(&item["children"], output);
+        }
+    }
+    let mut menu = vec![];
+    menus(&value["menus"], &mut menu);
+    let menu = packet(17, menu);
+    if menu != l.menus {
+        l.send(&menu)?;
+        l.menus = menu;
+    }
+    let window = value["target"]["window"].as_u64().unwrap_or(0) as u32;
+    let rects = value["rects"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let rects = if l.settings.focus && !secure {
+        rects
+    } else {
+        &[]
+    };
+    let mut focus = window.to_le_bytes().to_vec();
+    focus.push(rects.len().min(3) as u8);
+    for rect in rects.iter().take(3) {
+        let x = rect["x"].as_f64().unwrap_or(0.) + l.target["x"].as_f64().unwrap_or(0.);
+        let y = rect["y"].as_f64().unwrap_or(0.) + l.target["y"].as_f64().unwrap_or(0.);
+        for f in [
+            x,
+            y,
+            rect["w"].as_f64().unwrap_or(1.),
+            rect["h"].as_f64().unwrap_or(1.),
+        ] {
+            focus.extend((f as f32).to_le_bytes());
+        }
+    }
+    let focus = packet(36, focus);
+    if focus != l.focus {
+        l.send(&focus)?;
+        l.focus = focus;
+    }
+    Ok(())
+}
+fn covered(l: &mut Live, desktop: &Desktop, x: f32, y: f32) -> Result<bool> {
+    if let Some(cover) = desktop.pointer_cover(x, y)? {
+        let mut bytes = cover.id.to_le_bytes().to_vec();
+        rapp_client_core::protocol::string(&mut bytes, &cover.name);
+        rapp_client_core::protocol::string(&mut bytes, &cover.app_id());
+        bytes.push(cover.dismissable() as u8);
+        l.send(&packet(37, bytes))?;
+        l.cover = Some(cover);
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 #[cfg(test)]

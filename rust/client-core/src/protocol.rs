@@ -206,6 +206,11 @@ pub fn select_input(id: &str) -> Vec<u8> {
     string(&mut p, id);
     packet(30, p)
 }
+pub fn set_view(window: u32, rect: Rect) -> Vec<u8> {
+    let mut p = window.to_le_bytes().to_vec();
+    for f in [rect.x, rect.y, rect.w, rect.h] { p.extend(f.to_le_bytes()); }
+    packet(41, p)
+}
 pub fn key(code: u16, modifiers: u64, down: bool) -> Vec<u8> {
     let mut p = code.to_le_bytes().to_vec();
     p.extend(modifiers.to_le_bytes());

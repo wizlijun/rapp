@@ -12,15 +12,22 @@ anyhow.workspace = true
 serde_json.workspace = true
 rapp-client-core = { path = "../client-core" }
 flate2 = "1"
+zeroize = "1"
+rapp-net.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
 tempfile.workspace = true
 wayland-client = "0.31"
-wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+wayland-scanner = "0.31"
+wayland-backend = "0.3"
+bitflags = "2"
+wayland-protocols = { version = "0.32", features = ["client", "unstable", "staging"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 wayland-protocols-misc = { version = "0.3", features = ["client"] }
-x11rb = { version = "0.13", features = ["randr", "xtest", "xfixes"] }
+x11rb = { version = "0.13", features = ["randr", "xtest", "xfixes", "composite", "xkb"] }
+gdk = { package = "gdk4", version = "0.10", features = ["v4_12"] }
+gtk4-sys = "0.10"
 
 [dev-dependencies]
 tempfile.workspace = true

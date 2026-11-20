@@ -1,4 +1,5 @@
 use super::{keys, Display, Image};
+mod applications;
 use anyhow::{ensure, Context, Result};
 use std::collections::BTreeSet;
 use x11rb::{
@@ -22,6 +23,8 @@ pub struct X11 {
     held: BTreeSet<u8>,
     buttons: BTreeSet<u8>,
     scroll: (f32, f32),
+    pub app: Option<super::application::Application>,
+    redirected: BTreeSet<u32>,
 }
 impl X11 {
     pub fn connect() -> Result<Self> {
@@ -91,9 +94,14 @@ impl X11 {
             held: BTreeSet::new(),
             buttons: BTreeSet::new(),
             scroll: (0., 0.),
+            app: None,
+            redirected: BTreeSet::new(),
         })
     }
     pub fn capture(&mut self) -> Result<Image> {
+        if self.app.is_some() {
+            return self.capture_application();
+        }
         let d = self.selected.as_ref().context("no selected display")?;
         if d.id != self.root {
             let monitors = self.conn.randr_get_monitors(self.root, true)?.reply()?;

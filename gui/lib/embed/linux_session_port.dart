@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -360,9 +361,20 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     return true;
   }
 
-  /// No zoomed view here: a terminal or a Linux host has nothing to narrow.
   @override
-  void setView(Object sid, int window, Rect rect, double zoom) {}
+  void setView(Object sid, int window, Rect rect, double zoom) {
+    final s = _sessions[sid];
+    if (s == null) return;
+    if (!zoom.isFinite || zoom <= 0 ||
+        ![rect.left, rect.top, rect.width, rect.height].every((n) => n.isFinite) ||
+        (window != 0 && (rect.width <= 0 || rect.height <= 0))) return;
+    s.viewWindow = window;
+    s.viewRect = rect;
+    s.viewZoom = zoom;
+    s.send({'cmd': 'set_view', 'window': window, 'x': rect.left,
+      'y': rect.top, 'w': rect.width, 'h': rect.height});
+    _sendStream(s);
+  }
 
   /// A focused session over [process] without the worker handshake.
   @visibleForTesting
@@ -605,12 +617,13 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
           'fps': args['fps'],
           'density': args['density'],
           'smart': args['focus'] == true,
+          'pinned': args['pinned'] == true,
         };
         s.focusWanted = args['focus'] == true;
         if (!s.focusWanted) s.focusRegion = null;
         s.nativeFocus();
         if (s.detached) _nativeCall('stream', {'sid': sid, ...s.stream});
-        s.send({'cmd': method, ...args, 'density': _density(args['density'])});
+        _sendStream(s);
       case 'select_window':
         s.selected = args['window'] as int;
         _dropSid = sid;
@@ -701,6 +714,19 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     return null;
   }
 
+  void _sendStream(_Session s) {
+    final choice = s.stream['density'];
+    final base = _density(choice);
+    final window = s.windows.where((w) => w.id == s.viewWindow).firstOrNull;
+    final density = window == null || s.viewWindow == 0 ? base : linuxViewDensity(
+      base: base, original: choice == 'original', zoom: s.viewZoom,
+      content: Size(window.rect.width, window.rect.height - window.titleBar),
+      range: s.viewRect.size,
+    );
+    s.send({'cmd': 'set_stream', ...s.stream, 'density': density,
+      'focus': s.focusWanted});
+  }
+
   double _density(Object? choice) => choice == 'original'
       ? 8
       : choice == 'saver1x'
@@ -727,6 +753,16 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     _copies.clear();
     unawaited(_events.close());
   }
+}
+
+@visibleForTesting
+double linuxViewDensity({required double base, required bool original,
+    required double zoom, required Size content, required Size range}) {
+  final area = content.width * content.height;
+  final viewed = range.width * range.height;
+  if (area <= 0 || viewed <= 0) return base;
+  final desired = original ? 8.0 : (base * zoom).clamp(0.01, 8.0);
+  return math.min(desired, base * math.sqrt(area / viewed)).clamp(0.01, 8).toDouble();
 }
 
 void _retire(ui.Image? image) {
@@ -855,6 +891,9 @@ class _Session {
   final SessionWorker process;
   final void Function(SessionEvent) emit;
   List<RemoteWindow> windows = [];
+  int viewWindow = 0;
+  Rect viewRect = Rect.zero;
+  double viewZoom = 1;
   final _pictures = <int, RemoteWindow>{};
   Uint8List? _pendingFrame;
   int _receivedFrames = 0;

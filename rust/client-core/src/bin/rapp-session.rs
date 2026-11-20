@@ -115,7 +115,13 @@ fn command(v: &Value) -> Result<Vec<u8>> {
             ensure!([1, 5, 15, 30].contains(&fps), "invalid fps");
             let pinned = v["pinned"].as_bool().unwrap_or(false);
             let focus = v["focus"].as_bool().unwrap_or(false);
-            p::stream(mode, fps as u8, float(v, "density")?.clamp(0.1, 8.), pinned, focus)
+            p::stream(mode, fps as u8, float(v, "density")?.clamp(0.01, 8.), pinned, focus)
+        }
+        "set_view" => {
+            let window = id()?;
+            let rect = p::Rect { x: float(v, "x")?, y: float(v, "y")?, w: float(v, "w")?, h: float(v, "h")? };
+            ensure!(window == 0 || (rect.w > 0. && rect.h > 0.), "invalid view dimensions");
+            p::set_view(window, rect)
         }
         "menu_pick" => {
             let path: Vec<u16> = v["path"]
@@ -170,7 +176,7 @@ fn run(out: &Output) -> Result<()> {
         TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), Duration::from_secs(8))?;
     socket.set_nodelay(true)?;
     socket.set_write_timeout(Some(Duration::from_secs(5)))?;
-    socket.write_all(&address.hello(float(&start, "density")?.clamp(0.1, 8.)))?;
+    socket.write_all(&address.hello(float(&start, "density")?.clamp(0.01, 8.)))?;
     let writer = Arc::new(Mutex::new(socket.try_clone()?));
     let stdin_writer = writer.clone();
     let probe = Probe::new();
@@ -500,6 +506,17 @@ mod tests {
         ] {
             assert!(command(&v).is_err());
         }
+    }
+    #[test]
+    fn view_bridge_preserves_coordinates_and_rejects_invalid_regions() {
+        let view = json!({"cmd":"set_view","window":12,"x":-2.5,"y":3.,"w":100.,"h":80.});
+        assert_eq!(command(&view).unwrap(), p::set_view(12, p::Rect { x:-2.5, y:3., w:100., h:80. }));
+        let mut invalid = view; invalid["w"] = json!(0);
+        assert!(command(&invalid).is_err());
+        invalid["window"] = json!(0);
+        assert!(command(&invalid).is_ok());
+        invalid["x"] = json!("NaN");
+        assert!(command(&invalid).is_err());
     }
     #[test]
     fn set_stream_pinned() {

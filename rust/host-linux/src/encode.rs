@@ -1,12 +1,13 @@
 //! The same 64-pixel tile and persistent zlib stream consumed by every rapp client.
 use anyhow::{ensure, Result};
 use flate2::{Compress, Compression, FlushCompress};
-use rapp_client_core::protocol::packet;
+use rapp_client_core::protocol::{packet, Rect};
 
 pub struct Encoder {
     z: Compress,
     previous: Vec<u16>,
     shape: (usize, usize, u8),
+    region: Rect,
 }
 impl Default for Encoder {
     fn default() -> Self {
@@ -14,6 +15,7 @@ impl Default for Encoder {
             z: Compress::new(Compression::fast(), true),
             previous: vec![],
             shape: (0, 0, 0),
+            region: Rect::default(),
         }
     }
 }
@@ -33,6 +35,7 @@ impl Encoder {
     }
 
     /// Pixel dimensions may differ from the desktop's logical dimensions (HiDPI).
+    #[cfg(test)]
     pub fn frame(
         &mut self,
         bgra: &[u8],
@@ -41,11 +44,33 @@ impl Encoder {
         logical: (u16, u16),
         mode: u8,
     ) -> Result<Option<Vec<u8>>> {
+        self.frame_region(
+            bgra,
+            w,
+            h,
+            Rect {
+                x: 0.,
+                y: 0.,
+                w: logical.0 as f32,
+                h: logical.1 as f32,
+            },
+            mode,
+        )
+    }
+
+    pub fn frame_region(
+        &mut self,
+        bgra: &[u8],
+        w: usize,
+        h: usize,
+        region: Rect,
+        mode: u8,
+    ) -> Result<Option<Vec<u8>>> {
         ensure!(
             mode <= 4 && w > 0 && h > 0 && w <= 8192 && h <= 8192 && bgra.len() == w * h * 4,
             "invalid capture dimensions"
         );
-        let full = self.previous.is_empty() || self.shape != (w, h, mode);
+        let full = self.previous.is_empty() || self.shape != (w, h, mode) || self.region != region;
         let next: Vec<_> = bgra
             .as_chunks::<4>()
             .0
@@ -114,9 +139,10 @@ impl Encoder {
             }
         }
         self.shape = (w, h, mode);
+        self.region = region;
         self.previous = next;
         let mut payload = vec![mode];
-        for f in [0., 0., logical.0 as f32, logical.1 as f32] {
+        for f in [region.x, region.y, region.w, region.h] {
             payload.extend(f.to_le_bytes());
         }
         payload.extend((w as u16).to_le_bytes());
@@ -137,6 +163,49 @@ mod tests {
         codec::Decoder,
         protocol::{read_message, Incoming},
     };
+    #[test]
+    fn moving_view_resets_decoder_even_when_pixels_and_dimensions_match() {
+        let mut encoder = Encoder::default();
+        let mut decoder = Decoder::default();
+        let pixels = vec![255; 4 * 4 * 4];
+        for x in [0., 100., 0.] {
+            let region = Rect {
+                x,
+                y: 20.,
+                w: 2.,
+                h: 2.,
+            };
+            let bytes = encoder
+                .frame_region(&pixels, 4, 4, region, 2)
+                .unwrap()
+                .unwrap();
+            let (
+                Incoming::Frame {
+                    region: actual,
+                    mode,
+                    width,
+                    height,
+                    flags,
+                    dx,
+                    dy,
+                    data,
+                },
+                _,
+            ) = read_message(&mut &bytes[..]).unwrap()
+            else {
+                panic!()
+            };
+            assert_eq!(actual, region);
+            assert_ne!(flags & 1, 0);
+            assert_eq!(
+                decoder
+                    .decode(mode, width, height, flags, dx, dy, &data)
+                    .unwrap()
+                    .unwrap(),
+                pixels
+            );
+        }
+    }
     #[test]
     fn every_mode_roundtrips_partial_tiles_deltas_and_resets() {
         for mode in 0..=4 {

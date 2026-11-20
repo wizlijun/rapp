@@ -5,6 +5,7 @@ use crate::{
     wire::Settings,
 };
 use anyhow::{ensure, Result};
+use rapp_client_core::protocol::Rect;
 use std::{
     sync::mpsc,
     time::{Duration, Instant},
@@ -13,6 +14,7 @@ use std::{
 pub struct Job {
     pub epoch: u64,
     pub settings: Settings,
+    pub view: Option<(u32, Rect)>,
 }
 pub struct Completed {
     pub epoch: u64,
@@ -54,15 +56,27 @@ impl CaptureWorker {
                         encoder.reset();
                         epoch = Some(job.epoch);
                     }
-                    let image = desktop
-                        .as_mut()
-                        .unwrap()
-                        .capture_scaled(&expected, job.settings.density)?;
-                    encoder.frame(
+                    let desktop = desktop.as_mut().unwrap();
+                    let view = desktop.view_region(job.view)?;
+                    let (image, region) = if let Some(view) = view {
+                        let (image, region) = desktop.capture()?.cropped(&expected, view);
+                        (image.scaled_region(region, job.settings.density), region)
+                    } else {
+                        (
+                            desktop.capture_scaled(&expected, job.settings.density)?,
+                            Rect {
+                                x: 0.,
+                                y: 0.,
+                                w: expected.width as f32,
+                                h: expected.height as f32,
+                            },
+                        )
+                    };
+                    encoder.frame_region(
                         &image.pixels,
                         image.width,
                         image.height,
-                        (expected.width, expected.height),
+                        region,
                         job.settings.mode,
                     )
                 })();
