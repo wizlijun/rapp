@@ -778,3 +778,14 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [ ] 9. 整理中切到别的窗口：整理完发到原来那个窗口；顶栏提示「<应用>：已用 AI 整理并发出」。
 - [ ] 10. 整理好、等发送时又按住说话：上一段 AI 文字先发出，再开始听新的一段。
 - [ ] 11. 短语音（10 个字以内）照旧：松手气泡上飘消失、直接发送，没有整理气泡。
+
+## app 端口映射（feat/app-port-maps，2026-11-20）实机检查
+
+规格：`docs/superpowers/specs/2026-11-20-rapp-app-port-maps-design.md`。iOS app 里的 hub 自己开 `localhost:28000–28999`，只有 app 内能连；Mac、Linux 照旧由后台服务开。
+
+- [ ] 1. iOS 全局设置把 LLM 接入点设成 `localhost:28001`，点「测试」能通（Mac 共享着 rapp-llm 网关的端口）。
+- [ ] 2. iOS 上长语音（超过 10 个字）能整理，AI 文字发出去。
+- [ ] 3. app 切到后台几分钟再回来，马上点「测试」或说一段长语音，仍然能通。
+- [ ] 4. 日志页能看到 `ports` 一行，里面有 `{"id","port","local":28001}`；回前台后能看到 `ports_relisten`。
+- [ ] 5. 杀掉 app 再开（Mac 先不动）：日志里第一行 `ports` 就带上次的映射（从 `maps.json` 读的），不用等问到。
+- [ ] 6. Mac 上的 hub 不开 28000 段（`lsof -iTCP:28001 -sTCP:LISTEN` 只有 rapp-service）。

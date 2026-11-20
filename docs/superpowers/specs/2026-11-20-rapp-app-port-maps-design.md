@@ -97,3 +97,11 @@ pub trait Carrier: Send + Sync + 'static {
 - hub 的 60 秒定时放在 `presence` 里还是另起一个任务。
 - 测试：testkit 里起一个共享方后台服务，加一个 `own_ports` 的 hub，hub 那边连 `localhost:<号>` 能回显；Mac 上的 hub（`own_ports` 为 false）不开端口；`ports_relisten` 之后还能连。
 - iOS 上要实机看：设好 `localhost:28001` 后点「测试」能通；长语音能整理；app 切到后台再回来还能用。
+
+### 实现时的决定（2026-11-20）
+
+- 开关叫 `Opts.map_ports: Option<(u16, u16)>`（从哪个号开始、开几个），不叫 §5.2 的 `own_ports`：后台服务的 `own_ports` 已经是另一个意思（本机自己的共享号开不开）。只有 `rapp-hub-ffi` 给 `Some((28000, 1000))`；测试可以给自己的号段。
+- 回到前台时**不加** §5.3 的 Dart 命令 `ports_relisten`。Dart 的 `enterForeground` 本来就发 `net_changed`，hub 收到后（经 `net.wake`）关掉所有监听再重开，再问一遍。效果一样，少一条命令，Dart 不用改。日志写 `ports_relisten`。
+- 监听循环 `accept` 连续出错 `RELISTEN_AFTER = 5` 次就结束，hub 随即重开所有监听（日志 `map_listener_dead`）；后台服务不变，照旧每 100 ms 重试。之前没开成的号，每问一遍时再试一次。
+- 60 秒定时另起一个任务（`hub/src/ports.rs` 的 `run`），不放在 `presence` 里。`Carrier` 用 trait；共用代码在 `rust/ports`（`maps.rs` 端口表、`carry.rs` 转发和放置、`ask.rs` 向设备要端口和共享表）。
+- hub 用启动时的主目录放 `maps.json`；`relay` 和 `key` 每次连接时现读 `service.json`，所以在 app 里改了中继或 key 不用重启。
