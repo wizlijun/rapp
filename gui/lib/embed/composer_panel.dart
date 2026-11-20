@@ -737,11 +737,14 @@ List<Widget> _iosLayer(
                     alignment: Alignment.bottomCenter,
                     child: Padding(
                       padding: EdgeInsets.only(bottom: 8 + rest),
-                      child: PanelPlace(
-                        place: panelPlaceOf(session),
-                        child: SizedBox(
-                          width: panelWidth(c.maxWidth, state.composerScale),
-                          child: panel(c.maxHeight / 2),
+                      child: PullDown(
+                        onClose: session.composer.collapse,
+                        child: PanelPlace(
+                          place: panelPlaceOf(session),
+                          child: SizedBox(
+                            width: panelWidth(c.maxWidth, state.composerScale),
+                            child: panel(c.maxHeight / 2),
+                          ),
                         ),
                       ),
                     ),
@@ -754,6 +757,7 @@ List<Widget> _iosLayer(
                     scale: state.composerScale,
                     keyboard: rest,
                     place: panelPlaceOf(session),
+                    onPullClose: session.composer.collapse,
                     onPlace: (p) => state.placeComposer(session, p),
                     child: panel(c.maxHeight / 2),
                   ),

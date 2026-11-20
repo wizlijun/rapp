@@ -1399,7 +1399,8 @@ void main() {
       expect(find.byKey(const Key('composer-panel')), findsNothing);
     });
 
-    for (final (p, min) in [(TargetPlatform.macOS, 40.0), (TargetPlatform.iOS, 48.0)]) {
+    // iOS has no × (a pull down collapses there, G4/G6).
+    for (final (p, min) in [(TargetPlatform.macOS, 40.0)]) {
       testWidgets('the grip × is at least $min square on $p', (tester) async {
         await onPlatform(p, () async {
           await showPicture(tester);

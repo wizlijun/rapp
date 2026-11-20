@@ -4,11 +4,13 @@
 import 'dart:math' as math;
 import 'dart:ui' show lerpDouble;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../term/term_session_port.dart';
 import '../ui/main_state.dart';
 import '../ui/terms_entry.dart';
+import 'composer_float.dart' show PanelPan, pullCloseDistance;
 import 'key_bar.dart';
 import 'panel_place.dart';
 import 'remote_session.dart';
@@ -234,4 +236,66 @@ class IosDockState extends State<IosDock> with SingleTickerProviderStateMixin {
       ),
     );
   }
+}
+
+/// A pull down on the terminal panel (anywhere but its text, as [PanelPan] says): the panel follows the finger, and on
+/// release past [pullCloseDistance] or a fling down [onClose] is called, from where the panel is. Otherwise it springs
+/// back in 200 ms. Put it outside the panel's [PanelPlace], so the place (and the stack above it) follows.
+class PullDown extends StatefulWidget {
+  const PullDown({super.key, required this.onClose, required this.child});
+
+  final VoidCallback onClose;
+  final Widget child;
+
+  @override
+  State<PullDown> createState() => _PullDownState();
+}
+
+class _PullDownState extends State<PullDown> with SingleTickerProviderStateMixin {
+  double _over = 0, _from = 0;
+  late final AnimationController _spring = AnimationController(vsync: this, duration: const Duration(milliseconds: 200))
+    ..addListener(() => setState(() => _over = _from * (1 - Curves.easeOut.transform(_spring.value))));
+
+  @override
+  void initState() {
+    super.initState();
+    _spring; // made now: a lazy one made in dispose() would look up a deactivated element
+  }
+
+  @override
+  void dispose() {
+    _spring.dispose();
+    super.dispose();
+  }
+
+  void _end(Velocity v) {
+    if (_over > pullCloseDistance || (_over > 0 && v.pixelsPerSecond.dy > 700)) return widget.onClose();
+    _back();
+  }
+
+  void _back() {
+    if (_over <= 0) return;
+    _from = _over;
+    _spring.forward(from: 0);
+  }
+
+  @override
+  Widget build(BuildContext context) => Transform.translate(
+        offset: Offset(0, _over),
+        child: RawGestureDetector(
+          behavior: HitTestBehavior.opaque,
+          gestures: {
+            PanelPan: GestureRecognizerFactoryWithHandlers<PanelPan>(
+              () => PanelPan(debugOwner: this),
+              (r) => r
+                ..dragStartBehavior = DragStartBehavior.down
+                ..onStart = ((_) => _spring.stop())
+                ..onUpdate = ((d) => setState(() => _over = math.max(0, _over + d.delta.dy)))
+                ..onEnd = ((d) => _end(d.velocity))
+                ..onCancel = _back,
+            ),
+          },
+          child: widget.child,
+        ),
+      );
 }

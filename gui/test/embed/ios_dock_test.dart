@@ -376,4 +376,60 @@ void main() {
     expect(find.descendant(of: toggle, matching: find.byIcon(Icons.keyboard_outlined)), findsOneWidget);
     expect(find.descendant(of: toggle, matching: find.byIcon(Icons.keyboard_hide_outlined)), findsOneWidget);
   });
+
+  iosTest('terminal panel: pull on its border 80 -> collapsed (G4)', (tester) async {
+    await openOn(tester, tsess);
+    final r = tester.getRect(panel);
+    final g = await tester.startGesture(r.topLeft + const Offset(3, 3));
+    await g.moveBy(const Offset(0, 40));
+    await tester.pump(frame);
+    await g.moveBy(const Offset(0, 40));
+    await tester.pump(frame);
+    expect(tsess.composer.open, isTrue);
+    await g.up();
+    await tester.pump();
+    expect(tsess.composer.open, isFalse);
+    await settle(tester);
+    expect(panel, findsNothing);
+  });
+
+  iosTest('terminal panel: pull 40 springs back, stack follows the pull 1:1', (tester) async {
+    await openOn(tester, tsess);
+    final r = tester.getRect(panel);
+    final stack = bottomOf(tester, toggle);
+    final g = await tester.startGesture(r.topLeft + const Offset(3, 3));
+    await g.moveBy(const Offset(0, 20));
+    await tester.pump(frame);
+    await g.moveBy(const Offset(0, 20));
+    await tester.pump(frame);
+    await tester.pump(frame);
+    expect(tester.getRect(panel).top, closeTo(r.top + 40, 0.5));
+    expect(bottomOf(tester, toggle), closeTo(stack - 40, 0.5));
+    await g.up();
+    await tester.pump();
+    expect(tsess.composer.open, isTrue);
+    await settle(tester);
+    expect(tester.getRect(panel).top, closeTo(r.top, 0.5));
+    expect(bottomOf(tester, toggle), closeTo(stack, 0.5));
+  });
+
+  iosTest('app panel at lowest: pull 40 slowly, the stack follows 1:1 and springs back with it', (tester) async {
+    await openOn(tester, app);
+    final grip = find.byKey(const Key('composer-grip'));
+    final g0 = tester.getCenter(grip);
+    final stack = bottomOf(tester, toggle);
+    final g = await tester.startGesture(g0);
+    for (var i = 1; i <= 2; i++) {
+      await g.moveBy(const Offset(0, 20), timeStamp: Duration(milliseconds: 300 * i));
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+    await tester.pump();
+    expect(tester.getCenter(grip).dy, closeTo(g0.dy + 40, 0.5));
+    expect(bottomOf(tester, toggle), closeTo(stack - 40, 0.5));
+    await g.up(timeStamp: const Duration(milliseconds: 600));
+    await settle(tester);
+    expect(app.composer.open, isTrue);
+    expect(tester.getCenter(grip).dy, closeTo(g0.dy, 0.5));
+    expect(bottomOf(tester, toggle), closeTo(stack, 0.5));
+  });
 }
