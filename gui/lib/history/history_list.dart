@@ -237,13 +237,15 @@ class _HistoryRow extends StatelessWidget {
       // tab of a small window) it goes, so the text keeps its room.
       final third = box.maxWidth / 3;
       final sourceWidth = box.maxWidth < 400 ? 0.0 : (third < 170 ? third : 170.0);
-      return _line(context, sourceWidth);
+      // Keep a consistent time column, but leave space for multiline drafts'
+      // line count and unsent badge in the narrow resource panel.
+      return _line(context, sourceWidth, timeWidth < third ? timeWidth : third);
     });
     if (!touch) row = Tooltip(message: _tip(entry.text), waitDuration: const Duration(milliseconds: 600), child: row);
     return row;
   }
 
-  Widget _line(BuildContext context, double sourceWidth) {
+  Widget _line(BuildContext context, double sourceWidth, double stampWidth) {
     final t = RappTokens.of(context);
     final e = entry, w = view.widget;
     final touch = touchPlatform(Theme.of(context).platform);
@@ -264,7 +266,10 @@ class _HistoryRow extends StatelessWidget {
         decoration: BoxDecoration(border: Border(bottom: BorderSide(color: t.line.withValues(alpha: .55)))),
         child: Row(
           children: [
-            SizedBox(width: timeWidth, child: Text(view._when(e.ts), maxLines: 1, style: muted)),
+            SizedBox(
+              width: stampWidth,
+              child: Text(view._when(e.ts), maxLines: 1, overflow: TextOverflow.ellipsis, style: muted),
+            ),
             const SizedBox(width: 10),
             Expanded(
               child: Row(

@@ -65,6 +65,8 @@ Linux 0.14.13 adds local hold-to-talk on app and terminal stages: hold Right Alt
 
 The 0.15.2 source also includes host-grouped tray sessions and favorites, screen selection in the window menu, and input history that preserves unfinished drafts and works with recording disabled. On Linux, Ctrl+V, Shift+Insert and the input panel's context-menu Paste all use the application clipboard pipeline for text and attachment blocks. Detached windows leave history and send keys to the input method while it is composing. See [macOS 0.15.1 parity and Linux validation](docs/superpowers/plans/2026-11-20-linux-0151-parity.md).
 
+Linux 0.15.4 includes the macOS 0.15.3 single-row input history, with actions in the ⋮ / right-click menu, full-text hover previews and compact scope buttons. The time column also shrinks in narrow panels so multiline drafts retain their line count, unsent badge and menu without overflowing. See [0.15.3 parity and Linux 0.15.4 release validation](docs/superpowers/plans/2026-11-20-linux-0154-parity.md).
+
 ## License
 
 [GNU GPL v3](LICENSE).

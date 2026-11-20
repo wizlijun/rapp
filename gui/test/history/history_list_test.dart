@@ -59,15 +59,17 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('search field is 40 tall on macOS, like the log search', (tester) async {
-    await onPlatform(TargetPlatform.macOS, () async {
-      final h = await load(tester);
-      await show(tester, h);
-      expect(
-          tester.getSize(find.descendant(of: find.byKey(const Key('history-search')), matching: find.byType(InputDecorator))).height,
-          40);
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.linux]) {
+    testWidgets('search field is 40 tall on $platform, like the log search', (tester) async {
+      await onPlatform(platform, () async {
+        final h = await load(tester);
+        await show(tester, h);
+        expect(
+            tester.getSize(find.descendant(of: find.byKey(const Key('history-search')), matching: find.byType(InputDecorator))).height,
+            40);
+      });
     });
-  });
+  }
 
   testWidgets('search finds a three-day-old entry and puts it into the editor', (tester) async {
     day('dev1', '2026-11-12', [rec('01A', '2026-11-12T10:30:00+09:00', '跑一下部署脚本\n第二行')]);
@@ -92,21 +94,23 @@ void main() {
     expect(put, '跑一下部署脚本\n第二行');
   });
 
-  testWidgets('one row per entry, 40 tall on macOS; a click on the row puts it into the editor', (tester) async {
-    await onPlatform(TargetPlatform.macOS, () async {
-      day('dev1', '2026-11-15', [
-        rec('01A', '2026-11-15T09:00:00+09:00', 'a very long line ' * 20),
-        rec('01B', '2026-11-15T09:01:00+09:00', 'short'),
-      ]);
-      final h = await load(tester);
-      String? put;
-      await show(tester, h, onPut: (t) => put = t);
-      expect(tester.getSize(find.byKey(const Key('history-01A'))).height, 40);
-      expect(tester.getSize(find.byKey(const Key('history-01B'))).height, 40);
-      await tester.tap(find.text('short'));
-      expect(put, 'short');
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.linux]) {
+    testWidgets('one row per entry, 40 tall on $platform; a click on the row puts it into the editor', (tester) async {
+      await onPlatform(platform, () async {
+        day('dev1', '2026-11-15', [
+          rec('01A', '2026-11-15T09:00:00+09:00', 'a very long line ' * 20),
+          rec('01B', '2026-11-15T09:01:00+09:00', 'short'),
+        ]);
+        final h = await load(tester);
+        String? put;
+        await show(tester, h, onPut: (t) => put = t);
+        expect(tester.getSize(find.byKey(const Key('history-01A'))).height, 40);
+        expect(tester.getSize(find.byKey(const Key('history-01B'))).height, 40);
+        await tester.tap(find.text('short'));
+        expect(put, 'short');
+      });
     });
-  });
+  }
 
   testWidgets('a right-click on the row opens the same menu', (tester) async {
     day('dev1', '2026-11-15', [rec('01A', '2026-11-15T09:00:00+09:00', 'mine')]);
@@ -117,7 +121,7 @@ void main() {
     expect(find.byKey(const Key('put-01A')), findsOneWidget);
     expect(find.byKey(const Key('copy-01A')), findsOneWidget);
     expect(find.byKey(const Key('remove-01A')), findsOneWidget);
-  });
+  }, variant: const TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
 
   testWidgets('with nowhere to put it, 放进输入框 is grey and a click on the row does nothing', (tester) async {
     day('dev1', '2026-11-15', [rec('01A', '2026-11-15T09:00:00+09:00', 'mine')]);
@@ -149,14 +153,43 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a pause on the row shows the whole text', (tester) async {
-    await onPlatform(TargetPlatform.macOS, () async {
-      day('dev1', '2026-11-15', [rec('01A', '2026-11-15T09:00:00+09:00', '第一行\n第二行')]);
-      final h = await load(tester);
-      await show(tester, h);
-      expect(find.byTooltip('第一行\n第二行'), findsOneWidget);
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.linux]) {
+    testWidgets('a pause on the row shows the whole text on $platform', (tester) async {
+      await onPlatform(platform, () async {
+        day('dev1', '2026-11-15', [rec('01A', '2026-11-15T09:00:00+09:00', '第一行\n第二行')]);
+        final h = await load(tester);
+        await show(tester, h);
+        expect(find.byTooltip('第一行\n第二行'), findsOneWidget);
+      });
     });
-  });
+  }
+
+  testWidgets('desktop menu actions preserve the whole text without activating the row', (tester) async {
+    const text = '第一行\n第二行';
+    day('dev1', '2026-11-15', [rec('01A', '2026-11-15T09:00:00+09:00', text, kind: 'draft')]);
+    final h = await load(tester);
+    final puts = <String>[], copies = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') copies.add((call.arguments as Map)['text'] as String);
+      return null;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+    await show(tester, h, width: 320, onPut: puts.add);
+    expect(tester.takeException(), isNull);
+    expect(find.text('+1 行'), findsOneWidget);
+    expect(find.text('没发出'), findsOneWidget);
+    await menu(tester, '01A');
+    expect(puts, isEmpty);
+    await tester.tap(find.byKey(const Key('copy-01A')));
+    await tester.pumpAndSettle();
+    expect(copies, [text]);
+    expect(puts, isEmpty);
+    await tester.tap(find.text('第一行'), buttons: kSecondaryButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('put-01A')));
+    await tester.pumpAndSettle();
+    expect(puts, [text]);
+  }, variant: const TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
 
   testWidgets('time is HH:mm today and M月d日 HH:mm on other days', (tester) async {
     final today = DateTime(2026, 11, 15, 9, 5).toIso8601String();
