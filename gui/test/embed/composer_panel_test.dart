@@ -1400,18 +1400,15 @@ void main() {
     });
 
     // iOS has no × (a pull down collapses there, G4/G6).
-    for (final (p, min) in [(TargetPlatform.macOS, 40.0)]) {
-      testWidgets('the grip × is at least $min square on $p', (tester) async {
-        await onPlatform(p, () async {
-          await showPicture(tester);
-          await openPanel(tester);
-          final close = find.byKey(const Key('composer-grip-close'));
-          final s = tester.getSize(close);
-          expect(s.width, greaterThanOrEqualTo(min));
-          expect(s.height, greaterThanOrEqualTo(min));
-        });
+    testWidgets('the grip × is at least 40 square on macOS', (tester) async {
+      await onPlatform(TargetPlatform.macOS, () async {
+        await showPicture(tester);
+        await openPanel(tester);
+        final s = tester.getSize(find.byKey(const Key('composer-grip-close')));
+        expect(s.width, greaterThanOrEqualTo(40));
+        expect(s.height, greaterThanOrEqualTo(40));
       });
-    }
+    });
 
     testWidgets('a small × right beside the grip shows with the bar and collapses the panel', (tester) async {
       await showPicture(tester);

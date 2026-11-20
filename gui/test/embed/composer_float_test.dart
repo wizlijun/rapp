@@ -63,7 +63,7 @@ void main() {
     final body = find.byKey(const Key('body'));
     final text = find.byKey(const Key('text'));
 
-    Future<void> show(WidgetTester tester, TargetPlatform platform, {bool pull = true, InputPoint? at}) async {
+    Future<void> show(WidgetTester tester, TargetPlatform platform, {bool pull = true, InputPoint? at, double keyboard = 0}) async {
       debugDefaultTargetPlatformOverride = platform;
       tester.view.physicalSize = const Size(800, 600);
       tester.view.devicePixelRatio = 1;
@@ -77,6 +77,7 @@ void main() {
               placed.add(p);
               rs.setProfile(ResolvedProfile(composerAt: p));
             },
+            keyboard: keyboard,
             onPullClose: pull ? () => closed++ : null,
             child: SizedBox(
               height: 60,
@@ -167,6 +168,46 @@ void main() {
       expect(closed, 1);
       expect(placed, hasLength(1), reason: 'the lowest place it was dragged to, never the overshoot');
       expect(placed.single!.inContent(const Size(800, 600)).dy, closeTo(592, 0.5));
+    });
+
+    pullTest('keyboard 300, from the default place: pull 80 -> collapsed, nothing saved', (tester) async {
+      await show(tester, TargetPlatform.iOS, keyboard: 300);
+      await drag(tester, tester.getCenter(grip), [40, 40]);
+      expect(closed, 1);
+      expect(placed, isEmpty);
+    });
+
+    pullTest('keyboard 300, from the default place: pull 40 springs back, nothing saved', (tester) async {
+      await show(tester, TargetPlatform.iOS, keyboard: 300);
+      final y = top(tester);
+      await drag(tester, tester.getCenter(grip), [20, 20], every: const Duration(milliseconds: 300));
+      expect(closed, 0);
+      expect(placed, isEmpty);
+      expect(top(tester), closeTo(y, 0.5));
+    });
+
+    pullTest('keyboard 300, start high, drag into the bottom and further: saved as the true lowest place', (tester) async {
+      await show(tester, TargetPlatform.iOS, at: const InputPoint(0.5, 100), keyboard: 300);
+      final room = 600 - 300 - 8 - 80 - top(tester);
+      await drag(tester, tester.getCenter(grip), [room, 40, 40]);
+      expect(closed, 1);
+      expect(placed, hasLength(1));
+      expect(placed.single!.fromBottom, isTrue);
+      expect(placed.single!.dy, composerMargin);
+    });
+
+    pullTest('reopened during a pull-close: the panel springs back, and a small drag does not collapse', (tester) async {
+      await show(tester, TargetPlatform.iOS);
+      final y = top(tester);
+      await drag(tester, tester.getCenter(grip), [40, 40]);
+      expect(closed, 1);
+      await tester.pump(const Duration(milliseconds: 100));
+      rs.composer.open = true;
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(top(tester), closeTo(y, 0.5));
+      await drag(tester, tester.getCenter(grip), [10]);
+      expect(closed, 1);
     });
 
     pullTest('pull starting in the editor text: no collapse', (tester) async {

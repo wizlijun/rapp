@@ -432,4 +432,31 @@ void main() {
     expect(tester.getCenter(grip).dy, closeTo(g0.dy, 0.5));
     expect(bottomOf(tester, toggle), closeTo(stack, 0.5));
   });
+
+  for (final which in ['terminal', 'Safari']) {
+    iosTest('$which: reopened during a pull-close, the panel springs back; a 10pt drag does not collapse', (tester) async {
+      final rs = which == 'terminal' ? tsess : app;
+      await openOn(tester, rs);
+      final top0 = tester.getRect(panel).top;
+      final from = which == 'terminal' ? tester.getRect(panel).topLeft + const Offset(3, 3) : tester.getCenter(find.byKey(const Key('composer-grip')));
+      final g = await tester.startGesture(from);
+      await g.moveBy(const Offset(0, 40), timeStamp: const Duration(milliseconds: 16));
+      await tester.pump(frame);
+      await g.moveBy(const Offset(0, 40), timeStamp: const Duration(milliseconds: 32));
+      await tester.pump(frame);
+      await g.up(timeStamp: const Duration(milliseconds: 32));
+      await tester.pump();
+      expect(rs.composer.open, isFalse);
+      await tester.pump(const Duration(milliseconds: 100));
+      rs.composer.open = true;
+      await settle(tester);
+      expect(tester.getRect(panel).top, closeTo(top0, 0.5));
+      final g2 = await tester.startGesture(from);
+      await g2.moveBy(const Offset(0, 10), timeStamp: const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 300));
+      await g2.up(timeStamp: const Duration(milliseconds: 300));
+      await settle(tester);
+      expect(rs.composer.open, isTrue);
+    });
+  }
 }

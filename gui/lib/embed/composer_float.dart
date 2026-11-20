@@ -50,9 +50,9 @@ bool _onText(PointerEvent e) {
   });
 }
 
-/// How far past the lowest place a pull must go to collapse the panel, or how fast a fling down (px/s).
+/// How far past the lowest place a pull must go to collapse the panel, and how fast a fling down (px/s) does it.
 const pullCloseDistance = 70.0;
-const _pullCloseSpeed = 700.0;
+const pullCloseSpeed = 700.0;
 
 /// A drag that starts on the panel outside its text.
 class PanelPan extends PanGestureRecognizer {
@@ -139,10 +139,17 @@ class _FloatingComposerState extends State<FloatingComposer> with SingleTickerPr
   void initState() {
     super.initState();
     _spring; // made now: a lazy one made in dispose() would look up a deactivated element
+    widget.session.composer.addListener(_reopen);
+  }
+
+  // Opened again while the pull-close was going: the panel comes back from where the finger left it.
+  void _reopen() {
+    if (widget.session.composer.open && _drag == null) _springBack();
   }
 
   @override
   void dispose() {
+    widget.session.composer.removeListener(_reopen);
     _spring.dispose();
     super.dispose();
   }
@@ -155,7 +162,7 @@ class _FloatingComposerState extends State<FloatingComposer> with SingleTickerPr
   bool _hover = false;
 
   /// A touch landed on the panel and no tap elsewhere since: a touch screen has no hover, so this
-  /// shows the bar and the × instead.
+  /// shows the bar (and, off iOS, the ×) instead.
   bool _touched = false;
 
   /// Where the held touch was last, for its moves.
@@ -171,9 +178,14 @@ class _FloatingComposerState extends State<FloatingComposer> with SingleTickerPr
     return _topLeftOf(bc, _stage, p, widget.keyboard) + Offset(p.width / 2, p.height);
   }
 
+  /// Where the panel was seen when the drag began: a drop there writes no place (a default stays unwritten).
+  Offset? _from;
+
   void _start() {
     _spring.stop();
-    setState(() => _drag = _seen(_at.inContent(_stage)));
+    // A stale pull must never make this drag collapse by itself.
+    _over = 0;
+    setState(() => _from = _drag = _seen(_at.inContent(_stage)));
   }
 
   // Moved from where it is seen, so going past an edge and back has no dead zone. What the bottom clamp
@@ -192,12 +204,13 @@ class _FloatingComposerState extends State<FloatingComposer> with SingleTickerPr
     _held = null;
     final bc = _drag;
     if (bc == null) return;
-    final p = InputPoint.at(bc, _stage);
+    // Pulled past the bottom: the place is the lowest there is, not the keyboard-relative clamp.
+    final p = _over > 0 ? InputPoint(InputPoint.at(bc, _stage).x, composerMargin, fromBottom: true) : InputPoint.at(bc, _stage);
     // Dropped where it was: nothing to write (a default stays unwritten).
-    if (p != _at) widget.onPlace(p);
+    if (bc != _from && p != _at) widget.onPlace(p);
     setState(() => _drag = null);
     final pull = widget.onPullClose;
-    if (pull != null && _over > 0 && (_over > pullCloseDistance || (v?.pixelsPerSecond.dy ?? 0) > _pullCloseSpeed)) {
+    if (pull != null && _over > 0 && (_over > pullCloseDistance || (v?.pixelsPerSecond.dy ?? 0) > pullCloseSpeed)) {
       // The dock takes it from where the panel is.
       pull();
       return;
@@ -267,7 +280,7 @@ class _FloatingComposerState extends State<FloatingComposer> with SingleTickerPr
     // with the grip, so the grip row stays gripSize.height tall.
     final side = controlHeightOf(context);
     final ios = defaultTargetPlatform == TargetPlatform.iOS;
-    final close = AnimatedOpacity(
+    final close = ios ? null : AnimatedOpacity(
       opacity: shown ? 1 : 0,
       duration: const Duration(milliseconds: 120),
       child: IgnorePointer(
@@ -370,7 +383,7 @@ class _FloatingComposerState extends State<FloatingComposer> with SingleTickerPr
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             SizedBox(width: _closeSize.width + gripSize.width),
-                            close,
+                            close!,
                           ],
                         ),
                       ),

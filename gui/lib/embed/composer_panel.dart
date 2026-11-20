@@ -738,7 +738,7 @@ List<Widget> _iosLayer(
                     child: Padding(
                       padding: EdgeInsets.only(bottom: 8 + rest),
                       child: PullDown(
-                        onClose: session.composer.collapse,
+                        composer: session.composer,
                         child: PanelPlace(
                           place: panelPlaceOf(session),
                           child: SizedBox(

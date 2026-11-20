@@ -10,7 +10,8 @@ import 'package:flutter/material.dart';
 import '../term/term_session_port.dart';
 import '../ui/main_state.dart';
 import '../ui/terms_entry.dart';
-import 'composer_float.dart' show PanelPan, pullCloseDistance;
+import 'composer_float.dart' show PanelPan, pullCloseDistance, pullCloseSpeed;
+import 'composer_model.dart' show ComposerModel;
 import 'key_bar.dart';
 import 'panel_place.dart';
 import 'remote_session.dart';
@@ -239,12 +240,13 @@ class IosDockState extends State<IosDock> with SingleTickerProviderStateMixin {
 }
 
 /// A pull down on the terminal panel (anywhere but its text, as [PanelPan] says): the panel follows the finger, and on
-/// release past [pullCloseDistance] or a fling down [onClose] is called, from where the panel is. Otherwise it springs
+/// release past [pullCloseDistance] or a fling down the composer is collapsed, from where the panel is. Otherwise it springs
 /// back in 200 ms. Put it outside the panel's [PanelPlace], so the place (and the stack above it) follows.
 class PullDown extends StatefulWidget {
-  const PullDown({super.key, required this.onClose, required this.child});
+  const PullDown({super.key, required this.composer, required this.child});
 
-  final VoidCallback onClose;
+  /// Collapsed by a pull; opening again brings the panel back.
+  final ComposerModel composer;
   final Widget child;
 
   @override
@@ -260,16 +262,22 @@ class _PullDownState extends State<PullDown> with SingleTickerProviderStateMixin
   void initState() {
     super.initState();
     _spring; // made now: a lazy one made in dispose() would look up a deactivated element
+    widget.composer.addListener(_reopen);
+  }
+
+  void _reopen() {
+    if (widget.composer.open) _back();
   }
 
   @override
   void dispose() {
+    widget.composer.removeListener(_reopen);
     _spring.dispose();
     super.dispose();
   }
 
   void _end(Velocity v) {
-    if (_over > pullCloseDistance || (_over > 0 && v.pixelsPerSecond.dy > 700)) return widget.onClose();
+    if (_over > pullCloseDistance || (_over > 0 && v.pixelsPerSecond.dy > pullCloseSpeed)) return widget.composer.collapse();
     _back();
   }
 
@@ -289,7 +297,10 @@ class _PullDownState extends State<PullDown> with SingleTickerProviderStateMixin
               () => PanelPan(debugOwner: this),
               (r) => r
                 ..dragStartBehavior = DragStartBehavior.down
-                ..onStart = ((_) => _spring.stop())
+                ..onStart = ((_) {
+                  _spring.stop();
+                  _over = 0; // a stale pull must never close by itself
+                })
                 ..onUpdate = ((d) => setState(() => _over = math.max(0, _over + d.delta.dy)))
                 ..onEnd = ((d) => _end(d.velocity))
                 ..onCancel = _back,
