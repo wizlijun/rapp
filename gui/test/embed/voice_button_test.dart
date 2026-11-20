@@ -316,6 +316,42 @@ void main() {
     expect(v.bottom, lessThan(panelTop));
   });
 
+  iosTest('no voice, landscape: 收起 alone stands 8 above the panel top', (tester) async {
+    es.dispose();
+    // Built off iOS, where MainState makes no voice input of its own.
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    expect(es.voice, isNull);
+    rs.composer.open = true;
+    await tester.pumpWidget(layer());
+    await tester.pump();
+    expect(hold, findsNothing);
+    expect(inStage(tester, find.byType(ComposerPanel)).top - gripSize.height - inStage(tester, open).bottom, 8);
+  });
+
+  iosTest('portrait open: one row, 语音 outermost on the stage side', (tester) async {
+    const portrait = Size(393, 852);
+    for (final side in [StageSide.right, StageSide.left]) {
+      es.setStageSide(side);
+      rs.composer.open = true;
+      await tester.pumpWidget(layer(size: portrait));
+      await tester.pump();
+      final v = inStage(tester, hold);
+      final i = inStage(tester, open);
+      expect(i.center.dy, v.center.dy);
+      expect(v.left - i.right == 12 || i.left - v.right == 12, isTrue);
+      if (side == StageSide.right) {
+        expect(portrait.width - v.right, 80);
+        expect(i.right, lessThan(v.left));
+      } else {
+        expect(v.left, 80);
+        expect(i.left, greaterThan(v.right));
+      }
+      await tester.pumpWidget(const SizedBox());
+    }
+  });
+
   iosTest('recording hides 收起', (tester) async {
     rs.composer.open = true;
     await tester.pumpWidget(layer());

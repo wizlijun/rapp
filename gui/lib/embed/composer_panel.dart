@@ -838,7 +838,7 @@ class _TidyLayer extends StatelessWidget {
     double bottom;
     if (_open && p != null) {
       // The stack's top, as _StackAbovePanel puts it.
-      final h = _stackHeight(stage.height > stage.width);
+      final h = _stackHeight(stage.height > stage.width, state.voice != null);
       bottom = math.max(0.0, math.min(stage.height - p.top + 8, stage.height - 8 - h)) + h + 12;
     } else {
       final row = keys ? keyRowBottom + keyRowKeySize.height + 8 : 0.0;
@@ -890,8 +890,8 @@ Widget _openToggle(RemoteSession session) {
   );
 }
 
-/// The open stack's height: 语音 and 收起 in one row, or one above the other.
-double _stackHeight(bool upright) => upright ? stageButtonSize : 2 * stageButtonSize + 12;
+/// The open stack's height: 语音 and 收起 in one row, one above the other, or 收起 alone.
+double _stackHeight(bool upright, bool voice) => upright || !voice ? stageButtonSize : 2 * stageButtonSize + 12;
 
 /// iOS's stage stack while the panel is open: 语音 (if [hold]) and 收起, on the stack's line ([stageButtonsIn] in
 /// from the stack's side), the lowest 8 above the panel's top, or its key row's when that rides above it; the
@@ -911,7 +911,7 @@ class _StackAbovePanel extends StatelessWidget {
         builder: (context, panel, _) {
           if (panel == null) return const SizedBox.shrink();
           return LayoutBuilder(builder: (context, c) {
-            final h = _stackHeight(upright);
+            final h = _stackHeight(upright, this.hold != null);
             final bottom = math.min(c.maxHeight - panel.top + 8, c.maxHeight - 8 - h);
             final hold = this.hold;
             final hint = hold == null || hold.active || hold.hint == null
