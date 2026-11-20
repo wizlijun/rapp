@@ -83,7 +83,8 @@ void main() {
 
   // com.a open on 111 with a picture; a reconnect's open answers sid + 10. [endpoint]: the LLM 接入点 is set.
   // [held]: a reconnect's open is not answered but kept here, for the test to answer.
-  Future<(MainState, FakeSessionPort)> start({bool endpoint = true, List<void Function()>? held}) async {
+  Future<(MainState, FakeSessionPort)> start(
+      {bool endpoint = true, List<void Function()>? held, void Function(String)? log}) async {
     final t = FakeTransport();
     final port = FakeSessionPort();
     final h = HubClient(t);
@@ -94,7 +95,7 @@ void main() {
       ],
     });
     await pump();
-    final st = MainState(hub: h, data: d, prefs: UiPrefs(), port: port, llmApi: api);
+    final st = MainState(hub: h, data: d, prefs: UiPrefs(), port: port, llmApi: api, log: log);
     if (endpoint) st.setLlm(const LlmEndpoint(url: 'localhost:28001', key: 'k'));
     var reconnects = 0;
     t.onSend = (m) {
@@ -230,6 +231,91 @@ void main() {
     final text = lines().single['text'] as String;
     expect(text, contains('我打的字'));
     expect(text, contains(long));
+    st.dispose();
+  });
+
+  // Review 2026-11-20 minors.
+  test('quitting while a failure waits brings the original back on the next open', () async {
+    final (st, _) = await start();
+    st.tidyOf(sid).begin(long, VoicePick.send);
+    api.calls.single.complete(const LlmFailed('连不上 LLM 接入点'));
+    await pump();
+    st.dispose(); // the app quits (or dies) with the card still waiting
+    final (again, _) = await start();
+    expect(again.currentRemote!.composer.draftText, contains(long));
+    again.dispose();
+    final (third, _) = await start();
+    // It is in the draft now (drafts last across opens), and only once: the held copy went.
+    expect(long.allMatches(third.currentRemote!.composer.draftText), hasLength(1));
+    third.dispose();
+  });
+
+  test('a tidy that ended leaves nothing for the next open', () async {
+    final (st, _) = await start();
+    st.tidyOf(sid).begin(long, VoicePick.send);
+    st.tidyOf(sid).sendOriginal();
+    st.currentRemote!.composer.done(1, null);
+    await until(() => lines().length == 1);
+    st.dispose();
+    final (again, _) = await start();
+    expect(again.currentRemote!.composer.draftText, isNot(contains(long)));
+    again.dispose();
+  });
+
+  test('asking for a closed session\'s tidy leaves none behind', () async {
+    final (st, port) = await start();
+    st.endCurrent();
+    port.emit(ClosedEvent(sid, 'rapp-client: quit'));
+    await until(() => st.remote[sid] == null);
+    st.tidyOf(sid); // a last build of the gone session's layer
+    expect(st.tidyIfAny(sid), isNull);
+    st.dispose();
+  });
+
+  test('tidy lines go to the log', () async {
+    final logged = <String>[];
+    final (st, _) = await start(log: logged.add);
+    st.tidyOf(sid).begin(long, VoicePick.send);
+    api.calls.single.complete(const LlmDone(tidied));
+    await pump();
+    expect(logged.where((l) => l.contains('voice tidy: dictation start')), hasLength(1));
+    expect(logged.where((l) => l.contains('voice tidy: dictation done')), hasLength(1));
+    st.dispose();
+  });
+
+  test('a tidy in a background session says so in the hint', () async {
+    final (st, port) = await start();
+    st.tidyOf(sid).begin(long, VoicePick.send);
+    await st.openOrSwitch('111', 'com.bb', 'B');
+    await until(() => st.currentRemote?.sid == 'com.bb'.length);
+    port.emit(WindowsEvent('com.bb'.length, [win(4)]));
+    api.calls.last.complete(const LlmDone(tidied));
+    await pump();
+    expect(sends(port, sid), [
+      [
+        {'text': tidied}
+      ]
+    ]);
+    expect(st.hint, 'A：已用 AI 整理并发出');
+    st.tidyOf(sid).begin(long, VoicePick.send);
+    api.calls.last.complete(const LlmFailed('连不上 LLM 接入点'));
+    await pump();
+    expect(st.hint, 'A：AI 整理失败（连不上 LLM 接入点），回到这个窗口处理');
+    st.tidyOf(sid).editOriginal();
+    st.tidyOf(sid).begin(long, VoicePick.edit);
+    api.calls.last.complete(const LlmDone(tidied));
+    await pump();
+    expect(st.hint, 'A：AI 整理好了，放在写作面板里');
+    st.dispose();
+  });
+
+  test('a tidy in the session on show leaves the hint to the card', () async {
+    final (st, _) = await start();
+    final before = st.hint;
+    st.tidyOf(sid).begin(long, VoicePick.send);
+    api.calls.single.complete(const LlmDone(tidied));
+    await pump();
+    expect(st.hint, before);
     st.dispose();
   });
 

@@ -952,6 +952,24 @@ void main() {
       expect(m.pendingAi, isNull);
     });
 
+    // Review 2026-11-20 minor: the old composer's mark goes only with the draft it belongs to.
+    test('adoptFrom carries pendingAi only with the draft it takes', () async {
+      await m.detach(ed);
+      m.draft = '我们明天开会。';
+      m.pendingAi = ai;
+      final own = ComposerModel();
+      addTearDown(own.dispose);
+      own.draft = '别的话';
+      own.adoptFrom(m);
+      expect(own.draft, '别的话');
+      expect(own.pendingAi, isNull);
+      final took = ComposerModel();
+      addTearDown(took.dispose);
+      took.adoptFrom(m);
+      expect(took.draft, '我们明天开会。');
+      expect(took.pendingAi, ai);
+    });
+
     test('pendingAi goes when ↑ recalls another text', () async {
       m.recall = () => ['older'];
       ed.value = '我们明天开会。';

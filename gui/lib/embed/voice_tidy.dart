@@ -29,6 +29,8 @@ class VoiceTidy extends ChangeNotifier {
     required this.keep,
     this.overall = const Duration(seconds: 30),
     this.log,
+    this.held,
+    this.failed,
   });
 
   final LlmEndpoint Function() endpoint;
@@ -49,6 +51,13 @@ class VoiceTidy extends ChangeNotifier {
   /// From the start of the tidy to its end, whatever the stream does.
   final Duration overall;
   final void Function(String line)? log;
+
+  /// The original while it waits (tidying or failed), null once it went somewhere. Not on [dispose]: a quit
+  /// leaves it held, for the next open to put back.
+  final void Function(Object sid, String? original)? held;
+
+  /// The tidy failed and waits for a click.
+  final void Function(Object sid, String reason)? failed;
 
   static const _sentLife = Duration(milliseconds: 1500);
   static const _hintLife = Duration(seconds: 2);
@@ -113,6 +122,7 @@ class VoiceTidy extends ChangeNotifier {
       _fail(tidyTooSlow);
     });
     unawaited(call.result.then((r) => _ended(call, r)));
+    held?.call(sid, _original);
     _log('start (${_original.runes.length} chars)');
     notifyListeners();
     return true;
@@ -140,9 +150,11 @@ class VoiceTidy extends ChangeNotifier {
         if (_pick == VoicePick.edit) {
           _phase = TidyPhase.idle;
           edit(sid, t, ai);
+          _release();
           notifyListeners();
         } else {
           final hint = send(sid, t, VoiceOrigin(ai: ai));
+          _release();
           _showNote(hint ?? tidySent, hint == null ? _sentLife : _hintLife);
         }
     }
@@ -151,8 +163,11 @@ class VoiceTidy extends ChangeNotifier {
   void _fail(String reason) {
     _phase = TidyPhase.failed;
     _reason = reason;
+    failed?.call(sid, reason);
     notifyListeners();
   }
+
+  void _release() => held?.call(sid, null);
 
   /// 直接发送: the original goes, as heard.
   void sendOriginal() {
@@ -160,6 +175,7 @@ class VoiceTidy extends ChangeNotifier {
     _stop();
     _log('send original');
     final hint = send(sid, _original, const VoiceOrigin());
+    _release();
     if (hint != null) {
       _showNote(hint, _hintLife);
     } else {
@@ -175,6 +191,7 @@ class VoiceTidy extends ChangeNotifier {
     _log('edit original');
     _phase = TidyPhase.idle;
     edit(sid, _original, null);
+    _release();
     notifyListeners();
   }
 
@@ -191,6 +208,7 @@ class VoiceTidy extends ChangeNotifier {
     _log('interrupted');
     _phase = TidyPhase.idle;
     keep(sid, _original);
+    _release();
     notifyListeners();
   }
 
@@ -208,6 +226,7 @@ class VoiceTidy extends ChangeNotifier {
     _stop();
     _log('ended');
     _phase = TidyPhase.idle;
+    _release();
     notifyListeners();
     return _original;
   }

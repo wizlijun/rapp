@@ -517,6 +517,18 @@ void main() {
     expect(s.llm.key, 'rl-new');
   });
 
+  // Review 2026-11-20 minor: folding away a row nobody edited writes nothing back.
+  testWidgets('LLM 接入点: folding an untouched row keeps a newer endpoint', (tester) async {
+    await tester.pumpWidget(wrap(panel()));
+    s.setLlm(const LlmEndpoint(url: 'localhost:28009', key: 'rl-newer')); // set elsewhere after the row showed
+    await tester.ensureVisible(find.byKey(const Key('settings-fold')));
+    await tester.tap(find.byKey(const Key('settings-fold')));
+    await tester.pump();
+    await tester.pump();
+    expect(s.llm, const LlmEndpoint(url: 'localhost:28009', key: 'rl-newer'));
+    expect(LlmEndpoint.load('${tmp.path}/local'), s.llm);
+  });
+
   testWidgets('a saved fold opens folded', (tester) async {
     s.prefs.settingsFolded = true;
     await tester.pumpWidget(wrap(panel()));
