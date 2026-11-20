@@ -20,6 +20,7 @@ import 'composer_model.dart';
 import 'app_profile.dart';
 import 'composer_plus.dart';
 import 'flutter_editor.dart';
+import 'ios_dock.dart';
 import 'key_bar.dart';
 import 'native_editor.dart';
 import 'panel_place.dart';
@@ -512,6 +513,8 @@ class _ComposerPanelState extends State<ComposerPanel> {
 ///
 /// With the soft keyboard up ([keyboard]: how far it reaches over the stage's bottom) all of it stands on the
 /// keyboard's top edge instead, the panel 8 above it; the picture under it stays as it is.
+///
+/// iOS has its own: the key bar, the panel and the button stack in an [IosDock] (no [keyRow] there).
 List<Widget> composerLayer(
     {required MainState state,
     required RemoteSession session,
@@ -525,6 +528,9 @@ List<Widget> composerLayer(
   // The stage row's right inset: clear of the terminal key row when it shows.
   final rowRight = keys ? keyRowInset + keyRowGroupWidth + 8 : 12.0;
   bool open() => session.composer.open && session.composerAllowed;
+  if (defaultTargetPlatform == TargetPlatform.iOS) {
+    return _iosLayer(state: state, session: session, port: port, keyboard: keyboard, editor: editor, both: both);
+  }
   return [
     Positioned.fill(
       // The stage's origin for where the panel is (iOS's voice button stands above it).
@@ -607,80 +613,6 @@ List<Widget> composerLayer(
               : const SizedBox.shrink(),
         ),
       ),
-    if (defaultTargetPlatform == TargetPlatform.iOS)
-      // The stage buttons in one edge stack; the key row, if on, sits below it. Hold to talk draws over the stage.
-      Positioned.fill(
-        child: _IosStage(
-          key: ValueKey(session.sid),
-          state: state,
-          session: session,
-          port: port,
-          // Portrait by the stage itself, not what the keyboard leaves of it.
-          buttons: (hold) => LayoutBuilder(builder: (context, stage) => ListenableBuilder(
-              listenable: Listenable.merge([both, session.zooms, ?hold]),
-              builder: (context, _) {
-                final transfer = session.transferStatus;
-                final button = session.composerAllowed;
-                final zoomed = session.currentZoomed && !session.composer.open;
-                // An open panel takes the stack, all but 语音 and 收起, which stand above the panel (user
-                // 2026-11-18: 「输入版打开的时候不要隐藏这个语音输入」).
-                if (session.composer.open && button) {
-                  return _StackAbovePanel(state: state, session: session, hold: hold, upright: stage.maxHeight > stage.maxWidth);
-                }
-                // A disallowed panel hides 输入, so the strip shows here.
-                if (transfer == null && !button && !zoomed) return const SizedBox.shrink();
-                final t = RappTokens.of(context);
-                // The key row, if on, is under the stack: its own 88 clears it; on the keyboard the row comes
-                // first.
-                final row = keys ? keyRowBottom + keyRowKeySize.height + 8 : 0.0;
-                return Padding(
-                  padding: EdgeInsets.only(
-                      bottom: keyboard > 0 ? keyboard + (keys ? row : stageButtonsEdge) : math.max(stageButtonsUp, row)),
-                  child: Listener(
-                  onPointerDown: (_) => state.holdForPanel(session),
-                  child: StageButtons(
-                    side: state.stageSide.value,
-                    onSide: state.setStageSide,
-                    // Shown exactly when 输入 is (an open panel returned above).
-                    voice: hold != null && button ? voiceButton(hold) : null,
-                    hidden: hold?.active ?? false,
-                    upright: stage.maxHeight > stage.maxWidth,
-                    input: button ? _openToggle(session) : null,
-                    restore: zoomed
-                        ? RappButton.stage(
-                            key: const Key('zoom-reset'),
-                            label: '还原',
-                            icon: Icons.zoom_in_map,
-                            size: stageButtonSize,
-                            onPressed: session.restoreCurrent,
-                          )
-                        : null,
-                    beside: [
-                      if (hold?.hint != null) voiceHint(hold!),
-                      if (transfer != null)
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            DecoratedBox(
-                              decoration: t.floatBox(),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                child: Text(transfer, style: TextStyle(color: t.muted)),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            RappButton.secondary(label: '取消', onPicture: true, onPressed: () => port.cancelTransfer(session.sid)),
-                          ],
-                        ),
-                    ],
-                  ),
-                ),
-                );
-              },
-            )),
-        ),
-      )
-    else
     Positioned.fill(
       // The whole stage, so the Mac's voice bubble knows its width; the row sits in the corner as before.
       child: LayoutBuilder(
@@ -766,6 +698,143 @@ List<Widget> composerLayer(
   ];
 }
 
+/// iOS's composer layer: the key bar, the panel and the stage's button stack in one [IosDock], which moves them with the
+/// soft keyboard and by itself; hold to talk draws over the stage.
+List<Widget> _iosLayer(
+    {required MainState state,
+    required RemoteSession session,
+    required SessionPort port,
+    required double keyboard,
+    required ComposerEditor Function()? editor,
+    required Listenable both}) {
+  Widget panel(double maxHeight) => ComposerPanel(
+        editor: editor,
+        // Keyed by session: a switch is a new panel, and the old one's dispose copies its text into its own
+        // session's draft.
+        key: ValueKey(session.sid),
+        state: state,
+        session: session,
+        port: port,
+        maxHeight: maxHeight,
+      );
+  return [
+    Positioned.fill(
+      child: _IosStage(
+        key: ValueKey(session.sid),
+        state: state,
+        session: session,
+        port: port,
+        buttons: (hold) => IosDock(
+          state: state,
+          session: session,
+          port: port,
+          keyboard: keyboard,
+          listenable: Listenable.merge([both, session.zooms, ?hold]),
+          voice: hold != null,
+          panel: (context, rest) => LayoutBuilder(
+            builder: (context, c) => port is TermSessionPort
+                ? Align(
+                    alignment: Alignment.bottomCenter,
+                    child: Padding(
+                      padding: EdgeInsets.only(bottom: 8 + rest),
+                      child: PanelPlace(
+                        place: panelPlaceOf(session),
+                        child: SizedBox(
+                          width: panelWidth(c.maxWidth, state.composerScale),
+                          child: panel(c.maxHeight / 2),
+                        ),
+                      ),
+                    ),
+                  )
+                // An app window: the panel floats where the app's place is (floating-composer spec).
+                : FloatingComposer(
+                    // Per session: a switch mid-drag drops that drag instead of saving it into the new app.
+                    key: ValueKey(session.sid),
+                    session: session,
+                    scale: state.composerScale,
+                    keyboard: rest,
+                    place: panelPlaceOf(session),
+                    onPlace: (p) => state.placeComposer(session, p),
+                    child: panel(c.maxHeight / 2),
+                  ),
+          ),
+          stack: (context, bottom, stage) => _iosStack(context, state, session, port, hold, bottom, stage),
+        ),
+      ),
+    ),
+    // 长语音先让 AI 整理's card, over everything; only the card takes taps (spec §5.3).
+    Positioned.fill(
+      child: _TidyLayer(
+          state: state,
+          session: session,
+          both: both,
+          keys: false,
+          keyboard: keyboard,
+          rowRight: 12,
+          closedBar: keyBarWhenClosed(session, port)),
+    ),
+  ];
+}
+
+/// iOS's stage stack, its bottom [bottom] up off the [stage]'s bottom: 语音 and 输入 (收起 while the panel is open)
+/// one element either way, so the toggle's icon turns over; closed, 还原 and the upload strip too. [upright] by the
+/// stage itself, not what the keyboard leaves of it.
+Widget _iosStack(BuildContext context, MainState state, RemoteSession session, SessionPort port, VoiceHold? hold,
+    double bottom, Size stage) {
+  final transfer = session.transferStatus;
+  final button = session.composerAllowed;
+  final open = session.composer.open && button;
+  final zoomed = session.currentZoomed && !session.composer.open;
+  // A disallowed panel hides 输入, so the strip shows here.
+  if (transfer == null && !button && !zoomed) return const SizedBox.shrink();
+  final t = RappTokens.of(context);
+  // An open panel keeps only 语音 and 收起 (user 2026-11-18: 「输入版打开的时候不要隐藏这个语音输入」).
+  final hint = hold == null || hold.hint == null || (open && hold.active)
+      ? null
+      : voiceHint(hold, maxWidth: open ? stage.width - 2 * stageButtonsIn - stageButtonSize - 12 : null);
+  return Padding(
+    padding: EdgeInsets.only(bottom: math.max(0, bottom)),
+    child: Listener(
+      onPointerDown: (_) => state.holdForPanel(session),
+      child: StageButtons(
+        side: state.stageSide.value,
+        onSide: state.setStageSide,
+        voice: hold != null && button ? voiceButton(hold) : null,
+        hidden: hold?.active ?? false,
+        upright: stage.height > stage.width,
+        input: button ? _openToggle(session) : null,
+        restore: zoomed
+            ? RappButton.stage(
+                key: const Key('zoom-reset'),
+                label: '还原',
+                icon: Icons.zoom_in_map,
+                size: stageButtonSize,
+                onPressed: session.restoreCurrent,
+              )
+            : null,
+        beside: [
+          ?hint,
+          if (transfer != null && !open)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DecoratedBox(
+                  decoration: t.floatBox(),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Text(transfer, style: TextStyle(color: t.muted)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                RappButton.secondary(label: '取消', onPicture: true, onPressed: () => port.cancelTransfer(session.sid)),
+              ],
+            ),
+        ],
+      ),
+    ),
+  );
+}
+
 /// Where [VoiceTidyCard] stands. Desktop: right-aligned with the stage row, just above it; with the panel open,
 /// above the panel and right-aligned with it (below it, or the row's corner, when there is no room). iOS: on the
 /// stack's line above the stack; with the panel open, above 语音 (which stands above the panel).
@@ -776,7 +845,8 @@ class _TidyLayer extends StatelessWidget {
       required this.both,
       required this.keys,
       required this.keyboard,
-      required this.rowRight});
+      required this.rowRight,
+      this.closedBar = false});
 
   final MainState state;
   final RemoteSession session;
@@ -784,6 +854,9 @@ class _TidyLayer extends StatelessWidget {
   final bool keys;
   final double keyboard;
   final double rowRight;
+
+  /// iOS: the key bar stays under the closed stack ([keyBarWhenClosed]).
+  final bool closedBar;
 
   @override
   Widget build(BuildContext context) {
@@ -837,12 +910,11 @@ class _TidyLayer extends StatelessWidget {
     final p = panelPlaceOf(session).value;
     double bottom;
     if (_open && p != null) {
-      // The stack's top, as _StackAbovePanel puts it.
-      final h = _stackHeight(stage.height > stage.width, state.voice != null);
+      // The open stack's top, as IosDock puts it.
+      final h = openStackHeight(stage.height > stage.width, state.voice != null);
       bottom = math.max(0.0, math.min(stage.height - p.top + 8, stage.height - 8 - h)) + h + 12;
     } else {
-      final row = keys ? keyRowBottom + keyRowKeySize.height + 8 : 0.0;
-      final base = keyboard > 0 ? keyboard + (keys ? row : stageButtonsEdge) : math.max(stageButtonsUp, row);
+      final base = closedStackBottom(keyboard, closedBar ? keyBarHeightOf(state, session, stage.width) : 0);
       final button = session.composerAllowed;
       final n = (button && state.voice != null ? 1 : 0) + (button ? 1 : 0) + (session.currentZoomed ? 1 : 0);
       final upright = stage.height > stage.width;
@@ -875,8 +947,6 @@ class _TidyPlace extends SingleChildLayoutDelegate {
   bool shouldRelayout(_TidyPlace old) => true;
 }
 
-/// The iOS stage's button stack plus hold to talk: owns the session's [VoiceHold] (none without
-/// `state.voice`) and lays [VoiceOverlay] over the whole stage.
 /// 输入 and 收起 are one key: the keyboard to open the panel, the hiding keyboard to put it away.
 Widget _openToggle(RemoteSession session) {
   final open = session.composer.open;
@@ -890,53 +960,8 @@ Widget _openToggle(RemoteSession session) {
   );
 }
 
-/// The open stack's height: 语音 and 收起 in one row, one above the other, or 收起 alone.
-double _stackHeight(bool upright, bool voice) => upright || !voice ? stageButtonSize : 2 * stageButtonSize + 12;
-
-/// iOS's stage stack while the panel is open: 语音 (if [hold]) and 收起, on the stack's line ([stageButtonsIn] in
-/// from the stack's side), the lowest 8 above the panel's top, or its key row's when that rides above it; the
-/// panel moves (the keyboard, a drag), the stack follows a frame behind. Never off the stage's top. [upright]
-/// lays them in a row, 语音 outermost; else 收起 stands above 语音.
-class _StackAbovePanel extends StatelessWidget {
-  const _StackAbovePanel({required this.state, required this.session, required this.hold, required this.upright});
-
-  final MainState state;
-  final RemoteSession session;
-  final VoiceHold? hold;
-  final bool upright;
-
-  @override
-  Widget build(BuildContext context) => ValueListenableBuilder<Rect?>(
-        valueListenable: panelPlaceOf(session),
-        builder: (context, panel, _) {
-          if (panel == null) return const SizedBox.shrink();
-          return LayoutBuilder(builder: (context, c) {
-            final h = _stackHeight(upright, this.hold != null);
-            final bottom = math.min(c.maxHeight - panel.top + 8, c.maxHeight - 8 - h);
-            final hold = this.hold;
-            final hint = hold == null || hold.active || hold.hint == null
-                ? null
-                : voiceHint(hold, maxWidth: c.maxWidth - 2 * stageButtonsIn - stageButtonSize - 12);
-            return Padding(
-              padding: EdgeInsets.only(bottom: math.max(0, bottom)),
-              child: Listener(
-                onPointerDown: (_) => state.holdForPanel(session),
-                child: StageButtons(
-                  side: state.stageSide.value,
-                  onSide: state.setStageSide,
-                  voice: hold == null ? null : voiceButton(hold),
-                  input: _openToggle(session),
-                  hidden: hold?.active ?? false,
-                  upright: upright,
-                  beside: [?hint],
-                ),
-              ),
-            );
-          });
-        },
-      );
-}
-
+/// The iOS stage's button stack plus hold to talk: owns the session's [VoiceHold] (none without
+/// `state.voice`) and lays [VoiceOverlay] over the whole stage.
 class _IosStage extends StatefulWidget {
   const _IosStage({super.key, required this.state, required this.session, required this.port, required this.buttons});
 

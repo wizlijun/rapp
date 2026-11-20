@@ -11,6 +11,7 @@ import 'package:rapp/embed/composer_float.dart' show gripSize;
 import 'package:rapp/embed/composer_model.dart';
 import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/flutter_editor.dart';
+import 'package:rapp/embed/key_bar.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/stage_buttons.dart';
 import 'package:rapp/embed/session_port.dart';
@@ -274,6 +275,7 @@ void main() {
     expect(rs.composer.open, isTrue);
     rs.composer.open = false;
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400)); // the stack eases back down with the panel
     expect(stage.height - inStage(tester, hold).bottom, 88);
   });
 
@@ -412,14 +414,18 @@ void main() {
     expect(i.center.dx, v.center.dx);
   });
 
-  iosTest('terminal, key row above the open panel: 语音 stands 8 above the key row', (tester) async {
+  iosTest('terminal, open panel: the key bar under it, not the key row; 语音 stands 8 above the panel', (tester) async {
     final tport = FakeTermSessionPort();
     addTearDown(tport.dispose);
     rs.composer.open = true;
     await tester.pumpWidget(layer(p: tport, keyRow: true));
     await tester.pump();
     final b = inStage(tester, hold);
-    expect(inStage(tester, find.byType(TermKeyRow)).top - b.bottom, 8);
+    expect(find.byType(TermKeyRow), findsNothing);
+    final bar = inStage(tester, find.byType(KeyBar));
+    expect(bar.bottom, stage.height);
+    expect(bar.top - inStage(tester, find.byType(ComposerPanel)).bottom, 8);
+    expect(inStage(tester, find.byType(ComposerPanel)).top - b.bottom, 8);
     expect(stage.width - b.right, 80);
   });
 

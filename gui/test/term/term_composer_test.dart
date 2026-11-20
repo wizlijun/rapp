@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/composer_panel.dart' show pictureLift;
 import 'package:rapp/embed/flutter_editor.dart';
+import 'package:rapp/embed/key_bar.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
@@ -391,6 +392,32 @@ void main() {
       expect(callsOf('view'), isEmpty);
     });
   }
+
+  testWidgets('iOS stage lift: terminal closed with bar 54 → 54; open at scale 1 → 64+54', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    try {
+      await openTerm(tester);
+      double lift() => -tester
+          .widget<Transform>(find.ancestor(of: find.byKey(const Key('stage')), matching: find.byType(Transform)).first)
+          .transform
+          .getTranslation()
+          .y;
+      final size = tester.getSize(find.byType(TermStage));
+      expect(find.byType(KeyBar), findsOneWidget);
+      expect(keyBarHeightOf(s, s.currentRemote!, tester.getSize(find.byType(Stage)).width), 54);
+      expect(lift(), 54);
+      await openPanel(tester);
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(lift(), pictureLift + 54);
+      expect(tester.getSize(find.byType(TermStage)), size);
+      s.currentRemote!.composer.collapse();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(lift(), 54);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
 
   group('the port on its own', () {
     late TermSessionPort p;

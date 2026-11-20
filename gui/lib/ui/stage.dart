@@ -1,12 +1,15 @@
 // The stage: where the remote window sits; a placeholder while it is elsewhere (S1, detached).
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
 import '../embed/app_key_row.dart';
 import '../embed/composer_editor.dart';
 import '../embed/composer_panel.dart';
+import '../embed/ios_dock.dart';
+import '../embed/key_bar.dart';
 import '../embed/picture.dart';
 import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
@@ -237,7 +240,12 @@ class Stage extends StatelessWidget {
             final bar = rec != null && rec.frozen ? offlineBarFor(state, rec) : null;
             return Stack(
               children: [
-                Positioned.fill(child: _lifted(state, rs, stage, keyRow: keyRow, narrow: c.maxWidth < keyRowWideAt)),
+                Positioned.fill(
+                  child: _lifted(state, rs, stage,
+                      keyRow: keyRow,
+                      narrow: c.maxWidth < keyRowWideAt,
+                      bar: _ios ? keyBarHeightOf(state, rs, c.maxWidth) : null),
+                ),
                 if (bar != null) Positioned(top: 0, left: 0, right: 0, child: bar),
                 ...composerLayer(state: state, session: rs, port: state.portOf(rs.sid)!,
                     keyRow: keyRow, keyboard: keyboard, editor: composerEditor),
@@ -248,15 +256,21 @@ class Stage extends StatelessWidget {
           final banner = state.lockBanner;
           final notice = state.hostNotice;
           final offline = rec != null && rec.frozen && picture ? offlineBarFor(state, rec) : null;
+          final layer = !full && (picture || (rs != null && rs.detached)) && rs != null && port != null;
+          // iOS: a terminal app keeps the key bar with the panel closed, so its picture goes up as a terminal's.
+          if (_ios && layer && keyBarWhenClosed(rs, port)) {
+            stage = _lifted(state, rs, stage, bar: keyBarHeightOf(state, rs, c.maxWidth));
+          }
           return Stack(
             children: [
               stage,
-              if (!full && (picture || (rs != null && rs.detached)) && rs != null && port != null)
+              if (layer)
                 ...composerLayer(state: state, session: rs, port: port, keyboard: keyboard, editor: composerEditor),
               // 按键排 over an app picture (iPad spec §8.3), while the picture has the keys or the writing panel is
               // open: on the soft keyboard's top edge when it is up, floating over the stage (Z1: no resize). Not
-              // where the body fills the stage, as the writing panel's layer.
+              // where the body fills the stage, as the writing panel's layer. Never on iOS: the key bar is its.
               if (showAppKeyRow &&
+                  !_ios &&
                   !full &&
                   picture &&
                   rs != null &&
@@ -345,13 +359,16 @@ class _HostNoticeBar extends StatelessWidget {
 /// A terminal only (an app window's panel floats instead): while the writing panel is open the picture slides up one line (the size A sees stays as it was), in 150 ms
 /// (at once without animations); Transform moves hit tests with it, so a click lands where the picture is seen.
 /// A terminal's [keyRow] lifts it the same line, panel open or not; on a [narrow] stage with both, the row has a
-/// line of its own above the panel and the picture goes [keyRowLift] further.
-Widget _lifted(MainState state, RemoteSession session, Widget child, {bool keyRow = false, bool narrow = false}) =>
+/// line of its own above the panel and the picture goes [keyRowLift] further. On iOS the key bar ([bar] high, there
+/// panel open or not) lifts it instead of the row, and an app that keeps the bar goes up the same way.
+Widget _lifted(MainState state, RemoteSession session, Widget child,
+        {bool keyRow = false, bool narrow = false, double? bar}) =>
     ClipRect(
       child: ListenableBuilder(
         listenable: Listenable.merge([session, session.composer, state.composerZoom]),
         builder: (context, _) => TweenAnimationBuilder<double>(
-          tween: Tween(end: _lift(session.composer.open && session.composerAllowed, keyRow, narrow, state.composerScale)),
+          tween: Tween(
+              end: _lift(session.composer.open && session.composerAllowed, keyRow, narrow, state.composerScale, bar)),
           duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 150),
           curve: Curves.easeOut,
           builder: (_, v, child) => Transform.translate(offset: Offset(0, -v), child: child),
@@ -361,8 +378,11 @@ Widget _lifted(MainState state, RemoteSession session, Widget child, {bool keyRo
     );
 
 /// The open panel's line grows with its zoom ([scale]); the key row alone keeps its own height.
-double _lift(bool open, bool keyRow, bool narrow, double scale) =>
-    (open ? pictureLift * scale : keyRow ? pictureLift : 0) + (open && keyRow && narrow ? keyRowLift : 0);
+double _lift(bool open, bool keyRow, bool narrow, double scale, double? bar) => bar != null
+    ? (open ? pictureLift * scale : 0) + bar
+    : (open ? pictureLift * scale : keyRow ? pictureLift : 0) + (open && keyRow && narrow ? keyRowLift : 0);
+
+bool get _ios => defaultTargetPlatform == TargetPlatform.iOS;
 
 /// Paints [child] moved by under a device pixel, so its top-left lands on one: whatever it snaps in
 /// its own coordinates is then snapped on the screen too, wherever the layout put it.
