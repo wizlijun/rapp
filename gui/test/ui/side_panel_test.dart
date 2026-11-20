@@ -240,6 +240,17 @@ void main() {
     expect(UiPrefs.load('${tmp.path}/devices/dev1').autoSaveTraffic, false);
   });
 
+  testWidgets('the AI tidy switch saves', (tester) async {
+    await tester.pumpWidget(wrap(panel()));
+    expect(find.text('长语音先让 AI 整理'), findsOneWidget);
+    expect(s.prefs.voiceAiTidy, true);
+    await tester.ensureVisible(find.byKey(const Key('voice-ai-tidy')));
+    await tester.tap(find.byKey(const Key('voice-ai-tidy')));
+    await tester.pump();
+    expect(s.prefs.voiceAiTidy, false);
+    expect(UiPrefs.load('${tmp.path}/devices/dev1').voiceAiTidy, false);
+  });
+
   testWidgets('input history switch is on by default and saves', (tester) async {
     await tester.pumpWidget(wrap(panel()));
     expect(find.text('记下写作面板发出去的话'), findsOneWidget);

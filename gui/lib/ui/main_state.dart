@@ -13,6 +13,8 @@ import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../embed/stream_choice.dart';
 import '../embed/voice_input.dart';
+import '../embed/voice_button.dart' show sendVoice, voiceBlocked;
+import '../embed/voice_tidy.dart';
 import '../embed/linux_speech.dart';
 import '../embed/voice_key_gate.dart';
 import '../embed/traffic_label.dart' show segments;
@@ -317,6 +319,45 @@ class MainState extends ChangeNotifier {
 
   /// Embedded sessions by hub sid.
   final Map<Object, RemoteSession> remote = {};
+
+  // 长语音先让 AI 整理: one per session, keyed by sid like [remote]; a reconnect's swap moves it ([_dropOld]).
+  final Map<Object, VoiceTidy> _tidies = {};
+
+  /// [sid]'s tidy, made on first use.
+  VoiceTidy tidyOf(Object sid) => _tidies[sid] ??= VoiceTidy(
+        sid: sid,
+        endpoint: () => llm,
+        api: llmApi,
+        allowed: (s) => prefs.voiceAiTidy && llm.configured && !(remote[s]?.secureFocus ?? true),
+        send: (s, text, voice) {
+          final rs = remote[s], p = portOf(s);
+          if (rs == null || p == null) {
+            if (rs != null) unawaited(rs.composer.keep(text));
+            return voiceBlocked;
+          }
+          return sendVoice(state: this, session: rs, port: p, text: text, voice: voice);
+        },
+        edit: (s, text, ai) {
+          final c = remote[s]?.composer;
+          if (c == null) return;
+          unawaited(c.keep(text));
+          if (ai != null) c.pendingAi = ai;
+          c.open = true;
+        },
+        keep: (s, text) {
+          final c = remote[s]?.composer;
+          if (c != null) unawaited(c.keep(text));
+        },
+        log: debugPrint,
+      );
+
+  /// [sid]'s tidy if one was made.
+  VoiceTidy? tidyIfAny(Object sid) => _tidies[sid];
+
+  // The session [sid] goes for good: what its tidy holds stays in its draft.
+  void _endTidy(Object sid) => _tidies.remove(sid)
+    ?..closed()
+    ..dispose();
 
   /// Embedded sessions by `id/app`, in the order they were first opened. A record outlives its
   /// link: a disconnected one stays here, with its last frame, until the user ends it.
@@ -1491,6 +1532,7 @@ class MainState extends ChangeNotifier {
       if (fresh != null) {
         final start = _starts.remove(fresh);
         if (start != null) resources.linkDown(start);
+        _endTidy(fresh);
         remote.remove(fresh)?.dispose();
         _sentFps.remove(fresh);
         _waiting.remove(fresh)?.timer.cancel();
@@ -1719,6 +1761,9 @@ class MainState extends ChangeNotifier {
     final old = r.lastSid;
     if (old != null) portOf(old)?.close(old); // reconnected but not swapped yet: the old session is still open
     // Before a swap the old session is the one on show, the one written in.
+    for (final sid in [r.sid, old]) {
+      if (sid != null) _endTidy(sid);
+    }
     final shown = remote[old] ?? remote[r.sid];
     unawaited(recorder.sessionEnded(shown, _metaOf(r, shown),
         record: shown?.recordsInput ?? profiles.resolve(r.app).recordInput));
@@ -1750,6 +1795,17 @@ class MainState extends ChangeNotifier {
     final gone = remote.remove(old);
     if (gone == null) return;
     final to = fresh == null ? null : remote[fresh];
+    final tidy = _tidies.remove(old);
+    if (tidy != null) {
+      if (to != null) {
+        _tidies.remove(fresh)?.dispose();
+        _tidies[fresh!] = tidy..moveTo(fresh);
+      } else {
+        tidy
+          ..closed()
+          ..dispose();
+      }
+    }
     final moved = to?.composer.adoptFrom(gone.composer);
     to?.adoptZoom(gone);
     recorder.detach(gone, to: to, moved: moved);
@@ -1917,6 +1973,7 @@ class MainState extends ChangeNotifier {
         notifyListeners();
         return;
       }
+      _endTidy(s.sid);
       remote.remove(s.sid)?.dispose();
       _starts.remove(s.sid);
       _quiet.add(s.sid);
@@ -2187,6 +2244,7 @@ class MainState extends ChangeNotifier {
     if (fresh != null && r.sid == fresh && old != null) {
       final start = _starts.remove(fresh);
       if (start != null) resources.linkDown(start);
+      _endTidy(fresh);
       remote.remove(fresh)?.dispose();
       _sentFps.remove(fresh);
       _waiting.remove(fresh)?.timer.cancel();
@@ -3074,6 +3132,12 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
+  /// 「长语音先让 AI 整理」 on or off; saved.
+  void setVoiceAiTidy(bool v) {
+    prefs.voiceAiTidy = v;
+    _save();
+  }
+
   /// 「打开方式」 of [device]'s 终端 entry (`text` or `pixels`); saved.
   void setTermOpen(String device, String mode) {
     prefs.termOpen[device] = mode;
@@ -3724,6 +3788,10 @@ class MainState extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    for (final t in _tidies.values) {
+      t.dispose();
+    }
+    _tidies.clear();
     voice?.dispose();
     _voiceKeys.close();
     _voiceEnds.close();

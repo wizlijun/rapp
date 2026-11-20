@@ -259,6 +259,8 @@ class _Footer extends StatelessWidget {
               toggle(const Key('rime-switch'), '实体键盘用内置输入法', state.prefs.rimeEnabled, state.setRimeEnabled,
                   note: 'Rime 雾凇拼音，候选在文字下一行'),
             if (defaultTargetPlatform == TargetPlatform.macOS || defaultTargetPlatform == TargetPlatform.linux) _VoiceHotkeyRow(state: state, style: small, minHeight: rowHeight),
+            toggle(const Key('voice-ai-tidy'), '长语音先让 AI 整理', state.prefs.voiceAiTidy, state.setVoiceAiTidy,
+                note: '超过 10 个字时，先用 LLM 接入点整理再发'),
             LlmSettingsRow(state: state, style: small),
             if (settings != null) ...[const SizedBox(height: 8), settings!],
           ]),

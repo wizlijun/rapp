@@ -841,6 +841,8 @@ class _IosStageState extends State<_IosStage> {
           c.open = true;
         },
         composer: () => widget.session.composer,
+        tidy: (text, pick) => widget.state.tidyOf(widget.session.sid).begin(text, pick),
+        onPress: () => widget.state.tidyIfAny(widget.session.sid)?.interrupt(),
       );
     }
   }

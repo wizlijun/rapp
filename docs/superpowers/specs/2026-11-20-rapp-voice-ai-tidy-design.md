@@ -73,7 +73,7 @@
 
 ### 5.2 整理这件事挂在哪里
 
-新建 `VoiceTidy`（`ChangeNotifier`，建议放在 `gui/lib/embed/voice_tidy.dart`），**每个会话一个，挂在 `RemoteSession` 上**，不挂在 `VoiceHold` 上。这样整理中切到别的会话再切回来，卡片还在，结果也只会发回原来那个会话。终端会话本来就有 `RemoteSession`（`term/term_stage.dart:85`），同样处理。
+新建 `VoiceTidy`（`ChangeNotifier`，建议放在 `gui/lib/embed/voice_tidy.dart`），**每个会话一个**，不挂在 `VoiceHold` 上。实际放在 `MainState` 里一张按 sid 索引的表（`tidyOf(sid)`，用到才建），因为 `RemoteSession` 拿不到 `MainState`；重连换 sid 时它跟着搬到新 sid，会话关掉时原话留进草稿再销毁。这样整理中切到别的会话再切回来，卡片还在，结果也只会发回原来那个会话。终端会话本来就有 `RemoteSession`（`term/term_stage.dart:85`），同样处理。
 
 `VoiceTidy` 不靠 widget 闭包去发送：建的时候注入 `MainState`，发送时用 `state.portOf(sid)` 现取 port（widget 可能已经销毁）。发不出、放回草稿这类结果提示，显示在卡片自己的位置上（卡片换成一行提示，1.5 到 2 秒后淡出），不借用某个 `VoiceHold` 的提示气泡。
 
