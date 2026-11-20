@@ -50,7 +50,8 @@ void main() {
   });
   tearDown(() => tmp.deleteSync(recursive: true));
 
-  // Twice: a done send's wait (tidySettle zero here) is a timer of its own.
+  // Twice: a done send's wait (tidySettle zero here) is a timer of its own. The words come out at once
+  // (tidyRevealMax zero).
   Future<void> pump() async {
     await Future<void>.delayed(Duration.zero);
     await Future<void>.delayed(Duration.zero);
@@ -100,7 +101,8 @@ void main() {
     });
     await pump();
     final st = MainState(hub: h, data: d, prefs: UiPrefs(), port: port, llmApi: api, log: log)
-      ..tidySettle = Duration.zero;
+      ..tidySettle = Duration.zero
+      ..tidyRevealMax = Duration.zero;
     if (endpoint) st.setLlm(const LlmEndpoint(url: 'localhost:28001', key: 'k'));
     var reconnects = 0;
     t.onSend = (m) {

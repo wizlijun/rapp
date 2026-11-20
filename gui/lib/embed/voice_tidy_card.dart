@@ -94,13 +94,14 @@ class VoiceTidyCard extends StatelessWidget {
     final style = TextStyle(color: ink, fontSize: 17, height: 1.35);
     final rest = style.copyWith(color: ink.withValues(alpha: .55));
     final small = TextStyle(color: ink.withValues(alpha: .75), fontSize: 13, height: 20 / 13);
-    final ready = phase == TidyPhase.ready;
+    // Done, and the last of its words is out: a send's wait starts now ([VoiceTidy.settle]).
+    final ready = phase == TidyPhase.ready && !tidy.writing;
     final status = !ready ? 'AI 整理中…' : (tidy.comparing ? '整理好了' : '整理好了，马上发送');
     // Before the first word the heard words are the body; then the AI's take it, the heard ones kept under them
     // in one faint line to compare (user 2026-11-20), the whole of them on a tap.
     final done = tidy.shown;
     final waiting = phase == TidyPhase.tidying && done.isEmpty;
-    final caret = phase == TidyPhase.tidying && done.isNotEmpty;
+    final caret = (phase == TidyPhase.tidying && done.isNotEmpty) || tidy.writing;
     return CustomPaint(
       key: const Key('tidy-bubble'),
       painter: VoiceBubbleFrame(

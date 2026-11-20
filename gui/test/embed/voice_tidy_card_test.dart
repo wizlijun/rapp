@@ -182,13 +182,32 @@ void main() {
     expect(find.byKey(const Key('tidy-caret')), findsNothing);
     expect(text('tidy-body'), contains(long));
     api.onText!('我们明天');
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
     expect(find.byKey(const Key('tidy-shimmer')), findsNothing);
     expect(find.byKey(const Key('tidy-caret')), findsOneWidget);
     await tester.pump(const Duration(seconds: 2)); // it blinks, and does not stop the test
     api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 700));
     expect(find.byKey(const Key('tidy-caret')), findsNothing);
+  });
+
+  macTest('done while its last words are still coming out: still writing, the send waits', (tester) async {
+    final s = await goLive(tester);
+    await tester.pumpWidget(layer(s));
+    es.tidyOf(1).begin(long, VoicePick.send);
+    api.calls.single.complete(const LlmDone('我们明天下午三点开会，把上周的数据带上。'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(text('tidy-title'), 'AI 整理中…');
+    expect(find.byKey(const Key('tidy-caret')), findsOneWidget);
+    expect(find.byKey(const Key('tidy-drain')), findsNothing);
+    expect(text('tidy-body'), isNot(contains('带上')));
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(text('tidy-title'), '整理好了，马上发送');
+    expect(text('tidy-body'), '我们明天下午三点开会，把上周的数据带上。');
+    expect(find.byKey(const Key('tidy-drain')), findsOneWidget);
+    expect(sends(), isEmpty);
   });
 
   macTest('the original stays under the AI words in one line; a tap opens it and holds the send', (tester) async {
@@ -200,6 +219,7 @@ void main() {
     expect(find.byKey(const Key('tidy-original')), findsNothing);
     api.onText!('我们明天');
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
     expect(text('tidy-body'), startsWith('我们明天'));
     expect(text('tidy-body'), isNot(contains('下午')));
     final line = tester.widget<Text>(find.byKey(const Key('tidy-original')));
@@ -207,7 +227,7 @@ void main() {
     expect(line.maxLines, 1);
     api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
     await tester.pump();
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 700));
     expect(text('tidy-original'), contains(long));
     await tester.tap(find.byKey(const Key('tidy-original')));
     await tester.pump();
@@ -289,7 +309,7 @@ void main() {
     es.tidyOf(1).begin(long, VoicePick.send);
     api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
     await tester.pump();
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 700));
     expect(text('tidy-title'), '整理好了，马上发送');
     expect(text('tidy-body'), '我们明天下午三点开会。');
     expect(find.descendant(of: find.byKey(const Key('tidy-send')), matching: find.text('发送')), findsOneWidget);

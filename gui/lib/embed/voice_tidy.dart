@@ -4,6 +4,7 @@
 // 编辑 or 还原 (user 2026-11-20). A failure goes on quietly as if there had been no tidy: the original is sent or
 // put in the panel, the reason only in the log (§8.1 D3).
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' show Rect;
 
 import 'package:flutter/foundation.dart';
@@ -32,6 +33,8 @@ class VoiceTidy extends ChangeNotifier {
     required this.keep,
     this.overall = const Duration(seconds: 30),
     this.settle = const Duration(milliseconds: 1500),
+    this.revealRate = 40,
+    this.revealMax = const Duration(milliseconds: 600),
     this.log,
     this.held,
   });
@@ -54,8 +57,15 @@ class VoiceTidy extends ChangeNotifier {
   /// From the start of the tidy to its end, whatever the stream does.
   final Duration overall;
 
-  /// A done send's wait before it goes.
+  /// A done send's wait before it goes, counted from when its last word is out.
   final Duration settle;
+
+  /// The AI's words come out at least this many characters a second, faster when more are waiting: whatever has
+  /// arrived is out within [revealMax]. The gateway thinks for seconds and then the whole answer lands in a
+  /// fraction of one (measured 2026-11-21); shown as it lands it reads as all at once. Zero: at once.
+  final double revealRate;
+  final Duration revealMax;
+  static const _tick = Duration(milliseconds: 16);
   final void Function(String line)? log;
 
   /// The original while it waits (tidying or ready), null once it went somewhere. Not on [dispose]: a quit
@@ -91,8 +101,17 @@ class VoiceTidy extends ChangeNotifier {
   bool get comparing => _comparing;
   bool _comparing = false;
 
-  /// The AI's finished text (ready only).
+  /// True while arrived words are still coming out.
+  bool get writing => _n < _target.length;
+
+  /// The AI's finished text (from done until it goes somewhere).
   String? _result;
+
+  // The reveal: [_target] is what has arrived, its first [_n] characters are [shown].
+  List<int> _target = const [];
+  int _n = 0;
+  double _speed = 0, _carry = 0;
+  Timer? _ticker;
 
   LlmCall? _call;
   Timer? _cap;
@@ -116,6 +135,7 @@ class VoiceTidy extends ChangeNotifier {
     _original = text.trim();
     _shown = '';
     _result = null;
+    _resetReveal();
     _comparing = false;
     _pick = pick;
     _at = at;
@@ -126,8 +146,7 @@ class VoiceTidy extends ChangeNotifier {
     late final LlmCall call;
     call = api.run(endpoint(), tidyApp, _original, onText: (t) {
       if (!identical(_call, call)) return;
-      _shown = t;
-      notifyListeners();
+      _aim(t);
     });
     _call = call;
     _cap = Timer(overall, () {
@@ -161,25 +180,86 @@ class VoiceTidy extends ChangeNotifier {
           return;
         }
         _log('done');
-        if (_pick == VoicePick.edit) {
-          _phase = TidyPhase.idle;
-          edit(sid, t, _ai(t));
-          _release();
-          notifyListeners();
-        } else {
+        _result = t;
+        if (_pick != VoicePick.edit) {
           _phase = TidyPhase.ready;
-          _shown = t;
-          _result = t;
           held?.call(sid, t);
-          if (!_comparing) {
-            _settleTimer = Timer(settle, () {
-              _settleTimer = null;
-              if (_phase == TidyPhase.ready) _sendResult();
-            });
-          }
-          notifyListeners();
         }
+        notifyListeners();
+        _aim(t);
     }
+  }
+
+  // [text] is what has arrived so far (all of it, not a chunk); it comes out from where [shown] got to.
+  void _aim(String text) {
+    final runes = text.trimLeft().runes.toList();
+    var n = math.min(_n, runes.length);
+    for (var i = 0; i < n; i++) {
+      if (runes[i] != _target[i]) {
+        n = i;
+        break;
+      }
+    }
+    _target = runes;
+    if (n != _n) {
+      _n = n;
+      _shown = String.fromCharCodes(_target.take(_n));
+      notifyListeners();
+    }
+    final waiting = _target.length - _n;
+    if (waiting > 0 && revealMax <= Duration.zero) {
+      _n = _target.length;
+      _shown = String.fromCharCodes(_target);
+      notifyListeners();
+      return _caughtUp();
+    }
+    if (waiting == 0) return _caughtUp();
+    _speed = math.max(revealRate, waiting / (revealMax.inMicroseconds / 1e6));
+    _ticker ??= Timer.periodic(_tick, (_) => _step());
+  }
+
+  void _step() {
+    _carry += _speed * _tick.inMicroseconds / 1e6;
+    final k = _carry.floor();
+    if (k > 0) {
+      _carry -= k;
+      _n = math.min(_n + k, _target.length);
+      _shown = String.fromCharCodes(_target.take(_n));
+      notifyListeners();
+    }
+    if (!writing) {
+      _ticker?.cancel();
+      _ticker = null;
+      _carry = 0;
+      _caughtUp();
+    }
+  }
+
+  // Every arrived word is out: a done tidy goes on to what its pick does.
+  void _caughtUp() {
+    final t = _result;
+    if (t == null || _call != null) return;
+    if (_pick == VoicePick.edit && _phase == TidyPhase.tidying) {
+      _phase = TidyPhase.idle;
+      _result = null;
+      edit(sid, t, _ai(t));
+      _release();
+      notifyListeners();
+    } else if (_phase == TidyPhase.ready && !_comparing && _settleTimer == null) {
+      _settleTimer = Timer(settle, () {
+        _settleTimer = null;
+        if (_phase == TidyPhase.ready) _sendResult();
+      });
+      notifyListeners();
+    }
+  }
+
+  void _resetReveal() {
+    _ticker?.cancel();
+    _ticker = null;
+    _target = const [];
+    _n = 0;
+    _carry = 0;
   }
 
   VoiceAi _ai(String t) => VoiceAi(app: tidyApp, original: _original, result: t);
@@ -228,7 +308,7 @@ class VoiceTidy extends ChangeNotifier {
 
   /// 发送 / 直接发送: what the card shows goes now — the AI's text once it is done, else the original as heard.
   void sendNow() {
-    if (_phase == TidyPhase.ready) return _sendResult();
+    if (_phase == TidyPhase.ready || _result != null) return _sendResult();
     if (!_waiting) return;
     _stop();
     _log('send original');
@@ -268,7 +348,7 @@ class VoiceTidy extends ChangeNotifier {
 
   /// A new press: a done send goes first (it was about to); anything else waiting stays in the draft, unsent.
   void interrupt() {
-    if (_phase == TidyPhase.ready) return _sendResult();
+    if (_phase == TidyPhase.ready || (_result != null && _pick == VoicePick.send)) return _sendResult();
     closed();
   }
 
@@ -319,6 +399,8 @@ class VoiceTidy extends ChangeNotifier {
     _settleTimer?.cancel();
     _settleTimer = null;
     _result = null;
+    _ticker?.cancel();
+    _ticker = null;
     final c = _call;
     _call = null;
     c?.cancel();

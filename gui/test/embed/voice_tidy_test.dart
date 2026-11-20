@@ -27,6 +27,14 @@ class FakeLlmApi extends LlmApi {
 
 const long = '嗯那个我门明天下午三点开会';
 
+/// Lets the microtasks run, then the AI's words come out to the last one.
+void out(FakeAsync a, VoiceTidy t) {
+  a.flushMicrotasks();
+  while (t.writing) {
+    a.elapse(const Duration(milliseconds: 16));
+  }
+}
+
 void main() {
   late FakeLlmApi api;
   late bool allowed;
@@ -83,7 +91,7 @@ void main() {
       expect(api.runs.single, ('dictation', long));
       expect(t.phase, TidyPhase.tidying);
       api.calls.single.complete(const LlmDone(' 我们明天下午三点开会。 '));
-      a.flushMicrotasks();
+      out(a, t);
       // Time to click 编辑 (user 2026-11-20): nothing goes yet.
       expect(t.phase, TidyPhase.ready);
       expect(t.shown, '我们明天下午三点开会。');
@@ -186,7 +194,7 @@ void main() {
       final t = make();
       t.begin(long, VoicePick.edit);
       api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
-      a.flushMicrotasks();
+      out(a, t);
       expect(sent, isEmpty);
       expect(edited.single.$2, '我们明天下午三点开会。');
       expect(edited.single.$3, const VoiceAi(app: 'dictation', original: long, result: '我们明天下午三点开会。'));
@@ -196,6 +204,7 @@ void main() {
   });
 
   test('partial text shows as it comes', () {
+    fakeAsync((a) {
     final t = make();
     var n = 0;
     t.addListener(() => n++);
@@ -203,9 +212,123 @@ void main() {
     expect(t.shown, '');
     final before = n;
     api.onText!('我们');
+    a.elapse(const Duration(milliseconds: 100));
     expect(t.shown, '我们');
     expect(n, greaterThan(before));
     t.dispose();
+    });
+  });
+
+  // The gateway thinks for seconds, then the whole answer lands in a fraction of a second (measured 2026-11-21):
+  // shown as it lands it would read as "all at once". The words come out a few at a time instead.
+  test('a burst of AI text comes out a few characters at a time', () {
+    fakeAsync((a) {
+      final t = make();
+      t.begin(long, VoicePick.send);
+      const all = '我们明天下午三点开会，把上周的数据带上。';
+      api.onText!(all);
+      a.flushMicrotasks();
+      expect(t.shown.runes.length, lessThan(3));
+      expect(t.writing, isTrue);
+      a.elapse(const Duration(milliseconds: 200));
+      expect(t.shown, isNotEmpty);
+      expect(t.shown.runes.length, lessThan(all.runes.length));
+      expect(all.startsWith(t.shown), isTrue);
+      a.elapse(const Duration(milliseconds: 500));
+      expect(t.shown, all);
+      expect(t.writing, isFalse);
+      t.dispose();
+    });
+  });
+
+  test('even a long burst is all out within about 0.6 s', () {
+    fakeAsync((a) {
+      final t = make();
+      t.begin(long, VoicePick.send);
+      final all = '我们明天下午三点开会。' * 30;
+      api.onText!(all);
+      a.elapse(const Duration(milliseconds: 650));
+      expect(t.shown, all);
+      t.dispose();
+    });
+  });
+
+  test('a done send starts its 1.5 s wait only once every word is out', () {
+    fakeAsync((a) {
+      final t = make();
+      t.begin(long, VoicePick.send);
+      const all = '我们明天下午三点开会，把上周的数据带上。';
+      api.onText!(all);
+      api.calls.single.complete(const LlmDone(all));
+      a.flushMicrotasks();
+      expect(t.phase, TidyPhase.ready);
+      expect(t.writing, isTrue);
+      a.elapse(const Duration(milliseconds: 1500));
+      expect(sent, isEmpty);
+      a.elapse(const Duration(milliseconds: 700));
+      expect(sent.single.$2, all);
+      t.dispose();
+    });
+  });
+
+  test('done on edit puts the AI text in the panel once every word is out', () {
+    fakeAsync((a) {
+      final t = make();
+      t.begin(long, VoicePick.edit);
+      const all = '我们明天下午三点开会，把上周的数据带上。';
+      api.calls.single.complete(const LlmDone(all));
+      a.flushMicrotasks();
+      expect(edited, isEmpty);
+      expect(t.phase, TidyPhase.tidying);
+      a.elapse(const Duration(milliseconds: 700));
+      expect(edited.single.$2, all);
+      expect(edited.single.$3, const VoiceAi(app: 'dictation', original: long, result: all));
+      expect(t.phase, TidyPhase.idle);
+      t.dispose();
+    });
+  });
+
+  test('发送 while an edit pick\'s words are still coming out sends the AI text', () {
+    fakeAsync((a) {
+      final t = make();
+      t.begin(long, VoicePick.edit);
+      const all = '我们明天下午三点开会，把上周的数据带上。';
+      api.calls.single.complete(const LlmDone(all));
+      a.flushMicrotasks();
+      t.sendNow();
+      expect(sent.single.$2, all);
+      a.elapse(const Duration(seconds: 2));
+      expect(edited, isEmpty);
+      t.dispose();
+    });
+  });
+
+  test('a zero revealMax shows the words at once', () {
+    final t = VoiceTidy(
+        sid: 1,
+        endpoint: () => const LlmEndpoint(url: 'localhost:28001', key: 'k'),
+        api: api,
+        allowed: (_) => true,
+        send: (_, _, _) => null,
+        edit: (_, _, _) {},
+        keep: (_, _) {},
+        revealMax: Duration.zero);
+    t.begin(long, VoicePick.send);
+    api.onText!('我们明天');
+    expect(t.shown, '我们明天');
+    expect(t.writing, isFalse);
+    t.dispose();
+  });
+
+  test('a leading line break in the stream is not shown', () {
+    fakeAsync((a) {
+      final t = make();
+      t.begin(long, VoicePick.send);
+      api.onText!('\n\n我们');
+      a.elapse(const Duration(milliseconds: 200));
+      expect(t.shown, '我们');
+      t.dispose();
+    });
   });
 
   test('a failure on a send sends the original at once, as if never tidied (spec §8.1 D3)', () {
@@ -363,7 +486,7 @@ void main() {
       final t = make();
       t.begin(long, VoicePick.send);
       api.calls.single.complete(const LlmDone('好的。'));
-      a.flushMicrotasks();
+      out(a, t);
       a.elapse(const Duration(milliseconds: 1500));
       expect(t.phase, TidyPhase.note);
       t.interrupt();
@@ -409,7 +532,7 @@ void main() {
       t.moveTo(2);
       expect(t.sid, 2);
       api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
-      a.flushMicrotasks();
+      out(a, t);
       a.elapse(const Duration(milliseconds: 1500));
       expect(sent.single.$1, 2);
       t.dispose();
@@ -431,7 +554,7 @@ void main() {
       final t = make();
       t.begin(long, VoicePick.send);
       api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
-      a.flushMicrotasks();
+      out(a, t);
       a.elapse(const Duration(milliseconds: 1500));
       expect(t.phase, TidyPhase.note);
       expect(t.note, voiceBusy);

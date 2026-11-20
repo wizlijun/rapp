@@ -355,9 +355,14 @@ class MainState extends ChangeNotifier {
   @visibleForTesting
   Duration tidySettle = const Duration(milliseconds: 1500);
 
+  /// How long a burst of the AI's words takes to come out; zero: at once.
+  @visibleForTesting
+  Duration tidyRevealMax = const Duration(milliseconds: 600);
+
   VoiceTidy _makeTidy(Object sid) => VoiceTidy(
         sid: sid,
         settle: tidySettle,
+        revealMax: tidyRevealMax,
         endpoint: () => llm,
         api: llmApi,
         allowed: (s) => prefs.voiceAiTidy && llm.configured && !(remote[s]?.secureFocus ?? true),

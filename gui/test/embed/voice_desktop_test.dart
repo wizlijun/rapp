@@ -557,11 +557,12 @@ void main() {
     // The AI's words take the bubble; the heard ones stay under them in one line, to compare (user 2026-11-20).
     api.onText!('我们明天');
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
     expect(_plain(tester, find.byKey(const Key('tidy-body'))), startsWith('我们明天'));
     expect(_plain(tester, find.byKey(const Key('tidy-original'))), contains(said.trim()));
     api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
     await tester.pump();
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 700));
     expect(_plain(tester, find.byKey(const Key('tidy-body'))), '我们明天下午三点开会。');
     expect(find.text('整理好了，马上发送'), findsOneWidget);
     expect(sends(), isEmpty);
