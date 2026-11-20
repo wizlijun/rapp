@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -53,6 +54,11 @@ void main() {
     await tester.pump();
   }
 
+  Future<void> menu(WidgetTester tester, String id) async {
+    await tester.tap(find.byKey(Key('more-$id')));
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('search field is 40 tall on macOS, like the log search', (tester) async {
     await onPlatform(TargetPlatform.macOS, () async {
       final h = await load(tester);
@@ -74,11 +80,73 @@ void main() {
     expect(find.byKey(const Key('history-01A')), findsOneWidget);
     expect(find.byKey(const Key('history-01B')), findsNothing);
     expect(find.text('跑一下部署脚本'), findsOneWidget); // first line only
+    expect(find.text('+1 行'), findsOneWidget);
     expect(find.text('mac · 终端 · agent — zsh'), findsOneWidget);
+    // The actions wait in the ⋮ menu.
+    expect(find.text('放进输入框'), findsNothing);
+    await menu(tester, '01A');
     expect(find.text('从记录里去掉'), findsOneWidget);
     expect(find.text('git 历史里还在'), findsOneWidget);
     await tester.tap(find.byKey(const Key('put-01A')));
+    await tester.pumpAndSettle();
     expect(put, '跑一下部署脚本\n第二行');
+  });
+
+  testWidgets('one row per entry, 40 tall on macOS; a click on the row puts it into the editor', (tester) async {
+    await onPlatform(TargetPlatform.macOS, () async {
+      day('dev1', '2026-11-15', [
+        rec('01A', '2026-11-15T09:00:00+09:00', 'a very long line ' * 20),
+        rec('01B', '2026-11-15T09:01:00+09:00', 'short'),
+      ]);
+      final h = await load(tester);
+      String? put;
+      await show(tester, h, onPut: (t) => put = t);
+      expect(tester.getSize(find.byKey(const Key('history-01A'))).height, 40);
+      expect(tester.getSize(find.byKey(const Key('history-01B'))).height, 40);
+      await tester.tap(find.text('short'));
+      expect(put, 'short');
+    });
+  });
+
+  testWidgets('a right-click on the row opens the same menu', (tester) async {
+    day('dev1', '2026-11-15', [rec('01A', '2026-11-15T09:00:00+09:00', 'mine')]);
+    final h = await load(tester);
+    await show(tester, h, onPut: (_) {});
+    await tester.tap(find.text('mine'), buttons: kSecondaryButton);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('put-01A')), findsOneWidget);
+    expect(find.byKey(const Key('copy-01A')), findsOneWidget);
+    expect(find.byKey(const Key('remove-01A')), findsOneWidget);
+  });
+
+  testWidgets('with nowhere to put it, 放进输入框 is grey and a click on the row does nothing', (tester) async {
+    day('dev1', '2026-11-15', [rec('01A', '2026-11-15T09:00:00+09:00', 'mine')]);
+    final h = await load(tester);
+    await show(tester, h);
+    await tester.tap(find.text('mine')); // no crash, no menu
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('put-01A')), findsNothing);
+    await menu(tester, '01A');
+    expect(tester.widget<PopupMenuItem<String>>(find.byKey(const Key('put-01A'))).enabled, isFalse);
+  });
+
+  testWidgets('the source shows in 这台主机 and 全部, not in 这个会话', (tester) async {
+    day('dev1', '2026-11-15', [rec('01A', '2026-11-15T09:00:00+09:00', 'in session')]);
+    final h = await load(tester);
+    await show(tester, h, session: 'h1/com.apple.Terminal', host: 'h1');
+    expect(find.text('mac · 终端 · agent — zsh'), findsNothing);
+    await tester.tap(find.byKey(const Key('scope-host')));
+    await tester.pump();
+    expect(find.text('mac · 终端 · agent — zsh'), findsOneWidget);
+  });
+
+  testWidgets('a pause on the row shows the whole text', (tester) async {
+    await onPlatform(TargetPlatform.macOS, () async {
+      day('dev1', '2026-11-15', [rec('01A', '2026-11-15T09:00:00+09:00', '第一行\n第二行')]);
+      final h = await load(tester);
+      await show(tester, h);
+      expect(find.byTooltip('第一行\n第二行'), findsOneWidget);
+    });
   });
 
   testWidgets('time is HH:mm today and M月d日 HH:mm on other days', (tester) async {
@@ -127,9 +195,14 @@ void main() {
     final h = await load(tester);
     await show(tester, h);
     expect(find.byKey(const Key('history-01A')), findsOneWidget);
-    expect(find.byKey(const Key('remove-01A')), findsNothing);
+    await menu(tester, '01B');
     expect(find.byKey(const Key('remove-01B')), findsOneWidget);
     expect(find.text('git 历史里还在'), findsOneWidget);
+    await tester.tapAt(Offset.zero); // close it
+    await tester.pumpAndSettle();
+    await menu(tester, '01A');
+    expect(find.byKey(const Key('remove-01A')), findsNothing);
+    expect(find.text('git 历史里还在'), findsNothing);
     final copied = <String>[];
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (c) async {
       if (c.method == 'Clipboard.setData') copied.add((c.arguments as Map)['text'] as String);
@@ -137,6 +210,7 @@ void main() {
     });
     addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
     await tester.tap(find.byKey(const Key('copy-01A')));
+    await tester.pumpAndSettle();
     expect(copied, ['theirs']);
   });
 
@@ -147,6 +221,7 @@ void main() {
     ]);
     final h = await load(tester);
     await show(tester, h);
+    await menu(tester, '01B');
     await tester.tap(find.byKey(const Key('remove-01B')));
     for (var i = 0; i < 20; i++) {
       // The fake clock holds the awaits of the file IO back; each round lets one more through.
