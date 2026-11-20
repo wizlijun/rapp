@@ -5,6 +5,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import 'data_dir.dart' show writePrivate;
 
 const llmFile = 'llm.json';
@@ -119,7 +121,11 @@ class LlmCancelled extends LlmResult {
 class LlmCall {
   LlmCall._(this._client);
 
-  final HttpClient _client;
+  /// A call with no connection behind it, which the test ends with [complete].
+  @visibleForTesting
+  LlmCall.manual() : _client = null;
+
+  final HttpClient? _client;
   final _done = Completer<LlmResult>();
   bool _cancelled = false;
 
@@ -129,13 +135,16 @@ class LlmCall {
   void cancel() {
     if (_done.isCompleted) return;
     _cancelled = true;
-    _client.close(force: true);
+    _client?.close(force: true);
     _done.complete(const LlmCancelled());
   }
 
+  @visibleForTesting
+  void complete(LlmResult r) => _finish(r);
+
   void _finish(LlmResult r) {
     if (!_done.isCompleted) _done.complete(r);
-    _client.close(force: true);
+    _client?.close(force: true);
   }
 }
 
