@@ -29,6 +29,7 @@ void main() {
   late Directory tmp;
   late RemoteSession app, tsess, app2;
   var copied = 0;
+  var haptics = <String>[];
 
   setUp(() async {
     tmp = Directory.systemTemp.createTempSync('key_bar_test');
@@ -59,24 +60,30 @@ void main() {
   void iosTest(String name, Future<void> Function(WidgetTester) body) => testWidgets(name, (tester) async {
         debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
         try {
+          haptics = [];
+          tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (c) async {
+            if (c.method == 'HapticFeedback.vibrate') haptics.add('${c.arguments}');
+            return null;
+          });
           tester.view.physicalSize = const Size(1000, 900);
           tester.view.devicePixelRatio = 1;
           await body(tester);
         } finally {
           tester.view.reset();
+          tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null);
           debugDefaultTargetPlatformOverride = null;
         }
       });
 
   Finder k(String id) => find.byKey(Key('bar-$id'));
 
-  Widget bar(RemoteSession rs, {double width = 700, bool blocked = false, Widget? above}) {
+  Widget bar(RemoteSession rs, {double width = 700, Widget? above}) {
     final p = rs == tsess ? term as dynamic : port;
     return wrap(Column(mainAxisSize: MainAxisSize.min, children: [
       ?above,
       SizedBox(
         width: width,
-        child: KeyBar(state: s, session: rs, port: p, blocked: blocked, onCopy: rs == tsess ? () => copied++ : null),
+        child: KeyBar(state: s, session: rs, port: p, onCopy: rs == tsess ? () => copied++ : null),
       ),
     ]));
   }
@@ -250,6 +257,45 @@ void main() {
       expect(termKeys().length, 3);
     });
 
+    iosTest('a hold keeps the first press\'s latch: ⌃ once, hold ← gives Ctrl-Left each time, latch off once', (tester) async {
+      await tester.pumpWidget(bar(tsess));
+      tsess.keyLatch.tap(latchCtrl);
+      final g = await tester.startGesture(tester.getCenter(k('left')));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(tsess.keyLatch.flags, 0);
+      await tester.pump(const Duration(milliseconds: 160));
+      await g.up();
+      expect(termKeys(), [
+        ['Ctrl-Left'],
+        ['Ctrl-Left'],
+        ['Ctrl-Left'],
+      ]);
+    });
+
+    iosTest('once repeating, a later swipe up does not fire the alt on release', (tester) async {
+      await tester.pumpWidget(bar(tsess));
+      final g = await tester.startGesture(tester.getCenter(k('up')));
+      await tester.pump(const Duration(milliseconds: 400));
+      await g.moveBy(const Offset(0, -40));
+      await g.up();
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(termKeys().every((e) => (e as List).single == 'Up'), isTrue);
+    });
+
+    iosTest('one click per press: a hold repeats without more, a swipe clicks once', (tester) async {
+      await tester.pumpWidget(bar(tsess));
+      await tap(tester, 'esc');
+      expect(haptics.length, 1);
+      final g = await tester.startGesture(tester.getCenter(k('left')));
+      await tester.pump(const Duration(milliseconds: 560));
+      await g.up();
+      expect(haptics.length, 2);
+      final g2 = await tester.startGesture(tester.getCenter(k('up')));
+      await g2.moveBy(const Offset(0, -30));
+      await g2.up();
+      expect(haptics.length, 3);
+    });
+
     iosTest('switching session mid-hold stops the repeat', (tester) async {
       await tester.pumpWidget(bar(app));
       final g = await tester.startGesture(tester.getCenter(k('left')));
@@ -323,11 +369,27 @@ void main() {
 
   group('state of the bar', () {
     iosTest('blocked: keys grey, taps send nothing', (tester) async {
-      await tester.pumpWidget(bar(tsess, blocked: true));
+      t.emit({'event': 'hosts', 'hosts': [{'id': '111', 'name': 'mini'}]});
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({'event': 'opened', 'sid': 1, 'id': m['id'], 'app': m['app'], 'path': 'lan', 'port': 5001, 'token': 'tk', 'req': m['req']});
+          }
+        };
+        s.openOrSwitch('111', 'Safari', 'Safari');
+        for (var i = 0; i < 4; i++) {
+          await Future<void>.delayed(Duration.zero);
+        }
+      });
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      expect(s.sendBlocked(1), isTrue);
+      await tester.pumpWidget(bar(app));
+      port.calls.clear();
       await tester.tap(k('esc'));
       await tester.tap(k('left'));
       await tester.pump(const Duration(seconds: 1));
-      expect(termKeys(), isEmpty);
+      expect(appKeys(), isEmpty);
+      expect(haptics, isEmpty);
       expect(tester.widget<Opacity>(find.descendant(of: k('esc'), matching: find.byType(Opacity))).opacity, lessThan(1));
     });
 

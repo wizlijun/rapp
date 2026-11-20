@@ -76,8 +76,7 @@ class KeyBar extends StatefulWidget {
       required this.state,
       required this.session,
       required this.port,
-      this.onCopy,
-      this.blocked = false});
+      this.onCopy});
 
   final MainState state;
   final RemoteSession session;
@@ -85,9 +84,6 @@ class KeyBar extends StatefulWidget {
 
   /// The terminal stage's selection copy; null for an app (sends ⌘C).
   final VoidCallback? onCopy;
-
-  /// A network drop froze the session: the keys go grey and send nothing.
-  final bool blocked;
 
   @override
   State<KeyBar> createState() => _KeyBarState();
@@ -99,6 +95,9 @@ class _KeyBarState extends State<KeyBar> {
   bool get _term => _isTerm(widget.state, widget.session);
   ModifierLatch get _latch => keyLatchOf(widget.state, widget.session);
   Object get _sid => widget.session.sid;
+
+  /// A network drop froze the session: the keys go grey and send nothing.
+  bool get _blocked => widget.state.sendBlocked(_sid);
 
   @override
   void initState() {
@@ -132,16 +131,20 @@ class _KeyBarState extends State<KeyBar> {
     super.dispose();
   }
 
-  void _send(BarKey key) {
+  /// Sends [key] with the latch's modifiers, which are then used up; a repeat passes the [flags] of the first press
+  /// and leaves the latch alone. Returns the flags it went with.
+  int _send(BarKey key, int? flags) {
     final latch = _latch;
+    final on = flags ?? latch.flags;
     if (_term) {
       final port = widget.port;
-      if (port is! TermSessionPort) return;
-      port.sendKeys(_sid, [termWire(key.wire!, latch.flags)]);
-      latch.used();
+      if (port is! TermSessionPort) return on;
+      port.sendKeys(_sid, [termWire(key.wire!, on)]);
     } else {
-      _sender?.press(key.code!, mods: key.mods);
+      widget.port.key(_sid, key.code!, key.mods | on);
     }
+    if (flags == null) latch.used();
+    return on;
   }
 
   Future<void> _paste() async {
@@ -158,13 +161,15 @@ class _KeyBarState extends State<KeyBar> {
     }
   }
 
-  /// A key goes (down for most; up for an arrow, after its swipe was told from its hold).
-  void _fire(BarKey key, {bool alt = false}) {
-    if (widget.blocked) return;
+  /// A key goes (down for most; up for an arrow, after its swipe was told from its hold). A press plays the click, a
+  /// repeat ([haptic] false) does not. Returns the latch flags a send went with, for the repeats to keep.
+  int? _fire(BarKey key, {bool alt = false, bool haptic = true, int? flags}) {
+    if (_blocked) return null;
+    if (haptic) unawaited(HapticFeedback.selectionClick());
     final target = alt ? barKeys[key.alt]! : key;
     switch (target.kind) {
       case BarKind.send:
-        _send(target);
+        return _send(target, flags);
       case BarKind.mod:
         _latch.tap(target.bit!);
       case BarKind.copy:
@@ -181,6 +186,7 @@ class _KeyBarState extends State<KeyBar> {
       case BarKind.slim:
         widget.state.setKeyBarSlim(!widget.state.prefs.keyBarSlim);
     }
+    return null;
   }
 
   @override
@@ -226,8 +232,8 @@ class _KeyBarState extends State<KeyBar> {
           keyDef: key,
           sid: _sid,
           state: key.bit == null ? LatchState.off : _latch.of(key.bit!),
-          blocked: widget.blocked,
-          onFire: (alt) => _fire(key, alt: alt),
+          blocked: _blocked,
+          onFire: (alt, haptic, flags) => _fire(key, alt: alt, haptic: haptic, flags: flags),
         ),
       ));
     }
@@ -247,7 +253,7 @@ class _BarKeyView extends StatefulWidget {
   final Object sid;
   final LatchState state;
   final bool blocked;
-  final void Function(bool alt) onFire;
+  final int? Function(bool alt, bool haptic, int? flags) onFire;
 
   @override
   State<_BarKeyView> createState() => _BarKeyViewState();
@@ -257,6 +263,9 @@ class _BarKeyViewState extends State<_BarKeyView> {
   Timer? _timer;
   Offset? _from;
   bool _swiped = false, _sentByHold = false;
+
+  /// The latch flags the first press went with: a hold repeats with them.
+  int? _flags;
 
   BarKey get _k => widget.keyDef;
 
@@ -282,18 +291,19 @@ class _BarKeyViewState extends State<_BarKeyView> {
   }
 
   void _repeat() {
-    _timer = Timer.periodic(keyRepeatEvery, (_) => widget.onFire(false));
+    _timer = Timer.periodic(keyRepeatEvery, (_) => widget.onFire(false, false, _flags));
   }
 
   void _down(PointerDownEvent e) {
     if (widget.blocked) return;
     _from = e.position;
     _swiped = _sentByHold = false;
-    if (!_waits) widget.onFire(false);
+    _flags = null;
+    if (!_waits) _flags = widget.onFire(false, true, null);
     if (_k.repeats) {
       _timer = Timer(keyRepeatAfter, () {
         _sentByHold = true;
-        widget.onFire(false);
+        _flags = widget.onFire(false, _waits, _flags);
         _repeat();
       });
     }
@@ -301,7 +311,7 @@ class _BarKeyViewState extends State<_BarKeyView> {
 
   void _move(PointerMoveEvent e) {
     final from = _from;
-    if (from == null || _swiped || _k.alt == null) return;
+    if (from == null || _swiped || _sentByHold || _k.alt == null) return;
     if (from.dy - e.position.dy >= keySwipeUp) {
       _swiped = true;
       _timer?.cancel();
@@ -315,9 +325,9 @@ class _BarKeyViewState extends State<_BarKeyView> {
     _stop();
     if (!held || !_waits) return;
     if (swiped) {
-      widget.onFire(true);
+      widget.onFire(true, true, null);
     } else if (!sentByHold) {
-      widget.onFire(false);
+      widget.onFire(false, true, null);
     }
   }
 
@@ -336,7 +346,7 @@ class _BarKeyViewState extends State<_BarKeyView> {
       label: k.spoken,
       toggled: k.bit != null ? widget.state != LatchState.off : null,
       excludeSemantics: true,
-      onTap: widget.blocked ? null : () => widget.onFire(false),
+      onTap: widget.blocked ? null : () => widget.onFire(false, true, null),
       child: Opacity(
         opacity: widget.blocked ? .4 : 1,
         child: Listener(
