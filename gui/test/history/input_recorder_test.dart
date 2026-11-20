@@ -760,8 +760,9 @@ void main() {
     final rec = recorder();
     final rs = session(1, 'com.a');
     rec.attach(rs, () => meta('h1', 'com.a'), restore: true);
-    rec.recalled(rs, 'hello');
-    rs.composer.setDraft('hello');
+    rs.composer.recall = () => ['hello'];
+    rs.composer.arrow(true);
+    await settle();
     rs.composer.submitText('x');
     rs.composer.done(1, null);
     await until(() => lines().isNotEmpty);
@@ -776,9 +777,10 @@ void main() {
     await send(rs, 'hello');
     rs.composer.done(1, null);
     await settle();
-    rec.recalled(rs, 'hello');
-    rs.composer.setDraft('hello'); // what ↑ does
+    rs.composer.recall = () => ['hello'];
+    rs.composer.arrow(true);
     await settle();
+    expect(rs.composer.draft, 'hello');
     expect(drafts().load('h1/com.a'), isNull);
     await rec.sessionEnded(rs, meta('h1', 'com.a'), record: true);
     expect([for (final l in lines()) '${l['kind']}:${l['text']}'], ['sent:hello']);
@@ -788,11 +790,50 @@ void main() {
     final rec = recorder();
     final rs = session(1, 'com.a');
     rec.attach(rs, () => meta('h1', 'com.a'), restore: true);
-    rec.recalled(rs, 'hello');
-    rs.composer.setDraft('hello');
+    rs.composer.recall = () => ['hello'];
+    rs.composer.arrow(true);
+    await settle();
     rs.composer.setDraft('hello there');
     await rec.sessionEnded(rs, meta('h1', 'com.a'), record: true);
     expect([for (final l in lines()) '${l['kind']}:${l['text']}'], ['draft:hello there']);
+  });
+
+  test('while ↑ shows a record untouched, the draft file keeps the text being written', () async {
+    final rec = recorder();
+    final rs = session(1, 'com.a');
+    rec.attach(rs, () => meta('h1', 'com.a'), restore: true);
+    rs.composer.recall = () => ['hello'];
+    rs.composer.setDraft('half written');
+    rs.composer.arrow(true);
+    await settle();
+    expect(rs.composer.draft, 'hello');
+    expect(drafts().load('h1/com.a')?.text, 'half written');
+    await rec.sessionEnded(rs, meta('h1', 'com.a'), record: true);
+    expect([for (final l in lines()) '${l['kind']}:${l['text']}'], ['draft:half written']);
+  });
+
+  test('onSent: every send with text, the record on or off, never a password field or a retry', () async {
+    for (final on in [true, false]) {
+      enabled = on;
+      final rec = recorder();
+      final got = <String>[];
+      rec.onSent = (key, text, at) => got.add('$key:$text');
+      final rs = session(1, 'com.a', record: on);
+      rec.attach(rs, () => meta('h1', 'com.a'), restore: true);
+      await send(rs, 'one');
+      rs.composer.done(0, 'nope');
+      rs.composer.retry(rs.composer.failed.single);
+      rs.composer.done(1, null);
+      rs.composer.submitText('voice');
+      rs.composer.done(1, null);
+      rs.secureFocus = true;
+      await send(rs, 'secret');
+      rs.composer.done(1, null);
+      rs.secureFocus = false;
+      await send(rs, ''); // a Return: nothing
+      expect(got, ['h1/com.a:one', 'h1/com.a:voice'], reason: 'record $on');
+      await settle();
+    }
   });
 
   test('ending a session keeps what was typed in its last second', () async {

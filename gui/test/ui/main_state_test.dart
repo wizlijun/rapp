@@ -4593,11 +4593,26 @@ void main() {
       expect(st.recallOf(rs), isEmpty);
       rs.composer.setDraft('上一条');
       await rs.composer.submit();
+      expect(st.recallOf(rs).map((e) => e.text), ['上一条'], reason: 'in memory from the handoff on');
       rs.composer.done(1, null);
-      await until(() => st.recallOf(rs).isNotEmpty);
+      await until(() => st.recallOf(rs).single.mine);
       expect(st.recallOf(rs).map((e) => e.text), ['上一条']);
-      expect(st.recallOf(rs).single.mine, isTrue);
       expect(st.history.forSession(key).single.session, key);
+    });
+
+    test('with the record off, up still brings back what this run sent (R2)', () async {
+      final (st, _) = await start(prefs: UiPrefs(inputHistory: false));
+      final rs = st.currentRemote!;
+      rs.composer.setDraft('只在内存');
+      await rs.composer.submit();
+      rs.composer.done(1, null);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(st.recallOf(rs).map((e) => e.text), ['只在内存']);
+      expect(st.history.search(''), isEmpty);
+      rs.composer.setDraft('写了一半');
+      expect(rs.composer.arrow(true), true);
+      await Future<void>.delayed(Duration.zero);
+      expect(rs.composer.draft, '只在内存');
     });
 
     test('the records on disk are read at start, from every device', () async {

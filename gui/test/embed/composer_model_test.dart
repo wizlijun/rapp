@@ -764,4 +764,159 @@ void main() {
       expect(seen, ['a', 'b', 'c']);
     });
   });
+
+  group('↑/↓ through what was sent (R2)', () {
+    late List<String> sent;
+    setUp(() {
+      sent = ['newest', 'middle', 'oldest'];
+      m.recall = () => sent;
+    });
+    Future<void> settle() => Future<void>.delayed(Duration.zero);
+
+    test('up stashes the text being written; down brings it back as it was', () async {
+      ed.value = 'half written\nsecond line'; // typed a moment ago: no idle copy yet
+      expect(m.arrow(true), true);
+      await settle();
+      expect(ed.value, 'newest');
+      expect(m.browsing, true);
+      expect(m.arrow(false), true);
+      await settle();
+      expect(ed.value, 'half written\nsecond line');
+      expect(m.draft, 'half written\nsecond line');
+      expect(m.browsing, false);
+      expect(m.arrow(false), false, reason: 'down on the text being written is the caret\'s');
+    });
+
+    test('up walks older and stays on the oldest; down walks back', () async {
+      final seen = <String>[];
+      for (final up in [true, true, true, true, false, false, false]) {
+        expect(m.arrow(up), true);
+        await settle();
+        seen.add(ed.value);
+      }
+      expect(seen, ['newest', 'middle', 'oldest', 'oldest', 'middle', 'newest', '']);
+    });
+
+    test('nothing to bring back: up is not taken', () {
+      sent = [];
+      ed.value = 'x';
+      expect(m.canRecall, false);
+      expect(m.arrow(true), false);
+      expect(ed.value, 'x');
+    });
+
+    test('a record edited on the way keeps its edit until the send', () async {
+      ed.value = 'live';
+      m.arrow(true);
+      m.arrow(true);
+      await settle();
+      ed.value = 'middle, edited';
+      m.arrow(true);
+      m.arrow(false);
+      await settle();
+      expect(ed.value, 'middle, edited');
+      m.arrow(false);
+      m.arrow(false);
+      await settle();
+      expect(ed.value, 'live');
+      m.arrow(true);
+      m.arrow(true);
+      await settle();
+      expect(ed.value, 'middle, edited', reason: 'back on the text being written, the round goes on');
+      final r = await m.submit();
+      expect((r as SubmitPieces).pieces, [
+        {'text': 'middle, edited'}
+      ]);
+      expect(ed.value, 'live', reason: 'sent from a record: the text being written comes back');
+      m.done(1, null);
+      m.arrow(true);
+      m.arrow(true);
+      await settle();
+      expect(ed.value, 'middle', reason: 'a send ends the round: its edits go');
+    });
+
+    test('keys pressed quickly: each step reads after the one before, and a send waits for them', () async {
+      ed.value = 'live';
+      m.arrow(true);
+      m.arrow(true);
+      final r = await m.submit();
+      expect((r as SubmitPieces).pieces, [
+        {'text': 'middle'}
+      ]);
+      expect(ed.value, 'live');
+    });
+
+    test('the panel closing and opening while a record is shown keeps the round', () async {
+      ed.value = 'live';
+      m.arrow(true);
+      await settle();
+      await m.detach(ed);
+      expect(m.draft, 'newest');
+      final ed2 = FakeEditor();
+      await m.attach(ed2);
+      expect(ed2.value, 'newest');
+      expect(m.arrow(false), true);
+      await settle();
+      expect(ed2.value, 'live');
+    });
+
+    test('without an editor: through the draft, or a native window\'s text', () async {
+      await m.detach(ed);
+      m.draft = 'live';
+      final shown = <String>[];
+      m.arrow(true, show: shown.add);
+      await settle();
+      expect(m.draft, 'newest');
+      m.draft = 'newest!'; // the native window's text came back edited
+      m.arrow(false, show: shown.add);
+      await settle();
+      expect(shown, ['newest', 'live']);
+      m.arrow(true, show: shown.add);
+      await settle();
+      expect(shown.last, 'newest!');
+    });
+
+    test('a block in the text being written survives the round and a send from a record', () async {
+      m.apply(PasteResult(text: 'see ', blocks: const [BlockChip(1, '图片', kind: 'image')]));
+      final live = ed.value;
+      expect(m.blocks, hasLength(1));
+      m.arrow(true);
+      await settle();
+      await m.detach(ed); // a read without the mark: still held for the text that comes back
+      await m.attach(ed);
+      expect(ed.value, 'newest');
+      expect(m.blocks, hasLength(1));
+      final r = await m.submit();
+      expect((r as SubmitPieces).pieces, [
+        {'text': 'newest'}
+      ]);
+      expect(ed.value, live);
+      expect(m.blocks, hasLength(1));
+      expect(dropped, isEmpty);
+    });
+
+    test('an emptied record sent as a Return: the text being written comes back with its block', () async {
+      m.apply(PasteResult(text: 'see ', blocks: const [BlockChip(1, '图片', kind: 'image')]));
+      final live = ed.value;
+      m.arrow(true);
+      await settle();
+      ed.value = '';
+      expect(await m.submit(), isA<SubmitReturn>());
+      expect(ed.value, live);
+      expect(m.blocks.single.n, 1);
+      expect(dropped, isEmpty);
+    });
+
+    test('onRecalled says what is shown and what is being written', () async {
+      final calls = <String>[];
+      m.onRecalled = (shown, live) => calls.add('$shown|$live');
+      ed.value = 'live';
+      m.arrow(true);
+      m.arrow(true);
+      m.arrow(false);
+      m.arrow(false);
+      await settle();
+      expect(calls, ['newest|live', 'middle|live', 'newest|live', 'null|']);
+    });
+  });
 }

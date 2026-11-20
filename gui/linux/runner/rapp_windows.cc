@@ -169,7 +169,6 @@ struct Session {
   }
   void changed() {
     if (editing) return;
-    recalling = false;
     auto *args = fl_value_new_map();
     settext(args, "text", draft());
     emit("draft", args);
@@ -817,7 +816,8 @@ std::unique_ptr<Window> create_window(Session *s, int id, bool popup,
             gtk_text_buffer_get_iter_at_mark(s->buffer, &at, gtk_text_buffer_get_insert(s->buffer));
             if ((e->keyval == GDK_KEY_Up && gtk_text_iter_get_line(&at) == 0) ||
                 (e->keyval == GDK_KEY_Down && gtk_text_iter_get_line(&at) == gtk_text_buffer_get_line_count(s->buffer) - 1)) {
-              if (s->recalling || (e->keyval == GDK_KEY_Up && s->draft().empty())) {
+              // Up always asks (the app keeps the text being written); Down only while a record is shown.
+              if (e->keyval == GDK_KEY_Up || s->recalling) {
                 composer_action(s, e->keyval == GDK_KEY_Up ? "up" : "down");
                 return TRUE;
               }

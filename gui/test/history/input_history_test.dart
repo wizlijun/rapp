@@ -231,4 +231,38 @@ void main() {
     await h.refresh();
     expect(h.forSession('h1/com.apple.Terminal'), isEmpty);
   });
+
+  test('remember: this run\'s sends come back for up, merged with the record by time, never in search', () async {
+    day('dev1', '2026-11-14', [rec('01A', '2026-11-14T10:00:00+09:00', 'on disk')]);
+    final h = history();
+    await h.refresh();
+    var notified = 0;
+    h.addListener(() => notified++);
+    h.remember('h1/com.apple.Terminal', 'typed now', DateTime.parse('2026-11-14T10:05:00+09:00'));
+    h.remember('h1/com.apple.Terminal', '', DateTime.parse('2026-11-14T10:06:00+09:00')); // nothing to recall
+    h.remember('h2/x', 'elsewhere', DateTime.parse('2026-11-14T10:07:00+09:00'));
+    expect(notified, 2);
+    expect(h.forSession('h1/com.apple.Terminal').map((e) => e.text), ['typed now', 'on disk']);
+    expect(h.search(''), hasLength(1));
+    // The record of the same send lands a moment later: one entry, not two.
+    h.add(rec('01Z', '2026-11-14T10:05:01+09:00', 'typed now'));
+    expect(h.forSession('h1/com.apple.Terminal').map((e) => e.text), ['typed now', 'on disk']);
+    // Taken out of the record: up stops bringing it back.
+    await h.remove(h.search('typed now').single);
+    expect(h.forSession('h1/com.apple.Terminal').map((e) => e.text), ['on disk']);
+  });
+
+  test('forSession prefix: one host\'s terminals share their history', () async {
+    day('dev1', '2026-11-14', [
+      rec('01A', '2026-11-14T10:00:00+09:00', 'ls', session: 'h1/term:pty:a'),
+      rec('01B', '2026-11-14T10:01:00+09:00', 'pwd', session: 'h1/term:pty:b'),
+      rec('01C', '2026-11-14T10:02:00+09:00', 'mail', session: 'h1/com.apple.Mail'),
+      rec('01D', '2026-11-14T10:03:00+09:00', 'other host', session: 'h2/term:pty:a'),
+    ]);
+    final h = history();
+    await h.refresh();
+    h.remember('h1/term:pty:c', 'git status', DateTime.parse('2026-11-14T10:04:00+09:00'));
+    expect(h.forSession('h1/term:', prefix: true).map((e) => e.text), ['git status', 'pwd', 'ls']);
+    expect(h.forSession('h1/term:pty:a').map((e) => e.text), ['ls']);
+  });
 }

@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 
 import '../paths.dart';
 import 'input_log.dart';
+import 'record_id.dart';
 
 /// One record as read back.
 class InputEntry {
@@ -80,6 +81,29 @@ class InputEntry {
       mine: me != null && from == me,
     );
   }
+
+  /// A send this run kept only in memory (R2: ↑ brings it back whether the record is on or not).
+  factory InputEntry.memory(String session, String text, DateTime at) {
+    final id = newRecordId(at);
+    final ts = isoWithOffset(at);
+    return InputEntry._(
+      id: id,
+      // To the second, as a record's `ts`: the record of this send (a later id) sorts before it
+      // and this copy drops out as the same text twice in a row.
+      ts: DateTime.parse(ts),
+      kind: 'sent',
+      deviceId: '',
+      session: session,
+      hostId: '',
+      hostName: '',
+      appName: '',
+      windowTitle: null,
+      text: text,
+      day: ts.substring(0, 10),
+      raw: const {},
+      mine: false,
+    );
+  }
 }
 
 /// A day file as last read: re-read only when its length or modification time changed.
@@ -100,6 +124,9 @@ class InputHistory extends ChangeNotifier {
 
   /// Records handed over by [add] (written by this device since they were last read).
   final Map<String, InputEntry> _added = {};
+
+  /// Sends of this run, kept for ↑ only (never in [search], never on disk), oldest first.
+  final List<InputEntry> _memory = [];
 
   List<InputEntry>? _all;
   final Map<String, List<InputEntry>> _sessions = {};
@@ -177,6 +204,13 @@ class InputHistory extends ChangeNotifier {
     _changed();
   }
 
+  /// [text] was just sent in session [key]: ↑ brings it back in this run, the record on or off.
+  void remember(String key, String text, DateTime at) {
+    if (text.isEmpty) return;
+    _memory.add(InputEntry.memory(key, text, at));
+    _changed();
+  }
+
   void _changed() {
     _all = null;
     _sessions.clear();
@@ -193,25 +227,34 @@ class InputHistory extends ChangeNotifier {
         byId[e.id] = e;
       }
     }
-    final list = byId.values.toList()
-      ..sort((a, b) {
-        final c = b.ts.compareTo(a.ts);
-        return c != 0 ? c : b.id.compareTo(a.id);
-      });
+    final list = byId.values.toList()..sort(_newestFirst);
     return _all = List.unmodifiable(list);
   }
 
-  /// Session [key]'s records with text, newest first; of the same text twice in a row only the
-  /// newer stays.
-  List<InputEntry> forSession(String key) => _sessions[key] ??= List.unmodifiable(() {
+  /// What ↑ brings back for session [key], newest first: its records with text and this run's sends
+  /// ([remember]); of the same text twice in a row only the newer stays. [prefix]: every session whose
+  /// key starts with [key] (a host's text terminals share one history).
+  List<InputEntry> forSession(String key, {bool prefix = false}) =>
+      _sessions[prefix ? '$key*' : key] ??= List.unmodifiable(() {
+        bool ours(InputEntry e) => prefix ? e.session.startsWith(key) : e.session == key;
+        final all = [
+          for (final e in _entries)
+            if (ours(e) && e.text.isNotEmpty) e,
+          for (final e in _memory)
+            if (ours(e)) e,
+        ]..sort(_newestFirst);
         final out = <InputEntry>[];
-        for (final e in _entries) {
-          if (e.session != key || e.text.isEmpty) continue;
+        for (final e in all) {
           if (out.isNotEmpty && out.last.text == e.text) continue;
           out.add(e);
         }
         return out;
       }());
+
+  static int _newestFirst(InputEntry a, InputEntry b) {
+    final c = b.ts.compareTo(a.ts);
+    return c != 0 ? c : b.id.compareTo(a.id);
+  }
 
   /// The records whose text holds [q] (any case), newest first; [session] or [host] narrow it.
   List<InputEntry> search(String q, {String? session, String? host}) {
@@ -227,6 +270,10 @@ class InputHistory extends ChangeNotifier {
 
   /// Takes [e] out of its day file (only this device's); the other lines stay as they were.
   Future<void> remove(InputEntry e) {
+    // ↑ stops bringing it back too: this run's copy goes with it.
+    final before = _memory.length;
+    _memory.removeWhere((m) => m.session == e.session && m.text == e.text);
+    if (_memory.length != before) _changed();
     if (!e.mine) return Future.value();
     return _tail = _tail.then((_) => _remove(e)).catchError((Object err) {
       _log('rapp: 输入历史 去掉失败：${_reason(err)}');
