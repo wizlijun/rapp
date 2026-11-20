@@ -197,6 +197,21 @@ class VoiceTidy extends ChangeNotifier {
   /// The session is going for good: as [interrupt].
   void closed() => interrupt();
 
+  /// The session is going for good: stops without keeping anything itself, and hands back the
+  /// original it was waiting with (null: nothing waiting), for the caller to put where the session's
+  /// text goes. ([closed] keeps it through the composer, which an editor makes asynchronous.)
+  String? end() {
+    if (!_waiting) {
+      interrupt();
+      return null;
+    }
+    _stop();
+    _log('ended');
+    _phase = TidyPhase.idle;
+    notifyListeners();
+    return _original;
+  }
+
   /// A reconnect's swap: the session is [sid] now.
   void moveTo(Object to) => sid = to;
 

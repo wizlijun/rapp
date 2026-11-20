@@ -354,10 +354,21 @@ class MainState extends ChangeNotifier {
   /// [sid]'s tidy if one was made.
   VoiceTidy? tidyIfAny(Object sid) => _tidies[sid];
 
-  // The session [sid] goes for good: what its tidy holds stays in its draft.
-  void _endTidy(Object sid) => _tidies.remove(sid)
-    ?..closed()
-    ..dispose();
+  // The session [sid] goes for good: its tidy stops and hands back the original it was waiting with,
+  // for the caller to keep where the session's text goes (review 2026-11-20 #1, #2).
+  String? _endTidy(Object sid) {
+    final t = _tidies.remove(sid);
+    if (t == null) return null;
+    final original = t.end();
+    t.dispose();
+    return original;
+  }
+
+  // [text] (if any) into the draft of [sid], a session that stays.
+  void _keepIn(Object? sid, String? text) {
+    final c = sid == null ? null : remote[sid]?.composer;
+    if (text != null && c != null) unawaited(c.keep(text));
+  }
 
   /// Embedded sessions by `id/app`, in the order they were first opened. A record outlives its
   /// link: a disconnected one stays here, with its last frame, until the user ends it.
@@ -1532,7 +1543,7 @@ class MainState extends ChangeNotifier {
       if (fresh != null) {
         final start = _starts.remove(fresh);
         if (start != null) resources.linkDown(start);
-        _endTidy(fresh);
+        _keepIn(r.lastSid, _endTidy(fresh));
         remote.remove(fresh)?.dispose();
         _sentFps.remove(fresh);
         _waiting.remove(fresh)?.timer.cancel();
@@ -1760,13 +1771,15 @@ class MainState extends ChangeNotifier {
     final oldGroups = groups;
     final old = r.lastSid;
     if (old != null) portOf(old)?.close(old); // reconnected but not swapped yet: the old session is still open
-    // Before a swap the old session is the one on show, the one written in.
-    for (final sid in [r.sid, old]) {
-      if (sid != null) _endTidy(sid);
-    }
+    // Before a swap the old session is the one on show, the one written in. A waiting tidy's
+    // original goes after the editor's text is read (an editor makes a keep asynchronous).
+    final originals = [
+      for (final sid in [r.sid, old])
+        if (sid != null) ?_endTidy(sid),
+    ];
     final shown = remote[old] ?? remote[r.sid];
     unawaited(recorder.sessionEnded(shown, _metaOf(r, shown),
-        record: shown?.recordsInput ?? profiles.resolve(r.app).recordInput));
+        record: shown?.recordsInput ?? profiles.resolve(r.app).recordInput, extra: originals));
     _releaseUnlockBusy(r);
     for (final sid in [r.sid, old]) {
       if (sid == null) continue;
@@ -1801,9 +1814,11 @@ class MainState extends ChangeNotifier {
         _tidies.remove(fresh)?.dispose();
         _tidies[fresh!] = tidy..moveTo(fresh);
       } else {
-        tidy
-          ..closed()
-          ..dispose();
+        // No successor yet (the old end came before the new open): into the old draft, which the
+        // record keeps for the next open (review 2026-11-20 #1).
+        final original = tidy.end();
+        tidy.dispose();
+        if (original != null) gone.composer.keepNow(original);
       }
     }
     final moved = to?.composer.adoptFrom(gone.composer);
@@ -1973,7 +1988,8 @@ class MainState extends ChangeNotifier {
         notifyListeners();
         return;
       }
-      _endTidy(s.sid);
+      final original = _endTidy(s.sid);
+      if (original != null) remote[s.sid]?.composer.keepNow(original); // the record's draft keeps it
       remote.remove(s.sid)?.dispose();
       _starts.remove(s.sid);
       _quiet.add(s.sid);
@@ -2244,7 +2260,7 @@ class MainState extends ChangeNotifier {
     if (fresh != null && r.sid == fresh && old != null) {
       final start = _starts.remove(fresh);
       if (start != null) resources.linkDown(start);
-      _endTidy(fresh);
+      _keepIn(old, _endTidy(fresh));
       remote.remove(fresh)?.dispose();
       _sentFps.remove(fresh);
       _waiting.remove(fresh)?.timer.cancel();

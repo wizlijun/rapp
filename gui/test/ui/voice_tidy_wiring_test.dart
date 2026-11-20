@@ -1,4 +1,5 @@
 // 长语音先让 AI 整理 wired into MainState (plan 2026-11-20-rapp-voice-ai-tidy Task 4).
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' show Rect;
@@ -81,7 +82,8 @@ void main() {
       );
 
   // com.a open on 111 with a picture; a reconnect's open answers sid + 10. [endpoint]: the LLM 接入点 is set.
-  Future<(MainState, FakeSessionPort)> start({bool endpoint = true}) async {
+  // [held]: a reconnect's open is not answered but kept here, for the test to answer.
+  Future<(MainState, FakeSessionPort)> start({bool endpoint = true, List<void Function()>? held}) async {
     final t = FakeTransport();
     final port = FakeSessionPort();
     final h = HubClient(t);
@@ -98,10 +100,15 @@ void main() {
     t.onSend = (m) {
       if (m['cmd'] != 'open') return;
       final n = (m['app'] as String).length + (m['reconnect'] == true ? 10 * ++reconnects : 0);
-      t.emit({
-        'event': 'opened', 'sid': n, 'id': '111', 'app': m['app'], 'path': 'lan',
-        'port': 5000 + n, 'token': 'tk', 'req': m['req'],
-      });
+      void answer() => t.emit({
+            'event': 'opened', 'sid': n, 'id': '111', 'app': m['app'], 'path': 'lan',
+            'port': 5000 + n, 'token': 'tk', 'req': m['req'],
+          });
+      if (held != null && m['reconnect'] == true) {
+        held.add(answer);
+      } else {
+        answer();
+      }
     };
     await st.openOrSwitch('111', 'com.a', 'A');
     await until(() => st.currentRemote != null);
@@ -186,6 +193,43 @@ void main() {
         {'text': tidied}
       ]
     ]);
+    st.dispose();
+  });
+
+  // Review 2026-11-20 Important #1: the old session's end before the new one opens.
+  test('the old session closing before the reconnect opens keeps the original', () async {
+    final held = <void Function()>[];
+    final (st, port) = await start(held: held);
+    st.tidyOf(sid).begin(long, VoicePick.send);
+    api.calls.single.complete(const LlmFailed('连不上 LLM 接入点'));
+    await pump();
+    port.emit(DisconnectedEvent(sid, 'boom'));
+    await settle();
+    unawaited(st.reconnect(key));
+    await until(() => held.isNotEmpty);
+    port.emit(ClosedEvent(sid, 'gone'));
+    await pump();
+    expect(st.tidyIfAny(sid), isNull);
+    held.single();
+    await until(() => st.remote[sid + 10] != null);
+    expect(st.remote[sid + 10]!.composer.draftText, contains(long));
+    st.dispose();
+  });
+
+  // Review 2026-11-20 Important #2: the panel's editor is attached when the window goes.
+  test('closing with the panel open keeps the original in its draft record', () async {
+    final (st, port) = await start();
+    final c = st.currentRemote!.composer;
+    final e = FakeEditor();
+    await c.attach(e);
+    e.value = '我打的字'; // typed after the panel opened: not in the draft copy yet
+    st.tidyOf(sid).begin(long, VoicePick.send);
+    st.endCurrent();
+    port.emit(ClosedEvent(sid, 'rapp-client: quit'));
+    await until(() => lines().isNotEmpty);
+    final text = lines().single['text'] as String;
+    expect(text, contains('我打的字'));
+    expect(text, contains(long));
     st.dispose();
   });
 

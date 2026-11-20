@@ -251,8 +251,9 @@ class InputRecorder {
 
   /// The session ended ([rs]: null when it never went live): with the record on, the records left
   /// unwritten go, what is left unsent becomes one `draft` record and the file goes; with it off,
-  /// the file stays for the next open. [record]: the app's switch, else [rs]'s.
-  Future<void> sessionEnded(RemoteSession? rs, SessionMeta meta, {bool? record}) async {
+  /// the file stays for the next open. [record]: the app's switch, else [rs]'s. [extra]: text that
+  /// goes after what was typed (a voice tidy's original that was waiting).
+  Future<void> sessionEnded(RemoteSession? rs, SessionMeta meta, {bool? record, List<String> extra = const []}) async {
     final d = _drafts.remove(meta.key) ?? _load(meta.key);
     for (final s in [for (final e in _attached.entries) if (e.value.key == meta.key) e.key]) {
       _attached.remove(s);
@@ -267,6 +268,7 @@ class InputRecorder {
       typed = rs.composer.currentText();
     }
     if (typed != null) d.text = await typed;
+    if (extra.isNotEmpty) d.text = _join([d.text], extra.join('\n'));
     await Future.wait([...d.busy]);
     if (!on || !await _flush(d)) {
       await _persist(d);
