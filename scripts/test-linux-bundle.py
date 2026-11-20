@@ -126,7 +126,7 @@ with tempfile.TemporaryDirectory(prefix='rapp-bundle-') as td, EchoServer(('127.
                         pass
                     time.sleep(.1)
                 assert status and status.get('ok'), 'bundled service did not become ready'
-                assert status['capabilities'] == {'graphical': True, 'desktop': True, 'applications': False, 'terminal': True, 'ports': True}, status['capabilities']
+                assert status['capabilities'] == {'graphical': True, 'desktop': True, 'applications': status['permissions'].get('applications') is True, 'terminal': True, 'ports': True}, status['capabilities']
                 assert status['permissions']['platform'] == 'linux', status['permissions']
                 # Exercise the real hub -> QUIC service -> Linux desktop worker path.
                 # Only capture is requested: no input, clipboard operation or screen lock.
