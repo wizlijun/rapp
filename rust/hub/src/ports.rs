@@ -170,12 +170,37 @@ impl HubPorts {
     }
 }
 
+/// How long to wait before opening the listeners again after one ended: at once, then doubling
+/// while they keep ending (an accept that fails for good, out of file descriptors) up to
+/// `ASK_EVERY`; at once again after a quiet spell of two `ASK_EVERY`.
+#[derive(Default)]
+struct Backoff {
+    last: Option<tokio::time::Instant>,
+    delay: Duration,
+}
+
+impl Backoff {
+    fn next(&mut self, now: tokio::time::Instant) -> Duration {
+        let quiet = self.last.is_none_or(|last| now.duration_since(last) > ASK_EVERY * 2);
+        self.delay = if quiet {
+            Duration::ZERO
+        } else if self.delay.is_zero() {
+            Duration::from_secs(1)
+        } else {
+            (self.delay * 2).min(ASK_EVERY)
+        };
+        self.last = Some(now);
+        self.delay
+    }
+}
+
 /// Tells the table read from the file, then asks on every tick, poke and network change.
 pub(crate) async fn run(hub: Arc<Hub>, ports: Arc<HubPorts>) {
     ports.tell(&hub).await;
     let mut tick = interval(ASK_EVERY);
     tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut wake = hub.net.wake.subscribe();
+    let mut backoff = Backoff::default();
     loop {
         tokio::select! {
             _ = tick.tick() => {}
@@ -185,9 +210,33 @@ pub(crate) async fn run(hub: Arc<Hub>, ports: Arc<HubPorts>) {
                 ports.relisten().await;
                 tick.reset();
             }
-            _ = ports.dead.notified() => ports.relisten().await,
+            _ = ports.dead.notified() => {
+                tokio::time::sleep(backoff.next(tokio::time::Instant::now())).await;
+                ports.relisten().await;
+                // A listener ending says nothing about the devices' shares: no ask.
+                continue;
+            }
         }
         ports.ask_all().await;
         ports.tell(&hub).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::time::Instant;
+
+    #[test]
+    fn listeners_dying_one_after_another_are_opened_again_ever_later() {
+        let t0 = Instant::now();
+        let mut b = Backoff::default();
+        let s = Duration::from_secs;
+        assert_eq!(b.next(t0), Duration::ZERO, "the first is opened again at once");
+        let waits: Vec<Duration> = (1..10).map(|i| b.next(t0 + s(i))).collect();
+        assert_eq!(&waits[..7], &[s(1), s(2), s(4), s(8), s(16), s(32), ASK_EVERY]);
+        assert_eq!(waits[8], ASK_EVERY, "never longer than an ask");
+        // A while without one: at once again.
+        assert_eq!(b.next(t0 + s(10) + ASK_EVERY * 2 + s(600)), Duration::ZERO);
     }
 }
