@@ -806,3 +806,14 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [ ] 4. 日志页能看到 `ports` 一行，里面有 `{"id","port","local":28001}`；回前台后能看到 `ports_relisten`。
 - [ ] 5. 杀掉 app 再开（Mac 先不动）：日志里第一行 `ports` 就带上次的映射（从 `maps.json` 读的），不用等问到。
 - [ ] 6. Mac 上的 hub 不开 28000 段（`lsof -iTCP:28001 -sTCP:LISTEN` 只有 rapp-service）。
+
+## 主程序图标 B-Aqua（feat/app-icon-aqua，2026-11-21）实机检查
+
+来源：设计稿 `rapp-black-glass.zip` 里的 B-Aqua（Icon Composer `.icon`）。macOS、iOS 工程都加了 `Runner/AppIcon.icon`，它优先于 `AppIcon.appiconset`：26 以上的系统按液态玻璃规范自己画边框、高光、深色/着色/透明模式；旧系统用 actool 从 `.icon` 生成的兜底图。`AppIcon.appiconset` 的 PNG 也换成了 B-Aqua（macOS 版留白加投影，iOS 版满版不透明），Linux 打包读 `app_icon_256.png`，Windows 用 `app_icon.ico`。
+
+- [ ] 1. macOS 26+：Dock、启动台、访达里是黑色玻璃底、蓝色玻璃板、青色 r，四周留白和别的 app 一样大。
+- [ ] 2. macOS 26+ 切到深色 / 着色 / 透明图标风格：图标跟着变，没有白底或缺角。
+- [ ] 3. macOS 14/15（如有机器）：显示新图标，不是旧的绿色 r。
+- [ ] 4. iPhone / iPad 主屏：新图标，圆角由系统裁，边缘没有多出来的一圈框。
+- [ ] 5. 装过旧版本的 Mac：升级后 Dock 里图标刷新（不刷新就 `killall Dock` 再看）。
+- [ ] 6. Linux 打包后的桌面图标、Windows 版 exe 图标也是新的。
