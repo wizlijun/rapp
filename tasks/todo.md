@@ -826,5 +826,6 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 
 - [x] 按用户要求同步至 main `b724666c`（含 0.15.8 和随后合并的 iOS 输入按键区），补齐 Linux host 的 v14 取景、剪贴板/typed paste/文件续传、独立应用与窗口操作、焦点/菜单/密码角色、输入源、弱网节流和锁状态；语音相关原生实现未改。
 - [x] X11 Composite 与 Hyprland toplevel export/mapping 使用独立表面采集；跨输出窗口坐标及输入经过隔离双显示器回归；Hyprland resize 保持窗口原点，跨显示器移动同步目标 workspace。
-- [x] Rust workspace、Flutter 2656 项及原生窗口 smoke 通过。更多验证及平台边界见 `docs/superpowers/plans/2026-11-21-linux-nonvoice-parity.md`。
-- [ ] 干净源码打包、上传 Linux 发行资产、网站发布记录更新与安装核验。
+- [x] Rust workspace 1215 项、最新 Flutter 2745 项及原生窗口 smoke 通过。更多验证及平台边界见 `docs/superpowers/plans/2026-11-21-linux-nonvoice-parity.md`。
+- [x] 干净源码 `2cd87a69` 打包，验证产物及上传摘要；发布 Linux v0.15.9（保留 macOS Latest v0.15.8），网站快照更新并通过 8 项测试。
+- [ ] 完成本机管理员认证后重新安装与校验；完成 Cloudflare 登录后部署网站静态更新。
