@@ -63,6 +63,8 @@ To create Linux packages, run `./scripts/package-linux.sh` from a clean checkout
 
 Linux 0.14.13 adds local hold-to-talk on app and terminal stages: hold Right Alt or the voice button, release to send, Esc to cancel, Tab to edit. First use downloads a verified ~142 MB model; audio is never saved or uploaded. Recognition follows the system language and needs PulseAudio or PipeWire PulseAudio. See [Linux voice behavior and verification limits](docs/superpowers/specs/2026-11-18-rapp-linux-voice-design.md).
 
+The 0.15.2 source also includes host-grouped tray sessions and favorites, screen selection in the window menu, and input history that preserves unfinished drafts and works with recording disabled. On Linux, Ctrl+V, Shift+Insert and the input panel's context-menu Paste all use the application clipboard pipeline for text and attachment blocks. Detached windows leave history and send keys to the input method while it is composing. See [macOS 0.15.1 parity and Linux validation](docs/superpowers/plans/2026-11-20-linux-0151-parity.md).
+
 ## License
 
 [GNU GPL v3](LICENSE).

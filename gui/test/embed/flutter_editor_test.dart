@@ -169,6 +169,36 @@ void main() {
     expect(await ed.read(), '');
   }, skip: !Platform.isMacOS, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
+  for (final shiftInsert in [false, true]) {
+    testWidgets('Linux ${shiftInsert ? 'Shift+Insert' : 'Ctrl+V'} uses the application paste pipeline', (tester) async {
+      await tester.pumpWidget(_host(ed));
+      ed.setText('draft');
+      ed.focus();
+      await tester.pump();
+      final modifier = shiftInsert ? LogicalKeyboardKey.shiftLeft : LogicalKeyboardKey.controlLeft;
+      await tester.sendKeyDownEvent(modifier);
+      await tester.sendKeyEvent(shiftInsert ? LogicalKeyboardKey.insert : LogicalKeyboardKey.keyV);
+      await tester.sendKeyUpEvent(modifier);
+      await tester.pump();
+      expect(log.paste, 1);
+      expect(await ed.read(), 'draft'); // attachments/text are inserted by ComposerPanel, once
+    }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+  }
+
+  testWidgets('Linux context menu offers application paste even without clipboard text', (tester) async {
+    await tester.pumpWidget(_host(ed));
+    ed.focus();
+    await tester.pump();
+    await tester.tap(find.byType(TextField), buttons: kSecondaryMouseButton, kind: PointerDeviceKind.mouse);
+    await tester.pumpAndSettle();
+    expect(find.text('Paste'), findsOneWidget);
+    await tester.tap(find.text('Paste'));
+    await tester.pump();
+    expect(log.paste, 1);
+    expect(await ed.read(), '');
+    expect(find.text('Paste'), findsNothing);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
   testWidgets('a tap while composing cannot move the caret', (tester) async {
     await tester.pumpWidget(_host(ed));
     await tester.tap(find.byType(TextField));

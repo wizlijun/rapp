@@ -481,6 +481,43 @@ void main() {
       expect(callsOf('composer_paste'), hasLength(1));
     });
 
+    testWidgets('Linux paste waits for IME commit without replacing preedit', (tester) async {
+      port.pasteReply = {'text': ' hello'};
+      await tester.pumpWidget(wrap(panel()));
+      await tester.pump();
+      tester.testTextInput.updateEditingValue(const TextEditingValue(
+        text: 'ni', selection: TextSelection.collapsed(offset: 2), composing: TextRange(start: 0, end: 2),
+      ));
+      await tester.pump();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+      await tester.pump();
+      expect(callsOf('composer_paste'), [equals({'sid': 1})]);
+      expect(text(tester), 'ni');
+      expect(field(tester).controller!.value.composing, const TextRange(start: 0, end: 2));
+      tester.testTextInput.updateEditingValue(const TextEditingValue(
+        text: '你', selection: TextSelection.collapsed(offset: 1),
+      ));
+      await tester.pump();
+      expect(text(tester), '你 hello');
+    }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
+    testWidgets('Linux Ctrl+V inserts an attachment block through the composer', (tester) async {
+      port.pasteReply = {'blocks': [{'n': 1, 'label': 'image.png'}]};
+      await tester.pumpWidget(wrap(panel()));
+      await tester.pump();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+      await tester.pump();
+      expect(callsOf('composer_paste'), [equals({'sid': 1})]);
+      expect(rs.composer.blocks.single.label, 'image.png');
+      expect(find.text('image.png'), findsOneWidget);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
     testWidgets('a paste asked for while the panel is shown runs at once', (tester) async {
       port.pasteReply = {'text': 'x'};
       await tester.pumpWidget(wrap(panel()));

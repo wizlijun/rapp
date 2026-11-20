@@ -37,7 +37,8 @@ class EditorHandlers {
   /// Esc, not while composing.
   final VoidCallback onEscape;
 
-  /// ⌘V (macOS) — the runner decides what it becomes.
+  /// Application paste (⌘V on macOS; Ctrl+V, Shift+Insert or the menu on Linux).
+  /// The runner decides whether the clipboard becomes text or attachment blocks.
   final VoidCallback onPaste;
   final void Function(bool on) onFocus;
 

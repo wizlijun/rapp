@@ -288,6 +288,47 @@ int main(int argc, char **argv) {
     s.windows.erase(2);
     s.windows[1] = create_window(&s, 1, false, nullptr);
     auto *view = s.windows[1]->editor;
+    gtk_widget_show_all(s.windows[1]->shell);
+    while (g_main_context_iteration(nullptr, FALSE)) {}
+    set_draft(&s, "");
+    // History is available with an unsent draft, and editing a recalled entry
+    // must not lose Down's path back to the draft (0.15.1).
+    auto editor_key = [&](guint key, guint modifiers = 0) {
+      GdkEventKey event{};
+      event.type = GDK_KEY_PRESS; event.keyval = key; event.state = modifiers;
+      event.window = gtk_widget_get_window(view);
+      gboolean taken = FALSE;
+      g_signal_emit_by_name(view, "key-press-event", &event, &taken);
+    };
+    set_draft(&s, "unfinished");
+    auto actions_before = event_count("composer_action");
+    editor_key(GDK_KEY_Up);
+    assert(event_count("composer_action") == actions_before + 1);
+    assert(std::string(text(get(last_event("composer_action"), "action"))) == "up");
+    assert(std::string(text(get(last_event("composer_action"), "text"))) == "unfinished");
+    auto *recalled = fl_value_new_map(); settext(recalled, "text", "older");
+    invoke("composer_draft", recalled);
+    gtk_text_buffer_insert_at_cursor(s.buffer, " edited", -1);
+    editor_key(GDK_KEY_Down);
+    assert(std::string(text(get(last_event("composer_action"), "action"))) == "down");
+    assert(std::string(text(get(last_event("composer_action"), "text"))) == "older edited");
+    // A composing input method may decline a key. It still owns the preedit:
+    // do not recall history, queue a send, zoom or close its session.
+    actions_before = event_count("composer_action");
+    const auto closes_before = event_count("close");
+    const auto composing_sends = event_count("composer_send");
+    const auto pending_before = s.pending.size();
+    g_signal_emit_by_name(view, "preedit-changed", "ni");
+    editor_key(GDK_KEY_Up);
+    editor_key(GDK_KEY_Down);
+    editor_key(GDK_KEY_Return);
+    editor_key(GDK_KEY_plus, GDK_CONTROL_MASK);
+    editor_key(GDK_KEY_q, GDK_CONTROL_MASK);
+    assert(event_count("composer_action") == actions_before);
+    assert(event_count("close") == closes_before);
+    assert(event_count("composer_send") == composing_sends && s.pending.size() == pending_before);
+    g_signal_emit_by_name(view, "preedit-changed", "");
+    while (g_main_context_iteration(nullptr, FALSE)) {}
     set_draft(&s, "");
     // Commit and another Return can arrive before the low-priority idle: send
     // must queue after the earlier paste instead of snapshotting the old draft.

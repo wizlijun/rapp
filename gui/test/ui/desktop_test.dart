@@ -338,5 +338,5 @@ void main() {
     expect(find.text('打开左侧面板，选一个会话或到设备里打开 app'), findsNothing);
     await tester.pumpWidget(const SizedBox());
     e.dispose();
-  });
+  }, variant: const TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
 }

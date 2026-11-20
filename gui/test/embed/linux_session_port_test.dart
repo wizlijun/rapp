@@ -301,6 +301,18 @@ void main() {
       await messenger.handlePlatformMessage(channel.name,
           codec.encodeMethodCall(const MethodCall('draft', {'sid': 81, 'text': '前\ue000后'})), (_) {});
       expect((await nextWhere(events, (e) => e is ComposerDraftEvent) as ComposerDraftEvent).inline, true);
+      for (final direction in ['up', 'down']) {
+        await messenger.handlePlatformMessage(channel.name,
+            codec.encodeMethodCall(MethodCall('composer_action', {
+              'sid': 81, 'text': 'edited draft', 'action': direction,
+            })), (_) {});
+        final recall = await nextWhere(events, (e) => e is ComposerDraftEvent) as ComposerDraftEvent;
+        expect((recall.sid, recall.text, recall.action, recall.inline), (81, 'edited draft', direction, true));
+      }
+      port.nativeComposerDraft(81, 'restored draft');
+      await Future<void>.delayed(Duration.zero);
+      expect(calls.lastWhere((c) => c.method == 'composer_draft').arguments,
+          {'sid': 81, 'text': 'restored draft'});
       peer.add(packet(40, [0]));
       await nextWhere(events, (e) => e is SecureFocusEvent);
       expect((calls.lastWhere((c) => c.method == 'secure_focus').arguments as Map)['on'], false);

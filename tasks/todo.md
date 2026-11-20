@@ -736,3 +736,11 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [ ] 确认框开着时再按 Cmd+Q，仍然只有一个确认框
 - [ ] 设置里「升级 rapp？」框开着时按 Cmd+Q，不再叠出第二个框
 - [ ] Cmd+` 仍能在主窗口和分离窗口之间切换（分离窗口已不在「窗口」菜单里；不通就回头商量）
+
+## Linux 0.15.1 桌面客户端对齐（2026-11-20）
+
+- [x] 对齐 main `4aa638e0`：确认托盘设备分组/常用/分离会话提起、多屏窗口菜单、内存输入历史与终端共享历史已进入 Linux 共享路径。
+- [x] 补 Linux Ctrl+V、Shift+Insert 和右键粘贴的应用剪贴板路径，支持文本及附件块；组字中粘贴仍等待提交，不覆盖预编辑内容。
+- [x] 修复 GTK 分离窗口组字期间误召回历史、排队发送或执行快捷键；补草稿历史与 Linux 原生通道回写回归。
+- [x] Flutter 全量 2506 通过、15 跳过；analyze 无 error/warning。GTK 私有 Broadway、构建/启动器夹具通过；Linux GUI/全部 Rust 组件构建成功，14 个 ELF 依赖解析通过，无图形隔离 bundle 检查通过。
+- 产物在 `gui/build/linux/x64/release/bundle/`。本轮未发布或安装；真实 macOS 对端、物理输入法和多屏操作未验收。宿主既有限制及首轮 Wayland 采集超时的环境说明见 [对齐记录](../docs/superpowers/plans/2026-11-20-linux-0151-parity.md)。

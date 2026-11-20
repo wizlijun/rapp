@@ -231,6 +231,7 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
                 key: const Key('composer-field'),
                 controller: _controller,
                 focusNode: _focus,
+                contextMenuBuilder: _contextMenu,
                 minLines: 1,
                 maxLines: null,
                 keyboardType: TextInputType.multiline,
@@ -264,7 +265,17 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
         controller: _controller,
         style: style.text.copyWith(color: style.color),
         maxHeight: maxHeight,
-        child: field(maxHeight),
+        // EditableText's overridable paste action also covers Shift+Insert. A
+        // raw key handler outside TextField loses to its built-in shortcuts.
+        child: Actions(
+          actions: {
+            PasteTextIntent: CallbackAction<PasteTextIntent>(onInvoke: (_) {
+              handlers?.onPaste();
+              return null;
+            }),
+          },
+          child: field(maxHeight),
+        ),
       );
     }
     final rime = _rime;
@@ -293,6 +304,28 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
         );
       },
     );
+  }
+
+  Widget _contextMenu(BuildContext context, EditableTextState editable) {
+    final items = editable.contextMenuButtonItems;
+    if (defaultTargetPlatform == TargetPlatform.linux) {
+      final paste = ContextMenuButtonItem(
+        type: ContextMenuButtonType.paste,
+        onPressed: () {
+          editable.hideToolbar();
+          handlers?.onPaste();
+        },
+      );
+      final at = items.indexWhere((item) => item.type == ContextMenuButtonType.paste);
+      if (at >= 0) {
+        items[at] = paste;
+      } else {
+        // Flutter only checks for text; the application can paste images/files too.
+        final selectAll = items.indexWhere((item) => item.type == ContextMenuButtonType.selectAll);
+        items.insert(selectAll < 0 ? items.length : selectAll, paste);
+      }
+    }
+    return AdaptiveTextSelectionToolbar.buttonItems(anchors: editable.contextMenuAnchors, buttonItems: items);
   }
 
   @override

@@ -798,7 +798,11 @@ std::unique_ptr<Window> create_window(Session *s, int id, bool popup,
                                         gpointer p) -> gboolean {
           auto *w = static_cast<Window *>(p);
           auto *s = w->session;
+          const bool composing = w->preedit;
           if (gtk_text_view_im_context_filter_keypress(GTK_TEXT_VIEW(v), e)) return TRUE;
+          // An IME can decline a key while it still owns the preedit. Let the
+          // text view handle it without recalling history or queuing a send.
+          if (composing || w->preedit) return FALSE;
           const bool ctrl = e->state & GDK_CONTROL_MASK;
           if (ctrl && !(e->state & (GDK_SHIFT_MASK | GDK_MOD1_MASK)) &&
               (e->keyval == GDK_KEY_Return || e->keyval == GDK_KEY_KP_Enter)) {
