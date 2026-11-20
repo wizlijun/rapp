@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:rapp_rime/rapp_rime.dart';
 
@@ -26,6 +28,9 @@ class FakeRimeLink extends ChangeNotifier implements RimeLink {
 
   /// What [flush] answers. True also pushes the raw input as a commit, as the native side does.
   bool flushOk = true;
+
+  /// While set, [flush] answers only once it completes (the engine's answer arriving late).
+  Completer<void>? flushGate;
 
   final calls = <String>[];
   Object? owner;
@@ -87,12 +92,16 @@ class FakeRimeLink extends ChangeNotifier implements RimeLink {
       return flushOk;
     }
 
+    final gate = flushGate;
+    if (gate != null) return gate.future.then((_) => answer());
     return delayed ? Future.microtask(answer) : Future.value(answer());
   }
 
+  /// As the native side: the engine's composition is gone, so a later flush commits nothing.
   @override
   Future<void> clear() {
     calls.add('clear');
+    _input = '';
     return Future.value();
   }
 

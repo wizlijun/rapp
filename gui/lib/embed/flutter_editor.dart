@@ -80,8 +80,18 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
     if (_disposed) return;
     final r = _rime!;
     final live = r.enabled && r.builtin;
-    // To 「系」 or switched off: the composition goes, not committed (toggleBuiltin already cleared the engine's).
-    if (_live && !live) _dropRime();
+    if (_live && !live) {
+      // To 「系」 with the switch on: the app moving to a 「系」 session (configure flushes: the letters are
+      // committed as typed), or the user's tap (toggleBuiltin cleared the engine's first: nothing comes). The
+      // composition stays until the engine answers, so a read in between (the old panel's closing draft) waits
+      // for the letters. Switched off: the engine stops and the composition goes.
+      if (r.enabled && _controller.rimePreedit.isNotEmpty) {
+        _menu.value = RimeMenu.empty;
+        _flushRime();
+      } else {
+        _dropRime();
+      }
+    }
     _live = live;
     _sendActive();
   }

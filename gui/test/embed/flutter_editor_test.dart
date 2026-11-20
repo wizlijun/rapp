@@ -684,18 +684,38 @@ void main() {
           const TextSelection.collapsed(offset: 3));
     });
 
-    rimeTest('switching to 系 drops the composition', (tester) async {
+    rimeTest('tapping 系 drops the composition', (tester) async {
       await focused(tester);
       fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
       await tester.pump();
       expect(drawn(tester).toPlainText(), 'ni');
-      fake.set(builtin: false);
+      fake.toggleBuiltin();
       await tester.pump();
       expect(drawn(tester).toPlainText(), '');
-      expect(await ed.read(), '');
-      expect(fake.calls, isNot(contains('flush')), reason: 'dropped, not committed');
+      expect(await ed.read(), '', reason: 'cleared, not committed');
+      expect(fake.calls, containsAllInOrder(['clear', 'flush']));
       ed.insert('x');
       expect(await ed.read(), 'x', reason: 'nothing composing: edits apply at once');
+    });
+
+    rimeTest('moving to a 系 session keeps the letters for the old panel\'s draft, however late they come', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      await tester.pump();
+      fake.flushGate = Completer<void>();
+      fake.set(builtin: false); // configure from the session switch: 「内」 → 「系」, the switch still on
+      await tester.pump();
+      expect(fake.calls.where((c) => c == 'flush'), hasLength(1));
+      // As ComposerPanel.dispose on the switch: the field goes, the draft is read, then the editor goes.
+      await tester.pumpWidget(const SizedBox());
+      String? draft;
+      ed.read().then((t) => draft = t).whenComplete(ed.dispose);
+      await tester.pump();
+      expect(draft, isNull, reason: 'waits for the engine');
+      fake.flushGate!.complete();
+      await tester.pump();
+      expect(draft, 'ni');
+      expect(fake.calls.last, 'detach');
     });
 
     rimeTest('turning the switch off drops the composition; on again while focused activates', (tester) async {
@@ -754,7 +774,8 @@ void main() {
       await tester.tap(find.byKey(const Key('rime-toggle')), kind: PointerDeviceKind.mouse);
       await tester.pump();
       expect(tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus, isTrue);
-      expect(fake.calls, ['select(1)', 'toggleBuiltin', 'clear']);
+      // The flush after the clear commits nothing; its answer ends the composition shown.
+      expect(fake.calls, ['select(1)', 'toggleBuiltin', 'clear', 'flush']);
     });
 
     rimeTest('a read while typing leaves the composition alone (the 1 s draft copy)', (tester) async {
