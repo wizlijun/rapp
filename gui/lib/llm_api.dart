@@ -196,6 +196,32 @@ class LlmApi {
     }
   }
 
+  /// `GET /v1/hotwords`: the words the speech recogniser should expect (names, products). Never throws; not set
+  /// up, a failure or an old gateway without it all give an empty list.
+  Future<List<String>> hotwords(LlmEndpoint e) async {
+    final base = e.base;
+    if (base == null || e.key.isEmpty) return const [];
+    final client = HttpClient()..connectionTimeout = probeTimeout;
+    try {
+      final req = await client.getUrl(Uri.parse('$base/v1/hotwords')).timeout(probeTimeout);
+      req.headers.set(HttpHeaders.authorizationHeader, 'Bearer ${e.key}');
+      final res = await req.close().timeout(probeTimeout);
+      final body = await res.transform(utf8.decoder).join().timeout(probeTimeout);
+      if (res.statusCode != 200) return const [];
+      final j = jsonDecode(body);
+      final data = j is Map ? j['data'] : null;
+      return [
+        if (data is List)
+          for (final w in data)
+            if (w is String && w.isNotEmpty) w,
+      ];
+    } catch (_) {
+      return const [];
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   /// `POST /v1/apps/<app>` streamed. [onText] gets the whole text so far after each chunk. Completes with
   /// [LlmDone] only when the gateway finished normally; a non-200, a dropped stream or no first byte within
   /// [firstByte] is [LlmFailed]. [think]: the app's think.* settings go up too (dictation: the model thinks first).

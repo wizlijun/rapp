@@ -56,6 +56,30 @@ void main() {
 
     bool authed(HttpRequest r) => r.headers.value(HttpHeaders.authorizationHeader) == 'Bearer $key';
 
+    test('hotwords reads the list with the key; anything wrong is an empty list', () async {
+      handler = (r) async {
+        expect(r.method, 'GET');
+        expect(r.uri.path, '/v1/hotwords');
+        if (!authed(r)) {
+          r.response.statusCode = 401;
+        } else {
+          r.response.write(jsonEncode({
+            'object': 'list',
+            'data': ['Dify', 3, 'Lovable', '']
+          }));
+        }
+        await r.response.close();
+      };
+      expect(await const LlmApi().hotwords(ep), ['Dify', 'Lovable']);
+      expect(await const LlmApi().hotwords(LlmEndpoint(url: ep.url, key: 'wrong')), isEmpty);
+      expect(await const LlmApi().hotwords(const LlmEndpoint()), isEmpty);
+      handler = (r) async {
+        r.response.statusCode = 404;
+        await r.response.close();
+      };
+      expect(await const LlmApi().hotwords(ep), isEmpty);
+    });
+
     Future<void> error(HttpRequest r, int status, String code) async {
       r.response
         ..statusCode = status

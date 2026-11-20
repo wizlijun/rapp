@@ -159,6 +159,8 @@ class MainState extends ChangeNotifier {
     history = InputHistory(data: () => data, log: _log);
     _writtenSub = recorder.written.listen(history.add);
     recorder.onSent = history.remember;
+    this.voice?.hotwords = voiceHotwords;
+    _refreshHotwords();
     resources.addListener(notifyListeners);
     _portSub = port?.events.listen(_onPortEvent);
     _termSub = termPort?.events.listen(_onPortEvent);
@@ -211,6 +213,7 @@ class MainState extends ChangeNotifier {
     final oldRoot = data.root;
     data = d;
     llm = LlmEndpoint.load(d.localDir);
+    _forgetHotwords();
     final loaded = loadWorkspace(d.sharedDir);
     workspace = loaded.workspace;
     if (loaded.problem != null) hint = loaded.problem!;
@@ -3269,12 +3272,47 @@ class MainState extends ChangeNotifier {
   void setLlm(LlmEndpoint e) {
     if (_disposed || e == llm) return;
     llm = e;
+    _forgetHotwords();
     try {
       e.save(data.localDir);
     } catch (x) {
       hint = 'LLM 接入点没有保存：${_fsReason(x)}';
     }
     notifyListeners();
+  }
+
+  // The gateway's hotwords (GET /v1/hotwords) for the speech recogniser: asked for at start, on a new endpoint,
+  // and at a recording once 10 minutes old. Never waited for: a recording takes the list as it is.
+  static const _hotwordsAge = Duration(minutes: 10);
+  List<String> _hotwords = const [];
+  DateTime? _hotwordsAt;
+  LlmEndpoint? _hotwordsAsking;
+
+  /// The words the next recording should expect; asks the gateway again in the background when the list is old.
+  List<String> voiceHotwords() {
+    _refreshHotwords();
+    return _hotwords;
+  }
+
+  void _forgetHotwords() {
+    _hotwords = const [];
+    _hotwordsAt = null;
+    _refreshHotwords();
+  }
+
+  void _refreshHotwords() {
+    final e = llm;
+    if (_disposed || !e.configured || _hotwordsAsking == e) return;
+    final at = _hotwordsAt;
+    if (at != null && _now().difference(at) < _hotwordsAge) return;
+    _hotwordsAsking = e;
+    llmApi.hotwords(e).then((w) {
+      if (_hotwordsAsking == e) _hotwordsAsking = null;
+      if (_disposed || e != llm) return;
+      _hotwords = w;
+      // An empty answer (a failure, an old gateway) is asked again at the next recording.
+      _hotwordsAt = w.isEmpty ? null : _now();
+    });
   }
 
   /// [prefs] changed outside a setter here (iOS 本机's 屏幕常亮): save them.

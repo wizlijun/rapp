@@ -6,6 +6,7 @@ import 'dart:ui' show Rect;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/embed/voice_input.dart';
 import 'package:rapp/embed/voice_ring.dart' show VoicePick;
 import 'package:rapp/embed/voice_tidy.dart';
 import 'package:rapp/hub_client.dart';
@@ -19,6 +20,14 @@ import '../fakes.dart';
 class _FakeApi extends LlmApi {
   final calls = <LlmCall>[];
   final thinks = <bool>[];
+  final hotwordAsks = <LlmEndpoint>[];
+  List<String> words = const ['Dify', 'Lovable'];
+
+  @override
+  Future<List<String>> hotwords(LlmEndpoint e) async {
+    hotwordAsks.add(e);
+    return words;
+  }
 
   @override
   LlmCall run(LlmEndpoint e, String app, String input,
@@ -91,7 +100,11 @@ void main() {
   // com.a open on 111 with a picture; a reconnect's open answers sid + 10. [endpoint]: the LLM 接入点 is set.
   // [held]: a reconnect's open is not answered but kept here, for the test to answer.
   Future<(MainState, FakeSessionPort)> start(
-      {bool endpoint = true, List<void Function()>? held, void Function(String)? log}) async {
+      {bool endpoint = true,
+      List<void Function()>? held,
+      void Function(String)? log,
+      DateTime Function()? clock,
+      VoiceInput? voice}) async {
     final t = FakeTransport();
     final port = FakeSessionPort();
     final h = HubClient(t);
@@ -102,7 +115,7 @@ void main() {
       ],
     });
     await pump();
-    final st = MainState(hub: h, data: d, prefs: UiPrefs(), port: port, llmApi: api, log: log)
+    final st = MainState(hub: h, data: d, prefs: UiPrefs(), port: port, llmApi: api, log: log, clock: clock, voice: voice)
       ..tidySettle = Duration.zero
       ..tidyRevealMax = Duration.zero;
     if (endpoint) st.setLlm(const LlmEndpoint(url: 'localhost:28001', key: 'k'));
@@ -175,6 +188,37 @@ void main() {
     st.tidyOf(sid).begin(long, VoicePick.send);
     expect(api.thinks, [false, true]);
     expect(jsonDecode(File('${d.deviceDir('dev1')}/gui.json').readAsStringSync())['voice_ai_think'], true);
+    st.dispose();
+  });
+
+  test('the hotwords come from the gateway, at most every 10 minutes, and go to each recording', () async {
+    var now = DateTime(2026, 11, 21, 9);
+    final voice = VoiceInput();
+    final (st, _) = await start(clock: () => now, voice: voice);
+    await until(() => st.voiceHotwords().isNotEmpty);
+    expect(voice.hotwords!(), ['Dify', 'Lovable']);
+    final asked = api.hotwordAsks.length;
+    st.voiceHotwords();
+    now = now.add(const Duration(minutes: 9));
+    st.voiceHotwords();
+    await pump();
+    expect(api.hotwordAsks.length, asked);
+    api.words = const ['Notion'];
+    now = now.add(const Duration(minutes: 2));
+    st.voiceHotwords();
+    await until(() => st.voiceHotwords().contains('Notion'));
+    expect(api.hotwordAsks.length, asked + 1);
+    st.dispose();
+  });
+
+  test('a new endpoint asks again at once; none set asks nothing', () async {
+    final (st, _) = await start(endpoint: false);
+    expect(st.voiceHotwords(), isEmpty);
+    await pump();
+    expect(api.hotwordAsks, isEmpty);
+    st.setLlm(const LlmEndpoint(url: 'localhost:28001', key: 'k2'));
+    await until(() => st.voiceHotwords().isNotEmpty);
+    expect(api.hotwordAsks.last.key, 'k2');
     st.dispose();
   });
 

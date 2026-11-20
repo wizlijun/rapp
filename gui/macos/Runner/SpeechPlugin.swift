@@ -84,7 +84,9 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
   func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
     case "start":
-      start(result)
+      // Words to expect (the gateway's hotwords): names and products said often and heard wrong.
+      let words = ((call.arguments as? [String: Any])?["hotwords"] as? [String])?.filter { !$0.isEmpty } ?? []
+      start(result, hotwords: Array(words.prefix(100)))
     case "stop":
       stop()
       result(nil)
@@ -99,7 +101,7 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
 
   // MARK: - Start, stop, end
 
-  private func start(_ result: @escaping FlutterResult) {
+  private func start(_ result: @escaping FlutterResult, hotwords: [String]) {
     generation += 1
     let gen = generation
     end()  // A second start cancels the first, silently: Dart has already moved on.
@@ -115,12 +117,12 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
     if #available(iOS 26, macOS 26, *) {
       Task { @MainActor [weak self] in
         guard let self else { return result("cancelled") }
-        if let reply = await self.startAnalyzer(gen) { return result(reply) }
+        if let reply = await self.startAnalyzer(gen, hotwords: hotwords) { return result(reply) }
         // No transcriber for this device or locale: the older recogniser may still work.
-        result(gen == self.generation ? self.startRecognizer() : "cancelled")
+        result(gen == self.generation ? self.startRecognizer(hotwords: hotwords) : "cancelled")
       }
     } else {
-      result(startRecognizer())
+      result(startRecognizer(hotwords: hotwords))
     }
   }
 
@@ -317,7 +319,7 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
   /// The reply for Dart, or nil when the transcriber cannot serve this device or locale.
   @available(iOS 26, macOS 26, *)
   @MainActor
-  private func startAnalyzer(_ gen: Int) async -> String? {
+  private func startAnalyzer(_ gen: Int, hotwords: [String]) async -> String? {
     guard SpeechTranscriber.isAvailable else { return nil }
     guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Self.locale) else { return nil }
     // .fastResults: words show while being said instead of after the transcriber gathers more context (user
@@ -369,6 +371,12 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
         self?.failed(run)
       }
     }
+    // The hotwords as the analysis context: the transcriber leans toward them. Without them it still runs.
+    if !hotwords.isEmpty {
+      let context = AnalysisContext()
+      context.contextualStrings[.general] = hotwords
+      try? await analyzer.setContext(context)
+    }
     do {
       try await analyzer.start(inputSequence: stream)
     } catch {
@@ -417,12 +425,13 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
 
   // MARK: - Below iOS 26: SFSpeechRecognizer
 
-  private func startRecognizer() -> String {
+  private func startRecognizer(hotwords: [String]) -> String {
     guard let recognizer = SFSpeechRecognizer(locale: Self.locale), recognizer.isAvailable else { return "unavailable" }
     let request = SFSpeechAudioBufferRecognitionRequest()
     request.shouldReportPartialResults = true
     // Dictation: partials come per word, not held for a whole query.
     request.taskHint = .dictation
+    request.contextualStrings = hotwords
     request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
     guard startAudio({ _ in { request.append($0) } }) else { return "unavailable" }
 

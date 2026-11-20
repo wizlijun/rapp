@@ -23,6 +23,27 @@ void main() {
 
   Future<Object?> ok(MethodCall c) async => c.method == 'start' ? 'ok' : null;
 
+  test('start hands the hotwords to native, none when there are none', () async {
+    final args = <Object?>[];
+    messenger.setMockMethodCallHandler(channel, (c) async {
+      if (c.method == 'start') args.add(c.arguments);
+      return c.method == 'start' ? 'ok' : null;
+    });
+    final v = VoiceInput();
+    addTearDown(v.dispose);
+    await v.start();
+    await v.cancel();
+    v.hotwords = () => ['Dify', 'Lovable'];
+    await v.start();
+    await v.cancel();
+    expect(args, [
+      null,
+      {
+        'hotwords': ['Dify', 'Lovable']
+      }
+    ]);
+  });
+
   test('start ok -> listening; partials update text', () async {
     mock(ok);
     final v = VoiceInput();

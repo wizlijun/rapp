@@ -1,5 +1,5 @@
 // The Dart side of the `rapp/speech` channel (gui/ios/Runner, a later task): hold-to-talk speech recognition.
-// Dart calls `start` / `stop` / `cancel`; native answers with `partial` / `final` {text} and `error` {code} calls.
+// Dart calls `start` ({hotwords} when there are any) / `stop` / `cancel`; native answers with `partial` / `final` {text} and `error` {code} calls.
 // `start` replies `cancelled` when a cancel or an interruption overtook it natively.
 import 'dart:async';
 
@@ -30,6 +30,9 @@ class VoiceInput extends ChangeNotifier {
 
   /// Fired once when [maxLength] passes while listening.
   VoidCallback? onMaxLength;
+
+  /// Words the recogniser should expect (Apple's contextual strings), asked for at each [start].
+  List<String> Function()? hotwords;
 
   /// Native `error` {code}; the phase has already gone idle.
   void Function(String code)? onError;
@@ -68,7 +71,8 @@ class VoiceInput extends ChangeNotifier {
     _set(phase: VoicePhase.starting, text: '');
     VoiceStart r;
     try {
-      r = switch (await _channel.invokeMethod<String>('start')) {
+      final words = hotwords?.call() ?? const <String>[];
+      r = switch (await _channel.invokeMethod<String>('start', words.isEmpty ? null : {'hotwords': words})) {
         'ok' => VoiceStart.ok,
         'asked' => VoiceStart.asked,
         'denied' => VoiceStart.denied,
