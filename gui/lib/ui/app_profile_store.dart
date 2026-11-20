@@ -162,6 +162,12 @@ class AppProfileStore extends ChangeNotifier {
     _commit();
   }
 
+  /// 「内」/「系」 in the app's writing panel (the candidate row's button, the settings page's switch).
+  void setRime(String appId, String appName, bool on) {
+    _target(appId, appName).rime = on;
+    _commit();
+  }
+
   /// Where the app's writing panel sits ([p], its bottom centre), or back to the default (null).
   /// Clearing what is not there writes nothing.
   void setComposerAt(String appId, String appName, InputPoint? p) {

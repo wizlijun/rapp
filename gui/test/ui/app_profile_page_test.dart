@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/app_profile.dart';
@@ -98,6 +99,33 @@ void main() {
     await tester.pumpAndSettle();
     expect(store.mine.single.focusPane, false);
     expect(File('${dir.path}/apps.json').readAsStringSync(), contains('"focusPane": false'));
+  });
+
+  testWidgets('the built-in IME switch is only on iOS; there it is on and dim until set, and saves', (tester) async {
+    final store = storeWith();
+    await open(tester, store, appId: _chrome);
+    expect(find.byKey(const Key('rime-profile-switch')), findsNothing);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    try {
+      await open(tester, store, appId: _chrome);
+      final muted = RappTokens.of(tester.element(find.text('高彩').first)).muted;
+      expect(find.text('接实体键盘时用内置输入法'), findsOneWidget);
+      expect(tester.widget<Text>(find.text('接实体键盘时用内置输入法')).style?.color, muted);
+      expect(tester.widget<Switch>(find.byKey(const Key('rime-profile-switch'))).value, isTrue);
+      await tester.ensureVisible(find.byKey(const Key('rime-profile-switch')));
+      await tester.tap(find.byKey(const Key('rime-profile-switch')));
+      await tester.pump();
+      expect(tester.widget<Text>(find.text('接实体键盘时用内置输入法')).style?.color, isNot(muted));
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.mine.single.rime, false);
+      expect(File('${dir.path}/apps.json').readAsStringSync(), contains('"rime": false'));
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 
   testWidgets('panel place row: default, then a saved place, then 回到默认', (tester) async {
