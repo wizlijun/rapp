@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../embed/tidy_mode.dart';
 import '../embed/voice_key_gate.dart';
 import 'tokens.dart';
 
@@ -39,8 +40,10 @@ class UiPrefs {
     this.voiceHotkey = VoiceHotkey.standard,
     this.voiceLanguageHintShown = false,
     Map<String, String>? termOpen,
+    Map<String, TidyMode>? voiceTidyMode,
     Map<String, String>? termApp,
   })  : termOpen = termOpen ?? {},
+        voiceTidyMode = voiceTidyMode ?? {},
         termApp = termApp ?? {};
 
   RappTheme theme;
@@ -104,6 +107,9 @@ class UiPrefs {
   /// 终端打开方式 (`term_open`): device id to `text` or `pixels`. Unknown values are dropped on load.
   final Map<String, String> termOpen;
 
+  /// 整理用途 the user chose per app (see [tidyModeKey]); an app not here follows [defaultTidyMode].
+  final Map<String, TidyMode> voiceTidyMode;
+
   String termOpenFor(String device) => termOpen[device] ?? 'text';
 
   /// 终端 app (`term_app`): device id to the terminal app a new text terminal opens in. Non-string values are
@@ -140,6 +146,7 @@ class UiPrefs {
       final vl = j['voice_language_hint_shown'];
       final to = j['term_open'];
       final ta = j['term_app'];
+      final tm = j['voice_tidy_mode'];
       return UiPrefs(
         theme: RappTheme.values.firstWhere(
           (t) => t.name == name,
@@ -166,6 +173,11 @@ class UiPrefs {
           (v) => v.name == fl,
           orElse: () => FirstLayer.device,
         ),
+        voiceTidyMode: {
+          if (tm is Map)
+            for (final e in tm.entries)
+              if (e.key is String && tidyModeFromJson(e.value) != null) e.key as String: tidyModeFromJson(e.value)!,
+        },
         termOpen: {
           if (to is Map)
             for (final e in to.entries)
@@ -206,6 +218,7 @@ class UiPrefs {
         'settings_folded': settingsFolded,
         'voice_hotkey': voiceHotkey.toJson(),
         'voice_language_hint_shown': voiceLanguageHintShown,
+        'voice_tidy_mode': {for (final e in voiceTidyMode.entries) e.key: e.value.json},
         'term_open': termOpen,
         'term_app': termApp,
       }),

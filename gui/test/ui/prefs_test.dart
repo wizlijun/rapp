@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/voice_key_gate.dart';
+import 'package:rapp/embed/tidy_mode.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/tokens.dart';
 
@@ -95,6 +96,15 @@ void main() {
     UiPrefs(termKeyRow: true).save(tmp.path);
     expect(File('${tmp.path}/gui.json').readAsStringSync(), contains('"term_key_row":true'));
     expect(UiPrefs.load(tmp.path).termKeyRow, isTrue);
+  });
+  test('voice_tidy_mode round-trips and drops bad values', () {
+    File('${tmp.path}/gui.json').writeAsStringSync('{"voice_tidy_mode":{"a":"chat","b":"loud"}}');
+    final p = UiPrefs.load(tmp.path);
+    expect(p.voiceTidyMode, {'a': TidyMode.chat});
+    p.save(tmp.path);
+    expect(File('${tmp.path}/gui.json').readAsStringSync(), contains('"voice_tidy_mode":{"a":"chat"}'));
+    File('${tmp.path}/gui.json').writeAsStringSync('{"voice_tidy_mode":"nope"}');
+    expect(UiPrefs.load(tmp.path).voiceTidyMode, isEmpty);
   });
   test('term_open round-trips and defaults to text', () {
     final p = UiPrefs()..termOpen['d1'] = 'pixels';

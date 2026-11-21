@@ -12,9 +12,9 @@ import 'package:flutter/foundation.dart';
 import '../llm_api.dart';
 import 'composer_model.dart' show VoiceAi, VoiceOrigin;
 import 'tidy_diff.dart';
+import 'tidy_mode.dart';
 import 'voice_ring.dart' show VoicePick;
 
-const tidyApp = 'dictation';
 const tidyNoResult = 'AI 没有给出结果';
 const tidyTooSlow = 'LLM 没有及时回应';
 
@@ -53,9 +53,13 @@ class VoiceTidy extends ChangeNotifier {
     this.learn,
     this.offerLife = const Duration(seconds: 8),
     bool Function()? think,
-  }) : think = think ?? _no;
+    TidyMode Function(Object sid)? mode,
+    this.setMode,
+  })  : think = think ?? _no,
+        mode = mode ?? _prompt;
 
   static bool _no() => false;
+  static TidyMode _prompt(Object _) => TidyMode.prompt;
 
   final LlmEndpoint Function() endpoint;
   final LlmApi api;
@@ -65,6 +69,12 @@ class VoiceTidy extends ChangeNotifier {
 
   /// 「AI 整理时先思考」, read at each start.
   final bool Function() think;
+
+  /// The mode the session's tidy runs in: by its app, or what the user chose for it.
+  final TidyMode Function(Object sid) mode;
+
+  /// Remembers the mode the user switched to.
+  final void Function(Object sid, TidyMode m)? setMode;
 
   /// Sends the text as a voice send; returns the hint to show, or null when it went.
   final String? Function(Object sid, String text, VoiceOrigin voice) send;
@@ -102,6 +112,10 @@ class VoiceTidy extends ChangeNotifier {
   static const _doneLife = Duration(milliseconds: 1500);
 
   static const _hintLife = Duration(seconds: 2);
+
+  /// The mode of the tidy that is running or last ran.
+  TidyMode get running => _running;
+  TidyMode _running = TidyMode.prompt;
 
   /// The session it belongs to; a reconnect's swap changes it ([moveTo]).
   Object sid;
@@ -295,7 +309,8 @@ class VoiceTidy extends ChangeNotifier {
     final key = _key(text);
     if (a != null && a.key == key && a.result is! LlmFailed) return;
     _dropAhead();
-    _ahead = _Ahead(key, _run(text.trim()));
+    final m = mode(sid);
+    _ahead = _Ahead(key, m, _run(text.trim(), m));
     _log('prefetch (${text.trim().runes.length} chars)');
   }
 
@@ -308,9 +323,9 @@ class VoiceTidy extends ChangeNotifier {
   }
 
   // The prefetch, when it is on [text] and has not failed; it is no longer a prefetch either way.
-  _Ahead? _takeAhead(String text) {
+  _Ahead? _takeAhead(String text, TidyMode m) {
     final a = _ahead;
-    if (a == null || a.key != _key(text) || a.result is LlmFailed || a.result is LlmCancelled) {
+    if (a == null || a.key != _key(text) || a.mode != m || a.result is LlmFailed || a.result is LlmCancelled) {
       _dropAhead();
       return null;
     }
@@ -319,9 +334,9 @@ class VoiceTidy extends ChangeNotifier {
   }
 
   // One call to the gateway: its words and its end go to the tidy when it is [_call], else to the prefetch.
-  LlmCall _run(String input) {
+  LlmCall _run(String input, TidyMode m) {
     late final LlmCall call;
-    call = api.run(endpoint(), tidyApp, input, think: think(), onText: (t) {
+    call = api.run(endpoint(), m.app, input, think: think(), onText: (t) {
       if (identical(_call, call)) {
         _aim(t);
       } else if (identical(_ahead?.call, call)) {
@@ -357,15 +372,11 @@ class VoiceTidy extends ChangeNotifier {
     _watch
       ..reset()
       ..start();
-    final ahead = _takeAhead(_original);
-    final call = ahead?.call ?? _run(_original);
+    _running = mode(sid);
+    final ahead = _takeAhead(_original, _running);
+    final call = ahead?.call ?? _run(_original, _running);
     _call = call;
-    _cap = Timer(overall, () {
-      if (!identical(_call, call)) return;
-      _stop();
-      _log('timeout');
-      _fail(tidyTooSlow);
-    });
+    _startCap(call);
     held?.call(sid, _original);
     _log('start (${_original.runes.length} chars${ahead == null ? '' : ', prefetched ${ahead.age.elapsedMilliseconds} ms ahead'})');
     notifyListeners();
@@ -375,6 +386,38 @@ class VoiceTidy extends ChangeNotifier {
       if (r != null) _ended(call, r);
     }
     return true;
+  }
+
+  void _startCap(LlmCall call) {
+    _cap?.cancel();
+    _cap = Timer(overall, () {
+      if (!identical(_call, call)) return;
+      _stop();
+      _log('timeout');
+      _fail(tidyTooSlow);
+    });
+  }
+
+  /// 点用途: tidies the original again in the other mode and remembers the choice. The call in flight, the
+  /// result, its changes and flips and an offer in the bubble are dropped; nothing is sent. While comparing
+  /// nothing changes.
+  void switchMode() {
+    if (_disposed || !_waiting || _comparing || _pick == VoicePick.edit && _phase == TidyPhase.ready) return;
+    final next = _running.other;
+    final inBubble = _offer?.inBubble ?? false; // a box from offerLearn is not the bubble's: it stays
+    _stop();
+    if (inBubble) _clearOffer();
+    _shown = '';
+    _resetReveal();
+    _running = next;
+    setMode?.call(sid, next);
+    _log('switch mode');
+    _phase = TidyPhase.tidying;
+    final call = _run(_original, next);
+    _call = call;
+    _startCap(call);
+    held?.call(sid, _original);
+    notifyListeners();
   }
 
   void _ended(LlmCall call, LlmResult r) {
@@ -478,7 +521,7 @@ class VoiceTidy extends ChangeNotifier {
     _carry = 0;
   }
 
-  VoiceAi _ai(String t) => VoiceAi(app: tidyApp, original: _original, result: t);
+  VoiceAi _ai(String t) => VoiceAi(app: _running.app, original: _original, result: t);
 
   void _sendResult() {
     final r = _result!;
@@ -654,7 +697,7 @@ class VoiceTidy extends ChangeNotifier {
     _note = null;
   }
 
-  void _log(String what) => log?.call('voice tidy: $tidyApp $what ${_watch.elapsedMilliseconds} ms');
+  void _log(String what) => log?.call('voice tidy: ${_running.app} $what ${_watch.elapsedMilliseconds} ms');
 
   @override
   void dispose() {
@@ -669,8 +712,9 @@ class VoiceTidy extends ChangeNotifier {
 
 /// A [VoiceTidy.prefetch]: the words it is on (as compared), its call, and what has come back so far.
 class _Ahead {
-  _Ahead(this.key, this.call);
+  _Ahead(this.key, this.mode, this.call);
   final String key;
+  final TidyMode mode;
   final LlmCall call;
   final age = Stopwatch()..start();
   String text = '';

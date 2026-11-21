@@ -12,6 +12,7 @@ import '../ui/tokens.dart';
 import 'voice_overlay.dart' show VoiceBubbleFrame, voiceBubbleTail, voiceTail;
 import 'voice_ring.dart' show VoicePick;
 import 'tidy_diff.dart';
+import 'tidy_mode.dart';
 import 'voice_tidy.dart';
 
 const _fade = Duration(milliseconds: 160);
@@ -261,6 +262,14 @@ class VoiceTidyCard extends StatelessWidget {
               child: Row(
                 children: [
                   Text(status, key: const Key('tidy-title'), style: small.copyWith(fontWeight: FontWeight.w600)),
+                  if (tidy.setMode != null) const SizedBox(width: 4),
+                  if (tidy.setMode != null)
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: tidy.switchMode,
+                      child: Text('· ${tidy.running.label} ⇄',
+                          key: const Key('tidy-mode'), style: small.copyWith(fontWeight: FontWeight.w600)),
+                    ),
                   const Spacer(),
                   if (ready && !held) _Drain(duration: tidy.settle, color: ink),
                 ],

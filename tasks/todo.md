@@ -829,3 +829,10 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] Rust workspace 1215 项、最新 Flutter 2745 项及原生窗口 smoke 通过。更多验证及平台边界见 `docs/superpowers/plans/2026-11-21-linux-nonvoice-parity.md`。
 - [x] 干净源码 `2cd87a69` 打包，验证产物及上传摘要；发布 Linux v0.15.9（保留 macOS Latest v0.15.8），网站快照更新并通过 8 项测试。
 - [ ] 完成本机管理员认证后重新安装与校验；完成 Cloudflare 登录后部署网站静态更新。
+
+## 语音记住改法 + 按用途整理（feat/voice-learn、feat/voice-mode，2026-11-21）实机检查
+- 实机检查：规格 `docs/superpowers/specs/2026-11-21-rapp-voice-learn-design.md` §8 第 1–12 条，macOS 一遍，iOS 上 1、2、7 再做一遍
+- [ ] 1–6：虚线词点回原话（停住、不自动发）；记住提示与「语音学到的词」；编辑路改词后记住并在下一次整理里生效；热词 10 分钟内刷新；note.md pending 确认；不记住则文件不变
+- [ ] 7–8：微信按「对人」、终端按「提示词」；气泡里点用途切换后重新整理，按应用记住；全局设置「恢复默认」
+- [ ] 9–11：网关停掉点「记住」不报错；整段重写不标虚线；密码框会话没有记住提示也没有 learn 请求
+- [ ] 12：iOS 上 1、2、7 各做一遍

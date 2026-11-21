@@ -41,6 +41,7 @@ import 'project_positions.dart';
 import '../llm_api.dart';
 import 'projects.dart';
 import 'resources_state.dart';
+import '../embed/tidy_mode.dart';
 import 'session_model.dart';
 import 'terms_entry.dart';
 import 'tokens.dart';
@@ -371,6 +372,23 @@ class MainState extends ChangeNotifier {
         api: llmApi,
         allowed: (s) => prefs.voiceAiTidy && llm.configured && !(remote[s]?.secureFocus ?? true),
         think: () => prefs.voiceAiThink,
+        mode: (s) {
+          for (final r in _records.values) {
+            if (r.sid == s || r.lastSid == s) {
+              return prefs.voiceTidyMode[tidyModeKey(r.app, r.id)] ?? defaultTidyMode(r.app, r.appName);
+            }
+          }
+          return TidyMode.prompt;
+        },
+        setMode: (s, m) {
+          for (final r in _records.values) {
+            if (r.sid == s || r.lastSid == s) {
+              prefs.voiceTidyMode[tidyModeKey(r.app, r.id)] = m;
+              _save();
+              return;
+            }
+          }
+        },
         learn: (s, items) {
           if (remote[s]?.secureFocus ?? true) return;
           unawaited(_learnItems(items));
@@ -3235,6 +3253,14 @@ class MainState extends ChangeNotifier {
   }
 
   /// 「AI 整理时先思考」 on or off; saved. The next tidy reads it.
+  /// 恢复默认: forgets every per-app 整理用途 the user chose.
+  void resetVoiceTidyModes() {
+    if (prefs.voiceTidyMode.isEmpty) return;
+    prefs.voiceTidyMode.clear();
+    _save();
+    notifyListeners();
+  }
+
   void setVoiceAiThink(bool v) {
     prefs.voiceAiThink = v;
     _save();

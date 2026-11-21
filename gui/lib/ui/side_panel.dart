@@ -262,6 +262,21 @@ class _Footer extends StatelessWidget {
             if (defaultTargetPlatform == TargetPlatform.macOS || defaultTargetPlatform == TargetPlatform.linux) _VoiceHotkeyRow(state: state, style: small, minHeight: rowHeight),
             toggle(const Key('voice-ai-tidy'), '长语音先让 AI 整理', state.prefs.voiceAiTidy, state.setVoiceAiTidy,
                 note: '超过 10 个字时，先用 LLM 接入点整理再发'),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                Expanded(
+                  child: Text('发给聊天软件的话按『对人』整理（保留口气，不分点），其余按『提示词』；在整理气泡上点用途可改',
+                      key: const Key('voice-tidy-mode-note'), style: small.copyWith(color: t.muted)),
+                ),
+                const SizedBox(width: 8),
+                RappButton.quiet(
+                  key: const Key('voice-tidy-mode-reset'),
+                  label: '恢复默认',
+                  onPressed: state.prefs.voiceTidyMode.isEmpty ? null : state.resetVoiceTidyModes,
+                ),
+              ]),
+            ),
             toggle(const Key('voice-ai-think'), 'AI 整理时先思考', state.prefs.voiceAiThink, state.setVoiceAiThink,
                 note: '新名词更准，出字慢 1～2 秒'),
             VoiceLearnedRow(state: state, style: small),

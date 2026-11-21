@@ -9,6 +9,7 @@ import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/tidy_diff.dart';
+import 'package:rapp/embed/tidy_mode.dart';
 import 'package:rapp/embed/voice_tidy.dart';
 import 'package:rapp/embed/voice_tidy_card.dart';
 import 'package:rapp/embed/stage_buttons.dart' show stageButtonsIn;
@@ -115,6 +116,20 @@ void main() {
   }
   bool filled(WidgetTester tester, String key) =>
       find.descendant(of: find.byKey(Key(key)), matching: find.byType(FilledButton)).evaluate().isNotEmpty;
+
+  macTest('the title shows 对人 ⇄ and a tap switches', (tester) async {
+    final s = await goLive(tester);
+    es.prefs.voiceTidyMode['Safari'] = TidyMode.chat;
+    await tester.pumpWidget(layer(s));
+    es.tidyOf(1).begin(long, VoicePick.send);
+    await tester.pump();
+    expect(text('tidy-mode'), '· 对人 ⇄');
+    await tester.tap(find.byKey(const Key('tidy-mode')));
+    await tester.pump();
+    expect(text('tidy-mode'), '· 提示词 ⇄');
+    expect(es.prefs.voiceTidyMode['Safari'], TidyMode.prompt);
+    expect(api.calls, hasLength(2));
+  });
 
   macTest('the card shows while tidying and its buttons act', (tester) async {
     final s = await goLive(tester);

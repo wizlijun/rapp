@@ -4,6 +4,7 @@ import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/composer_model.dart';
 import 'package:rapp/embed/tidy_diff.dart';
+import 'package:rapp/embed/tidy_mode.dart';
 import 'package:rapp/embed/voice_button.dart' show voiceBusy;
 import 'package:rapp/embed/voice_ring.dart' show VoicePick;
 import 'package:rapp/embed/voice_tidy.dart';
@@ -50,7 +51,15 @@ void main() {
   late List<List<LearnItem>> learned;
   String? sendHint;
 
+  var mode = TidyMode.prompt;
+  late List<TidyMode> setModes;
+
   VoiceTidy make({bool learn = true}) => VoiceTidy(
+        mode: (_) => mode,
+        setMode: (sid, m) {
+          mode = m;
+          setModes.add(m);
+        },
         sid: 1,
         endpoint: () => const LlmEndpoint(url: 'localhost:28001', key: 'k'),
         api: api,
@@ -74,6 +83,82 @@ void main() {
     logs = [];
     learned = [];
     sendHint = null;
+    mode = TidyMode.prompt;
+    setModes = [];
+  });
+
+  group('tidy mode (按用途整理)', () {
+    test("the tidy runs the session's mode", () {
+      fakeAsync((a) {
+        mode = TidyMode.chat;
+        final t = make();
+        t.begin(long, VoicePick.send);
+        expect(api.runs.single.$1, 'dictation-chat');
+        expect(t.running, TidyMode.chat);
+        api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+        out(a, t);
+        a.elapse(const Duration(milliseconds: 1500));
+        expect(sent.single.$3.ai!.app, 'dictation-chat');
+        expect(logs.any((l) => l.contains('dictation-chat')), isTrue);
+        t.dispose();
+      });
+    });
+
+    test('switchMode re-tidies the original with the other mode and saves it', () {
+      fakeAsync((a) {
+        mode = TidyMode.chat;
+        final t = make();
+        t.begin(long, VoicePick.send);
+        api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+        out(a, t);
+        expect(t.phase, TidyPhase.ready);
+        expect(t.changes, isNotEmpty);
+        t.switchMode();
+        expect(api.runs.last, ('dictation', long));
+        expect(setModes, [TidyMode.prompt]);
+        expect(t.running, TidyMode.prompt);
+        expect(t.changes, isEmpty);
+        expect(t.phase, TidyPhase.tidying);
+        expect(t.shown, '');
+        a.elapse(const Duration(seconds: 5));
+        expect(sent, isEmpty);
+        api.calls.last.complete(const LlmDone('明天下午三点开会'));
+        out(a, t);
+        a.elapse(const Duration(milliseconds: 1500));
+        expect(sent.single.$3.ai!.app, 'dictation');
+        t.dispose();
+      });
+    });
+
+    test('switchMode drops an in-bubble offer, keeps a standalone box, and restarts the timer', () {
+      fakeAsync((a) {
+        final t = make();
+        t.begin(long, VoicePick.send);
+        a.elapse(const Duration(seconds: 25));
+        t.offerLearn([LearnItem.preserve(observed: 'a', avoid: 'b', excerpt: 'c')]);
+        t.switchMode();
+        expect(t.offer, isNotNull); // standalone survives
+        a.elapse(const Duration(seconds: 25)); // 50 s since start, 25 s since the switch
+        expect(t.phase, TidyPhase.tidying);
+        a.elapse(const Duration(seconds: 6));
+        expect(sent.single.$2, long);
+        t.dispose();
+      });
+    });
+
+    test('a prefetch in the other mode is not used', () {
+      fakeAsync((a) {
+        final t = make();
+        t.prefetch(long);
+        expect(api.runs.single, ('dictation', long));
+        mode = TidyMode.chat;
+        t.begin(long, VoicePick.send);
+        expect(api.runs, hasLength(2));
+        expect(api.runs.last, ('dictation-chat', long));
+        expect(api.calls.first.cancelled, isTrue);
+        t.dispose();
+      });
+    });
   });
 
   group('prefetch (边说边整理)', () {
