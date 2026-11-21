@@ -333,7 +333,7 @@ final cases = <(String, String, String, List<(String before, String after)>)>[
   ('numbered lines', '第一买菜第二做饭', '1. 买菜\n2. 做饭', []),
   ('rewritten', '我觉得吧这个事情其实还是要再想一想比较好', '这件事需要再考虑。', []),
   ('more than 8', '一甲二乙三丙四丁五戊六己七庚八辛九壬', '一a二b三c四d五e六f七g八h九i', []),
-  ('a side over 12 chars', '他说的那个东西', '他说的是一个特别特别特别长的名字', []),
+  ('a side over 12 chars', '明天把它拿来', '明天把那个特别特别特别长名字的东西拿来', []),
 ];
 for (final (name, o, r, want) in cases) {
   test(name, () => expect(tidyChanges(o, r).map((c) => (c.before, c.after)).toList(), want));
@@ -354,7 +354,7 @@ test('editLearns: a fix on the AI\'s own change learns from the heard words', ()
 });
 test('editLearns: a fix on words the AI added is dropped', () => expect(editLearns('明天开会', '明天下午开会', '明天晚上开会'), isEmpty));
 test('editLearns: flipping the AI back to the heard words learns nothing', () => expect(editLearns('用拍森跑', '用Python跑', '用拍森跑'), isEmpty));
-test('editLearns: at most 3', () => expect(editLearns('甲乙丙丁戊己', '甲乙丙丁戊己', 'AB CD EF GH').length, lessThanOrEqualTo(3)));
+test('editLearns: at most 3', () => expect(editLearns('甲甲和你说乙乙和你说丙丙和你说丁丁和你说', '甲甲和你说乙乙和你说丙丙和你说丁丁和你说', 'AA和你说BB和你说CC和你说DD和你说').map((i) => i.observed), ['甲甲', '乙乙', '丙丙']));
 ```
 
 - [ ] **Step 2:** `flutter test test/embed/tidy_diff_test.dart` → FAIL（文件不存在）。
@@ -368,7 +368,7 @@ test('editLearns: at most 3', () => expect(editLearns('甲乙丙丁戊己', '甲
     对每个 hunk：
       norm(s) = s 去空白、去 \p{P}\p{S}、去 ^\d+[.、] 编号、转小写
       norm(before) == norm(after) → 丢（规则 2）
-      before 或 after 去空白和标点后为空 → 丢（规则 3）
+      norm(before) 或 norm(after) 为空 → 丢（规则 3；编号「1.」也算空，所以「第一」→「1. 」被丢）
       两侧都去掉首尾空白和标点（after 收缩时 [j0,j1) 跟着收），任一侧 > 12 字 → 丢（规则 4）
       after 不足 2 字：先向左、再向右并入相邻的相等字（不并空白和标点），before 同时并入同样的字（规则 5）
     扩展后重叠的相邻改动合并；结果 > 8 个 → return []（规则 6）
