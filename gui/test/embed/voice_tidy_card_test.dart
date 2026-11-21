@@ -524,6 +524,44 @@ void main() {
       expect(tester.hasRunningAnimations, isFalse);
     });
 
+    tidyTest('the card keeps its state while the box comes and goes', (tester) async {
+      await ready(tester, heard, ai);
+      final drain = tester.state(find.byType(TweenAnimationBuilder<double>).evaluate().isNotEmpty
+          ? find.descendant(of: find.byKey(const Key('tidy-card')), matching: find.byType(TweenAnimationBuilder<double>)).first
+          : find.byKey(const Key('tidy-drain')));
+      tidy.offerLearn(const [LearnItem.replace(observed: '拍森', output: 'Python', excerpt: 'x')]);
+      await tester.pump();
+      expect(find.byKey(const Key('learn-offer')), findsOneWidget);
+      expect(find.byKey(const Key('tidy-drain')), findsOneWidget);
+      expect(tester.state(find.descendant(of: find.byKey(const Key('tidy-card')), matching: find.byType(TweenAnimationBuilder<double>)).first), same(drain));
+      tidy.dismissOffer();
+      await tester.pump();
+      expect(find.byKey(const Key('learn-offer')), findsNothing);
+      expect(tester.state(find.descendant(of: find.byKey(const Key('tidy-card')), matching: find.byType(TweenAnimationBuilder<double>)).first), same(drain));
+    });
+
+    tidyTest('flipping change 0 first leaves change 1 marked on exactly its own text', (tester) async {
+      await ready(tester, heard, ai);
+      await tester.tapOnText(find.textRange.ofSubstring('Python').first);
+      await tester.pump();
+      expect(body(tester), '明天用拍森跑一下Hemory');
+      expect(dashed(tester), ['拍森', 'Hemory']);
+      await tester.tapOnText(find.textRange.ofSubstring('Hemory').first);
+      await tester.pump();
+      expect(tidy.flipped(1), isTrue);
+      expect(body(tester), heard);
+      expect(dashed(tester), ['拍森', '黑猫瑞']);
+    });
+
+    tidyTest('an emoji before a change does not shift its mark', (tester) async {
+      await ready(tester, '😀明天用拍森跑一下黑猫瑞', '😀明天用Python跑一下Hemory');
+      expect(dashed(tester), ['Python', 'Hemory']);
+      await tester.tapOnText(find.textRange.ofSubstring('Hemory').first);
+      await tester.pump();
+      expect(tidy.flipped(1), isTrue);
+      expect(dashed(tester), ['Python', '黑猫瑞']);
+    });
+
     tidyTest('with motion the offer fades in', (tester) async {
       await ready(tester, heard, ai);
       await tester.tapOnText(find.textRange.ofSubstring('Hemory'));

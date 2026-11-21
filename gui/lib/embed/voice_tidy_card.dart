@@ -32,6 +32,7 @@ class VoiceTidyCard extends StatelessWidget {
           // An offer in the bubble is drawn by the bubble; with no card (or one not on screen) it is a box.
           final box = offer != null && !(offer.inBubble && _showsBubble);
           final stand = AnimatedSwitcher(
+            key: const ValueKey('tidy-stand'),
             duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : _fade,
             // The card comes in at once (it takes the voice bubble's place); only its going fades.
             switchInCurve: const Threshold(0),
@@ -43,14 +44,14 @@ class VoiceTidyCard extends StatelessWidget {
               TidyPhase.tidying || TidyPhase.ready => _card(context),
             },
           );
-          if (!box) return stand;
-          // The box stands above the card (or alone).
+          // One shape always, so the card (its countdown, shimmer, caret) keeps its State while the box comes and goes;
+          // the box stands above the card (or alone).
           return Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: right ? CrossAxisAlignment.end : CrossAxisAlignment.start,
             children: [
-              _Appear(key: const ValueKey('learn-box'), child: _offerBox(context, offer)),
-              if (_showsBubble || tidy.phase == TidyPhase.note) const SizedBox(height: 8),
+              if (box) _Appear(key: const ValueKey('learn-box'), child: _offerBox(context, offer)),
+              if (box && (_showsBubble || tidy.phase == TidyPhase.note)) const SizedBox(height: 8),
               stand,
             ],
           );
