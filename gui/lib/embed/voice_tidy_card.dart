@@ -3,12 +3,15 @@
 // once they are done a send waits [VoiceTidy.settle], time to click 编辑 or 还原. 编辑 and 直接发送 / 发送 always
 // there. Before the first word a shimmer runs over the heard words; a caret follows the AI's (§8.2). A failure
 // just takes the card away (the original goes, §8.1 D3). After a send, a hint (if any) shows a while.
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 
 import '../ui/controls.dart';
 import '../ui/tokens.dart';
 import 'voice_overlay.dart' show VoiceBubbleFrame, voiceBubbleTail, voiceTail;
 import 'voice_ring.dart' show VoicePick;
+import 'tidy_diff.dart';
 import 'voice_tidy.dart';
 
 const _fade = Duration(milliseconds: 160);
@@ -24,19 +27,116 @@ class VoiceTidyCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ListenableBuilder(
         listenable: tidy,
-        builder: (context, _) => AnimatedSwitcher(
-          duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : _fade,
-          // The card comes in at once (it takes the voice bubble's place); only its going fades.
-          switchInCurve: const Threshold(0),
-          layoutBuilder: (current, previous) =>
-              Stack(alignment: Alignment.topLeft, children: [...previous, ?current]),
-          child: switch (tidy.phase) {
-            TidyPhase.idle => const SizedBox.shrink(key: ValueKey('tidy-idle')),
-            TidyPhase.note => _note(context),
-            TidyPhase.tidying || TidyPhase.ready => _card(context),
-          },
-        ),
+        builder: (context, _) {
+          final offer = tidy.offer;
+          // An offer in the bubble is drawn by the bubble; with no card (or one not on screen) it is a box.
+          final box = offer != null && !(offer.inBubble && _showsBubble);
+          final stand = AnimatedSwitcher(
+            duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : _fade,
+            // The card comes in at once (it takes the voice bubble's place); only its going fades.
+            switchInCurve: const Threshold(0),
+            layoutBuilder: (current, previous) =>
+                Stack(alignment: Alignment.topLeft, children: [...previous, ?current]),
+            child: switch (tidy.phase) {
+              TidyPhase.idle => const SizedBox.shrink(key: ValueKey('tidy-idle')),
+              TidyPhase.note => _note(context),
+              TidyPhase.tidying || TidyPhase.ready => _card(context),
+            },
+          );
+          if (!box) return stand;
+          // The box stands above the card (or alone).
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: right ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            children: [
+              _Appear(key: const ValueKey('learn-box'), child: _offerBox(context, offer)),
+              if (_showsBubble || tidy.phase == TidyPhase.note) const SizedBox(height: 8),
+              stand,
+            ],
+          );
+        },
       );
+
+  bool get _showsBubble => tidy.phase == TidyPhase.tidying || tidy.phase == TidyPhase.ready;
+
+  // The small box to remember what the AI changed (or what was flipped back); 8 s, [VoiceTidy.offerLife].
+  Widget _offerBox(BuildContext context, LearnOffer o) {
+    final t = RappTokens.of(context);
+    final small = TextStyle(color: t.text, fontSize: 13, height: 20 / 13);
+    return DecoratedBox(
+      key: const Key('learn-offer'),
+      decoration: t.floatBox(),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 300),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(o.done ? '已记住' : '记住这个改法？',
+                  key: o.done ? const Key('learn-done') : null,
+                  style: small.copyWith(fontWeight: FontWeight.w600)),
+              if (!o.done) ...[
+                for (var i = 0; i < o.items.length; i++)
+                  InkWell(
+                    onTap: () => tidy.togglePick(i),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Checkbox(
+                          key: Key('learn-item-$i'),
+                          value: o.picked.contains(i),
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          onChanged: (_) => tidy.togglePick(i),
+                        ),
+                        Flexible(child: Text(o.items[i].label, style: small, overflow: TextOverflow.ellipsis)),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    RappButton.secondary(key: const Key('learn-ignore'), label: '忽略', onPressed: tidy.dismissOffer),
+                    const SizedBox(width: 8),
+                    RappButton.primary(key: const Key('learn-remember'), label: '记住', onPressed: tidy.remember),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // The same question in the bubble, one line under the words: only for a flipped word ("别把「X」改成「Y」").
+  Widget _offerLine(LearnOffer o, TextStyle small, Color ink) {
+    final it = o.items.first;
+    return _Appear(
+      key: const ValueKey('learn-line'),
+      child: Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Row(
+          key: const Key('learn-offer'),
+          children: [
+            Expanded(
+              child: o.done
+                  ? Text('已记住', key: const Key('learn-done'), style: small.copyWith(fontWeight: FontWeight.w600))
+                  : Text('记住：别把「${it.observed}」改成「${it.avoid}」？',
+                      style: small, maxLines: 2, overflow: TextOverflow.ellipsis),
+            ),
+            if (!o.done) ...[
+              _LineAction(key: const Key('learn-ignore'), label: '忽略', color: ink.withValues(alpha: .75), onTap: tidy.dismissOffer),
+              _LineAction(key: const Key('learn-remember'), label: '记住', color: ink, onTap: tidy.remember, bold: true),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _note(BuildContext context) {
     final t = RappTokens.of(context);
@@ -96,13 +196,16 @@ class VoiceTidyCard extends StatelessWidget {
     final small = TextStyle(color: ink.withValues(alpha: .75), fontSize: 13, height: 20 / 13);
     // Done, and the last of its words is out: a send's wait starts now ([VoiceTidy.settle]).
     final ready = phase == TidyPhase.ready && !tidy.writing;
-    final status = !ready ? 'AI 整理中…' : (tidy.comparing ? '整理好了' : '整理好了，马上发送');
+    final held = tidy.comparing || tidy.stopped;
+    final status = !ready ? 'AI 整理中…' : (held ? '整理好了' : '整理好了，马上发送');
     // Before the first word the heard words are the body; then the AI's take it, the heard ones kept under them
     // in one faint line to compare (user 2026-11-20), the whole of them on a tap.
     final done = tidy.shown;
     final waiting = phase == TidyPhase.tidying && done.isEmpty;
+    // The words are all out: the changes can be marked, and flipped.
+    final marked = ready;
     final caret = (phase == TidyPhase.tidying && done.isNotEmpty) || tidy.writing;
-    return CustomPaint(
+    return _TapZone(builder: (bodyKey) => CustomPaint(
       key: const Key('tidy-bubble'),
       painter: VoiceBubbleFrame(
           fill: fill, border: border, dashed: tidy.pick == VoicePick.edit, right: right, radius: t.r, tail: tail),
@@ -116,8 +219,20 @@ class VoiceTidyCard extends StatelessWidget {
               builder: (context, c) {
                 final scaler = MediaQuery.textScalerOf(context);
                 // Before the first word the heard words stay readable, a little faint, a shimmer running over them.
-                if (waiting) return _Shimmer(child: _body('', tidy.original, style, style, c.maxWidth, scaler));
-                return _body(done, '', style, rest, c.maxWidth, scaler,
+                if (waiting) {
+                  return _Shimmer(child: _TidyBody(tidy: tidy, done: '', left: tidy.original, style: style, rest: style, width: c.maxWidth, scaler: scaler, ink: ink));
+                }
+                return _TidyBody(
+                    key: bodyKey,
+                    tidy: tidy,
+                    done: marked ? tidy.text : done,
+                    left: '',
+                    style: style,
+                    rest: rest,
+                    width: c.maxWidth,
+                    scaler: scaler,
+                    ink: ink,
+                    marks: marked,
                     caret: caret ? _Caret(color: ink, height: style.fontSize! * 1.1) : null);
               },
             ),
@@ -138,6 +253,7 @@ class VoiceTidyCard extends StatelessWidget {
                 ),
               ),
             ],
+            if (tidy.offer case final o? when o.inBubble) _offerLine(o, small, ink),
             const SizedBox(height: 8),
             SizedBox(
               height: 20,
@@ -145,35 +261,14 @@ class VoiceTidyCard extends StatelessWidget {
                 children: [
                   Text(status, key: const Key('tidy-title'), style: small.copyWith(fontWeight: FontWeight.w600)),
                   const Spacer(),
-                  if (ready && !tidy.comparing) _Drain(duration: tidy.settle, color: ink),
+                  if (ready && !held) _Drain(duration: tidy.settle, color: ink),
                 ],
               ),
             ),
           ],
         ),
       ),
-    );
-  }
-
-  // Up to 4 lines; a longer text shows its last 4, as the voice bubble does.
-  Widget _body(String done, String left, TextStyle style, TextStyle rest, double width, TextScaler scaler,
-      {Widget? caret}) {
-    final all = done + left;
-    final tail = voiceTail(all, style, width, scaler);
-    final from = tail.length == all.length ? 0 : all.length - (tail.length - 1);
-    final lead = from == 0 ? '' : '…';
-    final a = from < done.length ? done.substring(from) : '';
-    final b = from <= done.length ? left : left.substring(from - done.length);
-    return Text.rich(
-      TextSpan(children: [
-        TextSpan(text: lead + a),
-        if (caret != null) WidgetSpan(alignment: PlaceholderAlignment.middle, child: caret),
-        TextSpan(text: b, style: rest),
-      ]),
-      key: const Key('tidy-body'),
-      style: style,
-      maxLines: 4,
-    );
+    ));
   }
 }
 
@@ -293,4 +388,217 @@ class _Drain extends StatelessWidget {
           ),
         ),
       );
+}
+
+/// Fades in over [_fade]; at once with reduced motion.
+class _Appear extends StatelessWidget {
+  const _Appear({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: 1),
+        duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : _fade,
+        builder: (context, v, child) => Opacity(opacity: v, child: child),
+        child: child,
+      );
+}
+
+/// A text action on the bubble's offer line, with room enough to hit.
+class _LineAction extends StatelessWidget {
+  const _LineAction({super.key, required this.label, required this.color, required this.onTap, this.bold = false});
+
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+  final bool bold;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Text(label,
+              style: TextStyle(color: color, fontSize: 13, height: 20 / 13, fontWeight: bold ? FontWeight.w600 : null)),
+        ),
+      );
+}
+
+/// The body: up to 4 lines, a longer text shows its last 4 as the voice bubble does. With [marks], each of the
+/// AI's changes that is still in view is underlined dashed and a tap on it (or near it) flips it.
+///
+/// The text is [done] (rune offsets of [VoiceTidy.changes] shifted for each flip before them, [_ranges]) and then
+/// [left]. A tap is not a `TapGestureRecognizer` on the span: a word is a few pixels wide, so the whole bubble ([_TapZone])
+/// takes the tap and asks the paragraph where each mark is, widened (6 px each side; at least 44 px tall on iOS, 24
+/// elsewhere), the nearest centre wins.
+/// The bubble's tap: the padding around the words is part of it, so a tap just above a line still reaches a mark.
+class _TapZone extends StatefulWidget {
+  const _TapZone({required this.builder});
+
+  final Widget Function(Key bodyKey) builder;
+
+  @override
+  State<_TapZone> createState() => _TapZoneState();
+}
+
+class _TapZoneState extends State<_TapZone> {
+  final _body = GlobalKey<_TidyBodyState>();
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTapUp: (d) => _body.currentState?.tap(d.globalPosition),
+        child: widget.builder(_body),
+      );
+}
+
+class _TidyBody extends StatefulWidget {
+  const _TidyBody({
+    super.key,
+    required this.tidy,
+    required this.done,
+    required this.left,
+    required this.style,
+    required this.rest,
+    required this.width,
+    required this.scaler,
+    required this.ink,
+    this.marks = false,
+    this.caret,
+  });
+
+  final VoiceTidy tidy;
+  final String done, left;
+  final TextStyle style, rest;
+  final double width;
+  final TextScaler scaler;
+  final Color ink;
+  final bool marks;
+  final Widget? caret;
+
+  @override
+  State<_TidyBody> createState() => _TidyBodyState();
+}
+
+class _TidyBodyState extends State<_TidyBody> {
+  final _key = GlobalKey();
+  // What is marked right now: the change's index and its UTF-16 range in the paragraph's text.
+  var _marked = <(int, int, int)>[];
+
+  /// Each change's rune range in the current text: the later ones shift by what the flips before them changed.
+  static List<(int, int)> ranges(List<TidyChange> changes, bool Function(int) flipped) {
+    final out = <(int, int)>[];
+    var shift = 0;
+    for (var i = 0; i < changes.length; i++) {
+      final c = changes[i];
+      final start = c.start + shift;
+      final len = flipped(i) ? c.before.runes.length : c.end - c.start;
+      out.add((start, start + len));
+      shift += len - (c.end - c.start);
+    }
+    return out;
+  }
+
+  RenderParagraph? _paragraph() {
+    RenderParagraph? find(RenderObject r) {
+      if (r is RenderParagraph) return r;
+      RenderParagraph? out;
+      r.visitChildren((c) => out ??= find(c));
+      return out;
+    }
+
+    final ro = _key.currentContext?.findRenderObject();
+    return ro == null ? null : find(ro);
+  }
+
+  /// A tap at [global] flips the nearest mark within reach, if any.
+  void tap(Offset global) {
+    final para = _paragraph();
+    if (para == null || !para.attached) return;
+    final p = para.globalToLocal(global);
+    final minH = defaultTargetPlatform == TargetPlatform.iOS ? 44.0 : 24.0;
+    int? best;
+    var bestD = double.infinity;
+    for (final (i, a, b) in _marked) {
+      for (final box in para.getBoxesForSelection(TextSelection(baseOffset: a, extentOffset: b))) {
+        var r = box.toRect();
+        r = Rect.fromLTRB(r.left - 6, r.top, r.right + 6, r.bottom);
+        if (r.height < minH) r = Rect.fromCenter(center: r.center, width: r.width, height: minH);
+        if (!r.contains(p)) continue;
+        final d = (r.center - p).distanceSquared;
+        if (d < bestD) {
+          bestD = d;
+          best = i;
+        }
+      }
+    }
+    if (best != null) widget.tidy.flip(best);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final w = widget;
+    final all = w.done + w.left;
+    final tail = voiceTail(all, w.style, w.width, w.scaler);
+    final cut = tail.length != all.length;
+    final from = cut ? all.length - (tail.length - 1) : 0; // UTF-16 index in [all]
+    final fromRune = all.substring(0, from).runes.length;
+    final runes = all.runes.toList();
+    final doneRunes = w.done.runes.length;
+    final lead = cut ? '…' : '';
+    final children = <InlineSpan>[];
+    final marked = <(int, int, int)>[];
+    var len = lead.length; // UTF-16 length of the plain text built so far
+    var at = fromRune; // rune offset of what has been emitted
+    String run(int a, int b) => String.fromCharCodes(runes.sublist(a, b));
+    void plain(int upto) {
+      // Until [upto], the part in [done] plain, the part in [left] faint.
+      final mid = upto < doneRunes ? upto : doneRunes;
+      if (mid > at) {
+        final t = run(at, mid);
+        children.add(TextSpan(text: (children.isEmpty ? lead : '') + t));
+        len += t.length;
+        at = mid;
+      }
+    }
+
+    if (w.marks) {
+      final rs = ranges(w.tidy.changes, w.tidy.flipped);
+      for (var i = 0; i < rs.length; i++) {
+        final (a, b) = rs[i];
+        // A change cut off by the tail (or only partly in view) is not marked.
+        if (a < fromRune || b > doneRunes || a >= b) continue;
+        plain(a);
+        final t = run(a, b);
+        if (children.isEmpty && lead.isNotEmpty) children.add(TextSpan(text: lead));
+        children.add(TextSpan(
+          text: t,
+          style: TextStyle(
+            decoration: TextDecoration.underline,
+            decorationStyle: TextDecorationStyle.dashed,
+            decorationColor: w.ink,
+          ),
+        ));
+        marked.add((i, len, len + t.length));
+        len += t.length;
+        at = b;
+      }
+    }
+    plain(doneRunes);
+    if (children.isEmpty && lead.isNotEmpty) children.add(TextSpan(text: lead));
+    if (w.caret != null) children.add(WidgetSpan(alignment: PlaceholderAlignment.middle, child: w.caret!));
+    if (w.left.isNotEmpty || w.done.isEmpty) {
+      final b = run(at > doneRunes ? at : doneRunes, runes.length);
+      children.add(TextSpan(text: b, style: w.rest));
+    }
+    _marked = marked;
+    final text = Text.rich(
+      TextSpan(children: children),
+      key: const Key('tidy-body'),
+      style: w.style,
+      maxLines: 4,
+    );
+    return KeyedSubtree(key: _key, child: text);
+  }
 }

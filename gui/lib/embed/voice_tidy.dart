@@ -237,7 +237,10 @@ class VoiceTidy extends ChangeNotifier {
     _log('remember');
     o.done = true;
     _offerTimer?.cancel();
-    _offerTimer = Timer(_doneLife, _clearOffer);
+    _offerTimer = Timer(_doneLife, () {
+      _clearOffer();
+      notifyListeners(); // the 已记住 goes off the screen too
+    });
     notifyListeners();
   }
 
