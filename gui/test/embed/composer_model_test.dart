@@ -182,6 +182,26 @@ void main() {
     expect(next.value, '刚完成的组字');
   });
 
+  test('a panel send with pendingAi tells onAiSent the sent text', () async {
+    const ai = VoiceAi(app: 'dictation', original: 'a', result: 'b');
+    final got = <(VoiceAi, String)>[];
+    m.onAiSent = (a, t) => got.add((a, t));
+    m.pendingAi = ai;
+    ed.value = 'edited';
+    await m.submit();
+    expect(got, [(ai, 'edited')]);
+  });
+
+  test('a send without pendingAi does not', () async {
+    var n = 0;
+    m.onAiSent = (a, t) => n++;
+    ed.value = 'plain';
+    await m.submit();
+    m.pendingAi = const VoiceAi(app: 'dictation', original: 'a', result: 'b');
+    await m.submit(); // empty: nothing sent
+    expect(n, 0);
+  });
+
   test('submit takes the text with its blocks where they stand; the editor is empty', () async {
     m.apply(const PasteResult(blocks: [BlockChip(1, '图片 #1')]));
     ed.value += 'hi';

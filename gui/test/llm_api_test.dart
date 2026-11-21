@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/tidy_diff.dart';
 import 'package:rapp/llm_api.dart';
 
 void main() {
@@ -78,6 +79,87 @@ void main() {
         await r.response.close();
       };
       expect(await const LlmApi().hotwords(ep), isEmpty);
+    });
+
+    const item = LearnItem.replace(observed: '黑猫瑞', output: 'Hemory', excerpt: '我们用黑猫瑞');
+
+    test('learn posts the item as JSON with the key', () async {
+      Map<String, Object?>? got;
+      String? auth, method, path;
+      handler = (r) async {
+        method = r.method;
+        path = r.uri.path;
+        auth = r.headers.value(HttpHeaders.authorizationHeader);
+        got = (jsonDecode(await utf8.decoder.bind(r).join()) as Map).cast<String, Object?>();
+        r.response.write(jsonEncode({'id': 'l1', 'object': 'learned'}));
+        await r.response.close();
+      };
+      expect(await const LlmApi().learn(ep, item), isTrue);
+      expect(method, 'POST');
+      expect(path, '/v1/vocabulary/learn');
+      expect(auth, 'Bearer k'.replaceFirst('k', key));
+      expect(got, item.toJson());
+    });
+
+    test('learn is false on 500 and on no server', () async {
+      handler = (r) async {
+        r.response.statusCode = 500;
+        await r.response.close();
+      };
+      expect(await const LlmApi().learn(ep, item), isFalse);
+      expect(await const LlmApi().learn(const LlmEndpoint(), item), isFalse);
+      await server.close(force: true);
+      expect(await const LlmApi().learn(ep, item), isFalse);
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0); // for tearDown
+    });
+
+    test('learned parses the list', () async {
+      handler = (r) async {
+        expect(r.method, 'GET');
+        expect(r.uri.path, '/v1/vocabulary/learned');
+        expect(authed(r), isTrue);
+        r.response.write(jsonEncode({
+          'object': 'list',
+          'data': [
+            {'id': 'a', 'object': 'learned', 'action': 'replace', 'observed': '黑猫瑞', 'output': 'Hemory'},
+            {'id': 'b', 'object': 'learned', 'action': 'preserve', 'observed': '嗯', 'output': null},
+            {'id': 'c', 'action': 'weird', 'observed': 'x'},
+            7,
+          ]
+        }));
+        await r.response.close();
+      };
+      final l = (await const LlmApi().learned(ep))!;
+      expect([for (final e in l) e.id], ['a', 'b']);
+      expect(l[0].action, LearnAction.replace);
+      expect(l[0].label, '黑猫瑞 → Hemory');
+      expect(l[1].action, LearnAction.preserve);
+      expect(l[1].label, '不改：嗯');
+    });
+
+    test('learned is null on 404', () async {
+      handler = (r) async {
+        r.response.statusCode = 404;
+        await r.response.close();
+      };
+      expect(await const LlmApi().learned(ep), isNull);
+      expect(await const LlmApi().learned(const LlmEndpoint()), isNull);
+    });
+
+    test('forget sends DELETE to the id', () async {
+      String? method, path;
+      var status = 200;
+      handler = (r) async {
+        method = r.method;
+        path = r.uri.path;
+        r.response.statusCode = status;
+        await r.response.close();
+      };
+      expect(await const LlmApi().forget(ep, 'abc'), isTrue);
+      expect(method, 'DELETE');
+      expect(path, '/v1/vocabulary/learned/abc');
+      status = 404;
+      expect(await const LlmApi().forget(ep, 'abc'), isFalse);
     });
 
     Future<void> error(HttpRequest r, int status, String code) async {

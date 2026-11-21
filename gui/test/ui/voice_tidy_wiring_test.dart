@@ -6,6 +6,7 @@ import 'dart:ui' show Rect;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/embed/tidy_diff.dart';
 import 'package:rapp/embed/voice_input.dart';
 import 'package:rapp/embed/voice_ring.dart' show VoicePick;
 import 'package:rapp/embed/voice_tidy.dart';
@@ -22,6 +23,14 @@ class _FakeApi extends LlmApi {
   final thinks = <bool>[];
   final hotwordAsks = <LlmEndpoint>[];
   List<String> words = const ['Dify', 'Lovable'];
+  final learns = <LearnItem>[];
+  bool learnOk = true;
+
+  @override
+  Future<bool> learn(LlmEndpoint e, LearnItem item) async {
+    learns.add(item);
+    return learnOk;
+  }
 
   @override
   Future<List<String>> hotwords(LlmEndpoint e) async {
@@ -400,6 +409,48 @@ void main() {
     await rs.composer.attach(e);
     expect(e.value, tidied);
     expect(e.undoTo, long.trim());
+    st.dispose();
+  });
+
+  // The edit pick, then the user fixes a word in the panel and sends.
+  Future<(MainState, FakeSessionPort)> edited({bool secure = false}) async {
+    final (st, port) = await start();
+    final rs = st.currentRemote!;
+    st.tidyOf(sid).begin('嗯那个我们明天用黑猫瑞开会', VoicePick.edit);
+    api.calls.single.complete(const LlmDone('我们明天用黑猫瑞开会。'));
+    await pump();
+    final e = FakeEditor();
+    await rs.composer.attach(e);
+    e.value = '我们明天用Hemory开会。';
+    if (secure) port.emit(SecureFocusEvent(sid, true));
+    await rs.composer.submit();
+    return (st, port);
+  }
+
+  test('an edited AI text offers what it teaches', () async {
+    final (st, _) = await edited();
+    expect(st.tidyOf(sid).offer!.items.single.label, '黑猫瑞 → Hemory');
+    st.dispose();
+  });
+
+  test('remember posts and forgets the hotwords', () async {
+    final (st, _) = await edited();
+    await until(() => st.voiceHotwords().isNotEmpty);
+    final asked = api.hotwordAsks.length;
+    st.tidyOf(sid).remember();
+    await until(() => api.learns.isNotEmpty);
+    expect(api.learns.single.label, '黑猫瑞 → Hemory');
+    await pump();
+    st.voiceHotwords();
+    await until(() => api.hotwordAsks.length > asked);
+    expect(api.hotwordAsks.length, asked + 1);
+    st.dispose();
+  });
+
+  test('a password field gets no offer and posts nothing', () async {
+    final (st, _) = await edited(secure: true);
+    expect(st.tidyOf(sid).offer, isNull);
+    expect(api.learns, isEmpty);
     st.dispose();
   });
 
