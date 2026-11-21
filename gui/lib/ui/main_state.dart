@@ -385,6 +385,7 @@ class MainState extends ChangeNotifier {
             if (r.sid == s || r.lastSid == s) {
               prefs.voiceTidyMode[tidyModeKey(r.app, r.id)] = m;
               _save();
+              notifyListeners();
               return;
             }
           }

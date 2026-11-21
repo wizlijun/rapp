@@ -920,6 +920,24 @@ void main() {
       });
     });
 
+    test('a flip on a long original offers preserve with a clipped excerpt', () {
+      fakeAsync((a) {
+        final pad = '天地玄黄' * 100;
+        final h = '$pad拍森跑一下$pad', r = '${pad}Python跑一下$pad';
+        final t = make(learn: true);
+        t.begin(h, VoicePick.send);
+        api.calls.single.complete(LlmDone(r));
+        out(a, t);
+        t.flip(0);
+        final item = t.offer!.items.single;
+        expect(item.observed, '拍森');
+        expect(item.excerpt.runes.length, lessThanOrEqualTo(2000));
+        expect(item.excerpt.runes.length, lessThan(h.runes.length));
+        expect(item.excerpt, contains('拍森'));
+        t.dispose();
+      });
+    });
+
     test('flipping back to the heard words offers preserve; flipping again takes it away', () {
       fakeAsync((a) {
         final t = ready(a);

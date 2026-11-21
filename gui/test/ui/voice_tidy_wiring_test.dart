@@ -178,6 +178,18 @@ void main() {
     st.dispose();
   });
 
+  test('switching the mode notifies listeners at once', () async {
+    final (st, _) = await start();
+    st.tidyOf(sid).begin(long, VoicePick.send);
+    var n = 0;
+    st.addListener(() => n++);
+    expect(st.tidyOf(sid).canSwitch, isTrue);
+    st.tidyOf(sid).switchMode();
+    expect(st.prefs.voiceTidyMode, isNotEmpty);
+    expect(n, greaterThan(0));
+    st.dispose();
+  });
+
   test('the switch off skips the tidy', () async {
     final (st, _) = await start();
     expect(st.prefs.voiceAiTidy, isTrue);

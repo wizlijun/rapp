@@ -74,6 +74,20 @@ bool _isSpaceOrPunct(int rune) => _spaceOrPunct.hasMatch(String.fromCharCode(run
 
 String _norm(String s) => s.replaceFirst(_numbering, '').replaceAll(_dropChars, '').toLowerCase();
 
+/// The gateway refuses an excerpt over 2000 code points, so a long text is cut to about [window] runes either
+/// side of [observed] (by runes: a surrogate pair is never split). The cut always holds [observed].
+String learnExcerpt(String text, String observed, {int window = 200}) {
+  final r = text.runes.toList();
+  if (r.length <= 2 * window + observed.runes.length) return text;
+  final at = text.indexOf(observed);
+  if (at < 0) return text;
+  final from = text.substring(0, at).runes.length;
+  final to = from + observed.runes.length;
+  final lo = from - window < 0 ? 0 : from - window;
+  final hi = to + window > r.length ? r.length : to + window;
+  return String.fromCharCodes(r.sublist(lo, hi));
+}
+
 String _str(List<int> r, int from, int to) => String.fromCharCodes(r.sublist(from, to));
 
 class _Hunk {
@@ -230,7 +244,7 @@ List<LearnItem> editLearns(String original, String result, String sent) {
     final observed = _str(o, lo, hi + 1).trim();
     final output = _str(s, sFrom, sTo).trim();
     if (observed.isEmpty || observed == output || observed.runes.length > _maxSide) continue;
-    out.add(LearnItem.replace(observed: observed, output: output, excerpt: original));
+    out.add(LearnItem.replace(observed: observed, output: output, excerpt: learnExcerpt(original, observed)));
     if (out.length == _maxLearns) break;
   }
   return out;

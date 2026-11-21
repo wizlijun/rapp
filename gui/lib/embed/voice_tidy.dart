@@ -217,7 +217,7 @@ class VoiceTidy extends ChangeNotifier {
       final c = _changes[i];
       if (learn != null) {
         _setOffer(
-          LearnOffer(items: [LearnItem.preserve(observed: c.before, avoid: c.after, excerpt: _original)], inBubble: true),
+          LearnOffer(items: [LearnItem.preserve(observed: c.before, avoid: c.after, excerpt: learnExcerpt(_original, c.before))], inBubble: true),
           null,
         );
         _offerFor = i;

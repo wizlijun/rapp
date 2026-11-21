@@ -72,4 +72,34 @@ void main() {
     expect(p.toJson(), {'action': 'preserve', 'observed': '黑猫瑞', 'avoid': 'Hemory', 'excerpt': 'x'});
     expect(p.label, '不改：黑猫瑞');
   });
+
+  group('learn excerpt is clipped around the word', () {
+    String pad(int n) => List.generate(n, (i) => '天地玄黄宇宙洪荒'[i % 8]).join();
+
+    test('a 1900 rune original gives a clipped excerpt that holds observed', () {
+      final o = '${pad(1500)}拍森${pad(398)}', r = '${pad(1500)}Python${pad(398)}';
+      expect(o.runes.length, 1900); // the aligner refuses far more than ~2000 runes
+      final item = editLearns(o, o, r).single;
+      expect(item.observed, '拍森');
+      expect(item.excerpt.runes.length, lessThanOrEqualTo(402));
+      expect(item.excerpt.runes.length, lessThanOrEqualTo(2000));
+      expect(item.excerpt, contains('拍森'));
+    });
+
+    test('a short original keeps its full excerpt', () {
+      expect(editLearns('明天用拍森跑', '明天用拍森跑', '明天用Python跑').single.excerpt, '明天用拍森跑');
+    });
+
+    test('an emoji at the window edge is not split', () {
+      final text = '${'😀' * 200}拍森${'😀' * 200}x';
+      for (final w in [199, 200, 201]) {
+        final e = learnExcerpt(text, '拍森', window: w);
+        expect(e, contains('拍森'));
+        expect(e.runes.every((c) => c == 0x1F600 || '拍森x'.runes.contains(c)), isTrue);
+      }
+      final e = learnExcerpt('${'😀' * 300}拍森${'😀' * 300}', '拍森');
+      expect(e.runes.length, 402);
+      expect(e.runes.where((c) => c == 0x1F600).length, 400);
+    });
+  });
 }
