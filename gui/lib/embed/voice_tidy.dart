@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 
 import '../llm_api.dart';
 import 'composer_model.dart' show VoiceAi, VoiceOrigin;
+import 'tidy_diff.dart';
 import 'voice_ring.dart' show VoicePick;
 
 const tidyApp = 'dictation';
@@ -19,6 +20,18 @@ const tidyTooSlow = 'LLM 没有及时回应';
 
 /// tidying: the AI is writing; ready: it is done and the send waits [VoiceTidy.settle]; note: a hint after the end.
 enum TidyPhase { idle, tidying, ready, note }
+
+/// A question "remember this correction?" next to the tidy: [items] are what would be learned, [picked] the
+/// indexes that will be. [inBubble]: it sits in the bubble while it is on screen; otherwise it is the small box
+/// that lives [VoiceTidy.offerLife]. [done]: it was answered ("记住了").
+class LearnOffer {
+  LearnOffer({required this.items, required this.inBubble, Set<int>? picked, this.done = false})
+      : picked = picked ?? {for (var i = 0; i < items.length; i++) i};
+  final List<LearnItem> items;
+  final bool inBubble;
+  final Set<int> picked;
+  bool done;
+}
 
 /// One session's tidy: at most one runs at a time. The card shows [phase]; the callbacks do the sending and the
 /// keeping in whatever session [sid] is now (a reconnect moves it, [moveTo]).
@@ -37,6 +50,8 @@ class VoiceTidy extends ChangeNotifier {
     this.revealMax = const Duration(milliseconds: 600),
     this.log,
     this.held,
+    this.learn,
+    this.offerLife = const Duration(seconds: 8),
     bool Function()? think,
   }) : think = think ?? _no;
 
@@ -78,6 +93,14 @@ class VoiceTidy extends ChangeNotifier {
   /// leaves it held, for the next open to put back.
   final void Function(Object sid, String? original)? held;
 
+  /// Keeps what the user taught: null for a session that must not learn (a password field), and then no offer
+  /// ever shows.
+  final void Function(Object sid, List<LearnItem> items)? learn;
+
+  /// How long an offer outside the bubble stays.
+  final Duration offerLife;
+  static const _doneLife = Duration(milliseconds: 1500);
+
   static const _hintLife = Duration(seconds: 2);
 
   /// The session it belongs to; a reconnect's swap changes it ([moveTo]).
@@ -107,6 +130,44 @@ class VoiceTidy extends ChangeNotifier {
   bool get comparing => _comparing;
   bool _comparing = false;
 
+  /// The words the AI changed, each one can flip back to what was heard. Only a done send has them.
+  List<TidyChange> get changes => _changes;
+  List<TidyChange> _changes = const [];
+  final _flips = <int>{};
+
+  bool flipped(int i) => _flips.contains(i);
+
+  /// A flip holds the send for good, like [comparing].
+  bool get stopped => _stopped;
+  bool _stopped = false;
+
+  /// The AI's text with each flipped change back to the heard words; what goes out and what [editNow] puts in
+  /// the panel. Empty before the result.
+  String get text {
+    final r = _result;
+    if (r == null) return '';
+    if (_flips.isEmpty) return r;
+    final runes = r.runes.toList();
+    final b = StringBuffer();
+    var at = 0;
+    for (var i = 0; i < _changes.length; i++) {
+      final c = _changes[i];
+      if (!_flips.contains(i)) continue;
+      b
+        ..write(String.fromCharCodes(runes.sublist(at, c.start)))
+        ..write(c.before);
+      at = c.end;
+    }
+    b.write(String.fromCharCodes(runes.sublist(at)));
+    return b.toString();
+  }
+
+  /// The question to remember a correction, if any.
+  LearnOffer? get offer => _offer;
+  LearnOffer? _offer;
+  int? _offerFor; // the change an in-bubble offer is about
+  Timer? _offerTimer;
+
   /// True while arrived words are still coming out.
   bool get writing => _n < _target.length;
 
@@ -126,6 +187,93 @@ class VoiceTidy extends ChangeNotifier {
   Timer? _noteTimer;
   final _watch = Stopwatch();
   bool _disposed = false;
+
+  /// Flips change [i] between the AI's words and the heard words, and holds the send. Only on a finished text.
+  void flip(int i) {
+    if (_phase != TidyPhase.ready || writing || i < 0 || i >= _changes.length) return;
+    _stopped = true;
+    _settleTimer?.cancel();
+    _settleTimer = null;
+    if (_flips.remove(i)) {
+      _log('flip back');
+      if (_offerFor == i && _offer != null && _offer!.inBubble) _clearOffer();
+    } else {
+      _flips.add(i);
+      _log('flip');
+      final c = _changes[i];
+      if (learn != null) {
+        _setOffer(
+          LearnOffer(items: [LearnItem.preserve(observed: c.before, avoid: c.after, excerpt: _original)], inBubble: true),
+          null,
+        );
+        _offerFor = i;
+      }
+    }
+    notifyListeners();
+  }
+
+  /// A small box to remember [items] (at most 3, all picked), gone after [offerLife].
+  void offerLearn(List<LearnItem> items) {
+    if (learn == null || items.isEmpty || _disposed) return;
+    _setOffer(LearnOffer(items: items.take(3).toList(), inBubble: false), offerLife);
+    notifyListeners();
+  }
+
+  void togglePick(int i) {
+    final o = _offer;
+    if (o == null || o.done || i < 0 || i >= o.items.length) return;
+    if (!o.picked.remove(i)) o.picked.add(i);
+    notifyListeners();
+  }
+
+  /// Hands the picked items to [learn] and shows "done" a moment.
+  void remember() {
+    final o = _offer;
+    final l = learn;
+    if (o == null || o.done || l == null) return;
+    final items = [for (var i = 0; i < o.items.length; i++) if (o.picked.contains(i)) o.items[i]];
+    if (items.isEmpty) return dismissOffer();
+    l(sid, items);
+    _log('remember');
+    o.done = true;
+    _offerTimer?.cancel();
+    _offerTimer = Timer(_doneLife, _clearOffer);
+    notifyListeners();
+  }
+
+  void dismissOffer() {
+    if (_offer == null) return;
+    _clearOffer();
+    notifyListeners();
+  }
+
+  void _setOffer(LearnOffer o, Duration? life) {
+    _offerTimer?.cancel();
+    _offerTimer = null;
+    _offer = o;
+    _offerFor = null;
+    if (life != null) {
+      _offerTimer = Timer(life, () {
+        _offerTimer = null;
+        _clearOffer();
+        notifyListeners();
+      });
+    }
+  }
+
+  void _clearOffer() {
+    _offerTimer?.cancel();
+    _offerTimer = null;
+    _offer = null;
+    _offerFor = null;
+  }
+
+  // The bubble is going: an unanswered in-bubble question moves to the small box instead of being dropped.
+  void _moveOffer() {
+    final o = _offer;
+    if (o == null || !o.inBubble || o.done) return;
+    _setOffer(LearnOffer(items: o.items, inBubble: false, picked: o.picked), offerLife);
+  }
 
   /// More than 10 characters, not counting white space.
   static bool long(String text) => text.replaceAll(RegExp(r'\s'), '').runes.length > 10;
@@ -197,6 +345,7 @@ class VoiceTidy extends ChangeNotifier {
     _original = text.trim();
     _shown = '';
     _result = null;
+    _clearChanges();
     _resetReveal();
     _comparing = false;
     _pick = pick;
@@ -244,6 +393,7 @@ class VoiceTidy extends ChangeNotifier {
         }
         _log('done');
         _result = t;
+        _changes = _pick == VoicePick.send ? tidyChanges(_original, t) : const [];
         if (_pick != VoicePick.edit) {
           _phase = TidyPhase.ready;
           held?.call(sid, t);
@@ -308,7 +458,7 @@ class VoiceTidy extends ChangeNotifier {
       edit(sid, t, _ai(t));
       _release();
       notifyListeners();
-    } else if (_phase == TidyPhase.ready && !_comparing && _settleTimer == null) {
+    } else if (_phase == TidyPhase.ready && !_comparing && !_stopped && _settleTimer == null) {
       _settleTimer = Timer(settle, () {
         _settleTimer = null;
         if (_phase == TidyPhase.ready) _sendResult();
@@ -328,10 +478,11 @@ class VoiceTidy extends ChangeNotifier {
   VoiceAi _ai(String t) => VoiceAi(app: tidyApp, original: _original, result: t);
 
   void _sendResult() {
-    final t = _result!;
+    final r = _result!;
+    final t = text;
     _stop();
     _log('send result');
-    final hint = send(sid, t, VoiceOrigin(ai: _ai(t)));
+    final hint = send(sid, t, VoiceOrigin(ai: _ai(r)));
     _release();
     _endWith(hint);
   }
@@ -401,10 +552,11 @@ class VoiceTidy extends ChangeNotifier {
   void editNow() {
     if (!_waiting) return;
     final r = _result;
+    final t = r != null ? text : _original;
     _stop();
     _log(r != null ? 'edit result' : 'edit original');
     _phase = TidyPhase.idle;
-    edit(sid, r ?? _original, r != null ? _ai(r) : null);
+    edit(sid, t, r != null ? _ai(r) : null);
     _release();
     notifyListeners();
   }
@@ -425,11 +577,13 @@ class VoiceTidy extends ChangeNotifier {
       return;
     }
     if (!_waiting) return;
-    final text = _result ?? _original;
+    final kept = _result != null ? text : _original;
+    final inBubble = _offer?.inBubble ?? false; // a box from offerLearn is not the bubble's: a new press keeps it
     _stop();
+    if (inBubble) _clearOffer();
     _log('interrupted');
     _phase = TidyPhase.idle;
-    keep(sid, text);
+    keep(sid, kept);
     _release();
     notifyListeners();
   }
@@ -442,13 +596,14 @@ class VoiceTidy extends ChangeNotifier {
       closed();
       return null;
     }
-    final text = _result ?? _original;
+    final kept = _result != null ? text : _original;
     _stop();
+    _clearOffer();
     _log('ended');
     _phase = TidyPhase.idle;
     _release();
     notifyListeners();
-    return text;
+    return kept;
   }
 
   /// A reconnect's swap: the session is [sid] now.
@@ -462,11 +617,19 @@ class VoiceTidy extends ChangeNotifier {
     _settleTimer?.cancel();
     _settleTimer = null;
     _result = null;
+    _clearChanges();
+    _moveOffer();
     _ticker?.cancel();
     _ticker = null;
     final c = _call;
     _call = null;
     c?.cancel();
+  }
+
+  void _clearChanges() {
+    _changes = const [];
+    _flips.clear();
+    _stopped = false;
   }
 
   void _showNote(String note, Duration life) {
@@ -496,6 +659,7 @@ class VoiceTidy extends ChangeNotifier {
     _stop();
     _dropAhead();
     _clearNote();
+    _clearOffer();
     super.dispose();
   }
 }
