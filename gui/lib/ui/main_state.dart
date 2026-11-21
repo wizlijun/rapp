@@ -3252,7 +3252,6 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
-  /// 「AI 整理时先思考」 on or off; saved. The next tidy reads it.
   /// 恢复默认: forgets every per-app 整理用途 the user chose.
   void resetVoiceTidyModes() {
     if (prefs.voiceTidyMode.isEmpty) return;
@@ -3261,6 +3260,7 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 「AI 整理时先思考」 on or off; saved. The next tidy reads it.
   void setVoiceAiThink(bool v) {
     prefs.voiceAiThink = v;
     _save();

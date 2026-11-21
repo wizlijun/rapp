@@ -131,6 +131,17 @@ void main() {
     expect(api.calls, hasLength(2));
   });
 
+  macTest('while comparing there is no tappable ⇄', (tester) async {
+    final s = await goLive(tester);
+    await tester.pumpWidget(layer(s));
+    es.tidyOf(1).begin(long, VoicePick.send);
+    await tester.pump();
+    expect(find.byKey(const Key('tidy-mode')), findsOneWidget);
+    es.tidyOf(1).compare();
+    await tester.pump();
+    expect(find.byKey(const Key('tidy-mode')), findsNothing);
+  });
+
   macTest('the card shows while tidying and its buttons act', (tester) async {
     final s = await goLive(tester);
     await tester.pumpWidget(layer(s));

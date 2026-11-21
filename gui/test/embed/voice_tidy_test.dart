@@ -146,6 +146,35 @@ void main() {
       });
     });
 
+    test('a switch after a flip settles normally and sends the new result', () {
+      fakeAsync((a) {
+        final t = make();
+        t.begin('明天用拍森跑一下黑猫瑞', VoicePick.send);
+        api.calls.single.complete(const LlmDone('明天用Python跑一下Hemory'));
+        out(a, t);
+        t.flip(0);
+        expect(t.stopped, isTrue);
+        t.switchMode();
+        expect(t.stopped, isFalse);
+        api.calls.last.complete(const LlmDone('明天用Python跑一下Hemory。'));
+        out(a, t);
+        a.elapse(const Duration(milliseconds: 1500));
+        expect(sent.single.$2, '明天用Python跑一下Hemory。');
+        t.dispose();
+      });
+    });
+
+    test('canSwitch is false while comparing', () {
+      fakeAsync((a) {
+        final t = make();
+        t.begin(long, VoicePick.send);
+        expect(t.canSwitch, isTrue);
+        t.compare();
+        expect(t.canSwitch, isFalse);
+        t.dispose();
+      });
+    });
+
     test('a prefetch in the other mode is not used', () {
       fakeAsync((a) {
         final t = make();

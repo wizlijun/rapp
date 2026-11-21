@@ -262,8 +262,8 @@ class VoiceTidyCard extends StatelessWidget {
               child: Row(
                 children: [
                   Text(status, key: const Key('tidy-title'), style: small.copyWith(fontWeight: FontWeight.w600)),
-                  if (tidy.setMode != null) const SizedBox(width: 4),
-                  if (tidy.setMode != null)
+                  if (tidy.setMode != null && tidy.canSwitch) const SizedBox(width: 4),
+                  if (tidy.setMode != null && tidy.canSwitch)
                     GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       onTap: tidy.switchMode,

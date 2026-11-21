@@ -398,16 +398,20 @@ class VoiceTidy extends ChangeNotifier {
     });
   }
 
+  /// [switchMode] would act now (the card offers ⇄ only then).
+  bool get canSwitch => !_disposed && _waiting && !_comparing && !(_pick == VoicePick.edit && _phase == TidyPhase.ready);
+
   /// 点用途: tidies the original again in the other mode and remembers the choice. The call in flight, the
   /// result, its changes and flips and an offer in the bubble are dropped; nothing is sent. While comparing
   /// nothing changes.
   void switchMode() {
-    if (_disposed || !_waiting || _comparing || _pick == VoicePick.edit && _phase == TidyPhase.ready) return;
+    if (!canSwitch) return;
     final next = _running.other;
     final inBubble = _offer?.inBubble ?? false; // a box from offerLearn is not the bubble's: it stays
     _stop();
     if (inBubble) _clearOffer();
     _shown = '';
+    _stopped = false;
     _resetReveal();
     _running = next;
     setMode?.call(sid, next);
