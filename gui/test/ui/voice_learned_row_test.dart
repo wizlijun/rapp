@@ -18,17 +18,19 @@ class _Api extends LlmApi {
   List<LearnedEntry>? entries;
   int asks = 0;
   final forgotten = <String>[];
+  bool forgetOk = true;
+  final byUrl = <String, List<LearnedEntry>?>{};
 
   @override
   Future<List<LearnedEntry>?> learned(LlmEndpoint e) async {
     asks++;
-    return entries;
+    return byUrl.containsKey(e.url) ? byUrl[e.url] : entries;
   }
 
   @override
   Future<bool> forget(LlmEndpoint e, String id) async {
     forgotten.add(id);
-    return true;
+    return forgetOk;
   }
 }
 
@@ -99,5 +101,38 @@ void main() {
     await tester.tap(find.byKey(const Key('voice-learned')));
     await tester.pumpAndSettle();
     expect(find.text('还没有'), findsOneWidget);
+  });
+
+  testWidgets('a failed forget keeps the entry', (tester) async {
+    final api = await mount(tester, entries);
+    api.forgetOk = false;
+    await tester.tap(find.byKey(const Key('voice-learned')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('voice-learned-delete-a')));
+    await tester.pumpAndSettle();
+    expect(api.forgotten, ['a']);
+    expect(find.byKey(const Key('voice-learned-a')), findsOneWidget);
+    expect(find.byKey(const Key('voice-learned-b')), findsOneWidget);
+  });
+
+  testWidgets('after a null result, a different endpoint shows the row again', (tester) async {
+    await mount(tester, null);
+    await tester.tap(find.byKey(const Key('voice-learned')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('voice-learned')), findsNothing);
+    s.setLlm(const LlmEndpoint(url: 'localhost:28002', key: 'k'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('voice-learned')), findsOneWidget);
+  });
+
+  testWidgets('a list loaded for endpoint A is not shown after switching to B', (tester) async {
+    await mount(tester, entries);
+    await tester.tap(find.byKey(const Key('voice-learned')));
+    await tester.pumpAndSettle();
+    expect(find.text('拍森 → Python'), findsOneWidget);
+    s.setLlm(const LlmEndpoint(url: 'localhost:28002', key: 'k'));
+    await tester.pumpAndSettle();
+    expect(find.text('拍森 → Python'), findsNothing);
+    expect(find.byKey(const Key('voice-learned')), findsOneWidget);
   });
 }

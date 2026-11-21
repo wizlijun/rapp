@@ -3332,9 +3332,11 @@ class MainState extends ChangeNotifier {
   /// What the gateway was taught; null when it cannot be asked.
   Future<List<LearnedEntry>?> voiceLearned() => llmApi.learned(llm);
 
-  /// Takes one taught correction back; the hotwords are asked again after.
-  Future<void> forgetLearned(String id) async {
-    if (await llmApi.forget(llm, id) && !_disposed) _forgetHotwords();
+  /// Takes one taught correction back; the hotwords are asked again after. True only when the gateway did.
+  Future<bool> forgetLearned(String id) async {
+    final ok = await llmApi.forget(llm, id);
+    if (ok && !_disposed) _forgetHotwords();
+    return ok;
   }
 
   void _forgetHotwords() {

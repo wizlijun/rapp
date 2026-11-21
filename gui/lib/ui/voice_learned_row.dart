@@ -22,8 +22,20 @@ class _VoiceLearnedRowState extends State<VoiceLearnedRow> {
   bool _loading = false;
   bool _gone = false;
   List<LearnedEntry>? _entries;
+  // The endpoint the list belongs to; another one resets the row.
+  LlmEndpoint? _for;
+
+  void _syncEndpoint() {
+    final now = widget.state.llm;
+    if (_for != null && _for != now) {
+      _open = _loading = _gone = false;
+      _entries = null;
+    }
+    _for = now;
+  }
 
   Future<void> _toggle() async {
+    if (_loading) return;
     if (_open) {
       setState(() => _open = false);
       return;
@@ -32,8 +44,10 @@ class _VoiceLearnedRowState extends State<VoiceLearnedRow> {
       _open = true;
       _loading = true;
     });
+    final asked = widget.state.llm;
+    _for = asked;
     final got = await widget.state.voiceLearned();
-    if (!mounted) return;
+    if (!mounted || widget.state.llm != asked) return;
     setState(() {
       _loading = false;
       _entries = got;
@@ -42,8 +56,18 @@ class _VoiceLearnedRowState extends State<VoiceLearnedRow> {
   }
 
   Future<void> _forget(String id) async {
-    setState(() => _entries = [for (final e in _entries ?? const <LearnedEntry>[]) if (e.id != id) e]);
-    await widget.state.forgetLearned(id);
+    final before = _entries ?? const <LearnedEntry>[];
+    final at = before.indexWhere((e) => e.id == id);
+    if (at < 0) return;
+    final asked = widget.state.llm;
+    setState(() => _entries = [for (final e in before) if (e.id != id) e]);
+    final ok = await widget.state.forgetLearned(id);
+    if (ok || !mounted || widget.state.llm != asked) return;
+    setState(() {
+      final now = [...?_entries];
+      now.insert(at.clamp(0, now.length), before[at]);
+      _entries = now;
+    });
   }
 
   @override
@@ -51,6 +75,7 @@ class _VoiceLearnedRowState extends State<VoiceLearnedRow> {
     return ListenableBuilder(
       listenable: widget.state,
       builder: (context, _) {
+        _syncEndpoint();
         if (!widget.state.llm.configured || _gone) return const SizedBox.shrink();
         final t = RappTokens.of(context);
         final small = widget.style;
