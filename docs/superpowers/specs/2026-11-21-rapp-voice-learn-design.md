@@ -212,7 +212,17 @@ rapp（Dart）                         rapp-llm 网关                     note.
 - **来源字段**：`validate_proposal` 要求一个 ASR 转写类的来源（`CandidateSource`：`content_kind`、`content_sha256`、`span`、`excerpt`、`excerpt_span`），`span` 要能在 `excerpt` 里定位到 `observed`。rapp 发来的 `excerpt` 用原话（§5.3），网关据此算 span 和 sha256。
 - **「不改」能不能提**：`ProposalInput` / `CandidateSuggestion` 没有 action 字段，`preserve` 只存在于已确认的规则上。试 `output == observed` 的候选是否被接受、确认后是否生成 `do not change`。不行的话，`preserve` 只写进 `voice-learned.md`、不 propose，长期留在网关那份里（§6.3 收编时 `preserve` 条目只在正式词表出现同一个 `do not change` 时才删）。
 
-探针结果决定 §6.2 的 propose 字段怎么填。**如果 `validate_scope_claim` 一类校验要求真实的会议来源，propose 做不通**：那就只做 voice-learned 这一份（马上生效那部分不受影响），G3 降级为「全局设置里列出学到的词，用户自己去 note.md 加」，并回来跟用户确认。
+探针结果决定 §6.2 的 propose 字段怎么填。**如果 `validate_scope_claim` 一类校验要求真实的会议来源，propose 做不通**：那就只做 voice_learned 这一份（马上生效那部分不受影响），G3 降级为「全局设置里列出学到的词，用户自己去 note.md 加」，并回来跟用户确认。
+
+**探针结果（2026-11-21）：可以做，不降级。** 在 vault 里手工跑 `notemd conversation-dictionary propose --input tmp/rapp-llm/probe.json`（cwd 必须是 vault，`--input` 是相对 vault 的路径）。替换（`拍森 → Python`）和「不改」（`黑猫瑞`，`output` 等于 `observed`）都返回 `"status":"stored"`，进了 `pending`。通过校验的写法：
+
+- `context.communication = {kind: "voice_message", user_relation: "participant", basis: {type: "user_statement", detail: "…"}}`。
+- `source = {content_kind: "asr_transcript", content_sha256: sha256(excerpt), span, excerpt, excerpt_span}`：span 按 Unicode code point 算，不带 `resource`。
+- `subject_id` 取 `notemd conversation-dictionary status` 最后一行 JSON 的值（现在是 `human:me`）。
+
+「不改」的候选，reviewer 确认时要在 note.md 窗口里选 preserve（同词「替换」会被当成 no-op），所以 `reason` 里要写明「不要改」。确认后会不会生成 `- do not change:`，留到验收 5 由用户在 note.md 里看。
+
+另外，网关的 context 名只能用 `[a-z0-9_]+`，所以 context 叫 `voice_learned`，文件名仍是 `voice-learned.md`。
 
 ### 6.2 新接口
 
@@ -235,12 +245,12 @@ rapp（Dart）                         rapp-llm 网关                     note.
 **配置与上线顺序**（我定的）：
 
 - propose 是可选的：配置里新增 `"notemd": {"bin": "/usr/local/bin/notemd", "vault": "~/git/sotvault", "domain": "public"}`，没配（例如 Docker 部署，没有 vault 和 notemd）就只写 `voice-learned.md`，不 propose。`subject_id` 不写进配置，每次从 `notemd conversation-dictionary status` 读。
-- 网关读 apps 时，`context:` 点名了配置里没有的 context 会 500 `app_invalid`，tidy 就会在所有设备上悄悄按原话走。所以上线顺序固定：先改正在运行的网关的 `config.json`（加 `voice-learned`、`notemd`），重启网关，再把带 `voice-learned` 的 `dictation.md` 和新的 `dictation-chat.md` 放进去。改 `config.json` 和重启由实现的人在用户点头后做（同 tidy §9 热词那次）。
+- 网关读 apps 时，`context:` 点名了配置里没有的 context 会 500 `app_invalid`，tidy 就会在所有设备上悄悄按原话走。所以上线顺序固定：先改正在运行的网关的 `config.json`（加 `voice_learned`、`notemd`），重启网关，再把带 `voice_learned` 的 `dictation.md` 和新的 `dictation-chat.md` 放进去。改 `config.json` 和重启由实现的人在用户点头后做（同 tidy §9 热词那次）。
 - 正在运行的网关就在 vault 所在的这台 Mac 上（`127.0.0.1:8101`，rapp 经分享号 `localhost:28001` 访问）。
 
 ### 6.3 `voice-learned.md`：格式、读取、收编
 
-- 位置：网关配置里新增一个 context，`"voice-learned": {"file": "~/rapp/voice-learned.md"}`（在 vault 外，避免和 vault 的 auto-sync、note.md 打架；我定的，可改）。
+- 位置：网关配置里新增一个 context，`"voice_learned": {"file": "~/rapp/voice-learned.md"}`（在 vault 外，避免和 vault 的 auto-sync、note.md 打架；我定的，可改）。
 - 格式照 `vocabulary.md` 的写法，模型不用学新记号：
 
   ```
@@ -250,14 +260,14 @@ rapp（Dart）                         rapp-llm 网关                     note.
   ```
 
   `replace` 一律写成 `(always)`：这是用户亲手确认过的改法。
-- `dictation`、`dictation-chat` 的 `context:` 加上 `voice-learned`，放在 `vocabulary` 后面；提示词第 1 条改为「先按 <vocabulary> 和 <voice-learned> 改；两者冲突时按 <vocabulary>」。
-- `/v1/hotwords`：`voice-learned` 里 `→` 右边的词排在最前面（它们是用户刚纠正的，最容易再错），然后是原来的顺序，总数仍最多 100。
+- `dictation`、`dictation-chat` 的 `context:` 加上 `voice_learned`，放在 `vocabulary` 后面；提示词第 1 条改为「先按 <vocabulary> 和 <voice_learned> 改；两者冲突时按 <vocabulary>」。
+- `/v1/hotwords`：`voice_learned` 里 `→` 右边的词排在最前面（它们是用户刚纠正的，最容易再错），然后是原来的顺序，总数仍最多 100。
 - **收编**：每次读 `voice-learned.md`（整理请求、hotwords、learned 列表）时，解析当时的 `vocabulary.md`；某条 `observed → output` 在任一场景里已有同样的规则（或 `do not change` 同一个词），就从 `voice-learned.md` 删掉它。正式词表里同一个 `observed` 有**不同**的 `output` 时，也删掉网关这条（以正式词表为准），日志记一行。
 - 文件不存在就当空表；写文件用临时文件 + rename，防止并发请求写坏。
 
 ### 6.4 新小 API `dictation-chat`
 
-`apps/dictation-chat.md`，`model: text-lite`、`context: vocabulary, voice-learned, user, memory`、`timeout_s` 与 `think.*` 同 `dictation`。规则在 `dictation` 的基础上：
+`apps/dictation-chat.md`，`model: text-lite`、`context: vocabulary, voice_learned, user, memory`、`timeout_s` 与 `think.*` 同 `dictation`。规则在 `dictation` 的基础上：
 
 - 保留：第 1–3 条（词表、user/memory、常识名称）、口头禅和重复的删除、改口以最后为准、全部信息保留、问题不回答。
 - 改掉：不精炼、不改写成书面语、保留原来的语序和说话口气（「哈」「吧」这种带情绪的语气词保留，只删「嗯、那个、就是」这类填充词）；不分点不编号，一律一段，长了按意思分段。
@@ -268,7 +278,7 @@ rapp（Dart）                         rapp-llm 网关                     note.
 ## 7. 阶段与顺序
 
 1. **探针**（§6.1）：半小时以内，结果写回本文 §6.1。
-2. **网关**：`voice-learned` context、三个接口、收编、hotwords 排序、`dictation-chat`。rapp-llm 自己的测试；在 rapp-llm 的 worktree 里改，**不要在 `/Users/bruce/git/rapp-llm` 主目录切分支**（正在跑的网关每次请求重新读 apps/*.md）。
+2. **网关**：`voice_learned` context、三个接口、收编、hotwords 排序、`dictation-chat`。rapp-llm 自己的测试；在 rapp-llm 的 worktree 里改，**不要在 `/Users/bruce/git/rapp-llm` 主目录切分支**（正在跑的网关每次请求重新读 apps/*.md）。
 3. **rapp 比对 + 气泡标词切换**（§5.1、§5.2）：不依赖网关新接口，可和 2 并行。
 4. **rapp 记住**（§5.3、§5.4、§5.6）：依赖 2。
 5. **rapp 按用途**（§5.5）：依赖 2 的 `dictation-chat`。
