@@ -34,6 +34,36 @@ void main() {
   test('editLearns: flipping the AI back to the heard words learns nothing', () => expect(editLearns('用拍森跑', '用Python跑', '用拍森跑'), isEmpty));
   test('editLearns: at most 3', () => expect(editLearns('甲甲和你说乙乙和你说丙丙和你说丁丁和你说', '甲甲和你说乙乙和你说丙丙和你说丁丁和你说', 'AA和你说BB和你说CC和你说DD和你说').map((i) => i.observed), ['甲甲', '乙乙', '丙丙']));
 
+  test('tidyChanges widens a 1-rune AI side to the right at the very start', () {
+    final c = tidyChanges('门口见面', '们口见面').single;
+    expect((c.start, c.end, c.before, c.after), (0, 2, '门口', '们口'));
+  });
+
+  test('tidyChanges widens a 1-rune AI side to the left at the very end', () {
+    final c = tidyChanges('明天开会门', '明天开会们').single;
+    expect((c.start, c.end, c.before, c.after), (3, 5, '会门', '会们'));
+  });
+
+  test('tidyChanges merges two widened changes; after is the result runes [start, end)', () {
+    const result = '们和们好好';
+    final c = tidyChanges('门和门好好', result).single;
+    expect((c.start, c.end, c.before, c.after), (0, 3, '门和门', '们和们'));
+    expect(c.after, String.fromCharCodes(result.runes.toList().sublist(c.start, c.end)));
+  });
+
+  test('tidyChanges: a huge input is over the guard and returns nothing', () {
+    final a = '甲' * 2100, b = '${'甲' * 1000}乙乙${'甲' * 1098}';
+    expect(tidyChanges(a, b), isEmpty);
+    expect(tidyChanges('${'甲' * 1000}丙丙${'甲' * 98}', '${'甲' * 1000}乙乙${'甲' * 98}').length, 1);
+  });
+
+  test('editLearns trims the output like the observed words', () {
+    final l = editLearns('用拍森跑', '用Python跑', '用 派森\n 跑');
+    for (final i in l) {
+      expect(i.output, i.output!.trim());
+    }
+  });
+
   test('LearnItem json and label', () {
     const r = LearnItem.replace(observed: '拍森', output: 'Python', excerpt: 'x');
     expect(r.toJson(), {'action': 'replace', 'observed': '拍森', 'output': 'Python', 'excerpt': 'x'});

@@ -209,7 +209,7 @@ List<LearnItem> editLearns(String original, String result, String sent) {
       final h = overlapping.single;
       if (h.i0 == h.i1) continue;
       if (h.j0 < rFrom) {
-        final p = _leftBoundary(rs, h.j0, s.length);
+        final p = _leftBoundary(rs, h.j0);
         if (p == null) continue;
         rFrom = h.j0;
         sFrom = p;
@@ -228,7 +228,7 @@ List<LearnItem> editLearns(String original, String result, String sent) {
     final lo = oIdx.reduce((x, y) => x < y ? x : y), hi = oIdx.reduce((x, y) => x > y ? x : y);
     if (oIdx.length != hi - lo + 1) continue; // must be contiguous
     final observed = _str(o, lo, hi + 1).trim();
-    final output = _str(s, sFrom, sTo);
+    final output = _str(s, sFrom, sTo).trim();
     if (observed.isEmpty || observed == output || observed.runes.length > _maxSide) continue;
     out.add(LearnItem.replace(observed: observed, output: output, excerpt: original));
     if (out.length == _maxLearns) break;
@@ -237,7 +237,7 @@ List<LearnItem> editLearns(String original, String result, String sent) {
 }
 
 // The s position of a cut just before r[q].
-int? _leftBoundary(_Align rs, int q, int sLen) {
+int? _leftBoundary(_Align rs, int q) {
   final n = rs.aToB.length;
   if (q < n && rs.aToB[q] >= 0) return rs.aToB[q];
   if (q > 0 && rs.aToB[q - 1] >= 0) return rs.aToB[q - 1] + 1;
