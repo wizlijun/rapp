@@ -9,6 +9,7 @@ import '../paths.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show Clipboard;
 
+import '../embed/phrases.dart';
 import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../embed/stream_choice.dart';
@@ -3210,6 +3211,25 @@ class MainState extends ChangeNotifier {
   void setKeyBarSlim(bool v) {
     prefs.keyBarSlim = v;
     _save();
+  }
+
+  /// 显示常用语条: the 常用语 strip over the key bar on or off; saved.
+  void setPhraseStrip(bool v) {
+    prefs.phraseStrip = v;
+    _save();
+  }
+
+  /// 常用语 replaced (edited, reordered, deleted, 恢复默认); saved.
+  void setPhrases(List<Phrase> v) {
+    prefs.phrases = List.of(v);
+    _save();
+  }
+
+  /// 加到常用语: [text] at the end unless a phrase already has it. False when it was there (or blank).
+  bool addPhrase(String text) {
+    if (text.trim().isEmpty || prefs.phrases.any((p) => p.text == text)) return false;
+    setPhrases([...prefs.phrases, Phrase(text)]);
+    return true;
   }
 
   /// 「跟着我的窗口」: the host's terminal window follows this console on or off; saved.

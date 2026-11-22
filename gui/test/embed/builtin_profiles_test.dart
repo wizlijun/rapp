@@ -19,6 +19,7 @@ void main() {
     for (final e in (raw['apps'] as List).cast<Map>()) {
       expect(e.keys.toList(), [
         'name', 'ids', 'stream', 'afterSend', 'composer',
+        if (e.containsKey('phrases')) 'phrases',
         if (e.containsKey('typeToCompose')) 'typeToCompose',
         'windows', 'tested',
       ]);
@@ -27,6 +28,11 @@ void main() {
       expect(e['windows'], isEmpty);
       expect(e['tested'], false);
     }
+  });
+
+  test('常用语条 on for the terminals and the AI coding apps only', () {
+    expect([for (final p in apps) if (p.phrases == true) p.name],
+        ['终端', 'iTerm2', 'Ghostty', 'Warp', 'ChatGPT', 'Claude', 'Cursor', 'VS Code']);
   });
 
   test('the §9 ids and pictures', () {

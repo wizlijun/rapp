@@ -128,6 +128,29 @@ void main() {
     }
   });
 
+  testWidgets('常用语条 is only on iOS; off for Chrome until set, and saves', (tester) async {
+    final store = storeWith();
+    await open(tester, store, appId: _chrome);
+    expect(find.byKey(const Key('phrases-profile-switch')), findsNothing);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    try {
+      await open(tester, store, appId: _chrome);
+      final sw = find.byKey(const Key('phrases-profile-switch'));
+      expect(tester.widget<Switch>(sw).value, isFalse);
+      await tester.ensureVisible(sw);
+      await tester.tap(sw);
+      await tester.pump();
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.mine.single.phrases, true);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
   testWidgets('panel place row: default, then a saved place, then 回到默认', (tester) async {
     final store = storeWith();
     await open(tester, store, appId: _chrome);

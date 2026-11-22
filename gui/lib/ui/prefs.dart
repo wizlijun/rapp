@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../embed/phrases.dart';
 import '../embed/voice_key_gate.dart';
 import 'tokens.dart';
 
@@ -26,6 +27,8 @@ class UiPrefs {
     this.termKeyRow = false,
     this.keyBarMore = false,
     this.keyBarSlim = false,
+    this.phraseStrip = true,
+    List<Phrase>? phrases,
     this.termFit = true,
     this.voiceAiTidy = true,
     this.voiceAiThink = false,
@@ -40,7 +43,8 @@ class UiPrefs {
     this.voiceLanguageHintShown = false,
     Map<String, String>? termOpen,
     Map<String, String>? termApp,
-  })  : termOpen = termOpen ?? {},
+  })  : phrases = phrases ?? List.of(defaultPhrases),
+        termOpen = termOpen ?? {},
         termApp = termApp ?? {};
 
   RappTheme theme;
@@ -61,6 +65,13 @@ class UiPrefs {
 
   /// 按键区 (iOS): the bar is cut to Esc, ⇧Tab and ⊙ (`key_bar_slim`). Missing or bad means full.
   bool keyBarSlim;
+
+  /// 显示常用语条 (`phrase_strip`, iOS): the 常用语 strip over the key bar. Missing or bad means on.
+  bool phraseStrip;
+
+  /// 常用语 (`phrases`, iOS): in strip order. Missing or not a list means [defaultPhrases]; bad entries are
+  /// dropped on load.
+  List<Phrase> phrases;
 
   /// 跟着我的窗口 (`term_fit`): the host's terminal window follows this console's size. Missing or bad means on.
   bool termFit;
@@ -151,6 +162,10 @@ class UiPrefs {
         termKeyRow: kr is bool ? kr : false,
         keyBarMore: j['key_bar_more'] == true,
         keyBarSlim: j['key_bar_slim'] == true,
+        phraseStrip: j['phrase_strip'] != false,
+        phrases: j['phrases'] is List
+            ? [for (final e in j['phrases'] as List) ?Phrase.fromJson(e)]
+            : null,
         termFit: tf is bool ? tf : true,
         voiceAiTidy: vt is bool ? vt : true,
         voiceAiThink: vk is bool ? vk : false,
@@ -194,6 +209,8 @@ class UiPrefs {
         'term_key_row': termKeyRow,
         'key_bar_more': keyBarMore,
         'key_bar_slim': keyBarSlim,
+        'phrase_strip': phraseStrip,
+        'phrases': [for (final p in phrases) p.toJson()],
         'term_fit': termFit,
         'voice_ai_tidy': voiceAiTidy,
         'voice_ai_think': voiceAiThink,

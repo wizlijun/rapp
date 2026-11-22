@@ -6,6 +6,7 @@ import 'dart:ui' show Rect, Size;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:rapp/embed/app_profile.dart';
+import 'package:rapp/embed/phrases.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/ui/app_profile_store.dart';
@@ -72,6 +73,16 @@ void main() {
     s.relocate(d);
     expect(s.hint, loadProblem);
     expect(s.favorites, isEmpty);
+  });
+
+  test('addPhrase appends once and saves; a repeat or a blank is refused', () {
+    Directory('${tmp.path}/local').createSync(recursive: true);
+    File('${tmp.path}/local/service.json').writeAsStringSync('{"id":"dev1"}');
+    s.setPhrases(const [Phrase('继续')]);
+    expect(s.addPhrase('跑一下测试'), isTrue);
+    expect(s.addPhrase('继续'), isFalse);
+    expect(s.addPhrase('  '), isFalse);
+    expect(UiPrefs.load(s.data.prefsDir()!).phrases, const [Phrase('继续'), Phrase('跑一下测试')]);
   });
 
   test('setFirst persists and leaves the current grouping alone', () {

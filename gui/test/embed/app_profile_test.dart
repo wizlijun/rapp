@@ -97,6 +97,14 @@ void main() {
     expect(AppProfile.fromJson(AppProfile(ids: ['a'], rime: false).toJson())!.rime, isFalse);
     expect(AppProfile.fromJson({'ids': ['a'], 'rime': 'no'})!.rime, isNull);
     expect(AppProfile(ids: ['a'], rime: false).copy().rime, isFalse);
+    expect(r.phrases, isFalse);
+    expect(ResolvedProfile.generic.phrases, isFalse);
+    expect(resolveProfile('a', mine: [AppProfile(ids: ['a'])], builtin: [AppProfile(ids: ['a'], phrases: true)]).phrases, isTrue);
+    expect(resolveProfile('a', mine: [AppProfile(ids: ['a'], phrases: false)], builtin: [AppProfile(ids: ['a'], phrases: true)]).phrases, isFalse);
+    expect(AppProfile(ids: ['a']).toJson().containsKey('phrases'), isFalse);
+    expect(AppProfile.fromJson(AppProfile(ids: ['a'], phrases: true).toJson())!.phrases, isTrue);
+    expect(AppProfile.fromJson({'ids': ['a'], 'phrases': 'yes'})!.phrases, isNull);
+    expect(AppProfile(ids: ['a'], phrases: true).copy().phrases, isTrue);
     expect(resolveProfile('other', mine: mine, builtin: builtin), same(ResolvedProfile.generic));
     expect(ResolvedProfile.generic.stream, startChoice);
   });
