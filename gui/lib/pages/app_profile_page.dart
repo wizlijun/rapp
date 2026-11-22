@@ -106,6 +106,7 @@ class _AppProfilePageState extends State<AppProfilePage> {
       _draft.typeToCompose == null &&
       _draft.focusPane == null &&
       _draft.rime == null &&
+      _draft.phrases == null &&
       _draft.input == null &&
       _draft.windows == null &&
       _draft.tested == null &&
@@ -241,6 +242,7 @@ class _AppProfilePageState extends State<AppProfilePage> {
     final typeToCompose = d.typeToCompose ?? b.typeToCompose;
     final focusPane = d.focusPane ?? b.focusPane;
     final rime = d.rime ?? b.rime;
+    final phrases = d.phrases ?? b.phrases;
     final rules = _rules;
     return Scaffold(
       backgroundColor: t.bg,
@@ -349,6 +351,16 @@ class _AppProfilePageState extends State<AppProfilePage> {
             dim: d.typeToCompose == null,
             onChanged: (v) => _set(() => d.typeToCompose = v),
           ),
+          // 常用语 live on the iOS key bar; the field stays harmless in the file elsewhere.
+          if (defaultTargetPlatform == TargetPlatform.iOS)
+            RappSwitchRow(
+              switchKey: const Key('phrases-profile-switch'),
+              label: '常用语条',
+              note: '按键区上方一排常用的话，点一下就发出并回车',
+              value: phrases,
+              dim: d.phrases == null,
+              onChanged: (v) => _set(() => d.phrases = v),
+            ),
           // The built-in input method exists only on iOS; the field stays harmless in the file elsewhere.
           if (defaultTargetPlatform == TargetPlatform.iOS)
             RappSwitchRow(

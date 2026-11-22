@@ -68,6 +68,7 @@ class ComposerPlus extends StatefulWidget {
       this.onPress,
       this.history,
       this.historyKey,
+      this.onAddPhrase,
       this.onReturnAfter,
       this.terminal = false,
       this.blocked = false,
@@ -94,6 +95,9 @@ class ComposerPlus extends StatefulWidget {
   /// The input record for 「输入历史」 (no such row without it) and this session's key (`host/app`).
   final InputHistory? history;
   final String? historyKey;
+
+  /// 输入历史's 加到常用语 (iOS); no such item without it.
+  final void Function(String text)? onAddPhrase;
 
   /// 「直接回车且隐藏」 toggled: whether a submit gets a Return after its paste, then hides the panel (the app's afterSend).
   /// No such row without it.
@@ -154,6 +158,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
                 putIntoComposer(widget.session, text);
                 Navigator.of(dialog).pop();
               },
+              onAddPhrase: widget.onAddPhrase,
             ),
           ),
         ),

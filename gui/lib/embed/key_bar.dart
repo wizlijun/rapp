@@ -4,6 +4,7 @@
 // focus: whatever had it keeps it.
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -13,6 +14,8 @@ import '../ui/main_state.dart';
 import '../ui/tokens.dart';
 import 'key_bar_keys.dart';
 import 'modifier_latch.dart';
+import 'phrase_strip.dart';
+import 'phrases.dart';
 import 'remote_session.dart';
 import 'session_port.dart';
 
@@ -37,9 +40,20 @@ List<List<String?>> _rowsOf(MainState state, RemoteSession session, double width
       hardware: hardwareKeyboard() || lastHardwareKey != null, // sticky: once seen, the ⊙ stays
     );
 
-/// How high the bar is at [width], with the modes now on.
+/// Whether the 常用语条 tops the bar (phrases spec §2): iOS, 显示常用语条 on, the bar not ⊙ slim, some phrases,
+/// and a text terminal or an app whose profile has 常用语条 on.
+bool phraseStripShown(MainState state, RemoteSession session) {
+  final p = state.prefs;
+  return defaultTargetPlatform == TargetPlatform.iOS &&
+      p.phraseStrip &&
+      !p.keyBarSlim &&
+      p.phrases.isNotEmpty &&
+      (_isTerm(state, session) || session.profile.phrases);
+}
+
+/// How high the bar is at [width], with the modes now on (the 常用语条 included).
 double keyBarHeightOf(MainState state, RemoteSession session, double width) =>
-    keyBarHeight(_rowsOf(state, session, width).length);
+    keyBarHeight(_rowsOf(state, session, width).length) + (phraseStripShown(state, session) ? phraseStripHeight : 0);
 
 /// A terminal's wire name for [wire] with the latch's ⌃ and ⌥ added, in the wire's order `[Ctrl-][Alt-][Shift-]base`.
 String termWire(String wire, int flags) {
@@ -268,13 +282,18 @@ class _KeyBarState extends State<KeyBar> {
         listenable: Listenable.merge([widget.state, _latch]),
         builder: (context, _) {
           final rows = _rowsOf(widget.state, widget.session, width);
+          final strip = phraseStripShown(widget.state, widget.session);
           return Container(
-            height: keyBarHeight(rows.length),
+            height: keyBarHeightOf(widget.state, widget.session, width),
             width: double.infinity,
             padding: const EdgeInsets.all(keyBarPad),
             decoration: t.floatBox(),
             child: Column(
               children: [
+                if (strip) ...[
+                  PhraseStrip(state: widget.state, session: widget.session, port: widget.port),
+                  const SizedBox(height: phraseStripGap),
+                ],
                 for (final (i, row) in rows.indexed) ...[
                   if (i > 0) const SizedBox(height: keyBarGap),
                   Expanded(child: _rowOf(row)),

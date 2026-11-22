@@ -9,6 +9,7 @@ import '../paths.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show Clipboard;
 
+import '../embed/phrases.dart';
 import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../embed/stream_choice.dart';
@@ -197,13 +198,20 @@ class MainState extends ChangeNotifier {
   String? historyKeyOf(RemoteSession rs) => (_recordOfSid(rs.sid) ?? _recordOfLastSid(rs.sid))?.key;
 
   /// What ↑ brings back in [rs]'s writing panel, newest first (R2); empty for a session no
-  /// record claims.
+  /// record claims. 常用语 sends are left out (phrases spec §4.8).
   List<InputEntry> recallOf(RemoteSession rs) {
     final r = _recordOfSid(rs.sid) ?? _recordOfLastSid(rs.sid);
     if (r == null) return const [];
     // A host's text terminals share one history (each keeps its own draft).
-    if (isTermApp(r.app)) return history.forSession('${r.key.substring(0, r.key.indexOf('/') + 1)}term:', prefix: true);
-    return history.forSession(r.key);
+    final all = isTermApp(r.app)
+        ? history.forSession('${r.key.substring(0, r.key.indexOf('/') + 1)}term:', prefix: true)
+        : history.forSession(r.key);
+    final out = <InputEntry>[];
+    for (final e in all) {
+      if (e.phrase || (out.isNotEmpty && out.last.text == e.text)) continue;
+      out.add(e);
+    }
+    return out;
   }
 
   /// Switches to a moved data root: later reads and writes go there and `workspace.json` is reread.
@@ -3210,6 +3218,25 @@ class MainState extends ChangeNotifier {
   void setKeyBarSlim(bool v) {
     prefs.keyBarSlim = v;
     _save();
+  }
+
+  /// 显示常用语条: the 常用语 strip over the key bar on or off; saved.
+  void setPhraseStrip(bool v) {
+    prefs.phraseStrip = v;
+    _save();
+  }
+
+  /// 常用语 replaced (edited, reordered, deleted, 恢复默认); saved.
+  void setPhrases(List<Phrase> v) {
+    prefs.phrases = List.of(v);
+    _save();
+  }
+
+  /// 加到常用语: [text] at the end unless a phrase already has it. False when it was there (or blank).
+  bool addPhrase(String text) {
+    if (text.trim().isEmpty || prefs.phrases.any((p) => p.text == text)) return false;
+    setPhrases([...prefs.phrases, Phrase(text)]);
+    return true;
   }
 
   /// 「跟着我的窗口」: the host's terminal window follows this console on or off; saved.

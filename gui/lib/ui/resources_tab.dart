@@ -1,6 +1,7 @@
 // 资源 tab of the side panel (S6 K13): every session's clipboard entries on top, this launch's
 // file transfers below (running, then ended). Global lists live here and in the stream menu's
 // corner, never on the stage.
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
 import '../embed/composer_plus.dart';
@@ -63,6 +64,7 @@ class ResourcesTab extends StatelessWidget {
                     session: key,
                     host: key?.split('/').first,
                     onPut: remote == null ? null : (text) => putIntoComposer(remote, text),
+                    onAddPhrase: defaultTargetPlatform == TargetPlatform.iOS ? state.addPhrase : null,
                   ),
                 ],
               ),

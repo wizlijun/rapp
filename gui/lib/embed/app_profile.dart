@@ -137,6 +137,7 @@ class AppProfile {
     this.typeToCompose,
     this.focusPane,
     this.rime,
+    this.phrases,
     this.input,
     this.composerAt,
     this.windows,
@@ -161,6 +162,9 @@ class AppProfile {
   /// Whether the built-in input method (iOS, hardware keyboard) types in this app's writing panel: 「内」 or
   /// 「系」; null inherits (true).
   bool? rime;
+
+  /// Whether the 常用语 strip shows over the key bar (iOS) for this app; null inherits (false).
+  bool? phrases;
   InputPoint? input;
 
   /// Where the writing panel sits (its bottom centre); null: [defaultComposerAt].
@@ -187,6 +191,7 @@ class AppProfile {
         typeToCompose: typeToCompose,
         focusPane: focusPane,
         rime: rime,
+        phrases: phrases,
         input: input,
         composerAt: composerAt,
         windows: windows == null ? null : [...windows!],
@@ -208,6 +213,7 @@ class AppProfile {
         if (typeToCompose != null) 'typeToCompose': typeToCompose,
         if (focusPane != null) 'focusPane': focusPane,
         if (rime != null) 'rime': rime,
+        if (phrases != null) 'phrases': phrases,
         if (input != null) 'input': input!.toJson(),
         if (composerAt != null) 'composerAt': composerAt!.toJson(),
         if (windows != null) 'windows': [for (final w in windows!) w.toJson()],
@@ -262,6 +268,7 @@ class AppProfile {
       typeToCompose: j['typeToCompose'] is bool ? j['typeToCompose'] as bool : null,
       focusPane: j['focusPane'] is bool ? j['focusPane'] as bool : null,
       rime: j['rime'] is bool ? j['rime'] as bool : null,
+      phrases: j['phrases'] is bool ? j['phrases'] as bool : null,
       input: InputPoint.fromJson(j['input']),
       composerAt: InputPoint.fromJson(j['composerAt']),
       windows: windows,
@@ -297,6 +304,7 @@ class ResolvedProfile {
     this.typeToCompose = true,
     this.focusPane = true,
     this.rime = true,
+    this.phrases = false,
     this.input,
     this.composerAt,
     this.windows = const [],
@@ -321,6 +329,9 @@ class ResolvedProfile {
 
   /// Whether the built-in input method types in the writing panel (iOS, with 实体键盘用内置输入法 on).
   final bool rime;
+
+  /// Whether the 常用语 strip shows over the key bar (iOS).
+  final bool phrases;
 
   /// The marked text box; null when none is marked.
   final InputPoint? input;
@@ -372,6 +383,7 @@ ResolvedProfile resolveProfile(String appId, {required List<AppProfile> mine, re
     typeToCompose: pick((p) => p.typeToCompose) ?? true,
     focusPane: pick((p) => p.focusPane) ?? true,
     rime: pick((p) => p.rime) ?? true,
+    phrases: pick((p) => p.phrases) ?? false,
     input: pick((p) => p.input),
     composerAt: pick((p) => p.composerAt),
     windows: pick((p) => p.windows) ?? const [],

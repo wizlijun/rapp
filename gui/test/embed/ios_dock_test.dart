@@ -34,7 +34,8 @@ void main() {
     tmp = Directory.systemTemp.createTempSync('ios_dock_test');
     port = FakeSessionPort();
     term = FakeTermSessionPort();
-    s = MainState(hub: HubClient(FakeTransport()), data: DataDir(tmp.path), prefs: UiPrefs(), port: port, termPort: term);
+    // The geometry below is the bare key bar; the 常用语条's 36 is pinned in key_bar_test.
+    s = MainState(hub: HubClient(FakeTransport()), data: DataDir(tmp.path), prefs: UiPrefs(phraseStrip: false), port: port, termPort: term);
     term.seed(2);
     app = RemoteSession(1, 'Safari');
     tsess = RemoteSession(2, 'term');

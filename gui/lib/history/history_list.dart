@@ -20,6 +20,7 @@ class InputHistoryList extends StatefulWidget {
     this.session,
     this.host,
     this.onPut,
+    this.onAddPhrase,
     this.clock = DateTime.now,
   });
 
@@ -33,6 +34,9 @@ class InputHistoryList extends StatefulWidget {
 
   /// 放进输入框; null: that action cannot be pressed.
   final void Function(String text)? onPut;
+
+  /// 加到常用语 (iOS); null: the item is not in the menu.
+  final void Function(String text)? onAddPhrase;
 
   final DateTime Function() clock;
 
@@ -214,6 +218,9 @@ class _HistoryRow extends StatelessWidget {
               key: Key('copy-original-${e.id}'), value: 'copy-original', label: '复制原话', lead: icon(Icons.copy_all)),
         ],
         RappMenuItem(key: Key('copy-${e.id}'), value: 'copy', label: '复制到本机', lead: icon(Icons.copy)),
+        if (w.onAddPhrase != null)
+          RappMenuItem(
+              key: Key('add-phrase-${e.id}'), value: 'add-phrase', label: '加到常用语', lead: icon(Icons.bolt_outlined)),
         if (e.mine) ...[
           const RappMenuItem.divider(),
           RappMenuItem(key: Key('remove-${e.id}'), value: 'remove', label: '从记录里去掉', lead: icon(Icons.close)),
@@ -230,6 +237,8 @@ class _HistoryRow extends StatelessWidget {
         w.onPut?.call(original!);
       case 'copy-original':
         await Clipboard.setData(ClipboardData(text: original!));
+      case 'add-phrase':
+        w.onAddPhrase?.call(e.text);
       case 'remove':
         await w.history.remove(e);
     }
@@ -304,6 +313,15 @@ class _HistoryRow extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                 decoration: BoxDecoration(border: Border.all(color: t.muted), borderRadius: BorderRadius.circular(t.r)),
                 child: Text('AI', style: TextStyle(color: t.on, fontSize: t.textSize - 2)),
+              ),
+            ],
+            if (e.phrase) ...[
+              const SizedBox(width: 8),
+              Container(
+                key: Key('phrase-${e.id}'),
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(border: Border.all(color: t.muted), borderRadius: BorderRadius.circular(t.r)),
+                child: Text('常用语', style: TextStyle(color: t.on, fontSize: t.textSize - 2)),
               ),
             ],
             if (e.kind == 'draft') ...[

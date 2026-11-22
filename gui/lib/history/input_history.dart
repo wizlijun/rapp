@@ -49,6 +49,9 @@ class InputEntry {
   /// Written by this device (only those can be taken out of the record).
   final bool mine;
 
+  /// Sent by a 常用语 tap (`source: phrase`): listed, but ↑ skips it.
+  bool get phrase => raw['source'] == 'phrase';
+
   /// The heard text when the record's text is the AI's (`ai.original`, 长语音先让 AI 整理); else null.
   String? get aiOriginal {
     final ai = raw['ai'];

@@ -6,9 +6,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/key_bar.dart';
 import 'package:rapp/embed/key_bar_keys.dart';
 import 'package:rapp/embed/modifier_latch.dart';
+import 'package:rapp/embed/phrases.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
@@ -497,7 +499,7 @@ void main() {
       await tester.pump();
       expect(k('bksp'), findsOneWidget);
       expect(tester.getSize(find.byType(KeyBar)).height, keyBarHeightOf(s, tsess, 700));
-      expect(keyBarHeightOf(s, tsess, 700), 100);
+      expect(keyBarHeightOf(s, tsess, 700), 100 + phraseStripHeight);
       await tap(tester, 'more');
       expect(s.prefs.keyBarMore, isFalse);
       expect(File('${tmp.path}/devices/123456789/gui.json').readAsStringSync(), contains('"key_bar_more":false'));
@@ -525,13 +527,99 @@ void main() {
 
     iosTest('the bar is as high as keyBarHeightOf says, one row wide and two narrow', (tester) async {
       await tester.pumpWidget(bar(tsess, width: 900));
-      expect(tester.getSize(find.byType(KeyBar)).height, 54);
-      expect(keyBarHeightOf(s, tsess, 900), 54);
+      expect(tester.getSize(find.byType(KeyBar)).height, 54 + phraseStripHeight);
+      expect(keyBarHeightOf(s, tsess, 900), 54 + phraseStripHeight);
     });
 
     iosTest('an arrow shows its swipe-up label in the corner', (tester) async {
       await tester.pumpWidget(bar(tsess));
       expect(find.descendant(of: k('up'), matching: find.text('PgUp')), findsOneWidget);
+    });
+  });
+
+  group('常用语条', () {
+    Finder ph(String id) => find.byKey(Key(id));
+
+    iosTest('on a terminal: the strip tops the bar, 36 more; off globally it goes and the bar is 54', (tester) async {
+      await tester.pumpWidget(bar(tsess, width: 900));
+      expect(ph('phrase-0'), findsOneWidget);
+      expect(find.text('继续'), findsOneWidget);
+      expect(ph('phrases-all'), findsOneWidget);
+      expect(tester.getSize(find.byType(KeyBar)).height, 90);
+      s.setPhraseStrip(false);
+      await tester.pump();
+      expect(ph('phrase-0'), findsNothing);
+      expect(tester.getSize(find.byType(KeyBar)).height, 54);
+    });
+
+    iosTest('an app only when its profile says 常用语条', (tester) async {
+      await tester.pumpWidget(bar(app));
+      expect(ph('phrase-0'), findsNothing);
+      expect(phraseStripShown(s, app), isFalse);
+      app.setProfile(const ResolvedProfile(phrases: true));
+      await tester.pumpWidget(bar(app));
+      expect(ph('phrase-0'), findsOneWidget);
+    });
+
+    iosTest('⊙ slim or no phrases: no strip', (tester) async {
+      s.prefs.keyBarSlim = true;
+      expect(phraseStripShown(s, tsess), isFalse);
+      s.prefs.keyBarSlim = false;
+      s.setPhrases(const []);
+      expect(phraseStripShown(s, tsess), isFalse);
+      s.setPhrases(defaultPhrases);
+      expect(phraseStripShown(s, tsess), isTrue);
+    });
+
+    testWidgets('not on macOS', (tester) async {
+      expect(phraseStripShown(s, tsess), isFalse);
+    });
+
+    iosTest('a tap sends the text, ✓ and a light tap', (tester) async {
+      app.setProfile(const ResolvedProfile(phrases: true));
+      await tester.pumpWidget(bar(app));
+      port.calls.clear();
+      await tester.tap(ph('phrase-0'));
+      await tester.pump();
+      final sends = [for (final c in port.calls) if (c.$1 == 'composer_send') c.$2];
+      expect(sends, hasLength(1));
+      expect(sends.single.toString(), contains('继续'));
+      expect(find.descendant(of: ph('phrase-0'), matching: find.byIcon(Icons.check)), findsOneWidget);
+      expect(haptics, ['HapticFeedbackType.lightImpact']);
+      await tester.pump(phraseTickTime);
+      expect(find.byIcon(Icons.check), findsNothing);
+      await tester.pump(phraseRepeatWindow);
+    });
+
+    iosTest('long press: 移到最前 and 删除, nothing sent', (tester) async {
+      await tester.pumpWidget(bar(tsess, width: 900));
+      term.calls.clear();
+      await tester.longPress(ph('phrase-1'));
+      await tester.pumpAndSettle();
+      await tester.tap(ph('phrase-menu-first'));
+      await tester.pumpAndSettle();
+      expect(s.prefs.phrases.first.text, '确认');
+      await tester.longPress(ph('phrase-0'));
+      await tester.pumpAndSettle();
+      await tester.tap(ph('phrase-menu-delete'));
+      await tester.pumpAndSettle();
+      expect(s.prefs.phrases.first.text, '继续');
+      expect(s.prefs.phrases, hasLength(defaultPhrases.length - 1));
+      expect(term.calls.where((c) => c.$1 != 'composer'), isEmpty);
+    });
+
+    iosTest('全部 ›: the whole list; a tap sends and closes it', (tester) async {
+      app.setProfile(const ResolvedProfile(phrases: true));
+      await tester.pumpWidget(bar(app));
+      await tester.tap(ph('phrases-all'));
+      await tester.pumpAndSettle();
+      expect(ph('phrases-all-9'), findsOneWidget);
+      port.calls.clear();
+      await tester.tap(ph('phrases-all-2'));
+      await tester.pumpAndSettle();
+      expect(ph('phrases-all-2'), findsNothing);
+      expect(port.calls.where((c) => c.$1 == 'composer_send').single.$2.toString(), contains('听你的'));
+      await tester.pump(phraseRepeatWindow);
     });
   });
 
