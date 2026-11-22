@@ -31,9 +31,12 @@ pub fn sample(mode: u8, p: &[u8]) -> u16 {
 
 /// Tells whether the picture changed while the client has paused it (v15), without encoding:
 /// the encoder's reference must stay the last frame the client got, so resume sends a diff.
+/// Samples, then (width, height, mode), then the region they show.
+type Picture = (Vec<u16>, (usize, usize, u8), Rect);
+
 #[derive(Default)]
 pub struct Probe {
-    last: Option<(Vec<u16>, (usize, usize, u8), Rect)>,
+    last: Option<Picture>,
 }
 impl Probe {
     pub fn reset(&mut self) {
@@ -243,7 +246,7 @@ mod tests {
         assert!(!probe.changed(&enc, &px, 4, 4, region, 2), "nothing encoded yet");
         enc.frame_region(&px, 4, 4, region, 2).unwrap();
         probe.reset();
-        assert!(!probe.changed(&enc, &vec![9; 4 * 4 * 4], 4, 4, region, 0), "other mode");
+        assert!(!probe.changed(&enc, &[9; 4 * 4 * 4], 4, 4, region, 0), "other mode");
     }
     #[test]
     fn moving_view_resets_decoder_even_when_pixels_and_dimensions_match() {
