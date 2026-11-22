@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 const RATE: usize = 16_000;
-const MAX_SAMPLES: usize = RATE * 60;
+const MAX_SAMPLES: usize = RATE * 60 * 5; // 5 minutes, the same cap as the Dart side.
 const CHUNK: usize = RATE / 50; // 20 ms; bounded stop latency without retaining recordings.
 
 pub fn emit(value: Value) {
@@ -203,7 +203,7 @@ pub fn run() -> Result<()> {
     let mut last_level = Instant::now();
     let mut last_text = String::new();
     loop {
-        let event = match rx.recv_timeout(Duration::from_secs(if ready { 90 } else { 8 })) {
+        let event = match rx.recv_timeout(Duration::from_secs(if ready { 300 } else { 8 })) {
             Ok(event) => event,
             Err(_) => bail!("speech worker timed out"),
         };

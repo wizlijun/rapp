@@ -15,7 +15,7 @@ class VoiceInput extends ChangeNotifier {
   VoiceInput({
     MethodChannel? channel,
     this.finalWait = const Duration(seconds: 1),
-    this.maxLength = const Duration(seconds: 60),
+    this.maxLength = const Duration(minutes: 5),
   }) : _channel = channel ?? const MethodChannel('rapp/speech') {
     _channel.setMethodCallHandler(handle);
   }

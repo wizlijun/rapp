@@ -146,7 +146,7 @@ class MainState extends ChangeNotifier {
             (defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.macOS
                 ? VoiceInput()
                 : defaultTargetPlatform == TargetPlatform.linux
-                    ? VoiceInput(channel: LinuxSpeechChannel(), finalWait: const Duration(seconds: 90))
+                    ? VoiceInput(channel: LinuxSpeechChannel(), finalWait: const Duration(minutes: 5))
                     : null),
         unlockStore = unlockStore ?? UnlockStore(),
         _now = clock ?? DateTime.now,

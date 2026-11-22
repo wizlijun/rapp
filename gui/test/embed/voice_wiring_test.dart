@@ -89,7 +89,7 @@ void main() {
       st.focusPicture(1);
       expect(lastFocus(port)['voice'], true);
       expect(st.voice, isNotNull);
-      expect(st.voice!.finalWait, const Duration(seconds: 90));
+      expect(st.voice!.finalWait, const Duration(minutes: 5));
     });
   });
 
