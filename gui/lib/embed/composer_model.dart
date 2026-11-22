@@ -49,7 +49,8 @@ class VoiceOrigin {
 /// One send: what was taken out of the editor, in the editor's order: text runs ([String], never empty)
 /// and blocks ([BlockChip]). Each part is one piece.
 class Outgoing {
-  Outgoing(List<Object> parts, {this.draftless = false, this.voice}) : parts = List.unmodifiable(parts) {
+  Outgoing(List<Object> parts, {this.draftless = false, this.voice, this.phrase = false})
+      : parts = List.unmodifiable(parts) {
     assert(parts.every((p) => p is BlockChip || (p is String && p.isNotEmpty)));
   }
   final List<Object> parts;
@@ -59,6 +60,9 @@ class Outgoing {
 
   /// From voice input (and the tidy, when [VoiceOrigin.ai] is set); null for typed text.
   final VoiceOrigin? voice;
+
+  /// A 常用语 tap: Return follows whatever the app's 发送后 says, and ↑ does not bring it back.
+  final bool phrase;
 
   /// The blocks among [parts], in order.
   List<BlockChip> get blocks => [for (final p in parts) if (p is BlockChip) p];
@@ -694,13 +698,13 @@ class ComposerModel extends ChangeNotifier {
 
   /// Sends [text] alone, as its own round: the draft, the editor and the held blocks stay as they
   /// are. Nothing happens while [busy] or when [text] is blank.
-  /// [voice] marks it as voice input (and AI) in its record.
-  Submit submitText(String text, {VoiceOrigin? voice}) {
+  /// [voice] marks it as voice input (and AI) in its record; [phrase] as a 常用语.
+  Submit submitText(String text, {VoiceOrigin? voice, bool phrase = false}) {
     final t = text.trim();
     if (t.isEmpty || busy) return SubmitNothing();
     final now = _clock();
     _lastSend = now;
-    final o = Outgoing([t], draftless: true, voice: voice)..at = now;
+    final o = Outgoing([t], draftless: true, voice: voice, phrase: phrase)..at = now;
     onSubmitted?.call(o);
     _inFlight = o;
     sending = true;
@@ -748,6 +752,9 @@ class ComposerModel extends ChangeNotifier {
     editorChanged();
   }
 
+  /// The round [done] last ended (null when it came with nothing in flight): what [onAllSent] was for.
+  Outgoing? lastDone;
+
   /// The runner's `sending`; a stop before `done` is held until `done` comes.
   void setSending(bool on) {
     if (!on && _inFlight != null) return;
@@ -762,6 +769,7 @@ class ComposerModel extends ChangeNotifier {
   void done(int sent, String? failure) {
     final o = _inFlight;
     _inFlight = null;
+    lastDone = o;
     sending = false;
     _lastSend = _clock();
     if (o == null) {

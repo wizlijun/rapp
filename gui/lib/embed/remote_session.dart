@@ -152,6 +152,11 @@ class RemoteSession extends ChangeNotifier {
   /// the keyboard goes down and the panel with it; a hardware keyboard keeps typing.
   /// 「直接回车且隐藏」: then the Return goes and the panel hides (the text stays, W6; the picture takes the keys back).
   void _allSent() {
+    // A 常用语 always ends with Return and leaves the panel and the keyboard as they were (phrases spec §4).
+    if (composer.lastDone?.phrase == true) {
+      onReturn?.call();
+      return;
+    }
     if (!hardwareKeyboard()) composer.releaseFocus();
     if (profile.afterSend != AfterSend.pressReturn) return;
     onReturn?.call();

@@ -195,7 +195,7 @@ class InputRecorder {
         d.live = '';
       }
       // Once per send (a retry is the same one); a voice send too.
-      if (!private && !identical(c.inFlight, o) && o.text.isNotEmpty) onSent?.call(m.key, o.text, o.at ?? _clock());
+      if (!private && !o.phrase && !identical(c.inFlight, o) && o.text.isNotEmpty) onSent?.call(m.key, o.text, o.at ?? _clock());
       if (o.text.isEmpty && !private) return;
       // An adopted row's retry: its text is pending once already.
       final p = d.pieces.where((p) => identical(p.owner, o)).firstOrNull;
@@ -531,8 +531,8 @@ class InputRecorder {
       'result': o.sent >= total ? 'sent' : (o.sent > 0 ? 'partial' : 'failed'),
       if (o.sent > 0 && o.sent < total) 'sentPieces': o.sent,
       // Return was pressed only when every piece went and nothing was said.
-      'after': all && o.failure == null && after == AfterSend.pressReturn ? 'return' : 'none',
-      'source': o.voice != null ? 'voice' : 'typed',
+      'after': all && o.failure == null && (o.phrase || after == AfterSend.pressReturn) ? 'return' : 'none',
+      'source': o.phrase ? 'phrase' : (o.voice != null ? 'voice' : 'typed'),
       if (o.voice?.ai case final ai?) 'ai': ai.toJson(),
     };
   }

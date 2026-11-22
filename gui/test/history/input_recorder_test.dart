@@ -876,6 +876,19 @@ void main() {
       expect(r['ai'], {'app': 'dictation', 'original': '嗯那个我门明天开会', 'result': '我们明天开会。'});
     });
 
+    test('a 常用语 records source phrase and a Return, and is not remembered for ↑', () async {
+      final got = <String>[];
+      final rec = recorder()..onSent = (key, text, at) => got.add(text);
+      final a = session(1, 'com.a'); // 发送后 = 只贴: the phrase's Return goes anyway
+      rec.attach(a, () => meta('h1', 'com.a'), restore: true);
+      a.composer.submitText('继续', phrase: true);
+      a.composer.done(1, null);
+      await until(() => lines().length == 1);
+      expect(lines().single['source'], 'phrase');
+      expect(lines().single['after'], 'return');
+      expect(got, isEmpty);
+    });
+
     test('a typed send stays typed', () async {
       final r = await sendOne((a) => unawaited(send(a, '打的字')));
       expect(r['source'], 'typed');
