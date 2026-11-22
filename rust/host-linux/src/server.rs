@@ -122,8 +122,8 @@ struct Live {
     input_sources: crate::input_source::InputSources,
     target: Value,
     secure: bool,
-    menus: Vec<u8>,
-    focus: Vec<u8>,
+    /// Window table, menu bar and focus region, and the pause (v15) that throttles or holds them.
+    outbox: crate::pause::Outbox,
     epoch: u64,
     unchanged: u32,
     pending: Vec<u8>,
@@ -136,7 +136,6 @@ struct Live {
     locked: Option<bool>,
     next_lock_check: Instant,
     next_windows: Instant,
-    windows: Vec<u8>,
     cover: Option<crate::desktop::Cover>,
     last_opening_input: Option<Instant>,
     covered_buttons: HashSet<u8>,
@@ -373,6 +372,7 @@ pub fn serve(opts: Options) -> Result<()> {
                         .unwrap_or_else(|| rapp_net::config::home().join("files/transfers"));
                     let session_transfers = Arc::new(Transfers::new(directory));
                     *transfers.lock().unwrap() = Some(Arc::downgrade(&session_transfers));
+                    let windows = wire::window_table(&desktop.windows()?);
                     let mut l = Live {
                         socket: a.socket,
                         settings: a.settings,
@@ -383,8 +383,7 @@ pub fn serve(opts: Options) -> Result<()> {
                         input_sources: crate::input_source::InputSources::start(),
                         target: Value::Null,
                         secure: false,
-                        menus: vec![],
-                        focus: vec![],
+                        outbox: crate::pause::Outbox::new(windows.clone()),
                         epoch: next_epoch(),
                         unchanged: 0,
                         pending: vec![],
@@ -397,7 +396,6 @@ pub fn serve(opts: Options) -> Result<()> {
                         locked: None,
                         next_lock_check: now,
                         next_windows: now,
-                        windows: wire::window_table(&desktop.windows()?),
                         cover: None,
                         last_opening_input: None,
                         covered_buttons: HashSet::new(),
@@ -405,7 +403,7 @@ pub fn serve(opts: Options) -> Result<()> {
                     };
                     let start = (|| {
                         l.send(&wire::ready(&title, display.width, display.height))?;
-                        l.send(&l.windows.clone())?;
+                        l.send(&windows)?;
                         l.send(&packet(33, vec![0]))
                     })();
                     if start.is_ok() {
@@ -430,21 +428,37 @@ pub fn serve(opts: Options) -> Result<()> {
                     } else {
                         done.frame?
                     };
-                    if let Some(frame) = frame {
-                        l.send(&frame)?;
-                        l.pacing.sent(l.clock.elapsed().as_secs_f64());
-                        l.unchanged = 0;
+                    if done.probe {
+                        // Paused: watch about once a second; resumed meanwhile: capture now.
+                        if done.changed && l.locked != Some(true) {
+                            if let Some(p) = l.outbox.changed(l.clock.elapsed().as_secs_f64()) {
+                                l.send(&p)?;
+                            }
+                        }
+                        l.next_frame = Instant::now()
+                            + if l.outbox.paused() {
+                                Duration::from_secs(1)
+                            } else {
+                                Duration::ZERO
+                            };
                     } else {
-                        l.unchanged = l.unchanged.saturating_add(1);
+                        if let Some(frame) = frame {
+                            // Also while paused: it was encoded, so the client must get it.
+                            l.send(&frame)?;
+                            l.pacing.sent(l.clock.elapsed().as_secs_f64());
+                            l.unchanged = 0;
+                        } else {
+                            l.unchanged = l.unchanged.saturating_add(1);
+                        }
+                        l.active_after = Instant::now()
+                            + capture::rest(l.pacing.effective(l.settings).fps, done.elapsed, 0);
+                        l.next_frame = Instant::now()
+                            + capture::rest(
+                                l.pacing.effective(l.settings).fps,
+                                done.elapsed,
+                                l.unchanged,
+                            );
                     }
-                    l.active_after = Instant::now()
-                        + capture::rest(l.pacing.effective(l.settings).fps, done.elapsed, 0);
-                    l.next_frame = Instant::now()
-                        + capture::rest(
-                            l.pacing.effective(l.settings).fps,
-                            done.elapsed,
-                            l.unchanged,
-                        );
                 }
                 for input in l.read()? {
                     handle(l, &mut desktop, input)?;
@@ -459,9 +473,8 @@ pub fn serve(opts: Options) -> Result<()> {
                 let now = Instant::now();
                 if now >= l.next_windows {
                     let windows = wire::window_table(&desktop.windows()?);
-                    if windows != l.windows {
-                        l.send(&windows)?;
-                        l.windows = windows;
+                    if let Some(p) = l.outbox.windows(windows, l.clock.elapsed().as_secs_f64()) {
+                        l.send(&p)?;
                     }
                     let target = if l.locked == Some(true) {
                         Value::Null
@@ -520,21 +533,26 @@ pub fn serve(opts: Options) -> Result<()> {
                     emit(json!({"event":"input"}));
                 }
                 let elapsed = l.clock.elapsed().as_secs_f64();
-                l.pacing.observe(elapsed, false, l.settings);
+                // Paused: an idle link with a stale slow RTT is not a slow network.
+                if !l.outbox.paused() {
+                    l.pacing.observe(elapsed, false, l.settings);
+                }
                 update_saving(l)?;
                 ensure!(
                     l.pacing.oldest_age(elapsed) < 15.,
                     "client stopped acknowledging frames"
                 );
                 let settings = l.pacing.effective(l.settings);
+                let paused = l.outbox.paused();
                 if l.locked != Some(true)
                     && now >= l.next_frame
-                    && l.pacing.ready(elapsed, settings.fps)
+                    && (paused || l.pacing.ready(elapsed, settings.fps))
                 {
                     capture.submit(Job {
                         epoch: l.epoch,
                         settings,
                         view: l.view,
+                        probe: paused,
                     })?;
                 }
                 Ok(())
@@ -583,7 +601,12 @@ fn handle(l: &mut Live, desktop: &mut Desktop, input: Input) -> Result<()> {
                 .ack(l.clock.elapsed().as_secs_f64(), ms, l.settings);
             return update_saving(l);
         }
-        Input::Stream(s) => {
+        Input::Stream(mut s) => {
+            // fps 0 pauses (v15) and keeps the rate it had: pacing and saving never see 0.
+            let pause = s.fps == 0;
+            if pause {
+                s.fps = l.settings.fps;
+            }
             if l.settings.mode != s.mode || l.settings.density != s.density {
                 l.epoch = next_epoch();
             }
@@ -593,6 +616,14 @@ fn handle(l: &mut Live, desktop: &mut Desktop, input: Input) -> Result<()> {
             let _ = l
                 .accessibility
                 .send(&json!({"cmd":"target","target":l.target}));
+            // Resume: what was held goes before the picture, which is captured at once.
+            for p in l.outbox.set_paused(pause, l.clock.elapsed().as_secs_f64()) {
+                l.send(&p)?;
+            }
+            if !pause {
+                l.pacing.resumed();
+                l.next_windows = Instant::now();
+            }
             l.unchanged = 0;
             l.next_frame = Instant::now();
             return Ok(());
@@ -751,10 +782,8 @@ fn metadata(l: &mut Live, value: &Value) -> Result<()> {
     }
     let mut menu = vec![];
     menus(&value["menus"], &mut menu);
-    let menu = packet(17, menu);
-    if menu != l.menus {
-        l.send(&menu)?;
-        l.menus = menu;
+    if let Some(p) = l.outbox.menus(packet(17, menu)) {
+        l.send(&p)?;
     }
     let window = value["target"]["window"].as_u64().unwrap_or(0) as u32;
     let rects = value["rects"]
@@ -780,10 +809,8 @@ fn metadata(l: &mut Live, value: &Value) -> Result<()> {
             focus.extend((f as f32).to_le_bytes());
         }
     }
-    let focus = packet(36, focus);
-    if focus != l.focus {
-        l.send(&focus)?;
-        l.focus = focus;
+    if let Some(p) = l.outbox.focus(packet(36, focus)) {
+        l.send(&p)?;
     }
     Ok(())
 }

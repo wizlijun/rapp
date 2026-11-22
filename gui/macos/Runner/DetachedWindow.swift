@@ -92,6 +92,10 @@ final class DetachedSession: NSObject, NSWindowDelegate {
   private var placing = false
   private var closed = false
   private var attachAsked = false
+  /// Told when the windows go out of sight together (minimized, covered, on another Space) or one
+  /// comes back: Dart pauses the session's picture meanwhile (protocol v15).
+  var onVisible: ((Bool) -> Void)?
+  private var anyVisible = true
   /// Shown over the top of every window (`DetachedWindow.setBanner`); nil for none.
   var banner: String? {
     didSet { for window in windows.values { window.setBanner(banner) } }
@@ -131,11 +135,15 @@ final class DetachedSession: NSObject, NSWindowDelegate {
       panel.close()
       popups[id] = nil
     }
+    var removed = false
     for (id, window) in windows where !decoratedIDs.contains(id) {
       window.delegate = nil
       window.close()
       windows[id] = nil
+      removed = true
     }
+    // A closed window says nothing more: the ones left decide whether the session is seen.
+    if removed, !windows.isEmpty { recheckVisible() }
     if let k = lastKey, windows[k] == nil { lastKey = nil }
 
     var fresh = [DetachedWindow]()
@@ -307,6 +315,16 @@ final class DetachedSession: NSObject, NSWindowDelegate {
   private func sendResize(_ window: DetachedWindow) {
     guard !closed, windows[window.info.id] === window else { return }
     if let m = detachedResize(window.info, content: window.contentSize) { session.send(m) }
+  }
+
+  func windowDidChangeOcclusionState(_ notification: Notification) { recheckVisible() }
+
+  private func recheckVisible() {
+    guard !closed else { return }
+    let now = windows.values.contains { $0.occlusionState.contains(.visible) }
+    guard now != anyVisible else { return }
+    anyVisible = now
+    onVisible?(now)
   }
 
   func windowDidBecomeKey(_ notification: Notification) {

@@ -70,6 +70,10 @@ final class ChannelTests: XCTestCase {
         XCTAssertThrowsError(try channelCommand("start", ["sid": 3, "port": 70000, "token": "t", "mode": "color16", "fps": 15, "density": "adaptive"]))
         XCTAssertThrowsError(try channelCommand("start", ["sid": 3, "port": 5000, "token": "t", "mode": "color16", "fps": 15, "density": "huge"]))
         XCTAssertThrowsError(try channelCommand("set_stream", ["sid": 1, "mode": "color16", "fps": 7, "density": "adaptive"]))
+        // v15: 0 pauses a running stream; a new session always starts with pictures.
+        XCTAssertEqual(try channelCommand("set_stream", ["sid": 1, "mode": "duogray", "fps": 0, "density": "saver1x"]),
+                       .setStream(sid: 1, mode: .duogray, fps: 0, density: .saver1x, pinned: false))
+        XCTAssertThrowsError(try channelCommand("start", ["sid": 3, "port": 5000, "token": "t", "mode": "color16", "fps": 0, "density": "adaptive"]))
         XCTAssertThrowsError(try channelCommand("close", ["sid": "1"]))
         XCTAssertThrowsError(try channelCommand("close", ["sid": true]))
         XCTAssertThrowsError(try channelCommand("close", "x"))

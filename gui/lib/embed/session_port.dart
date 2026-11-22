@@ -311,6 +311,13 @@ class TransferProgressEvent extends SessionEvent {
 }
 
 /// The session moved into its own windows, or back; `current` is the window to show on return.
+/// Whether any of a detached session's native windows can be seen (not minimized, covered, or on
+/// another Space).
+class WindowVisibleEvent extends SessionEvent {
+  const WindowVisibleEvent(super.sid, this.visible);
+  final bool visible;
+}
+
 class DetachedEvent extends SessionEvent {
   const DetachedEvent(super.sid, this.detached, {this.current});
   final bool detached;
@@ -517,6 +524,8 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
             kind: ClipKind.values.where((v) => v.name == m['kind']).firstOrNull);
       case 'detached':
         return DetachedEvent(sid, _as<bool>(m['detached']), current: _as<int?>(m['current']));
+      case 'window_visible':
+        return WindowVisibleEvent(sid, _as<bool>(m['visible']));
       case 'input_blocked':
         return InputBlockedEvent(sid, _as<String?>(m['by']) ?? '');
       case 'input_source':

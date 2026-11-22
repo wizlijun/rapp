@@ -18,7 +18,8 @@ pub struct Settings {
     pub focus: bool,
     pub pinned: bool,
 }
-fn settings(r: &mut Reader<'_>) -> Result<Settings> {
+/// `stream`: a `set_stream`, where fps 0 pauses the pictures (v15); a hello always starts them.
+fn settings(r: &mut Reader<'_>, stream: bool) -> Result<Settings> {
     let s = Settings {
         mode: r.u8()?,
         fps: r.u8()?,
@@ -27,7 +28,10 @@ fn settings(r: &mut Reader<'_>) -> Result<Settings> {
         pinned: false,
     };
     ensure!(
-        s.mode <= 4 && [1, 5, 15, 30].contains(&s.fps) && s.density > 0. && s.density <= 8.,
+        s.mode <= 4
+            && ([1, 5, 15, 30].contains(&s.fps) || stream && s.fps == 0)
+            && s.density > 0.
+            && s.density <= 8.,
         "invalid stream settings"
     );
     Ok(s)
@@ -44,7 +48,7 @@ pub fn hello(p: &[u8], token: &str, app: &str) -> Result<Settings> {
     // already selects the worker's desktop. Match the macOS host contract.
     let requested = r.string()?;
     ensure!(requested.is_empty() || requested == app, "wrong desktop");
-    let s = settings(&mut r)?;
+    let s = settings(&mut r, false)?;
     r.end()?;
     Ok(s)
 }
@@ -107,7 +111,7 @@ pub fn input(kind: u8, p: &[u8]) -> Result<Input> {
             Input::Scroll(id, r.f32()?, r.f32()?, r.f32()?, r.f32()?)
         }
         11 => {
-            let mut s = settings(&mut r)?;
+            let mut s = settings(&mut r, true)?;
             let flags = r.u8()?;
             ensure!(flags & !3 == 0, "invalid stream flags");
             s.pinned = flags & 1 != 0;
@@ -300,6 +304,23 @@ mod tests {
         assert!(hello(&p, "secret", "desktop:2").is_err());
         p[0] -= 1;
         assert!(hello(&p, "secret", "desktop:").is_err());
+        // v15: a hello never starts paused.
+        p[0] += 1;
+        let fps = p.len() - 5;
+        p[fps] = 0;
+        assert!(hello(&p, "secret", "desktop:").is_err());
+    }
+    #[test]
+    fn set_stream_fps_zero_pauses_and_other_rates_stay_strict() {
+        let stream = |fps: u8| {
+            let mut p = vec![2, fps];
+            p.extend(1f32.to_le_bytes());
+            p.push(0);
+            input(11, &p)
+        };
+        assert!(matches!(stream(0), Ok(Input::Stream(s)) if s.fps == 0));
+        assert!(matches!(stream(15), Ok(Input::Stream(s)) if s.fps == 15));
+        assert!(stream(2).is_err());
     }
 
     #[test]

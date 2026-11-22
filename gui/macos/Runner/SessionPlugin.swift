@@ -442,6 +442,9 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     let session = DetachedSession(session: entry.session, windows: shown, beside: view?.window,
                                   onAttach: { [weak self] in self?.attachSession(sid) })
     session.banner = banners[sid]
+    session.onVisible = { [weak self] visible in
+      self?.channel.invokeMethod("window_visible", arguments: ["sid": sid, "visible": visible])
+    }
     detached[sid] = session
     let payload = detachedPayload(sid: sid, detached: true, current: nil)
     channel.invokeMethod(payload.method, arguments: payload.args)

@@ -1,7 +1,7 @@
 //! One capture/encode job at a time, independent of the input/control loop.
 use crate::{
     desktop::{Desktop, Display},
-    encode::Encoder,
+    encode::{Encoder, Probe},
     wire::Settings,
 };
 use anyhow::{ensure, Result};
@@ -15,11 +15,17 @@ pub struct Job {
     pub epoch: u64,
     pub settings: Settings,
     pub view: Option<(u32, Rect)>,
+    /// Paused (v15): only tell whether the picture changed; nothing is encoded.
+    pub probe: bool,
 }
 pub struct Completed {
     pub epoch: u64,
     pub elapsed: Duration,
+    /// None for a probe and for a picture that did not change.
     pub frame: Result<Option<Vec<u8>>>,
+    pub probe: bool,
+    /// A probe saw the picture change.
+    pub changed: bool,
 }
 pub struct CaptureWorker {
     jobs: mpsc::SyncSender<Job>,
@@ -33,9 +39,11 @@ impl CaptureWorker {
         std::thread::spawn(move || {
             let mut desktop: Option<Desktop> = None;
             let mut encoder = Encoder::default();
+            let mut probe = Probe::default();
             let mut epoch = None;
             while let Ok(job) = incoming.recv() {
                 let began = Instant::now();
+                let mut changed = false;
                 let frame = (|| {
                     if desktop.is_none() {
                         let mut d = Desktop::connect()?;
@@ -54,7 +62,12 @@ impl CaptureWorker {
                         // Discarded results must never become the reference for
                         // another client or a changed mode/density.
                         encoder.reset();
+                        probe.reset();
                         epoch = Some(job.epoch);
+                    }
+                    if !job.probe {
+                        // The next pause compares with what this frame sends, not an older probe.
+                        probe.reset();
                     }
                     let desktop = desktop.as_mut().unwrap();
                     let view = desktop.view_region(job.view)?;
@@ -72,6 +85,17 @@ impl CaptureWorker {
                             },
                         )
                     };
+                    if job.probe {
+                        changed = probe.changed(
+                            &encoder,
+                            &image.pixels,
+                            image.width,
+                            image.height,
+                            region,
+                            job.settings.mode,
+                        );
+                        return Ok(None);
+                    }
                     encoder.frame_region(
                         &image.pixels,
                         image.width,
@@ -89,6 +113,8 @@ impl CaptureWorker {
                         epoch: job.epoch,
                         elapsed: began.elapsed(),
                         frame,
+                        probe: job.probe,
+                        changed,
                     })
                     .is_err()
                 {

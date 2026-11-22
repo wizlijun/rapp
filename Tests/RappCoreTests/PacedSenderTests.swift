@@ -571,4 +571,99 @@ final class PacedSenderTests: XCTestCase {
         offerSmall(s, 2)
         XCTAssertEqual(s.takeStats().fullFrames, 0)
     }
+    // MARK: Pause (v15 set_stream fps 0)
+
+    private func ackAll(_ s: PacedSender) {
+        var n = 0
+        while n < 1000 {
+            let c = sent.count
+            s.ack(processingMs: 0)
+            if sent.count == c { break }
+            n += 1
+        }
+    }
+
+    func testPausedOffersSendNothingAndResumeSendsOneDiff() throws {
+        let s = make()
+        let a = small(1)
+        s.offer(samples: a, raw: nil, width: 64, height: 64, region: rect, captured: t)
+        s.ack(processingMs: 0)
+        XCTAssertEqual(sent.count, 1)
+        s.setPaused(true)
+        offerSmall(s, 2)
+        offerSmall(s, 3)
+        s.tick()
+        XCTAssertEqual(sent.count, 1, "nothing while paused")
+        let c = small(4)
+        s.offer(samples: c, raw: nil, width: 64, height: 64, region: rect, captured: t)
+        s.setPaused(false)
+        XCTAssertEqual(sent.count, 2, "resume sends the newest at once")
+        XCTAssertFalse(sent[1].payload.isFull, "a diff against what B has")
+        let dec = FrameDecoder()
+        try dec.decode(sent[0].payload)
+        try dec.decode(sent[1].payload)
+        XCTAssertEqual(dec.samples, c)
+    }
+
+    func testSlicesQueuedBeforePauseStillGoOut() throws {
+        let s = make()
+        let w = 1920, h = 1080
+        let n = randomSamples(width: w, height: h, mode: .gray4, seed: 9)
+        s.offer(samples: n, raw: nil, width: w, height: h, region: rect, captured: t)
+        XCTAssertEqual(sent.count, 1)
+        s.setPaused(true)
+        offerSmall(s, 1)
+        ackAll(s)
+        XCTAssertGreaterThan(sent.count, 3, "the frame B got part of is finished")
+        let dec = FrameDecoder()
+        for f in sent { try dec.decode(f.payload) }
+        XCTAssertEqual(dec.samples, n, "the held 64x64 offer waits for resume")
+        s.setPaused(false)
+        ackAll(s)
+        XCTAssertEqual(sent.last?.payload.width, 64)
+    }
+
+    func testPauseDoesNotChangeTheSavingLevel() {
+        let s = make()
+        offerSmall(s, 1)
+        s.ack(processingMs: 0)
+        s.setPaused(true)
+        for _ in 0..<30 {
+            t += 1
+            offerSmall(s, UInt32(t))
+            s.tick()
+        }
+        XCTAssertEqual(levelChanges, [])
+        XCTAssertEqual(s.level, 0)
+        XCTAssertEqual(s.takeStats().inFlight, 0)
+    }
+
+    func testNoSettleWhilePaused() {
+        let s = make(mode: .duogray)
+        let (w, h) = (1024, 768)
+        offerRaw(s, page(0), w, h)
+        drain(s)
+        offerRaw(s, page(5), w, h)
+        drain(s)
+        s.setPaused(true)
+        t += 5
+        let before = sent.count
+        s.settleIfIdle()
+        XCTAssertEqual(sent.count, before)
+    }
+
+    func testPausedModeChangeResumesWithFullFrame() throws {
+        let s = make()
+        offerSmall(s, 1)
+        s.ack(processingMs: 0)
+        s.setPaused(true)
+        s.setMode(.color16)
+        let c = randomSamples(width: 64, height: 64, mode: .color16, seed: 7)
+        s.offer(samples: c, raw: nil, width: 64, height: 64, region: rect, captured: t)
+        XCTAssertEqual(sent.count, 1)
+        s.setPaused(false)
+        XCTAssertEqual(sent.count, 2)
+        XCTAssertTrue(sent[1].payload.isFull)
+        XCTAssertEqual(sent[1].payload.mode, .color16)
+    }
 }

@@ -1,7 +1,7 @@
 use anyhow::{bail, ensure, Context, Result};
 use std::{collections::HashSet, io::Read};
 
-pub const VERSION: u8 = 14;
+pub const VERSION: u8 = 15;
 
 /// The longest unlock password a client may send (bytes, v11).
 pub const UNLOCK_PASSWORD_LIMIT: usize = 1024;
@@ -89,6 +89,8 @@ pub enum Incoming {
     AppOpened { bundle: String, name: String },
     /// A's keyboard focus is in a password field (v13; its role only, never the text).
     SecureFocus(bool),
+    /// A paused session's picture changed (v15, no payload, at most once a second).
+    Changed,
 }
 #[derive(Clone, Debug)]
 pub struct Address {
@@ -339,8 +341,8 @@ pub fn read_message(input: &mut impl Read) -> Result<(Incoming, usize)> {
     input.read_exact(&mut h).context("host disconnected")?;
     ensure!(
         // Main-connection host messages in RappCore/Protocol.swift, including v12 focusRegion and
-        // v13 covered/appOpened/secureFocus. Side-transfer and client-to-host types stay rejected.
-        [2, 3, 4, 13, 17, 19, 21, 26, 28, 29, 32, 33, 34, 36, 37, 39, 40].contains(&h[0]),
+        // v13 covered/appOpened/secureFocus and v15 changed. Side-transfer and client-to-host types stay rejected.
+        [2, 3, 4, 13, 17, 19, 21, 26, 28, 29, 32, 33, 34, 36, 37, 39, 40, 42].contains(&h[0]),
         "unexpected host message type {}",
         h[0]
     );
@@ -528,6 +530,7 @@ pub fn decode(kind: u8, p: &[u8]) -> Result<Incoming> {
             ensure!(v <= 1, "invalid secure flag");
             Incoming::SecureFocus(v == 1)
         }
+        42 => Incoming::Changed,
         _ => bail!("unknown host message type {kind}"),
     };
     r.end()?;

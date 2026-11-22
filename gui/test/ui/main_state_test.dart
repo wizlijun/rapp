@@ -1458,6 +1458,62 @@ void main() {
       });
     });
 
+    group('pause out of sight (v15)', () {
+      void frames(FakeSessionPort port, int sid) => port.emit(TrafficEvent(sid, 900, 3));
+
+      test('after its first frame an off-stage session pauses at 0; back on stage it streams', () {
+        env((a, t, port, st, hints) {
+          expect(sets(port, 1).last['fps'], 1, reason: 'no first frame yet: not paused');
+          frames(port, 1);
+          expect(sets(port, 1).last['fps'], 0);
+          st.select('111/a');
+          expect(sets(port, 1).last['fps'], 15);
+          expect(st.remote[1]!.choice.fps, 15, reason: 'the choice never changes');
+          frames(port, 2);
+          expect(sets(port, 2).last['fps'], 0);
+        }, sessions: 2);
+      });
+
+      test('the main window out of sight pauses the stage session; a visible detached one keeps on', () {
+        env((a, t, port, st, hints) {
+          frames(port, 1);
+          frames(port, 2);
+          port.emit(const DetachedEvent(1, true));
+          expect(sets(port, 1).last['fps'], 15);
+          st.mainVisible = false;
+          expect(sets(port, 2).last['fps'], 0);
+          expect(sets(port, 1).last['fps'], 15);
+          st.mainVisible = true;
+          expect(sets(port, 2).last['fps'], 15);
+        }, sessions: 2);
+      });
+
+      test('a detached window out of sight pauses; a new detach starts visible', () {
+        env((a, t, port, st, hints) {
+          frames(port, 1);
+          port.emit(const DetachedEvent(1, true));
+          port.emit(const WindowVisibleEvent(1, false));
+          expect(sets(port, 1).last['fps'], 0);
+          port.emit(const WindowVisibleEvent(1, true));
+          expect(sets(port, 1).last['fps'], 15);
+          port.emit(const WindowVisibleEvent(1, false));
+          port.emit(const DetachedEvent(1, false));
+          expect(sets(port, 1).last['fps'], 0, reason: 'attached, but not current');
+          port.emit(const DetachedEvent(1, true));
+          expect(sets(port, 1).last['fps'], 15);
+        }, sessions: 2);
+      });
+
+      test('overview pauses every session that has a picture', () {
+        env((a, t, port, st, hints) {
+          frames(port, 2);
+          expect(sets(port, 2).isEmpty ? 15 : sets(port, 2).last['fps'], 15);
+          st.toggleOverview();
+          expect(sets(port, 2).last['fps'], 0);
+        }, sessions: 2);
+      });
+    });
+
     test('an off-stage choice change sends mode at 1 fps; returning sends the chosen rate', () {
       env((a, t, port, st, hints) {
         st.remote[1]!.setChoice(const StreamChoice('duogray', 'original', 30));

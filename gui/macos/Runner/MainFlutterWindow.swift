@@ -40,6 +40,12 @@ class MainFlutterWindow: NSWindow {
       }
     }
     systemChannel = system
+    // Minimized, hidden, fully covered or on another Space: Dart pauses the stage's picture (v15).
+    NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: self,
+                                           queue: .main) { [weak self] _ in
+      guard let self else { return }
+      self.systemChannel?.invokeMethod("visible", arguments: self.occlusionState.contains(.visible))
+    }
 
     super.awakeFromNib()
   }

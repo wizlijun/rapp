@@ -8,6 +8,9 @@ pub mod clipboard;
 pub mod desktop;
 pub mod encode;
 pub mod gate;
+// Shared so its tests run everywhere; only the Linux server uses it.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+mod pause;
 #[cfg(target_os = "linux")]
 pub mod input_source;
 // Shared so its tests run everywhere; only the Linux server uses it.

@@ -51,6 +51,8 @@ public final class PacedSender {
     private var latest: Offer?
     private var queue: [Slice] = []
     private var pumping = false
+    /// B paused the pictures (v15 fps 0): nothing new is encoded; the newest offer waits for resume.
+    private var paused = false
     private var sessionFirstFrame = true
     private var firstSentAt: TimeInterval?
     private var firstAckSeen = false
@@ -113,7 +115,7 @@ public final class PacedSender {
     public func settleIfIdle() {
         // A free send slot too: a settle frame left waiting in the queue would hold up a
         // keystroke captured after it.
-        guard encoder.needsSettle, queue.isEmpty, latest == nil, pacer.inFlight < pacer.cap(now: now()),
+        guard !paused, encoder.needsSettle, queue.isEmpty, latest == nil, pacer.inFlight < pacer.cap(now: now()),
               let at = divergedAt, now() - at >= Self.settleDelay else { return }
         let started = now()
         let slices = encoder.encodeSettle(limit: Self.settleLimit)
@@ -126,6 +128,15 @@ public final class PacedSender {
     }
 
     public func setFps(_ fps: Int) { pacer.fps = fps }
+
+    /// Paused: offers only replace the held one and no settle runs, so the encoder's reference stays
+    /// the last frame B got; slices already queued still go out (B must see a frame it was sent a part of).
+    /// Resuming encodes the held offer, if any, against that reference.
+    public func setPaused(_ on: Bool) {
+        guard on != paused else { return }
+        paused = on
+        if !on { pump() }
+    }
 
     /// Automatic saving off (true): back to level 0 at once, and it stays there.
     public func setPinned(_ pinned: Bool) {
@@ -167,7 +178,7 @@ public final class PacedSender {
         defer { pumping = false }
         while pacer.inFlight < pacer.cap(now: now()) {
             if queue.isEmpty {
-                guard let o = latest else { return }
+                guard !paused, let o = latest else { return }
                 latest = nil
                 let first = sessionFirstFrame ? Self.firstSliceLimit : nil
                 sessionFirstFrame = false

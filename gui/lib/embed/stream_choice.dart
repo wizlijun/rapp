@@ -33,7 +33,9 @@ const presetSharpest = StreamChoice('color16', 'original', 15);
 /// A new session starts like today's hub-spawned client.
 const startChoice = StreamChoice('color16', 'adaptive', 15);
 
-/// The rate a session really streams at: its chosen one while it is on the stage or detached
-/// (on screen, R6), 1 fps otherwise.
-int effectiveFps(StreamChoice c, {required bool onStage, required bool detached}) =>
-    (onStage || detached) ? c.fps : 1;
+/// The rate a session really streams at: its chosen one while it can be seen (on the stage of a
+/// visible main window, or in a visible detached window), otherwise 0: A pauses the picture and
+/// only says when it changed (protocol v15). A session without its first frame yet runs at 1 fps
+/// instead, so its lamp leaves 「连接中」.
+int effectiveFps(StreamChoice c, {required bool shown, bool sawFrame = true}) =>
+    shown ? c.fps : (sawFrame ? 0 : 1);

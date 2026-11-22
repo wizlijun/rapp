@@ -112,7 +112,8 @@ fn command(v: &Value) -> Result<Vec<u8>> {
             let mode = p::mode_number(v["mode"].as_str().context("missing mode")?)
                 .context("invalid mode")?;
             let fps = number(v, "fps")?;
-            ensure!([1, 5, 15, 30].contains(&fps), "invalid fps");
+            // v15: 0 pauses the pictures (only here; a session always starts with them).
+            ensure!([0, 1, 5, 15, 30].contains(&fps), "invalid fps");
             let pinned = v["pinned"].as_bool().unwrap_or(false);
             let focus = v["focus"].as_bool().unwrap_or(false);
             p::stream(mode, fps as u8, float(v, "density")?.clamp(0.01, 8.), pinned, focus)
@@ -389,6 +390,10 @@ fn read_loop(
                 event(out, json!({"event":"app_opened","bundle":bundle,"name":name}))?
             }
             Incoming::SecureFocus(on) => event(out, json!({"event":"secure_focus","on":on}))?,
+            // A paused session's picture changed: a frame for the activity lamp, nothing to ack.
+            Incoming::Changed => {
+                frames.fetch_add(1, Ordering::Relaxed);
+            }
         }
     }
 }
@@ -481,6 +486,14 @@ mod tests {
                 .concat()
             )
         );
+    }
+    #[test]
+    fn set_stream_fps_zero_pauses() {
+        assert_eq!(
+            command(&json!({"cmd":"set_stream","mode":"color16","fps":0,"density":1.})).unwrap(),
+            p::stream(2, 0, 1., false, false)
+        );
+        assert!(command(&json!({"cmd":"set_stream","mode":"color16","fps":2,"density":1.})).is_err());
     }
     #[test]
     fn malformed_commands_do_not_wrap_integer_fields() {

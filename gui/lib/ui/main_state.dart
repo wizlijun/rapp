@@ -848,21 +848,32 @@ class MainState extends ChangeNotifier {
   /// whose profile turned the focus pane off.
   bool _wantsFocus(RemoteSession rs, SessionRecord r) => rs.choice.smart && !isDesktopApp(r.app) && rs.profile.focusPane;
 
+  /// Whether the main window can be seen: false when it is minimized, hidden, fully covered or on
+  /// another Space (macOS), or minimized (Linux). Its stage session then pauses too.
+  bool get mainVisible => _mainVisible;
+  bool _mainVisible = true;
+  set mainVisible(bool v) {
+    if (v == _mainVisible) return;
+    _mainVisible = v;
+    _applyFps();
+  }
+
   /// Sends each started session's effective rate when it differs from the last one sent: the
-  /// chosen rate on the stage or detached, 1 fps otherwise. `session.choice` is never changed.
+  /// chosen rate when it can be seen, 0 (paused) otherwise. `session.choice` is never changed.
   void _applyFps() {
     final p = port;
     if (p == null) return;
     _sentFps.removeWhere((sid, _) => !remote.containsKey(sid));
     // In overview no picture is on stage: every session runs at its off-stage rate (C4).
-    final onStage = overview || logs ? null : currentRecord;
+    final onStage = overview || logs || !_mainVisible ? null : currentRecord;
     for (final rs in remote.values) {
       final last = _sentFps[rs.sid];
       if (last == null) continue; // not started yet: its start carries the rate
       final r = _recordOfSid(rs.sid);
       if (r == null || !_reachable(r)) continue; // a dead sid never reaches the runner (R12)
       final c = rs.choice;
-      final fps = effectiveFps(c, onStage: onStage != null && identical(r, onStage), detached: rs.detached);
+      final shown = rs.detached ? rs.windowVisible : onStage != null && identical(r, onStage);
+      final fps = effectiveFps(c, shown: shown, sawFrame: rs.sawFrame);
       // Pinned when the global traffic preference pins it. For a non-desktop session a
       // manual pick is only a ceiling (not a pin); desktop screens, however, share a
       // manual choice across siblings, so there a manual pin does pin the stream.
@@ -1304,7 +1315,7 @@ class MainState extends ChangeNotifier {
   void _applyPortEvent(RemoteSession rs, SessionEvent e) {
     // Allocate marks in the shared model before handing an insertion to the native editor.
     final text = e is ComposerInsertEvent ? rs.composer.plainText(e.insert.text ?? '') : null;
-    rs.apply(e);
+    rs.apply(e); // a first frame or a visibility change re-applies the rates in notifyListeners
     if (e is ComposerInsertEvent && portOf(rs.sid)?.supportsInlineNativeComposer == true) {
       final ids = e.insert.blocks.map((b) => b.n).toSet();
       portOf(rs.sid)?.nativeComposerInsert(rs.sid, text,

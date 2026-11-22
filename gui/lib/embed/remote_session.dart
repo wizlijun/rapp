@@ -323,6 +323,9 @@ class RemoteSession extends ChangeNotifier {
   List<RemoteWindow> windows = const [];
   int? get currentWindow => tabs.current;
   bool detached = false;
+
+  /// Whether its detached windows can be seen; a new detach starts visible.
+  bool windowVisible = true;
   int bytesPerSecond = 0;
 
   /// Whether a picture frame has arrived yet, and how many seconds have passed since the last.
@@ -432,8 +435,11 @@ class RemoteSession extends ChangeNotifier {
         break; // MainState's.
       case MenuEvent():
         menu = e.items;
+      case WindowVisibleEvent():
+        windowVisible = e.visible;
       case DetachedEvent():
         detached = e.detached;
+        windowVisible = true;
         final c = e.current;
         _pendingCurrent = null;
         if (!detached && c != null) {

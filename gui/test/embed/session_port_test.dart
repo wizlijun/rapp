@@ -200,6 +200,8 @@ void main() {
     expect(detached.detached, isFalse);
     expect(detached.current, 7);
     expect((parseSessionEvent('detached', {'sid': 1, 'detached': true}) as DetachedEvent).current, isNull);
+    expect((parseSessionEvent('window_visible', {'sid': 1, 'visible': false}) as WindowVisibleEvent).visible, isFalse);
+    expect(parseSessionEvent('window_visible', {'sid': 1}), isNull, reason: 'bad data is dropped');
   });
 
   test('setHidden sends set_hidden with the ids', () async {

@@ -82,6 +82,7 @@ fn host_messages() -> Vec<(u8, Vec<u8>)> {
         (37, covered),
         (39, opened),
         (40, vec![1]),
+        (42, vec![]),
         (
             4,
             frame(
@@ -113,6 +114,7 @@ fn kind(message: &Incoming) -> u8 {
         Incoming::Covered { .. } => 37,
         Incoming::AppOpened { .. } => 39,
         Incoming::SecureFocus(_) => 40,
+        Incoming::Changed => 42,
     }
 }
 
