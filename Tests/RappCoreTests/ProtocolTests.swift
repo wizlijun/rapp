@@ -78,6 +78,8 @@ final class ProtocolTests: XCTestCase {
         .appOpened(bundleID: "com.apple.Safari", name: "Safari"),
         .secureFocus(true),
         .secureFocus(false),
+        .changed,
+        .setStream(mode: .color16, fps: 0, density: 1, pinned: false, focus: true),
         .screenLocked(true),
         .screenLocked(false),
         .unlock(password: "pässwörd 1"),
@@ -114,7 +116,7 @@ final class ProtocolTests: XCTestCase {
     }
 
     func testScreenLockedAndUnlockWireFormat() throws {
-        XCTAssertEqual(protocolVersion, 14)
+        XCTAssertEqual(protocolVersion, 15)
         XCTAssertEqual(Message.screenLocked(true).encoded(), [34, 1, 0, 0, 0, 1])
         XCTAssertEqual(Message.unlock(password: "ab").encoded(), [35, 4, 0, 0, 0, 2, 0, 0x61, 0x62])
         XCTAssertThrowsError(try decodeOne([34, 1, 0, 0, 0, 2])) { XCTAssertEqual("\($0)", "bad locked flag") }
@@ -133,14 +135,14 @@ final class ProtocolTests: XCTestCase {
         p.append([1, UInt8(payload.count), 0, 0, 0] + payload)
         XCTAssertThrowsError(try p.next()) { error in
             XCTAssertEqual((error as? ProtocolVersionMismatch)?.client, 2)
-            XCTAssertEqual("\(error)", "protocol version mismatch: host 14, client 2 (update both sides)")
+            XCTAssertEqual("\(error)", "protocol version mismatch: host 15, client 2 (update both sides)")
         }
     }
 
-    func testHelloAcceptsOnlyVersion14() throws {
+    func testHelloAcceptsOnlyVersion15() throws {
         let m = Message.hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: protocolVersion)
         XCTAssertEqual(try decodeOne(m.encoded()), m)
-        for v: UInt8 in [12, 13] {
+        for v: UInt8 in [13, 14] {
             var bytes = m.encoded()
             bytes[5] = v
             XCTAssertThrowsError(try decodeOne(bytes)) { XCTAssertEqual(($0 as? ProtocolVersionMismatch)?.client, v) }
@@ -148,18 +150,18 @@ final class ProtocolTests: XCTestCase {
         var old = m.encoded()
         old[5] = 4
         XCTAssertThrowsError(try decodeOne(old)) {
-            XCTAssertEqual("\($0)", "protocol version mismatch: host 14, client 4 (update both sides)")
+            XCTAssertEqual("\($0)", "protocol version mismatch: host 15, client 4 (update both sides)")
         }
     }
 
-    func testFetchAndPutAcceptOnlyVersion14() throws {
+    func testFetchAndPutAcceptOnlyVersion15() throws {
         let f = Message.fetch(token: "t", clip: 1, file: 2, offset: 3).encoded()
         let q = Message.put(token: "t", item: 1, kind: .files, uti: "u", name: "n", total: 5).encoded()
-        XCTAssertEqual(f[5], 14)
-        XCTAssertEqual(q[5], 14)
+        XCTAssertEqual(f[5], protocolVersion)
+        XCTAssertEqual(q[5], protocolVersion)
         XCTAssertEqual(try decodeOne(f), .fetch(token: "t", clip: 1, file: 2, offset: 3))
         XCTAssertEqual(try decodeOne(q), .put(token: "t", item: 1, kind: .files, uti: "u", name: "n", total: 5))
-        for v: UInt8 in [12, 13] {
+        for v: UInt8 in [13, 14] {
             for var bytes in [f, q] {
                 bytes[5] = v
                 XCTAssertThrowsError(try decodeOne(bytes)) { XCTAssertEqual(($0 as? ProtocolVersionMismatch)?.client, v) }
@@ -285,7 +287,7 @@ final class ProtocolTests: XCTestCase {
     }
 
     func testSetStreamRejectsBadFpsAndDensity() {
-        for bytes in [setStream(fps: 3, density: 1), setStream(fps: 0, density: 1), setStream(density: 0),
+        for bytes in [setStream(fps: 3, density: 1), setStream(fps: 2, density: 1), setStream(density: 0),
                       setStream(density: -1), setStream(density: 9), setStream(density: .nan),
                       setStream(density: .infinity), setStream(mode: 5, density: 1)] {
             var p = MessageParser()
@@ -297,8 +299,20 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(try p.next(), .setStream(mode: .gray4, fps: 5, density: 8, pinned: false))
     }
 
+    func testSetStreamPausesWithFpsZero() throws {
+        var p = MessageParser()
+        p.append(setStream(fps: 0, density: 1))
+        XCTAssertEqual(try p.next(), .setStream(mode: .gray4, fps: 0, density: 1, pinned: false))
+    }
+
+    func testChangedWireFormat() throws {
+        XCTAssertEqual(Message.changed.encoded(), [42, 0, 0, 0, 0])
+        XCTAssertEqual(try decodeOne([42, 0, 0, 0, 0]), .changed)
+        assertRejects(frame(42, [0]), "changed with a payload")
+    }
+
     func testHelloRejectsBadFpsAndDensity() {
-        for (fps, density) in [(UInt8(7), Float(1)), (15, 0), (15, 8.5), (15, .nan)] {
+        for (fps, density) in [(UInt8(7), Float(1)), (0, 1), (15, 0), (15, 8.5), (15, .nan)] {
             var bytes = Message.hello(token: "a", bundleID: "b", mode: .gray4, fps: 15, density: 1).encoded()
             let d = density.bitPattern
             bytes[bytes.count - 5] = fps

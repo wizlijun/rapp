@@ -1,6 +1,8 @@
 import Foundation
 
-/// Protocol v14 = v13 + setView (client -> host: which part of a window B shows; window 0 = all).
+/// Protocol v15 = v14 + pause: setStream's fps may be 0 (send no pictures; hello's may not), and the
+/// host answers a paused session's picture changes with `changed` (at most one a second).
+/// v14 = v13 + setView (client -> host: which part of a window B shows; window 0 = all).
 /// v13 = v12 + host hints: covered (a press was dropped because another app's window was on
 /// top) with dismissCover to close it, appOpened (another app came to the front right after B's
 /// input) and secureFocus (A's keyboard focus is in a password field).
@@ -9,7 +11,7 @@ import Foundation
 /// ping/pong and the saving ladder: B's setStream values are its ceiling and its pinned byte means
 /// "automatic saving off") + desktop sessions: screenLocked/unlock for the remote lock screen.
 /// The host and client must both speak exactly this version.
-public let protocolVersion: UInt8 = 14
+public let protocolVersion: UInt8 = 15
 
 /// The longest system password `unlock` carries, in UTF-8 bytes.
 public let unlockPasswordLimit = 1024
@@ -29,8 +31,10 @@ public let defaultPort: UInt16 = 47800
 /// Upper bound for one message's payload; anything larger is treated as garbage.
 public let maxMessageLength = 64 * 1024 * 1024
 
-/// Frame rates a client may ask for.
+/// Frame rates a client may ask for at hello (a new session always gets a first picture).
 public let allowedFps: Set<UInt8> = [30, 15, 5, 1]
+/// Frame rates `setStream` may carry: 0 pauses the pictures (v15).
+public let allowedStreamFps: Set<UInt8> = allowedFps.union([0])
 
 /// A capture density (pixels per A point) is finite and in (0, 8].
 public func isValidDensity(_ d: Float) -> Bool { d.isFinite && d > 0 && d <= 8 }
@@ -149,6 +153,8 @@ public enum Message: Equatable {
     case appOpened(bundleID: String, name: String)                                           // 39, host -> client (v13)
     /// Whether A's keyboard focus is in a secure (password) text field; sent on change.
     case secureFocus(Bool)                                                                   // 40, host -> client (v13)
+    /// The paused session's picture changed (no payload, at most one a second; never while streaming).
+    case changed                                                                             // 42, host -> client (v15)
 
     public func encoded() -> [UInt8] {
         var w = Writer()
@@ -291,6 +297,8 @@ public enum Message: Equatable {
         case let .secureFocus(on):
             type = 40
             w.u8(on ? 1 : 0)
+        case .changed:
+            type = 42
         }
         precondition(w.bytes.count <= maxMessageLength, "message too large")
         var out: [UInt8] = [type]
@@ -341,7 +349,7 @@ public enum Message: Equatable {
             message = .resize(window: try r.u32(), width: try r.u16(), height: try r.u16())
         case 11:
             guard let mode = Mode(rawValue: try r.u8()) else { throw CodecError("unknown mode") }
-            let (fps, density) = try r.stream()
+            let (fps, density) = try r.stream(allowed: allowedStreamFps)
             let flag = try r.u8()
             guard flag & ~3 == 0 else { throw CodecError("bad stream flags") }
             message = .setStream(mode: mode, fps: fps, density: density, pinned: flag & 1 != 0, focus: flag & 2 != 0)
@@ -441,6 +449,8 @@ public enum Message: Equatable {
             let flag = try r.u8()
             guard flag <= 1 else { throw CodecError("bad secure flag") }
             message = .secureFocus(flag == 1)
+        case 42:
+            message = .changed
         default:
             throw CodecError("unknown message type \(type)")
         }
@@ -449,7 +459,7 @@ public enum Message: Equatable {
     }
 }
 
-private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41]
+private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42]
 
 /// Turns a byte stream into messages. Feed it whatever the socket delivers
 /// with `append`, then call `next()` until it returns nil.
@@ -635,10 +645,12 @@ private struct Reader {
         return s
     }
 
-    /// The fps byte and density f32 shared by `hello` and `setStream`.
-    mutating func stream() throws -> (UInt8, Float) {
+    /// The fps byte and density f32 shared by `hello` and `setStream` (which also allows 0).
+    mutating func stream(allowed: Set<UInt8> = allowedFps) throws -> (UInt8, Float) {
         let fps = try u8()
-        guard allowedFps.contains(fps) else { throw CodecError("fps must be 30, 15, 5 or 1") }
+        guard allowed.contains(fps) else {
+            throw CodecError(allowed.contains(0) ? "fps must be 30, 15, 5, 1 or 0" : "fps must be 30, 15, 5 or 1")
+        }
         let density = Float(bitPattern: UInt32(try uint(4)))
         guard isValidDensity(density) else { throw CodecError("density must be in (0, 8]") }
         return (fps, density)

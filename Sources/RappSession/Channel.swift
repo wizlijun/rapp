@@ -189,7 +189,7 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
     case "voice_end":
         return .voiceEnd(sid)
     case "set_stream":
-        return .setStream(sid: sid, mode: try a.mode(), fps: try a.fps(), density: try a.density(),
+        return .setStream(sid: sid, mode: try a.mode(), fps: try a.fps(pause: true), density: try a.density(),
                           pinned: try a.optionalBool("pinned"), focus: try a.optionalBool("focus"))
     case "clip_pick":
         guard let clip = UInt32(exactly: try a.int("clip")) else { throw ChannelError.bad(method) }
@@ -321,8 +321,9 @@ private struct Args {
         return m
     }
 
-    func fps() throws -> UInt8 {
-        guard let f = UInt8(exactly: try int("fps")), allowedFps.contains(f) else { throw bad }
+    /// `start` needs a picture rate; only `set_stream` may pause (0).
+    func fps(pause: Bool = false) throws -> UInt8 {
+        guard let f = UInt8(exactly: try int("fps")), (pause ? allowedStreamFps : allowedFps).contains(f) else { throw bad }
         return f
     }
 

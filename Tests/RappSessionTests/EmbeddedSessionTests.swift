@@ -520,6 +520,21 @@ final class EmbeddedSessionTests: XCTestCase {
         XCTAssertEqual(events.suffix(2), [.traffic(bytesPerSecond: 100, frames: 3), .traffic(bytesPerSecond: 0, frames: 0)])
     }
 
+    func testChangedCountsAsAFrameWithoutAnAck() {
+        let link = FakeLink()
+        var events = [SessionEvent]()
+        let (s, q) = make(link) { events.append($0) }
+        q.sync {
+            link.feed(.windows([w]))
+            link.feed(.changed)
+            link.onBytes?(5)
+        }
+        s.tickTraffic()
+        q.sync {}
+        XCTAssertEqual(events.last, .traffic(bytesPerSecond: 5, frames: 1))
+        XCTAssertFalse(link.sent.contains { if case .frameAck = $0 { return true } else { return false } })
+    }
+
     func testNoTrafficAfterDisconnect() {
         let link = FakeLink()
         var events = [SessionEvent]()
