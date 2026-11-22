@@ -829,3 +829,7 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] Rust workspace 1215 项、最新 Flutter 2745 项及原生窗口 smoke 通过。更多验证及平台边界见 `docs/superpowers/plans/2026-11-21-linux-nonvoice-parity.md`。
 - [x] 干净源码 `2cd87a69` 打包，验证产物及上传摘要；发布 Linux v0.15.9（保留 macOS Latest v0.15.8），网站快照更新并通过 8 项测试。
 - [ ] 完成本机管理员认证后重新安装与校验；完成 Cloudflare 登录后部署网站静态更新。
+
+## iOS 常用语条（feat/phrases，2026-11-22）
+- 实机检查：规格 `docs/superpowers/specs/2026-11-22-rapp-ios-phrases-design.md` §7 第 1–10 条，Duo 和 iPad 各一遍
+- 留意：App 会话里 ⌃⌥⌘ 锁住时，A 端修饰键还按着，常用语的文字和回车会不会被带上修饰键（规则 5 说常用语不受粘滞影响；面板发送也是同一条路，实机看一眼）

@@ -469,6 +469,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
                             onAttach: _attach,
                             history: widget.state.history,
                             historyKey: widget.state.historyKeyOf(_s),
+                            onAddPhrase: defaultTargetPlatform == TargetPlatform.iOS ? widget.state.addPhrase : null,
                             onPress: () => widget.state.holdForPanel(_s),
                             onReturnAfter: _s.appId.isEmpty
                                 ? null

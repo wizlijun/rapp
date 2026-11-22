@@ -41,13 +41,18 @@ void main() {
   }
 
   Future<void> show(WidgetTester tester, InputHistory h,
-      {String? session, String? host, void Function(String)? onPut, double width = 600}) async {
+      {String? session,
+      String? host,
+      void Function(String)? onPut,
+      void Function(String)? onAddPhrase,
+      double width = 600}) async {
     // Opening the list refreshes, which is real IO: let it run in real time.
     await tester.runAsync(() => tester.pumpWidget(wrap(SizedBox(
           width: width,
           height: 1600,
           child: SingleChildScrollView(
-            child: InputHistoryList(history: h, session: session, host: host, onPut: onPut, clock: () => now),
+            child: InputHistoryList(
+                history: h, session: session, host: host, onPut: onPut, onAddPhrase: onAddPhrase, clock: () => now),
           ),
         ))));
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
@@ -345,5 +350,27 @@ void main() {
     day('dev1', '2026-11-15', [rec('01A', '2026-11-15T09:00:00+09:00', 'late')]);
     await show(tester, h);
     expect(find.byKey(const Key('history-01A')), findsOneWidget);
+  });
+
+  testWidgets('加到常用语 in the ⋮ menu only when given; a 常用语 send is tagged', (tester) async {
+    day('dev1', '2026-11-15', [
+      rec('01A', '2026-11-15T09:00:00+09:00', '跑一下测试'),
+      {...rec('01B', '2026-11-15T09:01:00+09:00', '继续'), 'source': 'phrase'},
+    ]);
+    final h = await load(tester);
+    await show(tester, h);
+    expect(find.byKey(const Key('phrase-01B')), findsOneWidget);
+    expect(find.byKey(const Key('phrase-01A')), findsNothing);
+    await menu(tester, '01A');
+    expect(find.byKey(const Key('add-phrase-01A')), findsNothing);
+    await tester.tapAt(Offset.zero);
+    await tester.pumpAndSettle();
+
+    final added = <String>[];
+    await show(tester, h, onAddPhrase: added.add);
+    await menu(tester, '01A');
+    await tester.tap(find.byKey(const Key('add-phrase-01A')));
+    await tester.pumpAndSettle();
+    expect(added, ['跑一下测试']);
   });
 }

@@ -62,7 +62,8 @@ void main() {
     };
     port = FakeSessionPort();
     term = FakeTermSessionPort();
-    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, termPort: term);
+    // The lift below is the bare key bar; the 常用语条's 36 is pinned in key_bar_test.
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(phraseStrip: false), port: port, termPort: term);
   });
 
   tearDown(() {
