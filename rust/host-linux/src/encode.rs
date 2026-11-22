@@ -29,6 +29,42 @@ pub fn sample(mode: u8, p: &[u8]) -> u16 {
     }
 }
 
+/// Tells whether the picture changed while the client has paused it (v15), without encoding:
+/// the encoder's reference must stay the last frame the client got, so resume sends a diff.
+#[derive(Default)]
+pub struct Probe {
+    last: Option<(Vec<u16>, (usize, usize, u8), Rect)>,
+}
+impl Probe {
+    pub fn reset(&mut self) {
+        self.last = None;
+    }
+    /// Compared with the previous probe, or on the first one with what the encoder last produced.
+    /// A picture with nothing to compare against (new mode, size or view) counts as unchanged.
+    pub fn changed(
+        &mut self,
+        encoder: &Encoder,
+        bgra: &[u8],
+        w: usize,
+        h: usize,
+        region: Rect,
+        mode: u8,
+    ) -> bool {
+        let next: Vec<_> = bgra.as_chunks::<4>().0.iter().map(|p| sample(mode, p)).collect();
+        let shape = (w, h, mode);
+        let (before, before_shape, before_region) = match &self.last {
+            Some((samples, shape, region)) => (samples.as_slice(), *shape, *region),
+            None => (encoder.previous.as_slice(), encoder.shape, encoder.region),
+        };
+        let changed = !before.is_empty()
+            && before_shape == shape
+            && before_region == region
+            && before != next.as_slice();
+        self.last = Some((next, shape, region));
+        changed
+    }
+}
+
 impl Encoder {
     pub fn reset(&mut self) {
         self.previous.clear();
@@ -163,6 +199,52 @@ mod tests {
         codec::Decoder,
         protocol::{read_message, Incoming},
     };
+    fn decode(decoder: &mut Decoder, bytes: &[u8]) -> Vec<u8> {
+        let (Incoming::Frame { mode, width, height, flags, dx, dy, data, .. }, _) =
+            read_message(&mut &bytes[..]).unwrap()
+        else {
+            panic!()
+        };
+        decoder.decode(mode, width, height, flags, dx, dy, &data).unwrap().unwrap()
+    }
+    #[test]
+    fn probe_sees_one_change_and_leaves_the_encoder_reference_alone() {
+        let (w, h, mode) = (100, 70, 2);
+        let region = Rect { x: 0., y: 0., w: 100., h: 70. };
+        let before = vec![10; w * h * 4];
+        let mut after = before.clone();
+        after[(5 * w + 90) * 4..(5 * w + 90) * 4 + 4].copy_from_slice(&[200, 100, 50, 255]);
+        let mut enc = Encoder::default();
+        let mut dec = Decoder::default();
+        decode(&mut dec, &enc.frame_region(&before, w, h, region, mode).unwrap().unwrap());
+        let mut probe = Probe::default();
+        assert!(!probe.changed(&enc, &before, w, h, region, mode), "same as what B has");
+        assert!(probe.changed(&enc, &after, w, h, region, mode));
+        assert!(!probe.changed(&enc, &after, w, h, region, mode), "a still, changed picture: once");
+        probe.reset();
+        assert!(probe.changed(&enc, &after, w, h, region, mode), "still differs from B's picture");
+        // Resume: a diff against the frame B has, which decodes to the current picture.
+        let resume = enc.frame_region(&after, w, h, region, mode).unwrap().unwrap();
+        assert_eq!(resume[5 + 17 + 4], 6, "a diff, not a full frame");
+        let expected: Vec<_> = after
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| rapp_client_core::codec::bgra(mode, sample(mode, p)))
+            .collect();
+        assert_eq!(decode(&mut dec, &resume), expected);
+    }
+    #[test]
+    fn probe_without_a_comparable_reference_is_unchanged() {
+        let region = Rect { x: 0., y: 0., w: 4., h: 4. };
+        let px = vec![1; 4 * 4 * 4];
+        let mut enc = Encoder::default();
+        let mut probe = Probe::default();
+        assert!(!probe.changed(&enc, &px, 4, 4, region, 2), "nothing encoded yet");
+        enc.frame_region(&px, 4, 4, region, 2).unwrap();
+        probe.reset();
+        assert!(!probe.changed(&enc, &vec![9; 4 * 4 * 4], 4, 4, region, 0), "other mode");
+    }
     #[test]
     fn moving_view_resets_decoder_even_when_pixels_and_dimensions_match() {
         let mut encoder = Encoder::default();

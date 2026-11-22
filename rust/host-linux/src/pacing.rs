@@ -42,6 +42,11 @@ impl Pacing {
             self.level = steps.into_iter().rfind(|n| *n < self.level).unwrap_or(0);
         }
     }
+    /// Back from a pause (v15), during which nothing was observed: a queueing streak from before
+    /// it must not count the pause as 3 s of a slow network.
+    pub fn resumed(&mut self) {
+        self.queueing_since = None;
+    }
     pub fn sent(&mut self, now: f64) {
         self.pending.push_back(now);
     }
@@ -165,6 +170,20 @@ mod tests {
         assert_eq!(p.level, 1);
         p.sent(70.);
         p.ack(70.2, 0, s);
+        assert_eq!(p.level, 0);
+    }
+    #[test]
+    fn a_pause_is_not_counted_as_a_slow_network() {
+        let mut p = Pacing::default();
+        let s = settings();
+        p.sent(0.);
+        p.ack(0.1, 0, s);
+        p.sent(1.);
+        p.ack(1.5, 0, s); // slow: queueing from here
+        p.observe(1.6, false, s);
+        // Paused 5 s: the server does not observe meanwhile.
+        p.resumed();
+        p.observe(6.6, false, s);
         assert_eq!(p.level, 0);
     }
     #[test]
