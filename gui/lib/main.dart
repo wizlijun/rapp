@@ -321,6 +321,13 @@ class _Shell with WindowListener, TrayListener {
     if (Platform.isLinux) state.mainVisible = true;
   }
 
+  // Shown again from outside Dart (a second launch or the launcher presents the hidden window), or
+  // focused: either way it is on screen, so the stage streams again.
+  @override
+  void onWindowEvent(String eventName) {
+    if (Platform.isLinux && (eventName == 'show' || eventName == 'focus')) state.mainVisible = true;
+  }
+
   @override
   void onTrayIconMouseDown() => trayManager.popUpContextMenu();
 

@@ -135,11 +135,15 @@ final class DetachedSession: NSObject, NSWindowDelegate {
       panel.close()
       popups[id] = nil
     }
+    var removed = false
     for (id, window) in windows where !decoratedIDs.contains(id) {
       window.delegate = nil
       window.close()
       windows[id] = nil
+      removed = true
     }
+    // A closed window says nothing more: the ones left decide whether the session is seen.
+    if removed, !windows.isEmpty { recheckVisible() }
     if let k = lastKey, windows[k] == nil { lastKey = nil }
 
     var fresh = [DetachedWindow]()
@@ -313,7 +317,9 @@ final class DetachedSession: NSObject, NSWindowDelegate {
     if let m = detachedResize(window.info, content: window.contentSize) { session.send(m) }
   }
 
-  func windowDidChangeOcclusionState(_ notification: Notification) {
+  func windowDidChangeOcclusionState(_ notification: Notification) { recheckVisible() }
+
+  private func recheckVisible() {
     guard !closed else { return }
     let now = windows.values.contains { $0.occlusionState.contains(.visible) }
     guard now != anyVisible else { return }

@@ -744,9 +744,8 @@ final class Session {
         self.app = app
         self.display = capture.displayFrame
         self.region = region
-        // A SetStream that arrived while the window was being found is applied now.
-        let (fps, density) = (self.fps, Double(self.density))
-        Task { await capture.setStream(fps: fps, density: density) }
+        // A SetStream that arrived while the window was being found is applied now (a pause too).
+        updateCapture(capture)
         injector = InputInjector(app: app, display: display, log: { [output] in output.log($0) })
         if announced == nil {
             send(.ready(appName: windowTitle("", appName: app.localizedName),
@@ -828,8 +827,7 @@ final class Session {
         self.capture = capture
         self.display = capture.displayFrame
         self.region = region
-        let (fps, density) = (self.fps, Double(self.density))
-        Task { await capture.setStream(fps: fps, density: density) }
+        updateCapture(capture)
         injector = InputInjector(app: nil, display: display, log: { [output] in output.log($0) })
         let width = UInt16(clamping: Int(display.width.rounded())), height = UInt16(clamping: Int(display.height.rounded()))
         send(.ready(appName: title, width: width, height: height))
@@ -1143,8 +1141,7 @@ final class Session {
             if let capture {
                 // No encoder reset: the encoder sends a full frame itself when the
                 // density (pixels per point) changes by more than 1 %.
-                let captureFps = captureRate
-                Task { await capture.setStream(fps: captureFps, density: Double(newDensity)) }
+                updateCapture(capture)
             }
         }
         output.log("stream -> \(streamDescription(newMode))")
@@ -1188,11 +1185,20 @@ final class Session {
         let held = outbox.setPaused(on, now: uptimeSeconds())
         output.log(on ? "paused: B is not showing this session" : "resumed")
         for m in held { transmit(m) }
-        if let capture {
-            let captureFps = captureRate, d = Double(density)
-            Task { await capture.setStream(fps: captureFps, density: d) }
-        }
+        if let capture { updateCapture(capture) }
         paced?.setPaused(on)
+    }
+
+    private var captureUpdate: Task<Void, Never>?
+
+    /// Capture follows `captureRate` and `density`, in the order asked: one `set_stream` can both
+    /// change the density and pause or resume, and separate Tasks would run in either order.
+    private func updateCapture(_ capture: WindowCapture) {
+        let (fps, density, before) = (captureRate, Double(self.density), captureUpdate)
+        captureUpdate = Task {
+            await before?.value
+            await capture.setStream(fps: fps, density: density)
+        }
     }
 
     /// Sends `message` unless a pause holds it back (`PauseOutbox`).
