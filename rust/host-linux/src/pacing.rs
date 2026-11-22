@@ -12,6 +12,7 @@ pub struct Pacing {
     pub level: u8,
     queueing_since: Option<f64>,
     last_queueing: Option<f64>,
+    paused_at: Option<f64>,
 }
 impl Pacing {
     pub fn effective(&self, mut s: Settings) -> Settings {
@@ -42,15 +43,35 @@ impl Pacing {
             self.level = steps.into_iter().rfind(|n| *n < self.level).unwrap_or(0);
         }
     }
-    /// Back from a pause (v15), during which nothing was observed: a queueing streak from before
-    /// it must not count the pause as 3 s of a slow network.
-    pub fn resumed(&mut self) {
+    /// Keep in-flight ACK ordering, but exclude time spent deliberately paused from
+    /// network samples, the ACK deadline and saving-level decisions.
+    pub fn set_paused(&mut self, paused: bool, now: f64) {
+        if paused {
+            self.paused_at.get_or_insert(now);
+            return;
+        }
+        let Some(start) = self.paused_at.take() else {
+            return;
+        };
+        let duration = (now - start).max(0.);
+        for sent in &mut self.pending {
+            *sent += duration;
+        }
+        for (sent, _) in &mut self.samples {
+            *sent += duration;
+        }
+        if let Some(last) = &mut self.last_queueing {
+            *last += duration;
+        }
         self.queueing_since = None;
     }
     pub fn sent(&mut self, now: f64) {
-        self.pending.push_back(now);
+        self.pending.push_back(self.paused_at.unwrap_or(now));
     }
     pub fn oldest_age(&self, now: f64) -> f64 {
+        if self.paused_at.is_some() {
+            return 0.;
+        }
         self.pending.front().map_or(0., |sent| now - sent)
     }
     fn base(&self, now: f64) -> Option<f64> {
@@ -91,6 +112,9 @@ impl Pacing {
         let Some(sent) = self.pending.pop_front() else {
             return;
         };
+        if self.paused_at.is_some() {
+            return;
+        }
         self.last_rtt = (now - sent - processing_ms as f64 / 1000.).max(0.);
         self.samples.push_back((sent, self.last_rtt));
         if self.samples.len() > 4096 {
@@ -105,6 +129,9 @@ impl Pacing {
         self.observe(now, true, s);
     }
     pub fn observe(&mut self, now: f64, ack: bool, s: Settings) {
+        if self.paused_at.is_some() {
+            return;
+        }
         self.configure(s);
         if self.queueing(now) {
             let since = *self.queueing_since.get_or_insert(now);
@@ -182,9 +209,34 @@ mod tests {
         p.ack(1.5, 0, s); // slow: queueing from here
         p.observe(1.6, false, s);
         // Paused 5 s: the server does not observe meanwhile.
-        p.resumed();
+        p.set_paused(true, 1.6);
+        p.set_paused(false, 6.6);
         p.observe(6.6, false, s);
         assert_eq!(p.level, 0);
+    }
+    #[test]
+    fn paused_inflight_frames_keep_ack_order_without_timeouts_or_saving() {
+        let mut p = Pacing::default();
+        let s = settings();
+        p.sent(0.);
+        p.ack(0.1, 0, s);
+        p.sent(1.);
+        p.set_paused(true, 1.1);
+        p.set_paused(true, 10.); // repeated pause commands do not restart the clock
+        p.sent(20.); // an encode already in flight still has to reach the decoder
+        assert_eq!(p.oldest_age(60.), 0.);
+        p.observe(60., false, s);
+        p.ack(60., 0, s);
+        assert_eq!(p.pending.len(), 1);
+        assert_eq!(p.level, 0);
+        p.set_paused(false, 61.1);
+        assert!(p.oldest_age(61.1).abs() < 1e-8);
+        p.ack(61.2, 0, s);
+        assert_eq!(p.level, 0);
+        assert!(p.pending.is_empty());
+        assert!((p.last_rtt - 0.1).abs() < 1e-8);
+        p.sent(62.);
+        assert!(p.oldest_age(78.) >= 15., "real stalls still expire");
     }
     #[test]
     fn slow_first_ack_pinning_and_noop_steps_match_mac() {

@@ -177,7 +177,13 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     final s = _sessions[sid];
     if (s == null || s.closed) return null;
     args['sid'] = sid;
-    if (call.method == 'set_stream') {
+    if (call.method == 'window_visible') {
+      final visible = args['visible'];
+      if (s.detached && visible is bool) {
+        s.windowVisible = visible;
+        _emit(WindowVisibleEvent(s.sid, visible));
+      }
+    } else if (call.method == 'set_stream') {
       _emit(
         StreamChoiceEvent(
           s.sid,
@@ -577,6 +583,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
           }
           if (s.disconnected) throw StateError('连接已断开');
           s.detached = true;
+          s.windowVisible = true;
           s.wakeRenderer();
           await s.nativeWindows();
           if (_disposed || s.closed || !identical(_sessions[sid], s)) return null;
@@ -589,6 +596,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
           _nativeCall('composer_options', {'sid': sid, ...s.composerOptions});
           if (s.banner.isNotEmpty) _nativeCall('banner', {'sid': sid, 'text': s.banner});
           _emit(DetachedEvent(s.sid, true));
+          _emit(WindowVisibleEvent(s.sid, s.windowVisible));
         } catch (_) {
           s.restoreStage();
           await desktop.channel.invokeMethod<void>('attach', {'sid': sid, 'discard': true}).catchError((Object _) {});
@@ -821,6 +829,7 @@ class _Session {
   late final LinuxTransfers transfers;
   final LinuxDesktop desktop;
   bool detached = false;
+  bool windowVisible = true;
   Map<String, Object?> composerOptions = {};
   Set<int> hidden = {};
   String banner = '';

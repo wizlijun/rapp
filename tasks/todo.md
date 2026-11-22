@@ -843,3 +843,10 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [ ] 11. Linux B：主窗口关到托盘后，从启动器或再运行一次 `rapp` 打开，舞台上的会话照常满帧率。
 - [ ] 12. 放大/改密度后马上切回（同一条 `set_stream` 里既恢复又改密度）：帧率回到原来的，不卡在 1 fps。
 - Linux：`host-linux` 和 `rapp-session` 在 alpine 容器里 `cargo check` 通过、没有警告；容器里链接不了（缺本机库），Linux 上的 `cargo test -p rapp-host-linux` 和实机留给 Linux 那台机器。
+
+
+## Linux v15 对齐（2026-11-22，0.15.13）
+
+- [x] 对齐 macOS 0.15.12 / v15；补齐 GTK 主窗口和多分离窗口可见性，以及暂停期间未确认帧的超时/弱网处理。
+- [x] Flutter 2773 项、原生窗口、隔离 X11/Wayland 主机测试通过，Clippy 无警告，GUI release 构建成功。平台边界和测试细节见 `docs/superpowers/plans/2026-11-22-linux-v15-parity.md`。
+- [ ] 完整 Rust 工作区回归、最终包及公开资产校验后发布 Linux 0.15.13。

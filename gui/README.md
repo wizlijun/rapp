@@ -9,6 +9,10 @@ Client manager (`rapp`) and connection manager (`rapp --cm`), spec §4.
 On Linux, the session bus owns one GUI process. Reopening `rapp` presents its
 main window, including when hidden in the tray. `--cm` uses one separate window
 in that same process; closing it leaves the main window and hub running.
+Hidden or minimized main and detached windows pause their v15 picture streams;
+reopening them resumes the chosen rate. Detached sessions continue while any of
+their normal windows is visible. GTK mapping/minimization signals drive this;
+loss of focus alone does not pause, and Wayland occlusion is not inferred.
 `rapp-service` also claims a per-user Linux abstract socket before touching data,
 independent of bundle location, `RAPP_HOME`, or configured ports. The kernel
 releases ownership on exit, including crashes.

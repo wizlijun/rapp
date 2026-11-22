@@ -611,6 +611,7 @@ fn handle(l: &mut Live, desktop: &mut Desktop, input: Input) -> Result<()> {
                 l.epoch = next_epoch();
             }
             l.settings = s;
+            l.pacing.set_paused(pause, l.clock.elapsed().as_secs_f64());
             l.pacing.configure(s);
             update_saving(l)?;
             let _ = l
@@ -621,7 +622,6 @@ fn handle(l: &mut Live, desktop: &mut Desktop, input: Input) -> Result<()> {
                 l.send(&p)?;
             }
             if !pause {
-                l.pacing.resumed();
                 l.next_windows = Instant::now();
             }
             l.unchanged = 0;

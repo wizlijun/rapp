@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the real GTK worker against an independent Python v14 host fixture.
+"""Exercise the real GTK worker against an independent Python v15 host fixture.
 Requires a graphical session (or xvfb-run). No real host credentials are used.
 For isolated input with a rootful Xwayland server, set DISPLAY to that server
 and RAPP_TEST_NO_WM=1. Window-manager minimize/take-back checks are then omitted.
@@ -137,6 +137,7 @@ def normal(s):
     s.ready()
     z = zlib.compressobj()
     s.frame(z, True, 0xf800)
+    send(s.s, 42, b"")  # Paused activity must not advance/reset the decoder reference.
     s.frame(z, False, 0x07e0)
     assert s.hello[-6:-4]==bytes([2,15])
     assert 0<struct.unpack("<f",s.hello[-4:])[0]<=8
@@ -173,7 +174,7 @@ def mismatch(s):
     send(s.s, 3, string("protocol version mismatch: host 9, client 8 (update both sides)"))
     assert "version mismatch" in s.finish(5)["reason"]
 
-case("full frame, delta, menus, adaptive stream, quit", normal)
+case("full frame, v15 activity, delta, menus, adaptive stream, quit", normal)
 case("v14 host hints and secure focus around a frame", host_hints)
 case("hub closes stdin", eof)
 case("corrupt frame exits cleanly", malformed)

@@ -110,7 +110,7 @@ Future<void> main(List<String> args) async {
       profiles: AppProfileStore.load(data.sharedDir, builtin),
       log: stderr.writeln);
   mainState = state;
-  // macOS: the runner says when the main window goes out of sight or comes back (Linux: _Shell).
+  // Native window visibility: macOS occlusion, Linux mapping/minimization.
   const MethodChannel('rapp/system').setMethodCallHandler((call) async {
     final visible = call.arguments;
     if (call.method == 'visible' && visible is bool) state.mainVisible = visible;
@@ -304,28 +304,9 @@ class _Shell with WindowListener, TrayListener {
       // Flutter can deliver platform calls while GTK waits for a resized frame.
       // Let the native GTK loop finish that draw before unmapping the window.
       const MethodChannel('rapp/linux').invokeMethod<void>('hide_window');
-      state.mainVisible = false;
     } else {
       windowManager.hide();
     }
-  }
-
-  // Linux reports no covering (Wayland cannot), only minimizing; macOS uses its occlusion state.
-  @override
-  void onWindowMinimize() {
-    if (Platform.isLinux) state.mainVisible = false;
-  }
-
-  @override
-  void onWindowRestore() {
-    if (Platform.isLinux) state.mainVisible = true;
-  }
-
-  // Shown again from outside Dart (a second launch or the launcher presents the hidden window), or
-  // focused: either way it is on screen, so the stage streams again.
-  @override
-  void onWindowEvent(String eventName) {
-    if (Platform.isLinux && (eventName == 'show' || eventName == 'focus')) state.mainVisible = true;
   }
 
   @override
@@ -338,7 +319,6 @@ class _Shell with WindowListener, TrayListener {
   void onTrayMenuItemClick(MenuItem item) => _menuClick(item.key);
 
   Future<void> _show() async {
-    if (Platform.isLinux) state.mainVisible = true;
     await windowManager.show();
     await windowManager.focus();
   }

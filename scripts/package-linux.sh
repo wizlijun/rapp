@@ -78,7 +78,12 @@ Esc cancels; Tab edits before sending. Change the shortcut in the sidebar.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and
-reattach without reconnecting. Text, images, files and typed clipboard data can
+reattach without reconnecting. This release uses protocol v15 (compatible with
+macOS 0.15.12); update both peers when coming from protocol v14. Off-stage and
+hidden/minimized embedded or detached sessions pause pictures but keep activity
+signals, then resume from the existing canvas. Minimization requires compositor
+support; Wayland does not provide general window-occlusion detection.
+Text, images, files and typed clipboard data can
 be pasted, transferred, cancelled and pinned; files stream to disk with resume.
 Folders cannot be attached. This machine can host desktops on Omarchy/Hyprland,
 compatible wlroots compositors, and X11. Hyprland (toplevel export/mapping) and

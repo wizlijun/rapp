@@ -389,6 +389,87 @@ fn isolated_application_capture_excludes_other_apps_and_tracks_geometry() {
     conn.destroy_window(cover).unwrap().check().unwrap();
     conn.destroy_window(target).unwrap().check().unwrap();
 }
+#[test]
+#[ignore = "requires RAPP_TEST_ISOLATED_DESKTOP=1 and a private X11 display"]
+fn isolated_pause_activity_and_resume_preserve_the_client_canvas() {
+    use x11rb::{connection::Connection, protocol::xproto::{self, ConnectionExt as _}};
+    assert_eq!(std::env::var("RAPP_TEST_ISOLATED_DESKTOP").as_deref(), Ok("1"));
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() { return; }
+    let (conn, screen) = x11rb::connect(None).unwrap();
+    let root = conn.setup().roots[screen].root;
+    let window = conn.generate_id().unwrap();
+    conn.create_window(x11rb::COPY_DEPTH_FROM_PARENT, window, root, 50, 60, 200, 100,
+        0, xproto::WindowClass::INPUT_OUTPUT, 0,
+        &xproto::CreateWindowAux::new().background_pixel(0xcc4422)).unwrap().check().unwrap();
+    conn.map_window(window).unwrap().check().unwrap();
+    let mut child = Worker(Command::new(env!("CARGO_BIN_EXE_rapp-host"))
+        .args(["serve", "--app", "desktop:", "--bind", "127.0.0.1", "--port", "0",
+            "--token-env", "RAPP_HOST_TEST_TOKEN", "--json"])
+        .env("RAPP_HOST_TEST_TOKEN", "pause-test-token")
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn().unwrap());
+    let mut output = BufReader::new(child.0.stdout.take().unwrap());
+    let mut line = String::new();
+    output.read_line(&mut line).unwrap();
+    let event: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let mut peer = connect(event["port"].as_u64().unwrap() as u16, "pause-test-token");
+    let mut decoder = Decoder::default();
+    let decode = |decoder: &mut Decoder, frame: Incoming| {
+        let Incoming::Frame { mode, width, height, flags, dx, dy, data, .. } = frame else { panic!() };
+        decoder.decode(mode, width, height, flags, dx, dy, &data).unwrap().unwrap()
+    };
+    decode(&mut decoder, until(&mut peer, |m| matches!(m, Incoming::Frame { .. })));
+    // Deliberately leave that frame unacknowledged while hidden, beyond the normal 15 s deadline.
+    peer.write_all(&protocol::stream(2, 0, 1., false, false)).unwrap();
+    peer.write_all(&protocol::ping(101)).unwrap();
+    until(&mut peer, |m| matches!(m, Incoming::Pong(101)));
+    std::thread::sleep(Duration::from_secs(16));
+    peer.write_all(&protocol::ping(102)).unwrap();
+    loop {
+        match protocol::read_message(&mut peer).unwrap().0 {
+            Incoming::Pong(102) => break,
+            Incoming::Frame { .. } | Incoming::Changed => panic!("unchanged paused desktop sent activity"),
+            Incoming::Error(e) => panic!("paused session disconnected: {e}"),
+            Incoming::Saving(level) => assert_eq!(level, 0),
+            _ => {}
+        }
+    }
+    peer.write_all(&protocol::frame_ack(0)).unwrap();
+    let paint = |color| {
+        conn.change_window_attributes(window, &xproto::ChangeWindowAttributesAux::new().background_pixel(color))
+            .unwrap().check().unwrap();
+        conn.clear_area(false, window, 0, 0, 0, 0).unwrap().check().unwrap();
+    };
+    for color in [0x22cc44, 0x4422cc] {
+        paint(color);
+        loop {
+            match protocol::read_message(&mut peer).unwrap().0 {
+                Incoming::Changed => break,
+                Incoming::Frame { .. } => panic!("paused host sent pixels"),
+                Incoming::Error(e) => panic!("{e}"),
+                Incoming::Saving(level) => assert_eq!(level, 0),
+                _ => {}
+            }
+        }
+    }
+    peer.write_all(&protocol::stream(2, 5, 1., false, false)).unwrap();
+    let frame = until(&mut peer, |m| matches!(m, Incoming::Frame { .. }));
+    assert!(matches!(&frame, Incoming::Frame { flags, .. } if flags & 1 == 0), "resume should be a delta");
+    let pixels = decode(&mut decoder, frame);
+    let mut desktop = rapp_host_linux::desktop::Desktop::connect().unwrap();
+    desktop.select("desktop:").unwrap();
+    let image = desktop.capture().unwrap();
+    let expected: Vec<u8> = image.pixels.as_chunks::<4>().0.iter().flat_map(|p|
+        rapp_client_core::codec::bgra(2, rapp_host_linux::encode::sample(2, p))).collect();
+    assert_eq!(pixels, expected, "resumed delta must reconstruct the current desktop exactly");
+    peer.write_all(&protocol::frame_ack(0)).unwrap();
+    // Resuming together with a density change must also produce a valid new reference.
+    peer.write_all(&protocol::stream(2, 0, 1., false, false)).unwrap();
+    peer.write_all(&protocol::stream(2, 5, 0.5, false, false)).unwrap();
+    let frame = until(&mut peer, |m| matches!(m, Incoming::Frame { .. }));
+    assert!(matches!(&frame, Incoming::Frame { flags, .. } if flags & 1 != 0));
+    decode(&mut decoder, frame);
+    conn.destroy_window(window).unwrap().check().unwrap();
+}
 fn connect(port: u16, token: &str) -> TcpStream {
     connect_app(port, token, "")
 }

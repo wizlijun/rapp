@@ -66,6 +66,12 @@ void main() {
       final pending = port.detach(91);
       await entered.future;
       expect(events.whereType<DetachedEvent>(), isEmpty);
+      final visibilitySent = Completer<void>();
+      binding.channelBuffers.push('rapp/linux',
+          const StandardMethodCodec().encodeMethodCall(
+              const MethodCall('window_visible', {'sid': 91, 'visible': false})),
+          (_) => visibilitySent.complete());
+      await visibilitySent.future;
       port.nativeComposerInsert(91, 'late paste', [const BlockChip(1, 'file', mark: 0xe000)]);
       await Future<void>.delayed(Duration.zero);
       expect(calls.where((c) => c.method == 'composer_insert').single.arguments, {
@@ -73,6 +79,10 @@ void main() {
       });
       gate.complete();
       await pending;
+      await Future<void>.delayed(Duration.zero);
+      expect(events.whereType<DetachedEvent>().single.detached, true);
+      expect(events.whereType<WindowVisibleEvent>().last.visible, false,
+          reason: 'detach completion must retain visibility reported while opening');
     } finally {
       if (!gate.isCompleted) gate.complete();
       port.dispose();
@@ -237,6 +247,12 @@ void main() {
         );
         expect(calls.any((c) => c.method == 'frame'), true);
         expect(calls.any((c) => c.method == 'windows'), true);
+        for (final visible in [false, true]) {
+          await native('window_visible', {'sid': 91, 'visible': visible});
+          final event = await wire.nextWhere(events,
+              (e) => e is WindowVisibleEvent && e.visible == visible) as WindowVisibleEvent;
+          expect(event.visible, visible);
+        }
         await native('draft', {'sid': 91, 'text': '已编辑'});
         expect(
           (await wire.nextWhere(events, (e) => e is ComposerDraftEvent)

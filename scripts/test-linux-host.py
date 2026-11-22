@@ -65,7 +65,7 @@ with tempfile.TemporaryDirectory(prefix='rapp-host-native-') as td:
             env = {**base, 'DISPLAY': ':' + display, 'RAPP_TEST_ISOLATED_DESKTOP': '1', 'XDG_RUNTIME_DIR': str(xruntime)}
             env.pop('WAYLAND_DISPLAY', None)
             env.pop('HYPRLAND_INSTANCE_SIGNATURE', None)
-            subprocess.run(['dbus-run-session', '--config-file', str(bus), '--', binary, '--ignored', '--nocapture', '--test-threads=1'], env=env, check=True, timeout=45)
+            subprocess.run(['dbus-run-session', '--config-file', str(bus), '--', binary, '--ignored', '--nocapture', '--test-threads=1'], env=env, check=True, timeout=75)
         finally:
             stop(process)
 

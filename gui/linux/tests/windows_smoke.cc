@@ -125,6 +125,30 @@ int main(int argc, char **argv) {
       g_usleep(10000);
     }
     assert(s.draft() == "中文 draft");
+    // All normal windows participate; popovers do not keep a minimized session alive.
+    auto state = [](Window *w, GdkWindowState flags) {
+      GdkEventWindowState event{};
+      event.type = GDK_WINDOW_STATE;
+      event.changed_mask = GDK_WINDOW_STATE_ICONIFIED;
+      event.new_window_state = flags;
+      gboolean handled = FALSE;
+      g_signal_emit_by_name(w->shell, "window-state-event", &event, &handled);
+    };
+    const auto visibility_events = event_count("window_visible");
+    state(parent, GDK_WINDOW_STATE_ICONIFIED);
+    assert(s.any_visible && event_count("window_visible") == visibility_events);
+    state(s.windows[2].get(), GDK_WINDOW_STATE_ICONIFIED);
+    assert(!s.any_visible && !fl_value_get_bool(get(last_event("window_visible"), "visible")));
+    state(parent, GDK_WINDOW_STATE_FOCUSED);
+    assert(s.any_visible && fl_value_get_bool(get(last_event("window_visible"), "visible")));
+    const auto restored_events = event_count("window_visible");
+    state(parent, static_cast<GdkWindowState>(0)); // Losing focus alone never pauses.
+    assert(s.any_visible && event_count("window_visible") == restored_events);
+    gtk_widget_hide(parent->shell);
+    assert(!s.any_visible);
+    gtk_widget_show(parent->shell); // Reopened from outside Dart (launcher/tray).
+    assert(s.any_visible);
+    state(s.windows[2].get(), static_cast<GdkWindowState>(0));
     assert(gtk_widget_get_allocated_width(parent->area) >= 64);
     auto *surface = cairo_image_surface_create(
         CAIRO_FORMAT_ARGB32, gtk_widget_get_allocated_width(parent->area),

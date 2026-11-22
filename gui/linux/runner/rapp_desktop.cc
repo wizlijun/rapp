@@ -2,10 +2,12 @@
 #include "rapp_windows.h"
 #include "rapp_candidates.h"
 #include "rapp_secure_input.h"
+#include "rapp_visibility.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -13,6 +15,9 @@ namespace {
 constexpr size_t kLimit = 256 * 1024 * 1024;
 struct Desktop {
   FlMethodChannel *channel;
+  FlMethodChannel *system;
+  std::unique_ptr<rapp::Visibility> visibility;
+  bool visible = true;
   GtkWindow *main;
   RappWindows *windows;
 };
@@ -281,6 +286,16 @@ void rapp_desktop_register(FlView *view, GtkWindow *window) {
   d->channel = fl_method_channel_new(
       fl_engine_get_binary_messenger(fl_view_get_engine(view)), "rapp/linux",
       FL_METHOD_CODEC(codec));
+  d->system = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)), "rapp/system",
+      FL_METHOD_CODEC(codec));
+  d->visibility = std::make_unique<rapp::Visibility>(GTK_WIDGET(window), [d] {
+    const bool visible = d->visibility->visible();
+    if (d->visible == visible) return;
+    d->visible = visible;
+    g_autoptr(FlValue) value = fl_value_new_bool(visible);
+    fl_method_channel_invoke_method(d->system, "visible", value, nullptr, nullptr, nullptr);
+  });
   rapp::register_flutter_candidates(fl_engine_get_binary_messenger(fl_view_get_engine(view)), GTK_WIDGET(view), window);
   rapp::register_secure_input(fl_engine_get_binary_messenger(fl_view_get_engine(view)), GTK_WIDGET(view));
   d->windows = rapp_windows_new(d->channel, window);
@@ -317,6 +332,8 @@ void rapp_desktop_register(FlView *view, GtkWindow *window) {
   g_object_set_data_full(
       G_OBJECT(view), "rapp-desktop", d, +[](gpointer p) {
         auto *d = static_cast<Desktop *>(p);
+        d->visibility.reset();
+        g_object_unref(d->system);
         rapp_windows_free(d->windows);
         g_object_unref(d->channel);
         delete d;

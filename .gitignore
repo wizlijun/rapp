@@ -1,5 +1,6 @@
 .build/
 .build-logs/
+scripts/__pycache__/
 .swiftpm/
 .superpowers/
 .DS_Store

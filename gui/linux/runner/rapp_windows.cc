@@ -1,5 +1,6 @@
 #include "rapp_windows.h"
 #include "rapp_candidates_gtk.h"
+#include "rapp_visibility.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -78,6 +79,7 @@ struct Window {
   int aw = 0, ah = 0;
   bool allocated = false;
   std::map<guint, int> held;
+  std::unique_ptr<rapp::Visibility> visibility;
   ~Window();
 };
 struct Block {
@@ -90,6 +92,7 @@ struct Session {
   GtkWindow *main;
   int64_t sid;
   bool closing = false, disconnected = false, sending = false, secure = false;
+  bool any_visible = true;
   std::map<int, std::unique_ptr<Window>> windows;
   GtkTextBuffer *buffer = gtk_text_buffer_new(nullptr);
   std::vector<Block> blocks, sent_blocks;
@@ -147,6 +150,18 @@ struct Session {
                                     nullptr);
     fl_value_unref(args);
   }
+  void recheck_visible() {
+    if (closing) return;
+    const bool visible = std::any_of(windows.begin(), windows.end(), [](const auto &entry) {
+      const auto &w = entry.second;
+      return w->visibility && w->visibility->visible();
+    });
+    if (visible == any_visible) return;
+    any_visible = visible;
+    auto *args = fl_value_new_map();
+    put(args, "visible", fl_value_new_bool(visible));
+    emit("window_visible", args);
+  }
   std::string draft() {
     if (blocks.empty()) {
       GtkTextIter start, end;
@@ -176,6 +191,7 @@ struct Session {
 
 };
 Window::~Window() {
+  visibility.reset();
   preedit = false;
   schedule_composer(session);
   if (resize_timer)
@@ -719,6 +735,7 @@ std::unique_ptr<Window> create_window(Session *s, int id, bool popup,
     gtk_container_add(GTK_CONTAINER(w->shell), w->area);
   } else {
     w->shell = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    w->visibility = std::make_unique<rapp::Visibility>(w->shell, [s] { s->recheck_visible(); });
     gtk_window_set_application(GTK_WINDOW(w->shell),
                                gtk_window_get_application(s->main));
     auto *root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -1263,6 +1280,7 @@ bool rapp_windows_method(RappWindows *manager, FlMethodCall *call) {
         else
           ++it;
       }
+    s->recheck_visible();
     refresh_chips(s);
   } else if (method == "frame") {
     auto *value = get(args, "bytes");
