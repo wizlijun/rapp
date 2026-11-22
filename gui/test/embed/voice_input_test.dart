@@ -98,7 +98,7 @@ void main() {
     expect(v.phase, VoicePhase.idle);
   });
 
-  test('60 s fires onMaxLength once', () {
+  test('5 minutes fires onMaxLength once, not at the old 60 s', () {
     fakeAsync((fa) {
       mock(ok);
       final v = VoiceInput();
@@ -106,9 +106,11 @@ void main() {
       v.onMaxLength = () => n++;
       v.start();
       fa.flushMicrotasks();
-      fa.elapse(const Duration(seconds: 59));
+      fa.elapse(const Duration(seconds: 61));
       expect(n, 0);
-      fa.elapse(const Duration(seconds: 70));
+      fa.elapse(const Duration(minutes: 3, seconds: 58)); // 4:59 in total
+      expect(n, 0);
+      fa.elapse(const Duration(minutes: 3));
       expect(n, 1);
       v.dispose();
     });
