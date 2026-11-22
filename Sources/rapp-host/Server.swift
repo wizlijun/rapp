@@ -333,6 +333,9 @@ final class Session {
     /// The canvas display in global points.
     private var display = CGRect.zero
 
+    /// What else is sent while B has paused the pictures (v15): see `PauseOutbox`.
+    private var outbox = PauseOutbox()
+
     private var bytesThisSecond = 0
     private var framesThisSecond = 0
     private var lastWidth = 0
@@ -443,11 +446,14 @@ final class Session {
             syncFocus()
             requestedMode = mode
             requestedDensity = density
-            requestedFps = Int(fps)  // before setPinned/setSteps: their levelChanged must use the new ceiling
+            // fps 0 pauses (v15) and keeps the ceiling's rate: the saving ladder never sees 0.
+            // Before setPinned/setSteps: their levelChanged must use the new ceiling.
+            if fps > 0 { requestedFps = Int(fps) }
             // Pinned (automatic saving off) goes back to the ceiling at once.
             paced?.setPinned(pinned)
             paced?.setSteps(SaveLadder.steps(ceiling: ceiling))
             applyLevel(paced?.level ?? 0)
+            setPaused(fps == 0)
         case let .ping(seq):
             // Answered at once: B measures the whole path with it (spec §6.1).
             send(.pong(seq))
@@ -519,7 +525,7 @@ final class Session {
             view = viewFor(window: window, rect: rect)
             applyRegion(table)
         case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked, .weak,
-             .inputSource, .pong, .saving, .screenLocked, .focusRegion, .covered, .appOpened, .secureFocus:
+             .inputSource, .pong, .saving, .screenLocked, .focusRegion, .covered, .appOpened, .secureFocus, .changed:
             fail("unexpected message from client")
         }
     }
@@ -956,13 +962,14 @@ final class Session {
             latest = (pixelBuffer, region)
             return (sampleMode, latestSeq)
         }
-        quantizeAndSubmit(pixelBuffer, region: region, mode: mode, seq: seq, captured: captured)
+        quantizeAndSubmit(pixelBuffer, region: region, mode: mode, seq: seq, captured: captured, fresh: true)
     }
 
     /// Quantizes on the calling (non-session) queue, then hands the samples,
     /// tagged with the mode and capture sequence number they came from, to `queue`.
+    /// `fresh`: ScreenCaptureKit delivered it, so the picture changed (a mode switch's redraw is not).
     private func quantizeAndSubmit(_ pixelBuffer: CVPixelBuffer, region: CanvasRect, mode: Mode, seq: Int,
-                                   captured: TimeInterval) {
+                                   captured: TimeInterval, fresh: Bool = false) {
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
         guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return }
@@ -985,7 +992,7 @@ final class Session {
         }
         queue.async { [weak self] in
             self?.submit(samples: samples, raw: raw, width: width, height: height, region: region, mode: mode, seq: seq,
-                         captured: captured)
+                         captured: captured, fresh: fresh)
         }
     }
 
@@ -996,8 +1003,10 @@ final class Session {
     /// dropped (the encoder would reject their size), and so are samples older
     /// than ones already submitted (a redraw racing a newer frame).
     private func submit(samples: [UInt8], raw: [UInt8]?, width: Int, height: Int, region: CanvasRect, mode: Mode, seq: Int,
-                        captured: TimeInterval) {
+                        captured: TimeInterval, fresh: Bool) {
         guard !ended, capture != nil else { return }
+        // Paused: the change only lights B's activity lamp; the frame waits in `paced` for resume.
+        if fresh, let m = outbox.changed(now: uptimeSeconds()) { transmit(m) }
         guard mode == sampleLock.withLock({ sampleMode }), seq >= newestSubmittedSeq else { return }
         newestSubmittedSeq = seq
         lastWidth = width
@@ -1056,6 +1065,7 @@ final class Session {
     private func tick() {
         guard !ended, capture != nil else { return }
         paced?.tick()
+        if let m = outbox.due(now: uptimeSeconds()) { transmit(m) }
         let kbps = Double(bytesThisSecond) * 8 / 1000
         let p = paced?.takeStats()
         if output.json {
@@ -1133,7 +1143,8 @@ final class Session {
             if let capture {
                 // No encoder reset: the encoder sends a full frame itself when the
                 // density (pixels per point) changes by more than 1 %.
-                Task { await capture.setStream(fps: newFps, density: Double(newDensity)) }
+                let captureFps = captureRate
+                Task { await capture.setStream(fps: captureFps, density: Double(newDensity)) }
             }
         }
         output.log("stream -> \(streamDescription(newMode))")
@@ -1167,7 +1178,30 @@ final class Session {
 
     // MARK: Sending and ending
 
+    /// Capture runs at 1 fps while paused: enough to see that the picture changed.
+    private var captureRate: Int { outbox.paused ? 1 : fps }
+
+    /// Pauses or resumes the pictures (v15 `setStream` fps 0). Resuming sends what was held first,
+    /// then the held frame as a diff against the last one B got.
+    private func setPaused(_ on: Bool) {
+        guard on != outbox.paused else { return }
+        let held = outbox.setPaused(on, now: uptimeSeconds())
+        output.log(on ? "paused: B is not showing this session" : "resumed")
+        for m in held { transmit(m) }
+        if let capture {
+            let captureFps = captureRate, d = Double(density)
+            Task { await capture.setStream(fps: captureFps, density: d) }
+        }
+        paced?.setPaused(on)
+    }
+
+    /// Sends `message` unless a pause holds it back (`PauseOutbox`).
     private func send(_ message: Message) {
+        guard let m = outbox.pass(message, now: uptimeSeconds()) else { return }
+        transmit(m)
+    }
+
+    private func transmit(_ message: Message) {
         connection.send(content: Data(message.encoded()), completion: .contentProcessed { [weak self] error in
             if let error { self?.end("send failed: \(error.localizedDescription)") }
         })
