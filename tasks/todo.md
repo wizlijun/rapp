@@ -829,3 +829,13 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] Rust workspace 1215 项、最新 Flutter 2745 项及原生窗口 smoke 通过。更多验证及平台边界见 `docs/superpowers/plans/2026-11-21-linux-nonvoice-parity.md`。
 - [x] 干净源码 `2cd87a69` 打包，验证产物及上传摘要；发布 Linux v0.15.9（保留 macOS Latest v0.15.8），网站快照更新并通过 8 项测试。
 - [ ] 完成本机管理员认证后重新安装与校验；完成 Cloudflare 登录后部署网站静态更新。
+
+## 看不见的会话停画面（feat/offstage-pause，协议 v15，2026-11-22）
+
+规格 `docs/superpowers/specs/2026-11-22-rapp-offstage-pause-design.md`，计划 `docs/superpowers/plans/2026-11-22-rapp-offstage-pause.md`。B 不看的会话 `set_stream` fps 0：A 不发画面，屏幕变了每秒最多一条 `changed`（灯照常亮），窗口表最多 5 秒一次，菜单栏和焦点区留到恢复时一起发；恢复时第一帧是对 B 手上那帧的差分。
+
+- 实机检查：规格 §5 第 1–9 条（A 为 macOS 和 Linux 各一台，B 为 macOS；第 8 条 Linux B，第 9 条 iPad）。
+- [ ] 10. 切走一个会话后看它的灯：不应因为切走本身亮「活动」约 10 秒（ScreenCaptureKit 改成 1 fps 时可能补发一帧没变的画面，审查时没法在本机验证）。
+- [ ] 11. Linux B：主窗口关到托盘后，从启动器或再运行一次 `rapp` 打开，舞台上的会话照常满帧率。
+- [ ] 12. 放大/改密度后马上切回（同一条 `set_stream` 里既恢复又改密度）：帧率回到原来的，不卡在 1 fps。
+- Linux：`host-linux` 和 `rapp-session` 在 alpine 容器里 `cargo check` 通过、没有警告；容器里链接不了（缺本机库），Linux 上的 `cargo test -p rapp-host-linux` 和实机留给 Linux 那台机器。
