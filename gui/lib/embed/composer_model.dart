@@ -268,9 +268,15 @@ class ComposerModel extends ChangeNotifier {
       final e = _editor;
       if (e != null) {
         _idleTimer?.cancel();
-        final copy = _closeCopy = _readInto(e);
-        copy.then((_) {
-          if (!_disposed) _checkDeclined();
+        // A read that throws (the native view already gone) gives null: the copy is dropped and the [detach]
+        // at the fold's end reads again (or keeps the draft); the check waits for that read.
+        final copy = _closeCopy = _readInto(e).then<bool?>((mine) => mine, onError: (Object _) => null);
+        copy.then((mine) {
+          if (mine == null) {
+            if (identical(_closeCopy, copy)) _closeCopy = null;
+          } else if (!_disposed) {
+            _checkDeclined();
+          }
         });
       } else {
         _checkDeclined();
@@ -280,8 +286,8 @@ class ComposerModel extends ChangeNotifier {
   }
 
   /// The copy made when the panel closed with its editor still there ([_setOpen]); the [detach] at the fold's
-  /// end has nothing more to read.
-  Future<bool>? _closeCopy;
+  /// end has nothing more to read. Null when its read failed.
+  Future<bool?>? _closeCopy;
 
   /// [e]'s text into [draft], once [e] is attached, unless the draft was written since. True when it was.
   Future<bool> _readInto(ComposerEditor e) {
@@ -415,7 +421,13 @@ class ComposerModel extends ChangeNotifier {
     Future<void> copy() async {
       // Closed: the text was read when the panel closed. A write into the editor during the fold
       // ([editorChanged], [insert]: typing, a [keep]) dropped that copy, so it is read again.
-      final mine = await (closed ?? _readInto(e));
+      // A close copy whose read failed is read again; if that fails too, the draft keeps what it had.
+      bool mine;
+      try {
+        mine = (closed == null ? null : await closed) ?? await _readInto(e);
+      } catch (_) {
+        mine = false;
+      }
       if (_disposed) return;
       if (mine) _dropMissing(draft); // the editor's undo goes with it
       _checkDeclined();

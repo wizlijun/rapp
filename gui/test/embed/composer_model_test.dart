@@ -36,6 +36,38 @@ class _SlowReadEditor extends FakeEditor {
   Future<String> read() => gate.future;
 }
 
+/// A native view already gone: its first [fails] reads throw.
+class _FailingReadEditor extends FakeEditor {
+  _FailingReadEditor(this.fails);
+  int fails;
+  int reads = 0;
+
+  @override
+  Future<String> read() async {
+    reads++;
+    if (fails > 0) {
+      fails--;
+      throw StateError('view gone');
+    }
+    return value;
+  }
+}
+
+/// A read that fails once [gate] does.
+class _GatedFailEditor extends FakeEditor {
+  final gate = Completer<void>();
+  int reads = 0;
+
+  @override
+  Future<String> read() async {
+    if (reads++ == 0) {
+      await gate.future;
+      throw StateError('view gone');
+    }
+    return value;
+  }
+}
+
 void main() {
   late ComposerModel m;
   late FakeEditor ed;
@@ -469,6 +501,45 @@ void main() {
     expect(ed.value, 'A\nB');
     await m.detach(ed); // the fold ended
     expect(m.draft, 'A\nB');
+  });
+
+  group('a close copy whose read throws (final review)', () {
+    test('raises nothing; the detach at the fold\'s end reads again', () async {
+      final e = _FailingReadEditor(1);
+      await m.attach(e);
+      m.open = true;
+      e.value = '写了一半';
+      m.collapse(); // the close copy throws: no unhandled async error
+      await Future<void>.delayed(Duration.zero);
+      await m.detach(e);
+      expect(e.reads, 2);
+      expect(m.draft, '写了一半');
+    });
+
+    test('a detach that took the copy before it failed reads again', () async {
+      final e = _GatedFailEditor();
+      await m.attach(e);
+      m.open = true;
+      e.value = '写了一半';
+      m.collapse();
+      final detached = m.detach(e); // the fold ended before the read came back
+      e.gate.complete();
+      await detached;
+      expect(e.reads, 2);
+      expect(m.draft, '写了一半');
+    });
+
+    test('every read failing leaves the draft as it was, and the detach completes', () async {
+      m.draft = '旧的';
+      final e = _FailingReadEditor(99);
+      await m.attach(e);
+      m.open = true;
+      e.value = '新的';
+      m.collapse();
+      await Future<void>.delayed(Duration.zero);
+      await m.detach(e);
+      expect(m.draft, '旧的');
+    });
   });
 
   test('an insert during the fold reaches the draft too', () async {
