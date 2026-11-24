@@ -11,6 +11,7 @@ import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/embed/geometry.dart';
+import 'package:rapp/embed/input_dock.dart' show desktopComposerAt, dockMove;
 import 'package:rapp/embed/key_bar.dart';
 import 'package:rapp/embed/modifier_latch.dart';
 import 'package:rapp/embed/picture.dart';
@@ -135,7 +136,7 @@ void main() {
       expect(es.prefs.composerZoom, 0);
     });
 
-    testWidgets('open: one line, 720 wide, centred, 8 above the stage bottom', (tester) async {
+    testWidgets('open: one line, 720 wide, centred, standing on the desktop anchor', (tester) async {
       big(tester);
       await tester.pumpWidget(layer());
       await tester.pump();
@@ -143,8 +144,10 @@ void main() {
       final p = rect(tester, 'composer-panel');
       expect(p.size, const Size(720, 56 + 2)); // one line as tall as ＋/发送 and their 8s, inside a 1 px border
       expect(p.center.dx - host.left, 500);
-      // 8 above the key bar, which an open panel brings along.
-      expect(p.bottom - host.top, 700 - keyBarHeightOf(es, rs) - 8);
+      // Safari's 快捷区 is folded by default, so the panel is the whole block: its bottom on the anchor, a control's
+      // height and 20 over the stage's bottom.
+      expect(quickHidden(es, rs), isTrue);
+      expect(p.bottom - host.top, 700 - desktopComposerAt(controlHeightFor(defaultTargetPlatform)).dy);
       // W2: 15 on 22, no MATRIX glow in the editor.
       final style = field(tester).style!;
       expect(style.fontSize, 15);
@@ -218,6 +221,7 @@ void main() {
       expect(find.text('发送中'), findsNothing);
       // The default 直接回车且隐藏: the Return goes and the panel hides.
       expect(rs.composer.open, isFalse);
+      await tester.pumpAndSettle(); // the text area folds away
       expect(find.byKey(const Key('composer-panel')), findsNothing);
     });
 
@@ -864,6 +868,7 @@ void main() {
         await tester.pump();
         await tester.pump();
         expect(menu, findsNothing);
+        await tester.pumpAndSettle(); // the text area folds away
         expect(find.byKey(const Key('composer-panel')), findsNothing);
         expect(rs.composer.open, isFalse);
         expect(rs.composer.draft, '草稿');
@@ -1193,8 +1198,10 @@ void main() {
           visible: const Rect.fromLTWH(0, 0, 1, 1),
         );
 
-    // The key bar an open panel brings along: panels stand on it.
-    double bar() => keyBarHeightOf(es, es.currentRemote!);
+    // What stands under the panel in its block: the 快捷区 and its 8 while shown (Safari folds it by default).
+    double bar() => quickHidden(es, es.currentRemote!) ? 0 : keyBarHeightOf(es, es.currentRemote!) + 8;
+    // The block's default bottom on the 800×600 stage: the desktop anchor.
+    double home() => 600 - desktopComposerAt(controlHeightFor(defaultTargetPlatform)).dy;
 
     Future<void> openEmbedded(WidgetTester tester, {int sid = 1, String app = 'Safari'}) async {
       await tester.runAsync(() async {
@@ -1367,11 +1374,11 @@ void main() {
       expect(open['y'], plain['y']);
     });
 
-    testWidgets('the panel starts bottom centre, 8 up, the grip above it', (tester) async {
+    testWidgets('the panel starts bottom centre on the desktop anchor, the grip above it', (tester) async {
       await showPicture(tester);
       await openPanel(tester);
       final p = panelRect(tester);
-      expect(p.bottom, 600 - 8 - bar());
+      expect(p.bottom, home() - bar());
       expect(p.center.dx, 400);
       final g = tester.getRect(grip);
       expect(g.width, greaterThanOrEqualTo(48));
@@ -1433,13 +1440,13 @@ void main() {
         await tester.pump();
       }
       expect(saves, 0);
-      expect(panelRect(tester).bottom, 392 - bar());
+      expect(panelRect(tester).bottom, home() - 200 - bar());
       expect(panelRect(tester).center.dx, 380);
       await g.up();
       await tester.pump();
       expect(saves, 1);
-      expect(es.profiles.resolve('Safari').composerAt, InputPoint.at(Offset(380, 392 - bar()), const Size(800, 600)));
-      expect(panelRect(tester).bottom, 392 - bar());
+      expect(es.profiles.resolve('Safari').composerAt, InputPoint.at(Offset(380, home() - 200 - bar()), const Size(800, 600)));
+      expect(panelRect(tester).bottom, home() - 200 - bar());
       expect(panelRect(tester).center.dx, 380);
       await tester.pump(kDoubleTapTimeout);
     });
@@ -1455,7 +1462,7 @@ void main() {
       await tester.tap(grip);
       await tester.pumpAndSettle();
       expect(es.profiles.resolve('Safari').composerAt, isNull);
-      expect(panelRect(tester).bottom, 592 - bar());
+      expect(panelRect(tester).bottom, home() - bar());
       expect(panelRect(tester).center.dx, 400);
       expect(fieldFocused(tester), isTrue);
     });
@@ -1466,7 +1473,7 @@ void main() {
       await tester.enterText(fieldFinder, 'keep');
       await tester.pump();
       await dragGrip(tester, const [Offset(0, -150), Offset(0, -50)]);
-      expect(panelRect(tester).bottom, 392 - bar());
+      expect(panelRect(tester).bottom, home() - 200 - bar());
       expect(text(tester), 'keep');
       expect(fieldFocused(tester), isTrue);
     });
@@ -1477,7 +1484,7 @@ void main() {
       // 720 wide on 800: the centre can go from 368 to 432.
       await dragGrip(tester, const [Offset(2000, 0), Offset(-50, 0)]);
       expect(panelRect(tester).center.dx, 382);
-      expect(panelRect(tester).bottom, 592 - bar());
+      expect(panelRect(tester).bottom, home() - bar());
     });
 
     testWidgets('a touch held still on the grip, then moved, still drags (no long-press tooltip)', (tester) async {
@@ -1492,7 +1499,7 @@ void main() {
       await g.up();
       await tester.pump();
       await tester.pump(kDoubleTapTimeout);
-      expect(panelRect(tester).bottom, 392 - bar());
+      expect(panelRect(tester).bottom, home() - 200 - bar());
       expect(find.text('拖动；双击回到底部居中'), findsNothing);
     });
 
@@ -1515,9 +1522,9 @@ void main() {
         await g.up();
         await tester.pump();
         await tester.pump(kDoubleTapTimeout);
-        expect(panelRect(tester).bottom, 392 - bar());
+        expect(panelRect(tester).bottom, home() - 200 - bar());
         expect(panelRect(tester).center.dx, 380);
-        expect(es.profiles.resolve('Safari').composerAt, InputPoint.at(Offset(380, 392 - bar()), const Size(800, 600)));
+        expect(es.profiles.resolve('Safari').composerAt, InputPoint.at(Offset(380, home() - 200 - bar()), const Size(800, 600)));
       });
     }
 
@@ -1535,7 +1542,7 @@ void main() {
         await g.up();
         await tester.pump();
         await tester.pump(kDoubleTapTimeout);
-        expect(panelRect(tester).bottom, 592 - bar());
+        expect(panelRect(tester).bottom, home() - bar());
         expect(es.profiles.resolve('Safari').composerAt, isNull);
         expect(text(tester), 'some text to select');
       });
@@ -1573,7 +1580,7 @@ void main() {
       await g.up();
       await tester.pump();
       await tester.pump(kDoubleTapTimeout);
-      expect(panelRect(tester).bottom, 392 - bar());
+      expect(panelRect(tester).bottom, home() - 200 - bar());
       expect(panelRect(tester).center.dx, 380);
       expect(text(tester), 'keep');
       expect(fieldFocused(tester), isTrue);
@@ -1595,7 +1602,7 @@ void main() {
       await g.panZoomEnd();
       await tester.pump();
       await tester.pump(kDoubleTapTimeout);
-      expect(panelRect(tester).bottom, 592 - bar());
+      expect(panelRect(tester).bottom, home() - bar());
       expect(saves, 0);
     });
 
@@ -1613,7 +1620,7 @@ void main() {
       // Open or not is the session's (R18): Notes' panel starts closed.
       expect(find.byKey(const Key('composer-panel')), findsNothing);
       await openPanel(tester);
-      expect(panelRect(tester).bottom, 592 - bar());
+      expect(panelRect(tester).bottom, home() - bar());
       expect(panelRect(tester).center.dx, 400);
     });
 
@@ -1641,7 +1648,7 @@ void main() {
       await tester.pump(kDoubleTapTimeout);
       expect(es.profiles.resolve('Notes').composerAt, isNull);
       expect(es.profiles.resolve('Safari').composerAt, isNull);
-      expect(panelRect(tester).bottom, 592 - bar());
+      expect(panelRect(tester).bottom, home() - bar());
     });
 
     testWidgets('a drag that ends where it started writes nothing', (tester) async {
@@ -1650,7 +1657,7 @@ void main() {
       var saves = 0;
       es.profiles.addListener(() => saves++);
       await dragGrip(tester, const [Offset(0, -100), Offset(0, 100)]);
-      expect(panelRect(tester).bottom, 592 - bar());
+      expect(panelRect(tester).bottom, home() - bar());
       expect(saves, 0);
       expect(es.profiles.mine, isEmpty);
     });
@@ -1688,18 +1695,6 @@ void main() {
       expect(after.bottom, before.bottom);
     });
 
-    testWidgets('no lift over a detached placeholder', (tester) async {
-      await showPicture(tester);
-      port.emit(const DetachedEvent(1, true));
-      await tester.pump();
-      expect(find.byType(Picture), findsNothing);
-      final before = tester.getTopLeft(find.byKey(const Key('stage'))).dy;
-      await tester.tap(find.byKey(const Key('composer-open')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('composer-panel')), findsOneWidget);
-      expect(tester.getTopLeft(find.byKey(const Key('stage'))).dy, before);
-    });
-
     testWidgets('opening the composer takes the caret from the picture', (tester) async {
       await showPicture(tester);
       port.calls.clear();
@@ -1734,7 +1729,7 @@ void main() {
       await showPicture(tester);
       await tester.tap(find.byKey(const Key('composer-open')));
       await tester.pump();
-      await tester.pump();
+      await tester.pump(dockMove); // the text area grows in
       await tester.tap(find.byKey(const Key('composer-plus')));
       await tester.pump();
       final menu = find.byKey(const Key('composer-plus-menu'));
@@ -1764,7 +1759,7 @@ void main() {
       });
       await tester.tap(find.byKey(const Key('composer-open')));
       await tester.pump();
-      await tester.pump();
+      await tester.pump(dockMove); // the text area grows in
       await tester.tap(find.byKey(const Key('composer-plus')));
       await tester.pump();
       await tester.tap(find.text('输入历史'));
@@ -1793,7 +1788,7 @@ void main() {
       });
       await tester.tap(find.byKey(const Key('composer-open')));
       await tester.pump();
-      await tester.pump();
+      await tester.pump(dockMove); // the text area grows in
       await tester.tap(find.byKey(const Key('composer-plus')));
       await tester.pump();
       await tester.tap(find.text('输入历史'));
@@ -1807,12 +1802,13 @@ void main() {
       await showPicture(tester);
       await tester.tap(find.byKey(const Key('composer-open')));
       await tester.pump();
-      await tester.pump();
+      await tester.pump(dockMove); // the text area grows in
       await tester.tap(find.byKey(const Key('composer-plus')));
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pump();
       expect(find.byKey(const Key('composer-plus-menu')), findsNothing);
+      await tester.pumpAndSettle(); // the text area folds away
       expect(find.byKey(const Key('composer-panel')), findsNothing);
     });
 
@@ -1877,6 +1873,7 @@ void main() {
       await showPicture(tester);
       await tester.tap(find.byKey(const Key('composer-open')));
       await tester.pump();
+      await tester.pump(dockMove); // the text area grows in
       await tester.tap(fieldFinder);
       await tester.pump();
       final m = es.currentRemote!.composer;

@@ -8,8 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/app_profile.dart';
-import 'package:rapp/embed/composer_panel.dart' show pictureLift;
 import 'package:rapp/embed/flutter_editor.dart';
+import 'package:rapp/embed/input_dock.dart' show dockMove;
 import 'package:rapp/embed/key_bar.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
@@ -62,7 +62,7 @@ void main() {
     };
     port = FakeSessionPort();
     term = FakeTermSessionPort();
-    // The lift below is the bare key bar; the 常用语条's 36 is pinned in key_bar_test.
+    // The geometry below is the bare key bar; the 常用语条's 36 is pinned in key_bar_test.
     s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(phraseStrip: false), port: port, termPort: term);
   });
 
@@ -162,7 +162,7 @@ void main() {
   Future<void> openPanel(WidgetTester tester) async {
     await tester.tap(find.byKey(const Key('composer-open')));
     await tester.pump();
-    await tester.pump();
+    await tester.pump(dockMove); // the text area grows in
     expect(find.byKey(const Key('composer-panel')), findsOneWidget);
   }
 
@@ -349,39 +349,57 @@ void main() {
     expect(stageFocused(tester), isTrue);
   });
 
-  testWidgets('with the soft keyboard up the panel sits 8 above it, not under it', (tester) async {
+  testWidgets('with the soft keyboard up the block sits 8 above it, not under it', (tester) async {
     await openTerm(tester, keyboard: 300);
     await openPanel(tester);
+    await tester.pump(const Duration(milliseconds: 400));
     final stage = tester.getRect(find.byKey(const Key('stage')));
-    expect(tester.getRect(find.byKey(const Key('composer-panel'))).bottom, stage.bottom - 300 - 8);
+    final bar = tester.getRect(find.byType(KeyBar));
+    expect(bar.bottom, stage.bottom - 300 - 8);
+    expect(tester.getRect(find.byKey(const Key('composer-panel'))).bottom, bar.top - 8);
   });
 
-  for (final off in [false, true]) {
-    testWidgets('opening and closing the panel lifts the picture by $pictureLift, never resizes it '
-        '(animations ${off ? 'off' : 'on'}; Review Focus 5)', (tester) async {
-      await openTerm(tester, disableAnimations: off);
-      final size = tester.getSize(find.byType(TermStage));
-      final top = tester.getTopLeft(find.byType(TermStage)).dy;
-      term.calls.clear();
-      await openPanel(tester);
-      if (!off) {
-        await tester.pump(const Duration(milliseconds: 75));
-        final mid = tester.getTopLeft(find.byType(TermStage)).dy;
-        expect(mid, lessThan(top));
-        expect(mid, greaterThan(top - pictureLift));
-      }
-      await tester.pump(const Duration(milliseconds: 200));
-      expect(tester.getSize(find.byType(TermStage)), size);
-      expect(tester.getTopLeft(find.byType(TermStage)).dy, top - pictureLift);
-      expect(fieldFocused(tester), isTrue);
-      expect(find.byKey(const Key('composer-grip')), findsNothing); // terminals keep the fixed panel
-      s.currentRemote!.composer.collapse();
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 200));
-      expect(tester.getTopLeft(find.byType(TermStage)).dy, top);
-      expect(tester.getSize(find.byType(TermStage)), size);
-      expect(callsOf('view'), isEmpty);
-    });
+  for (final p in [TargetPlatform.android, TargetPlatform.iOS, TargetPlatform.macOS]) {
+    for (final off in [false, true]) {
+      testWidgets('${p.name}: the picture never moves — opening the text area and showing or hiding the 快捷区 '
+          'leave the stage child\'s rect as it was, every frame (animations ${off ? 'off' : 'on'})', (tester) async {
+        debugDefaultTargetPlatformOverride = p;
+        try {
+          await openTerm(tester, disableAnimations: off);
+          final picture = find.byType(TermStage);
+          final rect = tester.getRect(picture);
+          Future<void> frames() async {
+            for (var i = 0; i < 25; i++) {
+              await tester.pump(const Duration(milliseconds: 16));
+              expect(tester.getRect(picture), rect, reason: 'frame $i');
+            }
+          }
+
+          expect(find.byType(KeyBar), findsOneWidget);
+          term.calls.clear();
+          await openPanel(tester);
+          await frames();
+          expect(fieldFocused(tester), isTrue);
+          s.setQuickHidden(term: true, hidden: true);
+          await tester.pump();
+          await frames();
+          expect(find.byType(KeyBar), findsNothing);
+          s.setQuickHidden(term: true, hidden: false);
+          await tester.pump();
+          await frames();
+          expect(find.byType(KeyBar), findsOneWidget);
+          s.currentRemote!.composer.collapse();
+          await tester.pump();
+          await frames();
+          expect(find.byKey(const Key('composer-panel')), findsNothing);
+          expect(tester.getRect(picture), rect);
+          expect(callsOf('view'), isEmpty);
+          await tester.pump(const Duration(seconds: 2));
+        } finally {
+          debugDefaultTargetPlatformOverride = null;
+        }
+      });
+    }
   }
 
   testWidgets('iOS key bar 复制 copies the terminal selection to the clipboard', (tester) async {
@@ -412,32 +430,6 @@ void main() {
       expect(copied, ['abcdef']);
       expect(callsOf('keys'), isEmpty);
       await tester.pump(const Duration(seconds: 2));
-    } finally {
-      debugDefaultTargetPlatformOverride = null;
-    }
-  });
-
-  testWidgets('iOS stage lift: terminal closed with bar 54 → 54; open at scale 1 → 64+54', (tester) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
-    try {
-      await openTerm(tester);
-      double lift() => -tester
-          .widget<Transform>(find.ancestor(of: find.byKey(const Key('stage')), matching: find.byType(Transform)).first)
-          .transform
-          .getTranslation()
-          .y;
-      final size = tester.getSize(find.byType(TermStage));
-      expect(find.byType(KeyBar), findsOneWidget);
-      expect(keyBarHeightOf(s, s.currentRemote!), 54);
-      expect(lift(), 54);
-      await openPanel(tester);
-      await tester.pump(const Duration(milliseconds: 200));
-      expect(lift(), pictureLift + 54);
-      expect(tester.getSize(find.byType(TermStage)), size);
-      s.currentRemote!.composer.collapse();
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
-      expect(lift(), 54);
     } finally {
       debugDefaultTargetPlatformOverride = null;
     }

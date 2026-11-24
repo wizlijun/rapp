@@ -440,7 +440,7 @@ void main() {
     await drop(tester);
     await tester.tap(find.byKey(const Key('composer-open')));
     await tester.pump();
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400)); // the text area grows in
     await tester.tap(find.byKey(const Key('composer-field')));
     await tester.pump();
     FocusNode? primary() => FocusManager.instance.primaryFocus;

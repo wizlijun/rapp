@@ -1,6 +1,5 @@
-// The writing panel over an app window (floating-composer spec §4): it floats over a still
-// picture where the app's `composerAt` says, and a drag on it moves it. Terminals keep the
-// bottom-centre panel and the lift (composer_panel.dart).
+// The input dock's block (floating-composer spec §4, input-dock spec): it floats over a still picture where the
+// session's `composerAt` says, and a drag on it moves it.
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
@@ -134,7 +133,8 @@ class FloatingComposer extends StatefulWidget {
   final bool grip;
 
   /// A widget beside the block, bottoms level, 8 off its right edge (its left edge when that would leave the
-  /// stage). Not part of [place]'s rect, and outside the drag.
+  /// stage; 8 above the block, right edges level, when neither side has room). Not part of [place]'s rect, and
+  /// outside the drag.
   final Widget? handle;
 
   final ValueChanged<InputPoint?> onPlace;
@@ -181,7 +181,7 @@ class _FloatingComposerState extends State<FloatingComposer> with SingleTickerPr
   bool _hover = false;
 
   /// A touch landed on the panel and no tap elsewhere since: a touch screen has no hover, so this
-  /// shows the bar (and, off iOS, the ×) instead.
+  /// shows the bar instead.
   bool _touched = false;
 
   /// Where the held touch was last, for its moves.
@@ -230,8 +230,9 @@ class _FloatingComposerState extends State<FloatingComposer> with SingleTickerPr
     setState(() => _drag = null);
     final pull = widget.onPullClose;
     if (pull != null && _over > 0 && (_over > pullCloseDistance || (v?.pixelsPerSecond.dy ?? 0) > pullCloseSpeed)) {
-      // The dock takes it from where the panel is.
+      // The text area folds; the block (the 快捷区 stays in it) goes back up from where the finger left it.
       pull();
+      _springBack();
       return;
     }
     _springBack();
@@ -390,9 +391,16 @@ class _Place extends MultiChildLayoutDelegate {
     if (!hasHandle) return;
     final h = layoutChild(_handle, const BoxConstraints());
     var left = at.dx + block.width + _handleGap;
+    var top = at.dy + block.height - h.height;
     if (left + h.width > size.width - composerMargin) left = at.dx - _handleGap - h.width;
+    if (left < composerMargin) {
+      // No room on either side (a block near the stage's width): above it, right edges level.
+      left = at.dx + block.width - h.width;
+      top = at.dy - _handleGap - h.height;
+    }
     left = math.max(0, math.min(left, size.width - h.width));
-    positionChild(_handle, Offset(left, at.dy + block.height - h.height));
+    top = math.max(0, math.min(top, size.height - h.height));
+    positionChild(_handle, Offset(left, top));
   }
 
   @override

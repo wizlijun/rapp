@@ -93,6 +93,31 @@ class _ComposerPlusState extends State<ComposerPlus> {
 
   void _close() => _portal.hide();
 
+  // The panel stays while its text area folds away; the menu goes the moment it closes.
+  @override
+  void initState() {
+    super.initState();
+    widget.session.composer.addListener(_composerChanged);
+  }
+
+  @override
+  void didUpdateWidget(ComposerPlus oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.session.composer, widget.session.composer)) return;
+    oldWidget.session.composer.removeListener(_composerChanged);
+    widget.session.composer.addListener(_composerChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.session.composer.removeListener(_composerChanged);
+    super.dispose();
+  }
+
+  void _composerChanged() {
+    if (!widget.session.composer.open && _portal.isShowing) _close();
+  }
+
   /// The menu opens below 「＋」 when the button sits in the upper half of the overlay (a panel moved up
   /// there, floating-composer spec), else above it. Decided once, at open.
   bool _down = false;

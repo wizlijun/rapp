@@ -1038,6 +1038,8 @@ void main() {
     // Esc in the editor is the panel's: it collapses, fullscreen stays.
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400)); // the text area folds away
+    await tester.pump();
     expect(find.byType(ComposerPanel), findsNothing);
     expect(fs.calls, isEmpty);
     expect(fs.on, isTrue);
