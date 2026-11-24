@@ -986,3 +986,12 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] [Linux v0.15.22](https://github.com/wizlijun/rapp/releases/tag/v0.15.22) 已发布，源码 `6c6992a0`；三个远端资产大小及 SHA256 核对通过。macOS Latest 保持 v0.15.21，既有附件未变。
 - [x] 网站下载快照已更新；本轮不部署静态站、不自动安装或重启服务。
 - [ ] 实际麦克风中文/多语言效果、物理触屏和 macOS 真机对端验收。详见 `docs/superpowers/plans/2026-11-25-linux-01522-parity.md`。
+
+
+## Linux 0.15.24 快捷区开关评审修正对齐与发布（2026-11-25）
+
+- [x] 对齐 macOS 0.15.23 的共享修复：快捷区开关保持光标、窄窗口大字号与菜单限宽、开关淡入和无障碍去重。
+- [x] 补充 Linux 选区、IME composing 与继续输入、各级缩放不多余滚动，以及三平台窄窗口回归；完整 Flutter 3096 项通过、3 跳过，analyze 无 error/warning。
+- [x] [Linux v0.15.24](https://github.com/wizlijun/rapp/releases/tag/v0.15.24) 已发布（源码 `4c992ac0`）。两种包 40 文件一致、14 个 ELF 依赖完整，隔离 QUIC/CLI/端口共享检查通过；三个附件远端大小/SHA256 和匿名校验清单核验通过。
+- [x] macOS Latest 保留 v0.15.23；仓库下载快照更新。本轮不安装系统包、不重启服务、不部署静态站。
+- [ ] 实际物理输入法、触屏及 macOS 真机对端验收；详见 `docs/superpowers/plans/2026-11-25-linux-01524-parity.md`。
