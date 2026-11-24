@@ -116,6 +116,9 @@ class ComposerModel extends ChangeNotifier {
   /// A send that carried [pendingAi] (the AI's text, maybe edited): the AI record and the text sent.
   void Function(VoiceAi ai, String text)? onAiSent;
 
+  /// A send that carried [pendingHeard] and no [pendingAi]: what was heard and fixed, and the text sent.
+  void Function(VoiceHeard heard, String text)? onHeardSent;
+
   /// Called once per send round after `done` updated `o.sent`; [all]: everything went by now.
   void Function(Outgoing o, {required bool all})? onFinished;
 
@@ -132,7 +135,7 @@ class ComposerModel extends ChangeNotifier {
   int _draftEpoch = 0;
   set draft(String v) {
     _draftEpoch++;
-    if (v.isEmpty) pendingAi = null;
+    if (v.isEmpty) _clearPending();
     if (_draft == v) return;
     _undoTo = null;
     _draft = v;
@@ -141,11 +144,21 @@ class ComposerModel extends ChangeNotifier {
 
   /// The tidy's text was put in the draft (the edit pick, or a voice send that could not go): the next panel
   /// send is marked AI with this. Goes when the draft empties, when ↑/↓ brings in another text, and on a send.
-  VoiceAi? pendingAi;
+  VoiceAi? get pendingAi => _pendingAi;
+  VoiceAi? _pendingAi;
+  set pendingAi(VoiceAi? v) {
+    _pendingAi = v;
+    if (v != null) pendingHeard = null; // the AI's text took the draft: the AI mark is the one that goes
+  }
 
   /// A voice hold's words put in the draft without the AI (the edit pick, or a voice send that could not go):
-  /// what the recognizer heard and what the device fix made of it.
+  /// what the recognizer heard and what the device fix made of it. Goes when [pendingAi] does, and when it is set.
   VoiceHeard? pendingHeard;
+
+  void _clearPending() {
+    _pendingAi = null;
+    pendingHeard = null;
+  }
 
   /// What one undo in the next editor gives back ([keep] with `undo` while no editor was there): the next
   /// [_start] puts it in first and the draft over it in one undoable step. Goes when the draft changes.
@@ -637,7 +650,7 @@ class ComposerModel extends ChangeNotifier {
       final next = to < 0 ? (_kept.remove(-1) ?? '') : (_kept[to] ?? round[to]);
       onRecalled?.call(to < 0 ? null : round[to], _plain(_kept[-1] ?? ''));
       _idleTimer?.cancel();
-      pendingAi = null;
+      _clearPending();
       draft = next;
       if (show != null) {
         show(next);
@@ -668,7 +681,7 @@ class ComposerModel extends ChangeNotifier {
     _toCheck = null;
     _idleTimer?.cancel();
     _setTaking(true);
-    final ai = pendingAi; // before the take: an editor emptied by it clears it
+    final ai = pendingAi, heard = pendingHeard; // before the take: an editor emptied by it clears them
     final String text;
     try {
       if (_steps > 0) await _stepping; // a ↑ still putting its record in: that is what is sent
@@ -702,10 +715,20 @@ class ComposerModel extends ChangeNotifier {
       return SubmitReturn();
     }
     _lastSend = now;
-    final o = Outgoing(parts, voice: ai == null ? null : VoiceOrigin(ai: ai))..at = now;
-    pendingAi = null;
+    final o = Outgoing(parts,
+        voice: ai != null
+            ? VoiceOrigin(ai: ai)
+            : heard != null
+                ? VoiceOrigin(heard: heard)
+                : null)
+      ..at = now;
+    _clearPending();
     onSubmitted?.call(o);
-    if (ai != null) onAiSent?.call(ai, o.text);
+    if (ai != null) {
+      onAiSent?.call(ai, o.text);
+    } else if (heard != null) {
+      onHeardSent?.call(heard, o.text);
+    }
     draft = '';
     // The row holds them now; the ones deleted from the text leave the runner.
     final liveBack = live == null ? null : _withoutMarksOf(live, o.blocks);
@@ -876,10 +899,13 @@ class ComposerModel extends ChangeNotifier {
           o: Outgoing([t], voice: o.voice)..failure = o.failure ?? '没有发出去',
     };
     _failed.insertAll(0, made.values);
-    // The AI mark goes with the draft it belongs to, not onto a draft of this composer's own.
+    // The AI mark (or the heard words) goes with the draft it belongs to, not onto a draft of this composer's own.
     if (draft.isEmpty) {
       draft = old.draftText;
-      if (draft.isNotEmpty) pendingAi ??= old.pendingAi;
+      if (draft.isNotEmpty && pendingAi == null && pendingHeard == null) {
+        pendingAi = old.pendingAi;
+        pendingHeard ??= old.pendingHeard;
+      }
     }
     final e = old._editor;
     if (e != null) {

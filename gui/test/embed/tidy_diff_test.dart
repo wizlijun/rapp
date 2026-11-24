@@ -31,7 +31,17 @@ void main() {
         [const LearnItem.replace(observed: '拍森', output: 'Python', excerpt: '明天用拍森跑')]);
   });
   test('editLearns: a fix on words the AI added is dropped', () => expect(editLearns('明天开会', '明天下午开会', '明天晚上开会'), isEmpty));
+  // Empty because so short a text is mostly rewritten (`_changes`' guard); a longer revert teaches preserve (below).
   test('editLearns: flipping the AI back to the heard words learns nothing', () => expect(editLearns('用拍森跑', '用Python跑', '用拍森跑'), isEmpty));
+  test('editLearns: reverting a fix teaches preserve', () => expect(editLearns('我们现在打开拍森看看', '我们现在打开Python看看', '我们现在打开拍森看看'),
+      [const LearnItem.preserve(observed: '拍森', avoid: 'Python', excerpt: '我们现在打开拍森看看')]));
+  test('editLearns: no fix, an edit teaches replace', () => expect(editLearns('我们现在打开黑猫瑞看看', '我们现在打开黑猫瑞看看', '我们现在打开Hemory看看'),
+      [const LearnItem.replace(observed: '黑猫瑞', output: 'Hemory', excerpt: '我们现在打开黑猫瑞看看')]));
+  test('editLearns: a revert next to a fix of its own teaches both', () => expect(editLearns('明天我们用拍森跑一下黑猫瑞的测试', '明天我们用Python跑一下黑猫瑞的测试', '明天我们用拍森跑一下Hemory的测试'), [
+        const LearnItem.preserve(observed: '拍森', avoid: 'Python', excerpt: '明天我们用拍森跑一下黑猫瑞的测试'),
+        const LearnItem.replace(observed: '黑猫瑞', output: 'Hemory', excerpt: '明天我们用拍森跑一下黑猫瑞的测试'),
+      ]));
+  test('editLearns: a fix left as it was teaches nothing', () => expect(editLearns('我们现在打开拍森看看', '我们现在打开Python看看', '我们现在打开Python看看'), isEmpty));
   test('editLearns: at most 3', () => expect(editLearns('甲甲和你说乙乙和你说丙丙和你说丁丁和你说', '甲甲和你说乙乙和你说丙丙和你说丁丁和你说', 'AA和你说BB和你说CC和你说DD和你说').map((i) => i.observed), ['甲甲', '乙乙', '丙丙']));
 
   test('tidyChanges widens a 1-rune AI side to the right at the very start', () {

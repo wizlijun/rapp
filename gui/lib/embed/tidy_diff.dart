@@ -200,8 +200,9 @@ List<TidyChange> tidyChanges(String original, String result) {
   ];
 }
 
-/// What the user's edit ([sent]) of the AI's [result] teaches about the heard
-/// [original]. At most 3 items.
+/// What the user's edit ([sent]) of [result] (the AI's text, or the device's fixed words) teaches about the
+/// heard [original]: a change to new words teaches replace; putting a change of [result] back as heard teaches
+/// preserve, avoiding what [result] had there. At most 3 items.
 List<LearnItem> editLearns(String original, String result, String sent) {
   final o = original.runes.toList(), r = result.runes.toList(), s = sent.runes.toList();
   final oa = _align(o, r), rs = _align(r, s);
@@ -243,8 +244,16 @@ List<LearnItem> editLearns(String original, String result, String sent) {
     if (oIdx.length != hi - lo + 1) continue; // must be contiguous
     final observed = _str(o, lo, hi + 1).trim();
     final output = _str(s, sFrom, sTo).trim();
-    if (observed.isEmpty || observed == output || observed.runes.length > _maxSide) continue;
-    out.add(LearnItem.replace(observed: observed, output: output, excerpt: learnExcerpt(original, observed)));
+    if (observed.isEmpty || observed.runes.length > _maxSide) continue;
+    if (observed == output) {
+      // Put back as heard: a fix (the AI's, or the device's) the user does not want — keep [observed] (D8).
+      if (overlapping.isEmpty) continue;
+      final avoid = _str(r, rFrom, rTo).trim();
+      if (avoid.isEmpty || avoid == observed) continue;
+      out.add(LearnItem.preserve(observed: observed, avoid: avoid, excerpt: learnExcerpt(original, observed)));
+    } else {
+      out.add(LearnItem.replace(observed: observed, output: output, excerpt: learnExcerpt(original, observed)));
+    }
     if (out.length == _maxLearns) break;
   }
   return out;

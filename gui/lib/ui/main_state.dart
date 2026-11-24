@@ -412,7 +412,11 @@ class MainState extends ChangeNotifier {
           if (rs == null || p == null) {
             if (rs != null) {
               unawaited(rs.composer.keep(text));
-              if (voice.ai != null) rs.composer.pendingAi = voice.ai;
+              if (voice.ai != null) {
+                rs.composer.pendingAi = voice.ai;
+              } else if (voice.heard != null) {
+                rs.composer.pendingHeard = voice.heard; // sent from the panel later, it still learns (D8)
+              }
             }
             return voiceBlocked;
           }
@@ -426,7 +430,11 @@ class MainState extends ChangeNotifier {
           // The AI's text over the original: one ⌘Z gives the original back (§8.2) — the fixed words, as 还原
           // does, not the heard ones [VoiceAi.original] keeps for learning (spec D6).
           unawaited(c.keep(text, undo: ai == null ? null : (tidyIfAny(s)?.original ?? ai.original)));
-          if (ai != null) c.pendingAi = ai;
+          if (ai != null) {
+            c.pendingAi = ai;
+          } else if (tidyIfAny(s) case final t?) {
+            c.pendingHeard = VoiceHeard(heard: t.heard, fixed: text); // the fixed words, without the AI (D8)
+          }
           c.open = true;
           if (ai != null) _tidyAside(s, 'AI 整理好了，放在写作面板里');
         },
@@ -2064,11 +2072,9 @@ class MainState extends ChangeNotifier {
         },
         onComposeKey: () => tidyIfAny(s.sid)?.closed(),
         followNewTabs: !term);
-    rs.composer.onAiSent = (ai, text) {
-      if (rs.secureFocus) return;
-      final items = editLearns(ai.original, ai.result, text);
-      if (items.isNotEmpty) tidyOf(rs.sid).offerLearn(items);
-    };
+    rs.composer.onAiSent = (ai, text) => _offerEditLearns(rs.sid, editLearns(ai.original, ai.result, text));
+    // Without the AI: what the user changed in the device's fixed words, against what was heard (spec D8).
+    rs.composer.onHeardSent = (h, text) => _offerEditLearns(rs.sid, editLearns(h.heard, h.fixed, text));
     final prof = profiles.resolve(r.app);
     rs.setProfile(prof);
     // Wired before any swap's adoptFrom; a reconnect's old session hands its text over itself.
@@ -3457,6 +3463,17 @@ class MainState extends ChangeNotifier {
   /// [text] through [voiceRules]; a password field (or a session that is gone) gets it back unchanged (D7).
   FixResult voiceFix(Object sid, String text) =>
       (remote[sid]?.secureFocus ?? true) ? FixResult(text, const []) : _voiceRules.fix(text);
+
+  // What a sent edit teaches, offered in the session's tidy. Not from a password field; and a fix of the formal
+  // vocabulary put back is not offered to keep: that is changed in note.md (spec D9).
+  void _offerEditLearns(Object sid, List<LearnItem> items) {
+    if (remote[sid]?.secureFocus ?? true) return;
+    final keep = [
+      for (final i in items)
+        if (i.action != LearnAction.preserve || !voiceRules.fromVocabulary(i.observed, i.avoid!)) i,
+    ];
+    if (keep.isNotEmpty) tidyOf(sid).offerLearn(keep);
+  }
 
   /// One line for the log (counts and milliseconds only, never words: D20).
   void voiceLog(String line) => _log(line);
