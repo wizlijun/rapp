@@ -20,15 +20,16 @@ const _fade = Duration(milliseconds: 120);
 const _glide = Duration(milliseconds: 200);
 
 /// The stage's square buttons (iOS), each [stageButtonSize], as one vertical stack on a screen edge, bottom to top:
-/// [voice], [input], [restore]. [beside] widgets stack upward on the inner side, bottom-aligned with the stack's lowest button.
+/// [voice], [input], [quick] (the 快捷区 toggle), [restore]. [beside] widgets stack upward on the inner side,
+/// bottom-aligned with the stack's lowest button.
 ///
-/// A horizontal drag on [input] or [restore] moves the stack to the other side once it passes the middle.
+/// A horizontal drag on [input], [quick] or [restore] moves the stack to the other side once it passes the middle.
 ///
 /// [upright] (a portrait stage) lays the buttons in a row instead, [voice] outermost and the others toward the
 /// middle, centred on one line; [beside] then stands above the row on its outer edge (user 2026-11-18:
 /// 「竖屏时，键盘在语音按钮靠中间的横排就行了」).
 ///
-/// [hidden] (recording) fades [input], [restore] and [beside] out, ignores their input and turns dragging
+/// [hidden] (recording) fades [input], [quick], [restore] and [beside] out, ignores their input and turns dragging
 /// off; [voice] keeps its place and draws itself.
 class StageButtons extends StatefulWidget {
   const StageButtons({
@@ -37,6 +38,7 @@ class StageButtons extends StatefulWidget {
     required this.onSide,
     this.voice,
     this.input,
+    this.quick,
     this.restore,
     this.beside = const [],
     this.hidden = false,
@@ -47,6 +49,7 @@ class StageButtons extends StatefulWidget {
   final ValueChanged<StageSide> onSide;
   final Widget? voice;
   final Widget? input;
+  final Widget? quick;
   final Widget? restore;
   final List<Widget> beside;
   final bool hidden;
@@ -161,6 +164,7 @@ class _StageButtonsState extends State<StageButtons>
     final stack = <Widget>[
       if (widget.voice != null) widget.voice!,
       if (widget.input != null) _faded(_draggable(widget.input!), reduced),
+      if (widget.quick != null) _faded(_draggable(widget.quick!), reduced),
       if (widget.restore != null) _faded(_draggable(widget.restore!), reduced),
     ];
     final spaced = [

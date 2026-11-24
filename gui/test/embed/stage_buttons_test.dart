@@ -7,7 +7,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/embed/geometry.dart';
-import 'package:rapp/embed/input_dock.dart' show desktopComposerAt;
+import 'package:rapp/embed/app_profile.dart' show ResolvedProfile;
+import 'package:rapp/embed/input_dock.dart' show desktopComposerAt, stackButtonCount;
 import 'package:rapp/embed/key_bar.dart';
 import 'package:rapp/embed/panel_place.dart';
 import 'package:rapp/embed/remote_session.dart';
@@ -165,7 +166,18 @@ void main() {
     expect(rs.composer.open, isFalse);
   });
 
-  iosTest('zoomed: 还原 sits 12 above 输入', (tester) async {
+  test('stackButtonCount counts the toggle: 语音, 输入, 快捷区, and 还原 while zoomed', () {
+    expect(stackButtonCount(rs, voice: true), 3);
+    expect(stackButtonCount(rs, voice: false), 2);
+    final z = zoomable();
+    addTearDown(z.dispose);
+    z.zoomOf(7).zoomTo(2, const Offset(500, 350), fitRect(const Size(100, 100), stage), stage);
+    expect(stackButtonCount(z, voice: true), 4);
+    rs.setProfile(const ResolvedProfile(name: 'X', composer: false));
+    expect(stackButtonCount(rs, voice: true), 0);
+  });
+
+  iosTest('zoomed: 还原 sits 12 above the 快捷区 toggle, which sits 12 above 输入', (tester) async {
     big(tester);
     rs.dispose();
     rs = zoomable();
@@ -173,8 +185,10 @@ void main() {
     zoom();
     await tester.pump();
     final o = inStage(tester, open);
+    final q = inStage(tester, find.byKey(const Key('quick-toggle-stack')));
     final z = inStage(tester, reset);
-    expect(o.top - z.bottom, 12);
+    expect(o.top - q.bottom, 12);
+    expect(q.top - z.bottom, 12);
     expect(z.center.dx, o.center.dx);
   });
 
@@ -204,13 +218,14 @@ void main() {
       expect(stage.height - inStage(tester, open).bottom, 12);
     });
 
-    iosTest('${platform.name}: app session: only the handle while closed; the text area on the anchor while open', (tester) async {
+    iosTest('${platform.name}: app session: the toggle beside 输入 while closed; the text area on the anchor while open', (tester) async {
       debugDefaultTargetPlatformOverride = platform;
       big(tester);
       await tester.pumpWidget(layer());
       await tester.pump();
       expect(find.byType(KeyBar), findsNothing);
-      expect(find.byKey(const Key('quick-handle')), findsOneWidget);
+      expect(find.byKey(const Key('quick-toggle-stack')), findsOneWidget);
+      expect(find.byKey(const Key('quick-toggle')), findsNothing);
       final closed = inStage(tester, open);
       rs.composer.open = true;
       await tester.pumpAndSettle();
@@ -319,6 +334,47 @@ void main() {
     expect(sides, 0);
   });
 
+  for (final upright in [false, true]) {
+    iosTest('quick sits between input and restore, fades and drags like input (upright: $upright)', (tester) async {
+      big(tester);
+      var sides = 0;
+      Widget stack({bool hidden = false}) => wrap(SizedBox(
+          key: const Key('stage'),
+          width: stage.width,
+          height: stage.height,
+          child: StageButtons(
+            side: StageSide.right,
+            onSide: (_) => sides++,
+            hidden: hidden,
+            upright: upright,
+            voice: probe('v'),
+            input: probe('i'),
+            quick: probe('q'),
+            restore: probe('r'),
+          )));
+      await tester.pumpWidget(stack());
+      Rect r(String k) => inStage(tester, find.byKey(Key(k)));
+      if (upright) {
+        // Outward from 语音 on the right edge: right to left.
+        expect(r('i').left - r('q').right, 12);
+        expect(r('q').left - r('r').right, 12);
+        expect(r('q').center.dy, r('i').center.dy);
+      } else {
+        expect(r('q').bottom, r('i').top - 12);
+        expect(r('r').bottom, r('q').top - 12);
+        expect(r('q').center.dx, r('i').center.dx);
+      }
+      await tester.drag(find.byKey(const Key('q')), const Offset(-700, 0));
+      await tester.pumpAndSettle();
+      expect(sides, 1, reason: 'a drag on quick moves the stack');
+      await tester.pumpWidget(stack(hidden: true));
+      await tester.pumpAndSettle();
+      final fade = tester.widget<FadeTransition>(
+          find.ancestor(of: find.byKey(const Key('q')), matching: find.byType(FadeTransition)).first);
+      expect(fade.opacity.value, 0);
+    });
+  }
+
   iosTest('beside alone: the transfer strip sits 80 from the edge (no empty stack, no gap)', (tester) async {
     big(tester);
     await tester.pumpWidget(wrap(SizedBox(
@@ -361,6 +417,9 @@ void main() {
     expect(sides, 0);
   });
 }
+
+/// A plain square standing in for a stage button, keyed [k].
+Widget probe(String k) => SizedBox.square(key: Key(k), dimension: 56, child: const ColoredBox(color: Color(0xFF000000)));
 
 /// A stand-in for 输入 that counts taps.
 class RappButtonProbe extends StatelessWidget {

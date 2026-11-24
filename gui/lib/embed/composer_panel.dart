@@ -1,6 +1,6 @@
 // The writing panel (spec §3, W1–W16): a 720-wide box at the bottom of the stage, one line to
 // start, growing upward to half the stage. From the top: the outgoing items, the hint line,
-// the box with [editor] [＋] [发送]. The editor owns the text; the model copies it out
+// the box with [＋] [快捷区] [editor] [发送]. The editor owns the text; the model copies it out
 // at send, session switch, 1 s idle and collapse (spec §5). The draft is the session's (R18).
 import 'dart:async';
 import 'dart:math' as math;
@@ -23,6 +23,7 @@ import 'input_dock.dart';
 import 'key_bar.dart';
 import 'native_editor.dart';
 import 'panel_place.dart';
+import 'quick_toggle.dart';
 import 'remote_session.dart';
 import 'session_port.dart';
 import 'stage_buttons.dart';
@@ -418,9 +419,39 @@ class _ComposerPanelState extends State<ComposerPanel> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
+                    // ＋ and the 快捷区 toggle on the left, 发送 on the right: 40 square, [_edge] to the border on
+                    // every side (one line), 4 between the two on the left; all sit at the bottom as the text grows.
+                    Padding(
+                      padding: EdgeInsets.all(edge),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ComposerPlus(
+                            state: widget.state,
+                            session: _s,
+                            port: widget.port,
+                            onAttach: _attach,
+                            history: widget.state.history,
+                            historyKey: widget.state.historyKeyOf(_s),
+                            onAddPhrase: widget.state.addPhrase,
+                            onPress: () => widget.state.holdForPanel(_s),
+                            onReturnAfter: _s.appId.isEmpty
+                                ? null
+                                : (on) => widget.state.setAfterSend(_s, on ? AfterSend.pressReturn : AfterSend.none),
+                            terminal: _terminal,
+                            blocked: _blocked,
+                            scale: k,
+                            zoom: widget.state.composerZoom.value,
+                            onZoom: widget.state.setComposerZoom,
+                          ),
+                          const SizedBox(width: 4),
+                          QuickToggle(state: widget.state, session: _s, look: QuickToggleLook.box, scale: k),
+                        ],
+                      ),
+                    ),
                     Expanded(
                       child: Padding(
-                        padding: const EdgeInsets.only(left: 12, right: 8),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -453,31 +484,12 @@ class _ComposerPanelState extends State<ComposerPanel> {
                         ),
                       ),
                     ),
-                    // ＋ and 发送: 40 square, [_edge] to the border on every side (one line), 4 between them.
+                    // 发送 alone on the right, away from the keys on the left, so it is not hit by mistake.
                     Padding(
                       padding: EdgeInsets.all(edge),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          ComposerPlus(
-                            state: widget.state,
-                            session: _s,
-                            port: widget.port,
-                            onAttach: _attach,
-                            history: widget.state.history,
-                            historyKey: widget.state.historyKeyOf(_s),
-                            onAddPhrase: widget.state.addPhrase,
-                            onPress: () => widget.state.holdForPanel(_s),
-                            onReturnAfter: _s.appId.isEmpty
-                                ? null
-                                : (on) => widget.state.setAfterSend(_s, on ? AfterSend.pressReturn : AfterSend.none),
-                            terminal: _terminal,
-                            blocked: _blocked,
-                            scale: k,
-                            zoom: widget.state.composerZoom.value,
-                            onZoom: widget.state.setComposerZoom,
-                          ),
-                          const SizedBox(width: 4),
                           RappButton.primary(
                             key: const Key('composer-send'),
                             label: '发送',
@@ -600,6 +612,11 @@ Widget _cornerRow(BuildContext context, MainState state, RemoteSession session, 
       ),
       if (button) const SizedBox(width: 8),
     ],
+    // With the text area folded the 快捷区 toggle stands left of 输入 (quick-toggle spec §6); open, it is in the box.
+    if (button && !open) ...[
+      QuickToggle(state: state, session: session, look: QuickToggleLook.corner),
+      const SizedBox(width: 8),
+    ],
     // 输入 and 收起 are one button, always in its corner: it folds the text area only.
     if (button)
       RappButton.secondary(
@@ -663,6 +680,8 @@ Widget _iosStack(BuildContext context, MainState state, RemoteSession session, S
         hidden: hold?.active ?? false,
         upright: stage.height > stage.width,
         input: button ? _openToggle(session) : null,
+        // Folded, the 快捷区 toggle stands above 输入 (quick-toggle spec §6); open, it is in the box.
+        quick: button && !open ? QuickToggle(state: state, session: session, look: QuickToggleLook.stage) : null,
         restore: zoomed
             ? RappButton.stage(
                 key: const Key('zoom-reset'),
@@ -696,8 +715,8 @@ Widget _iosStack(BuildContext context, MainState state, RemoteSession session, S
 }
 
 /// Where [VoiceTidyCard] stands. Desktop: above the input block (text area, quick area or both) and right-aligned
-/// with it, 8 up; below it when there is no room above; in the corner above the row when there is no block (only the
-/// handle). iOS: 12 above the stack, which stands above the block.
+/// with it, 8 up; below it when there is no room above; in the corner above the row when there is no block (both
+/// folded). iOS: 12 above the stack, which stands above the block.
 class _TidyLayer extends StatelessWidget {
   const _TidyLayer(
       {required this.state,

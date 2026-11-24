@@ -172,21 +172,45 @@ void main() {
       }
     });
 
-    testWidgets('＋ and 发送: 40 square with an even 8 all round, inside the one-line box', (tester) async {
+    testWidgets('＋ and the toggle on the left, 发送 on the right: 40 square, even 8, one-line box 56', (tester) async {
       big(tester);
       await tester.pumpWidget(layer());
       await tester.pump();
       final box = rect(tester, 'composer-box').deflate(1); // inside the 1 px border
       final plus = rect(tester, 'composer-plus'), send = rect(tester, 'composer-send');
-      expect(plus.size, const Size(40, 40));
-      expect(send.size, const Size(40, 40));
+      final toggle = rect(tester, 'quick-toggle');
+      for (final r in [plus, toggle, send]) {
+        expect(r.size, const Size(40, 40));
+        expect(r.top - box.top, 8);
+        expect(box.bottom - r.bottom, 8);
+      }
+      expect(plus.left - box.left, 8);
+      expect(toggle.left - plus.right, 4);
       expect(box.right - send.right, 8);
-      expect(box.bottom - send.bottom, 8);
-      expect(send.top - box.top, 8);
-      expect(plus.left - box.left, greaterThan(8));
-      expect(send.left - plus.right, 4);
-      expect(plus.top, send.top);
       expect(box.height, 56);
+      // The text starts 16 right of the toggle, as it ends 16 left of 发送.
+      final editor = rect(tester, 'composer-field');
+      expect(editor.left, toggle.right + 16);
+      expect(send.left - editor.right, 16);
+    });
+
+    testWidgets('zoomed and narrow', (tester) async {
+      big(tester);
+      es.setComposerZoom(4);
+      await tester.pumpWidget(layer());
+      await tester.pump();
+      final k = es.composerScale;
+      for (final key in ['composer-plus', 'quick-toggle', 'composer-send']) {
+        expect(rect(tester, key).size, Size(40 * k, 40 * k), reason: key);
+      }
+      expect(rect(tester, 'composer-box').deflate(1).height, closeTo(56 * k, 1e-9));
+      es.setComposerZoom(0);
+      await tester.pumpWidget(wrap(SizedBox(
+          width: 320,
+          height: 700,
+          child: Stack(children: composerLayer(state: es, session: rs, port: port, editor: FlutterEditor.new)))));
+      await tester.pump();
+      expect(rect(tester, 'composer-field').width, greaterThan(100));
     });
 
     testWidgets('long text grows upward to half the stage, bottom and width fixed', (tester) async {
@@ -466,7 +490,7 @@ void main() {
       expect(find.text('写给 Safari'), findsOneWidget);
     });
 
-    testWidgets('send and plus stay at the bottom right when tall (W13)', (tester) async {
+    testWidgets('tall: 发送 stays bottom right, ＋ and the toggle bottom left (W13)', (tester) async {
       big(tester);
       rs.composer.setDraft(List.generate(10, (i) => 'line $i').join('\n'));
       await tester.pumpWidget(layer());
@@ -479,8 +503,10 @@ void main() {
       expect(plus.size, const Size(40, 40));
       expect(send.bottom, box.bottom - 1 - 8); // 8 inside the 1 px border
       expect(plus.bottom, box.bottom - 1 - 8);
+      expect(rect(tester, 'quick-toggle').bottom, box.bottom - 1 - 8);
       expect(send.right, box.right - 1 - 8);
-      expect(plus.right, send.left - 4);
+      expect(plus.left, box.left + 1 + 8);
+      expect(rect(tester, 'quick-toggle').left, plus.right + 4);
     });
 
     testWidgets('⌘V pastes what the runner answers at the cursor', (tester) async {
@@ -698,7 +724,8 @@ void main() {
           final plus = rect(tester, 'composer-plus');
           expect(m.width, 300);
           expect(m.bottom, plus.top - 8);
-          expect(m.right, plus.right);
+          expect(m.left, plus.left);
+          expect(m.left, greaterThanOrEqualTo(rect(tester, 'host').left));
           expect(find.text('按键 · 直接发给远端'), findsNothing);
           for (final l in ['Tab', '⌘', '⌥', '删除', '←', '↓', '↑', '→', '回车']) {
             expect(find.descendant(of: menu, matching: find.text(l)), findsNothing, reason: l);
@@ -825,7 +852,8 @@ void main() {
         final plus = rect(tester, 'composer-plus');
         final host = rect(tester, 'host');
         expect(m.top, plus.bottom + 8);
-        expect(m.right, plus.right);
+        expect(m.left, plus.left);
+        expect(m.left, greaterThanOrEqualTo(host.left));
         expect(m.top, greaterThanOrEqualTo(host.top));
         expect(m.bottom, lessThanOrEqualTo(host.bottom));
       });
@@ -1739,7 +1767,9 @@ void main() {
       final menu = find.byKey(const Key('composer-plus-menu'));
       expect(menu, findsOneWidget);
       port.calls.clear();
-      final spot = tester.getTopLeft(find.byType(Picture)) + const Offset(100, 100);
+      // On the picture, clear of the menu, which now opens rightward from ＋ on the left.
+      final spot = tester.getTopRight(find.byType(Picture)) + const Offset(-40, 40);
+      expect(tester.getRect(menu).contains(spot), isFalse);
       await tester.tapAt(spot);
       await tester.pump();
       expect(menu, findsNothing);
@@ -2194,7 +2224,7 @@ void main() {
       await tidy(tester);
       expect(cardRect(tester).bottom, block().top - 8);
       expect(cardRect(tester).right, block().right);
-      // Only the handle left: no block, the corner above the row.
+      // Both folded: no block, the corner above the row.
       es.setQuickHidden(term: false, hidden: true);
       await tester.pumpAndSettle();
       expect(block().height, 0);
@@ -2205,9 +2235,10 @@ void main() {
     platformTest(TargetPlatform.iOS, 'tidy card stands 12 above the stack, which stands above the block', (tester) async {
       await show(tester, quick: true);
       await tidy(tester);
-      final stack = tester.getRect(toggle);
-      expect(stack.bottom, block().top - 8);
-      expect(cardRect(tester).bottom, stack.top - 12);
+      // Folded, the stack is 语音, 输入 and the 快捷区 toggle on top.
+      expect(tester.getRect(toggle).bottom, block().top - 8);
+      final top = tester.getRect(find.byKey(const Key('quick-toggle-stack')));
+      expect(cardRect(tester).bottom, top.top - 12);
       s.composer.open = true;
       await tester.pumpAndSettle();
       expect(tester.getRect(toggle).bottom, block().top - 8);

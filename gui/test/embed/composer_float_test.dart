@@ -256,7 +256,7 @@ void main() {
     tearDown(() => rs.dispose());
 
     Future<void> pump(WidgetTester tester,
-        {InputPoint? at, bool grip = true, Widget? handle, double childH = 60, double childW = 0, Widget? inner}) async {
+        {InputPoint? at, bool grip = true, double childH = 60, double childW = 0, Widget? inner}) async {
       tester.view.physicalSize = const Size(800, 600);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
@@ -270,7 +270,6 @@ void main() {
               session: rs,
               at: at,
               grip: grip,
-              handle: handle,
               onPlace: (p) {
                 placed.add(p);
                 cur.value = p;
@@ -321,30 +320,6 @@ void main() {
       expect(tester.getRect(block), const Rect.fromLTWH(40, 532, 720, 60));
     });
 
-    testWidgets('handle sits 8 right of the block, bottoms level', (tester) async {
-      await pump(tester, at: const InputPoint(0.3, 100, fromBottom: true), childW: 0,
-          handle: const SizedBox(key: Key('hd'), width: quickHandleSize, height: quickHandleSize));
-      final b = tester.getRect(block);
-      final h = tester.getRect(find.byKey(const Key('hd')));
-      expect(h.size, const Size.square(quickHandleSize));
-      expect(b.left, 8); // 0.3*800-360 < 8
-      // 800 - 8 - 728 = 64 > 28 + 8: the handle goes right
-      expect(h.left, b.right + 8);
-      expect(h.bottom, tester.getBottomLeft(block).dy);
-    });
-
-    testWidgets('block at the right edge: the handle flips to 8 left of it, inside the stage', (tester) async {
-      tester.view.physicalSize = const Size(800, 600);
-      await pump(tester, at: const InputPoint(1, 100, fromBottom: true),
-          handle: const SizedBox(key: Key('hd'), width: quickHandleSize, height: quickHandleSize));
-      final h = tester.getRect(find.byKey(const Key('hd')));
-      final b = tester.getRect(block);
-      expect(b.right, 792);
-      expect(h.right, b.left - 8);
-      expect(h.left, greaterThanOrEqualTo(0));
-      expect(h.bottom, b.bottom);
-    });
-
     testWidgets('a drag starting inside composerNoDrag does not move the block', (tester) async {
       await pump(tester,
           inner: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -383,16 +358,6 @@ void main() {
       await g.up();
       await tester.pump(kDoubleTapTimeout);
       expect(placed, isEmpty);
-    });
-
-    testWidgets('a tap on the handle reaches the handle', (tester) async {
-      var taps = 0;
-      await pump(tester,
-          handle: GestureDetector(
-              key: const Key('hd'), behavior: HitTestBehavior.opaque, onTap: () => taps++, child: const SizedBox.square(dimension: quickHandleSize)));
-      await tester.tap(find.byKey(const Key('hd')));
-      await tester.pump(kDoubleTapTimeout);
-      expect(taps, 1);
     });
 
     testWidgets('a growing child keeps the bottom centre where it was', (tester) async {

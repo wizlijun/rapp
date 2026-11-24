@@ -18,10 +18,6 @@ const composerMargin = 8.0;
 /// The grip's hit area (spec: at least 48×20).
 const gripSize = Size(48, 20);
 
-/// The side handle's square (the quick area's handle, Task 5): it sits [_handleGap] beside the block.
-const quickHandleSize = 28.0;
-const _handleGap = 8.0;
-
 /// Wrap a subtree in `MetaData(metaData: composerNoDrag)`: neither a drag nor a held touch starts a move there.
 final composerNoDrag = Object();
 
@@ -103,7 +99,6 @@ class FloatingComposer extends StatefulWidget {
       required this.at,
       this.defaultAt = defaultComposerAt,
       this.grip = true,
-      this.handle,
       required this.onPlace,
       required this.child,
       this.scale = 1,
@@ -131,11 +126,6 @@ class FloatingComposer extends StatefulWidget {
 
   /// The grip row above the block (drag handle, double-tap reset). False: the block is only [child].
   final bool grip;
-
-  /// A widget beside the block, bottoms level, 8 off its right edge (its left edge when that would leave the
-  /// stage; 8 above the block, right edges level, when neither side has room, or 8 below it when the block is too
-  /// near the stage's top for that). Never over the block. Not part of [place]'s rect, and outside the drag.
-  final Widget? handle;
 
   final ValueChanged<InputPoint?> onPlace;
   final Widget child;
@@ -294,10 +284,8 @@ class _FloatingComposerState extends State<FloatingComposer> with SingleTickerPr
     );
     return LayoutBuilder(builder: (context, c) {
       _stage = c.biggest;
-      final handle = widget.handle;
       return CustomMultiChildLayout(
-        delegate: _Place(_drag ?? _at.inContent(_stage), panelWidth(_stage.width, widget.scale), widget.keyboard,
-            handle != null),
+        delegate: _Place(_drag ?? _at.inContent(_stage), panelWidth(_stage.width, widget.scale), widget.keyboard),
         children: [
           LayoutId(
             id: _block,
@@ -358,8 +346,6 @@ class _FloatingComposerState extends State<FloatingComposer> with SingleTickerPr
               )),
             ),
           ),
-          if (handle != null)
-            LayoutId(id: _handle, child: Transform.translate(offset: Offset(0, _over), child: handle)),
         ],
       );
     });
@@ -369,15 +355,13 @@ class _FloatingComposerState extends State<FloatingComposer> with SingleTickerPr
 }
 
 const _block = #block;
-const _handle = #handle;
 
 class _Place extends MultiChildLayoutDelegate {
-  _Place(this.bc, this.width, this.keyboard, this.hasHandle);
+  _Place(this.bc, this.width, this.keyboard);
 
   final Offset bc;
   final double width;
   final double keyboard;
-  final bool hasHandle;
 
   @override
   void performLayout(Size size) {
@@ -388,24 +372,9 @@ class _Place extends MultiChildLayoutDelegate {
             minWidth: width, maxWidth: width, maxHeight: math.max(0, size.height - 2 * composerMargin - keyboard)));
     final at = _topLeftOf(bc, size, block, keyboard);
     positionChild(_block, at);
-    if (!hasHandle) return;
-    final h = layoutChild(_handle, const BoxConstraints());
-    var left = at.dx + block.width + _handleGap;
-    var top = at.dy + block.height - h.height;
-    if (left + h.width > size.width - composerMargin) left = at.dx - _handleGap - h.width;
-    if (left < composerMargin) {
-      // No room on either side (a block near the stage's width): above it, right edges level; below it when
-      // the block stands too near the stage's top for that. Never over the block.
-      left = at.dx + block.width - h.width;
-      top = at.dy - _handleGap - h.height;
-      if (top < 0) top = at.dy + block.height + _handleGap;
-    }
-    left = math.max(0, math.min(left, size.width - h.width));
-    top = math.max(0, math.min(top, size.height - h.height));
-    positionChild(_handle, Offset(left, top));
   }
 
   @override
   bool shouldRelayout(_Place old) =>
-      old.bc != bc || old.width != width || old.keyboard != keyboard || old.hasHandle != hasHandle;
+      old.bc != bc || old.width != width || old.keyboard != keyboard;
 }

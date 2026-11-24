@@ -4,9 +4,9 @@ import 'package:rapp/embed/key_bar_keys.dart';
 import 'package:rapp/embed/modifier_latch.dart';
 
 void main() {
-  test('one row of eleven, ⊙ last; more adds the second row', () {
+  test('one row of ten, ⋯ last; more adds the second row', () {
     expect(keyBarRows(app: false, more: false), [
-      ['esc', 'stab', 'tab', 'cc', 'left', 'up', 'down', 'right', 'enter', 'more', 'hide'],
+      ['esc', 'stab', 'tab', 'cc', 'left', 'up', 'down', 'right', 'enter', 'more'],
     ]);
     expect(keyBarRows(app: false, more: true)[1],
         ['ctrl', 'opt', 'cr', 'co', 'ct', 'cb', 'cd', 'bksp', 'copy', 'paste']);
@@ -17,11 +17,8 @@ void main() {
         ['ctrl', 'opt', 'cmd', 'cr', 'co', 'ct', 'cb', 'bksp', 'copy', 'paste']);
   });
 
-  test('hide key: ⊙, spoken 收起快捷区, kind hide', () {
-    final k = barKeys['hide']!;
-    expect(k.label, '⊙');
-    expect(k.spoken, '收起快捷区');
-    expect(k.kind, BarKind.hide);
+  test('no hide key: the toggle is in the box', () {
+    expect(barKeys.containsKey('hide'), isFalse);
     expect(barKeys.containsKey('slim'), isFalse);
   });
 
@@ -66,7 +63,7 @@ void main() {
     expect(barKeys['ctrl']!.bit, latchCtrl);
     expect(barKeys['opt']!.bit, latchOpt);
     expect(barKeys['cmd']!.bit, latchCmd);
-    for (final id in ['ctrl', 'opt', 'cmd', 'copy', 'paste', 'more', 'hide']) {
+    for (final id in ['ctrl', 'opt', 'cmd', 'copy', 'paste', 'more']) {
       final k = barKeys[id]!;
       expect(k.wire, isNull, reason: id);
       expect(k.code, isNull, reason: id);
