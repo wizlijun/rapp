@@ -123,11 +123,12 @@ class _Rule {
 String fixRuleKey(String observed) =>
     _latin.hasMatch(observed) ? String.fromCharCodes(observed.runes.map(_fold)) : observed;
 
-/// Rules bucketed by (folded) first rune, longest first.
+/// Rules bucketed by folded first rune, longest first. Every rule goes by the folded rune, latin or not, since
+/// [_longest] looks up by the text's folded rune; [_Rule.at] still compares a non-latin rule exactly.
 Map<int, List<_Rule>> _buckets(Iterable<_Rule> rules) {
   final m = <int, List<_Rule>>{};
   for (final r in rules) {
-    (m[r.runes.first] ??= []).add(r);
+    (m[_fold(r.runes.first)] ??= []).add(r);
   }
   for (final b in m.values) {
     b.sort((a, b) => b.runes.length - a.runes.length);
