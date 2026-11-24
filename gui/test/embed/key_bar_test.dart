@@ -577,6 +577,8 @@ void main() {
         expect(phraseStripShown(s, tsess), isTrue);
         s.prefs.keyBarSlim = true;
         expect(phraseStripShown(s, tsess), isTrue);
+        debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+        expect(phraseStripShown(s, tsess), isTrue);
         debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
         expect(phraseStripShown(s, tsess), isFalse);
       } finally {
@@ -633,14 +635,18 @@ void main() {
   });
 
   group('desktop: a hardware key cuts the bar to ⊙', () {
-    void deskTest(String name, Future<void> Function(WidgetTester) body) => testWidgets(name, (tester) async {
-          debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    void deskTest(String name, Future<void> Function(WidgetTester) body, {bool macOnly = false}) {
+      for (final platform in [TargetPlatform.macOS, if (!macOnly) TargetPlatform.linux]) {
+        testWidgets('${platform.name}: $name', (tester) async {
+          debugDefaultTargetPlatformOverride = platform;
           try {
             await body(tester);
           } finally {
             debugDefaultTargetPlatformOverride = null;
           }
         });
+      }
+    }
 
     deskTest('a letter key collapses the bar to ⊙; ⊙ expands; ⌘ alone and ⌘-held keys do not', (tester) async {
       await tester.pumpWidget(bar(tsess));
@@ -700,7 +706,7 @@ void main() {
       port.emit(const KeyTypedEvent(1));
       await tester.pump();
       expect(s.prefs.keyBarSlim, isTrue);
-    });
+    }, macOnly: true);
 
     testWidgets('Linux: Ctrl-held keys (the app shortcuts) do not fold', (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.linux;

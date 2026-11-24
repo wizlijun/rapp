@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'session_port.dart';
+import 'modifier_latch.dart';
 import 'voice_key_gate.dart';
 import 'linux_transfer.dart';
 import 'linux_clipboard.dart';
@@ -296,6 +297,8 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         s.send({'cmd': 'key', 'keyCode': code, 'modifiers': 0, 'down': false});
       }
       s.held.clear();
+      s.latched = 0;
+      s.strokeLatch.clear();
     }
     if (clear) _focused = null;
   }
@@ -341,6 +344,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     // Never in a password field on A (v13 secure_focus): the keys go straight there.
     if (_compose &&
         !s.secure &&
+        s.latched & (latchCtrl | latchOpt | latchCmd) == 0 &&
         event is KeyDownEvent &&
         !keyboard.isControlPressed &&
         !keyboard.isAltPressed &&
@@ -354,16 +358,26 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     final code = linuxMacKeyCode(event.physicalKey);
     if (code == null) return false;
     final down = event is! KeyUpEvent;
+    // A once latch belongs to the entire hardware stroke (repeat and release included).
+    // Physical modifiers alone never consume it. AppKeySender rearms locked bits on latch_used.
+    final useLatch = event is KeyDownEvent && !(code >= 54 && code <= 63) && s.latched != 0;
+    if (event is KeyDownEvent) s.strokeLatch[code] = s.latched;
+    final latched = s.strokeLatch[code] ?? s.latched;
     if (down) {
       s.held.add(code);
     } else {
       s.held.remove(code);
+      s.strokeLatch.remove(code);
     }
     final mods =
         (keyboard.isShiftPressed ? 1 << 17 : 0) |
         (keyboard.isControlPressed ? 1 << 20 : 0) |
-        (keyboard.isAltPressed ? 1 << 19 : 0);
+        (keyboard.isAltPressed ? 1 << 19 : 0) | latched;
     s.send({'cmd': 'key', 'keyCode': code, 'modifiers': mods, 'down': down});
+    if (useLatch) {
+      s.latched = 0;
+      _emit(LatchUsedEvent(sid));
+    }
     return true;
   }
 
@@ -646,6 +660,11 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         if (sid == _focused) _voiceFeed(VoiceGateInput.scroll);
         s.send({'cmd': method, ...args});
       case 'key':
+      case 'key_event':
+        // The worker's key command uses an optional down flag for a single edge.
+        s.send({...args, 'cmd': 'key'});
+      case 'latch':
+        s.latched = (args['modifiers'] as int) & (latchCmd | latchOpt | latchCtrl | latchShift);
       case 'resize':
       case 'menu_pick':
       case 'close_window':
@@ -980,6 +999,8 @@ class _Session {
   final _fetched = <int, LinuxCopy>{};
   int _nextItem = 1;
   final held = <int>{};
+  int latched = 0;
+  final strokeLatch = <int, int>{};
   int? selected;
   bool closed = false;
   bool disconnected = false;

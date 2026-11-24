@@ -622,7 +622,7 @@ abstract class SessionPort {
   void keyEvent(Object sid, int keyCode, int modifiers, {required bool down}) =>
       _send('key_event', {'sid': sid, 'keyCode': keyCode, 'modifiers': modifiers, 'down': down});
 
-  /// The modifiers the hardware keyboard's next key carries (the key row's latch; iOS, a no-op on macOS).
+  /// The modifiers the hardware keyboard's next key carries (iOS/Linux; a no-op on macOS).
   void latch(Object sid, int modifiers) => _send('latch', {'sid': sid, 'modifiers': modifiers});
 
   /// The session whose picture has keyboard focus; null for none.

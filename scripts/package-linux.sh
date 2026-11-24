@@ -56,11 +56,11 @@ info={'source_commit':commit,'source_url':f'https://github.com/wizlijun/rapp/tre
       'rust':subprocess.check_output(['rustc','--version'],text=True).strip(),
       'runtime_packages':subprocess.check_output(['pacman','-Q','glibc','gtk3','gtk4','at-spi2-core','libxkbcommon','libayatana-appindicator'],text=True).splitlines()}
 (stage/'BUILD-INFO.json').write_text(json.dumps(info,ensure_ascii=False,indent=2)+'\n')
-(stage/'README-LINUX.txt').write_text('''rapp for Omarchy / Arch Linux x86_64 (SSE4.2 CPU required for local speech)
+(stage/'README-LINUX.txt').write_text('''rApp for Omarchy / Arch Linux x86_64 (SSE4.2 CPU required for local speech)
 
 Recommended installation: download the matching .pkg.tar.zst release asset, then:
   sudo pacman -U ./rapp-omarchy-*.pkg.tar.zst
-Open rapp from the application launcher or run `rapp`.
+Open rApp from the application launcher or run `rapp`.
 Remove the installed package with `sudo pacman -R rapp-omarchy`.
 
 Portable bundle:
@@ -120,7 +120,7 @@ Use Local / 本机 for the actual port and read-only UFW diagnostics; an empty l
 does not prove that the network or firewall allows the connection.
 Local configuration and saved hosts are not included.
 The package does not automatically start a background service at installation.
-In rapp, open Local / 本机 and click Start / 启动 to install and enable the user
+In rApp, open Local / 本机 and click Start / 启动 to install and enable the user
 systemd service. The service records text changes with git (install git to use it).
 Start/restart also refreshes the executable path after moving a portable bundle.
 Stop stops the current process; to turn off login startup, run:

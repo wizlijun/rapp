@@ -360,13 +360,13 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
     }));
     let window = gtk::ApplicationWindow::builder()
         .application(app)
-        .title("rapp-client · 远程窗口")
+        .title("rApp · 远程窗口")
         .default_width(1000)
         .default_height(720)
         .build();
     let root = gtk::Box::new(gtk::Orientation::Vertical, 6);
     let header = gtk::HeaderBar::new();
-    let title = gtk::Label::new(Some("rapp-client"));
+    let title = gtk::Label::new(Some("rApp"));
     title.set_ellipsize(gtk::pango::EllipsizeMode::End);
     header.set_title_widget(Some(&title));
     let rate = gtk::MenuButton::builder()
@@ -433,7 +433,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
     });
     rate.add_controller(right);
     let local_menu = gio::Menu::new();
-    local_menu.append_submenu(Some("rapp-client"), &controls.app_menu);
+    local_menu.append_submenu(Some("rApp"), &controls.app_menu);
     menu_bar.set_menu_model(Some(&local_menu));
     let entry = Editor::new();
     root.append(&entry.chips());
@@ -644,7 +644,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                     return glib::ControlFlow::Break;
                 }
                 Event::Message(Incoming::Ready(name, w, h)) => {
-                    window.set_title(Some(&format!("{name} · rapp-client")));
+                    window.set_title(Some(&format!("{name} · rApp")));
                     title.set_text(&name);
                     info.set_visible(false);
                     rate.set_visible(true);
@@ -688,7 +688,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                 Event::Message(Incoming::Menus(items)) => {
                     let (model, group) = menus(&items, &state);
                     window.insert_action_group("remote", Some(&group));
-                    model.prepend_submenu(Some("rapp-client"), &controls.app_menu);
+                    model.prepend_submenu(Some("rApp"), &controls.app_menu);
                     menu_bar.set_menu_model(Some(&model));
                 }
                 Event::Message(Incoming::Clipboard {

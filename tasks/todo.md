@@ -899,3 +899,11 @@ macOS / Linux 改用 iOS 的 `KeyBar` 和常用语条，贴在画面底部；按
 - [x] 722 项 Flutter、4 项 Rust 单元测试、Clippy、真实模型 8 项检查通过；analyze 无 error/warning。
 - [x] 源码 `0b5672d0` 构建 Arch/便携包，内容、依赖、SHA256 及隔离运行校验通过；产物在 `dist/`。
 - [x] 本机已安装 0.15.16-1，40 个文件与包一致，pacman 检查 0 改动；后台服务已重启且运行二进制摘要一致。当前 GUI 退出重开后使用新版。详见 `docs/superpowers/plans/2026-11-24-linux-01516-parity.md`。
+
+## Linux PC 按键区与名称对齐（2026-11-24）
+
+- [x] 补通 Linux `key_event` 和 `latch`，覆盖实体按键的单次/锁定修饰键、重复与释放、失焦清理及写作框路由。
+- [x] Linux 共用 PC 按键区、常用语条和自动收起规则；补充与 macOS 同组的布局及键盘回归。
+- [x] GTK 独立客户端可见名称与包内说明统一为 rApp；核对新图标已进入 Linux 打包路径。
+- [x] 299 项不同 Flutter 用例、10 项 Rust 会话测试通过；GTK 编译检查、Linux release GUI 构建、构建路径回归和 diff 检查通过。
+- [ ] 实机确认触屏按住/上滑、实体快捷键及安装后的新图标。本轮仅修改代码与构建验证，尚未打包安装。详见 `docs/superpowers/plans/2026-11-24-linux-pc-controls-parity.md`。
