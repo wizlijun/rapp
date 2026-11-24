@@ -72,16 +72,23 @@ void main() {
     });
   });
 
-  test('an open panel takes voice away', () {
-    env(TargetPlatform.macOS, (a, port, st) {
-      port.emit(WindowsEvent(1, [rw(7)]));
-      st.focusPicture(1);
-      expect(lastFocus(port)['voice'], true);
-      st.currentRemote!.composer.open = true;
-      expect(st.pictureFocused, 1);
-      expect(lastFocus(port).containsKey('voice'), false);
+  // Final review: with the text area open the hotkey holds as the mouse does (and as on iOS); the panel's editor
+  // taking the keys blurs the picture, which is what keeps the gate away from them.
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.linux]) {
+    test('${platform.name}: an open text area leaves the picture its voice', () {
+      env(platform, (a, port, st) {
+        port.emit(WindowsEvent(1, [rw(7)]));
+        st.focusPicture(1);
+        expect(lastFocus(port)['voice'], true);
+        st.currentRemote!.composer.open = true;
+        expect(st.pictureFocused, 1);
+        expect(lastFocus(port)['voice'], true);
+        st.blurPicture(); // the editor takes the keys
+        st.focusPicture(1); // a click back on the picture, the text area still open
+        expect(lastFocus(port)['voice'], true);
+      });
     });
-  });
+  }
 
   test('linux enables local speech and sends the voice flag', () {
     env(TargetPlatform.linux, (a, port, st) {

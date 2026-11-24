@@ -2,7 +2,7 @@
 // Pure data and layout: the widget draws what keyBarRows says and sends what barKeys says.
 import 'modifier_latch.dart';
 
-enum BarKind { send, mod, copy, paste, more, slim }
+enum BarKind { send, mod, copy, paste, more, hide }
 
 /// One key. [wire] is the terminal wire name; [code] and [mods] the macOS key code and modifier bits for app sessions;
 /// [bit] the latch bit of a mod key; [alt] the id of the swipe-up key.
@@ -21,11 +21,7 @@ typedef BarKey = ({
 
 const keyBarKeyHeight = 42.0;
 const keyBarGap = 4.0;
-const keyBarGroupGap = 12.0;
 const keyBarPad = 6.0;
-
-/// From this width on the bar is one grouped row; below it, the rows are the narrow ones.
-const keyBarOneRowAt = 860.0;
 
 double keyBarHeight(int rows) => rows * keyBarKeyHeight + (rows - 1) * keyBarGap + 2 * keyBarPad;
 
@@ -58,37 +54,12 @@ const barKeys = <String, BarKey>{
   'copy': (id: 'copy', label: '复制', spoken: '复制', kind: BarKind.copy, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
   'paste': (id: 'paste', label: '粘贴', spoken: '粘贴', kind: BarKind.paste, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
   'more': (id: 'more', label: '⋯', spoken: '更多按键', kind: BarKind.more, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
-  'slim': (id: 'slim', label: '⊙', spoken: '收成窄条', kind: BarKind.slim, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
+  'hide': (id: 'hide', label: '⊙', spoken: '收起快捷区', kind: BarKind.hide, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
 };
 
-/// The rows of the bar, each a list of key ids; null marks a group gap. Slim keeps only Esc, ⇧Tab and ⊙.
-/// Wide (from [keyBarOneRowAt]) is one grouped row with no ⋯. Narrow is one row of ten, and [more] adds the second row.
-/// ⊙ ends the first row when [hardware] or [slim] is set.
-List<List<String?>> keyBarRows({
-  required double width,
-  required bool app,
-  required bool more,
-  required bool slim,
-  required bool hardware,
-}) {
-  if (slim) {
-    return [
-      ['esc', 'stab', 'slim'],
-    ];
-  }
-  if (width >= keyBarOneRowAt) {
-    return [
-      [
-        'esc', 'stab', 'tab', null, 'ctrl', 'opt', if (app) 'cmd', null,
-        'cc', 'cd', 'cr', 'co', 'ct', 'cb', null,
-        'home', 'end', 'pgup', 'pgdn', null,
-        'bksp', 'copy', 'paste', null,
-        'left', 'up', 'down', 'right', 'enter',
-        if (hardware) ...[null, 'slim'],
-      ],
-    ];
-  }
-  final first = ['esc', 'stab', 'tab', 'cc', 'left', 'up', 'down', 'right', 'enter', 'more', if (hardware) 'slim'];
+/// The rows of the bar, each a list of key ids: one row of eleven, ⊙ last, and [more] adds the second row.
+List<List<String>> keyBarRows({required bool app, required bool more}) {
+  const first = ['esc', 'stab', 'tab', 'cc', 'left', 'up', 'down', 'right', 'enter', 'more', 'hide'];
   if (!more) return [first];
   return [
     first,

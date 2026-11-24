@@ -1,6 +1,7 @@
 // One embedded session as the GUI sees it: the state the runner's events build up.
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart' show Offset, Rect;
+import 'package:flutter/services.dart' show KeyEvent;
 
 import '../platform_caps.dart';
 import 'app_profile.dart';
@@ -52,6 +53,11 @@ class RemoteSession extends ChangeNotifier {
   /// A terminal stage's copy of its selection to the clipboard, while one is mounted for this session (the key
   /// bar's 复制 calls it).
   VoidCallback? termCopy;
+
+  /// Whether a terminal stage mounted for this session has the keyboard (its own Focus: a terminal never sets
+  /// [MainState.pictureFocused]) and this key down is the terminal's, not a voice hotkey hold's; null while none
+  /// is mounted. The key bar's 打字后自动收起 asks it before the stage sees the key.
+  bool Function(KeyEvent e)? termTakesKey;
 
   /// A terminal's key bar modifiers (⌃ ⌥, sticky); the app's live in [MainState.appLatch].
   final keyLatch = ModifierLatch();

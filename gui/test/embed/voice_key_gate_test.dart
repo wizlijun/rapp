@@ -138,4 +138,30 @@ void main() {
     expect(macKeyCode(PhysicalKeyboardKey.escape), 53);
     expect(macKeyCode(PhysicalKeyboardKey.fn), 63);
   });
+  // Dart only (the key bar asks before the gate sees the key); the case table pins handle.
+  test('keeps: the hotkey\'s own down and every key of a hold, and nothing is changed by asking', () {
+    const opt = 1 << 19;
+    final g = VoiceKeyGate();
+    expect(g.keeps(0, 0, ready: true), isFalse, reason: 'a letter while idle is A\'s');
+    expect(g.keeps(61, opt, ready: false), isFalse, reason: 'not ready: right ⌥ goes to A');
+    expect(g.keeps(61, opt, ready: true), isTrue);
+    expect(g.keeps(61, opt, repeat: true, ready: true), isFalse);
+    g.handle(const VoiceGateInput.down(61, opt), ms: 0, ready: true); // pending
+    expect(g.keeps(61, opt, repeat: true, ready: true), isTrue);
+    expect(g.keeps(0, opt, ready: true), isFalse, reason: '⌥ was a modifier for A');
+    expect(g.handle(VoiceGateInput.elapsed, ms: 400, ready: true).voice, VoiceKeyPhase.start, reason: 'asking left it pending');
+    for (final code in [53, 48, 0]) {
+      expect(g.keeps(code, opt, ready: true), isTrue, reason: 'recording: $code');
+    }
+    g.handle(const VoiceGateInput.down(53, opt), ms: 500, ready: true); // decided
+    expect(g.keeps(0, opt, ready: true), isTrue, reason: 'decided until the hotkey\'s up');
+    g.handle(const VoiceGateInput.up(53), ms: 510, ready: true);
+    g.handle(const VoiceGateInput.up(61), ms: 520, ready: true);
+    expect(g.keeps(0, 0, ready: true), isFalse);
+
+    final c = VoiceKeyGate()..setHotkey(const VoiceHotkey.holdCombo(49, opt));
+    expect(c.keeps(49, opt, ready: true), isTrue, reason: '⌥Space starts the hold');
+    expect(c.keeps(49, 0, ready: true), isFalse, reason: 'Space alone is typing');
+    expect(c.keeps(49, opt | (1 << 17), ready: true), isFalse, reason: '⇧⌥Space is not the hotkey');
+  });
 }

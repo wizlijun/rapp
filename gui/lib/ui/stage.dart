@@ -6,10 +6,7 @@ import 'package:flutter/rendering.dart';
 
 import '../embed/composer_editor.dart';
 import '../embed/composer_panel.dart';
-import '../embed/ios_dock.dart';
-import '../embed/key_bar.dart';
 import '../embed/picture.dart';
-import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../term/term_stage.dart';
 import 'controls.dart';
@@ -205,14 +202,11 @@ class Stage extends StatelessWidget {
           );
           if (term && rs != null) {
             // The same tree whether the panel is open or not: the terminal stage is never remounted (its focus
-            // would fight the panel's caret), and the lift never changes the size it lays out at (Z2). Nor does the
-            // key bar: it floats over the picture too.
+            // would fight the panel's caret), and never moves (input-dock spec): the input dock floats over it.
             final bar = rec != null && rec.frozen ? offlineBarFor(state, rec) : null;
             return Stack(
               children: [
-                Positioned.fill(
-                  child: _lifted(state, rs, stage, bar: () => keyBarHeightOf(state, rs, c.maxWidth)),
-                ),
+                Positioned.fill(child: stage),
                 if (bar != null) Positioned(top: 0, left: 0, right: 0, child: bar),
                 ...composerLayer(state: state, session: rs, port: state.portOf(rs.sid)!,
                     keyboard: keyboard, editor: composerEditor),
@@ -224,10 +218,6 @@ class Stage extends StatelessWidget {
           final notice = state.hostNotice;
           final offline = rec != null && rec.frozen && picture ? offlineBarFor(state, rec) : null;
           final layer = !full && (picture || (rs != null && rs.detached)) && rs != null && port != null;
-          // A terminal app keeps the key bar with the panel closed, so its picture goes up by the bar height (never the open lift).
-          if (layer && keyBarWhenClosed(rs, port)) {
-            stage = _lifted(state, rs, stage, bar: () => keyBarHeightOf(state, rs, c.maxWidth), appBar: true);
-          }
           return Stack(
             children: [
               stage,
@@ -303,31 +293,6 @@ class _HostNoticeBar extends StatelessWidget {
     );
   }
 }
-
-/// A terminal only (an app window's panel floats instead): while the writing panel is open the picture slides up one line (the size A sees stays as it was), in 150 ms
-/// (at once without animations); Transform moves hit tests with it, so a click lands where the picture is seen.
-/// The key bar ([bar]: its height now, there panel open or not) lifts it by its height too; an app that keeps the
-/// bar goes up by the bar only ([appBar]: its panel floats over the picture).
-Widget _lifted(MainState state, RemoteSession session, Widget child,
-        {required double Function() bar, bool appBar = false}) =>
-    ClipRect(
-      child: ListenableBuilder(
-        // The state too: ⊙ and ⋯ change the bar's height.
-        listenable: Listenable.merge([session, session.composer, state.composerZoom, state]),
-        builder: (context, _) => TweenAnimationBuilder<double>(
-          tween: Tween(
-              end: _lift(session.composer.open && session.composerAllowed && !appBar, state.composerScale, bar())),
-          duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 150),
-          curve: Curves.easeOut,
-          builder: (_, v, child) => Transform.translate(offset: Offset(0, -v), child: child),
-          child: child,
-        ),
-      ),
-    );
-
-/// The open panel's line grows with its zoom ([scale]).
-double _lift(bool open, double scale, double bar) => (open ? pictureLift * scale : 0) + bar;
-
 
 /// Paints [child] moved by under a device pixel, so its top-left lands on one: whatever it snaps in
 /// its own coordinates is then snapped on the screen too, wherever the layout put it.

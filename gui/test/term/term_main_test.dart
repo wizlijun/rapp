@@ -374,7 +374,7 @@ void main() {
     expect(find.byType(KeyBar), findsOneWidget);
   }, variant: TargetPlatformVariant({TargetPlatform.iOS, TargetPlatform.macOS}));
 
-  testWidgets('a frozen key bar and the panel keys grid send no keys', (tester) async {
+  testWidgets('a frozen key bar sends no keys', (tester) async {
     await tester.pumpWidget(wrap(window()));
     await openTerm(tester, two);
     await tester.tap(find.byKey(const Key('composer-open')));
@@ -385,10 +385,6 @@ void main() {
     await tester.tap(find.byKey(const Key('bar-cc')));
     await tester.tap(find.byKey(const Key('bar-enter')));
     await tester.pump();
-    await tester.tap(find.byKey(const Key('composer-plus')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('回车'));
-    await tester.tap(find.descendant(of: find.byKey(const Key('composer-plus-menu')), matching: find.text('⌃C')));
     await tester.pump();
     expect(term.calls.where((c) => {'keys', 'type', 'paste'}.contains(c.$1)), isEmpty);
   });
@@ -444,7 +440,7 @@ void main() {
     await drop(tester);
     await tester.tap(find.byKey(const Key('composer-open')));
     await tester.pump();
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400)); // the text area grows in
     await tester.tap(find.byKey(const Key('composer-field')));
     await tester.pump();
     FocusNode? primary() => FocusManager.instance.primaryFocus;

@@ -1,13 +1,15 @@
-// The 「＋」 button of the writing panel and the menu above it (spec W9, W13): 附件…, 在远端复制,
-// the keys that go straight to A, 收起. The ⌘ and ⌥ stick for one key; a key does not close the menu.
-// A terminal's menu: 附件… greyed, no 在远端复制, and 15 keys by their terminal names (no sticky keys).
+// The 「＋」 button of the writing panel and the menu above it (spec W13, input dock §5.3): 附件…, 在远端复制,
+// 输入历史, 直接回车且隐藏, 大小, the 快捷区 settings, 收起. The same on every platform.
+// A terminal's menu: 附件… greyed, no 在远端复制.
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../history/history_list.dart';
 import '../history/input_history.dart';
-import '../term/term_session_port.dart';
+import '../pages/phrases_page.dart';
+import '../term/term_session_port.dart' show termNoAttach;
 import '../ui/controls.dart';
+import '../ui/main_state.dart';
 import '../ui/prefs.dart' show composerZoomMax, composerZoomScales;
 import '../ui/tokens.dart';
 import 'app_profile.dart';
@@ -17,39 +19,6 @@ import 'session_port.dart';
 /// macOS modifier bits, as the runner's `key` takes them.
 const commandBit = 1048576;
 const optionBit = 524288;
-
-/// The keys grid (W9 order): label, key code, and the modifier bit for the sticky ones.
-const composerKeys = <(String, int, int?)>[
-  ('Esc', 53, null),
-  ('Tab', 48, null),
-  ('⌘', 0, commandBit),
-  ('⌥', 0, optionBit),
-  ('删除', 51, null),
-  ('←', 123, null),
-  ('↓', 125, null),
-  ('↑', 126, null),
-  ('→', 124, null),
-  ('回车', 36, null),
-];
-
-/// A terminal's keys grid: label, and the key name the pane gets (删除 is Backspace).
-const termComposerKeys = <(String, String)>[
-  ('Esc', 'Esc'),
-  ('Tab', 'Tab'),
-  ('⇧Tab', 'Shift-Tab'),
-  ('删除', 'Backspace'),
-  ('回车', 'Enter'),
-  ('←', 'Left'),
-  ('↓', 'Down'),
-  ('↑', 'Up'),
-  ('→', 'Right'),
-  ('⌃C', 'Ctrl-C'),
-  ('⌃D', 'Ctrl-D'),
-  ('⌃L', 'Ctrl-L'),
-  ('⌃R', 'Ctrl-R'),
-  ('PgUp', 'PageUp'),
-  ('PgDn', 'PageDown'),
-];
 
 /// 放进输入框: the writing panel opens, the text goes in at the caret and the field takes focus.
 void putIntoComposer(RemoteSession s, String text) {
@@ -62,6 +31,7 @@ void putIntoComposer(RemoteSession s, String text) {
 class ComposerPlus extends StatefulWidget {
   const ComposerPlus(
       {super.key,
+      required this.state,
       required this.session,
       required this.port,
       required this.onAttach,
@@ -82,6 +52,9 @@ class ComposerPlus extends StatefulWidget {
   /// The zoom step (0 is the default) and its setter, for the menu's slider; no slider without them.
   final int? zoom;
   final ValueChanged<int>? onZoom;
+
+  /// The quick-area prefs the menu's 快捷区 group flips.
+  final MainState state;
 
   final RemoteSession session;
   final SessionPort port;
@@ -117,24 +90,50 @@ class _ComposerPlusState extends State<ComposerPlus> {
   final _portal = OverlayPortalController();
   final _link = LayerLink();
   final _group = Object();
-  int _sticky = 0;
 
-  /// The menu goes, and an armed ⌘ or ⌥ with it.
-  void _close() {
-    _portal.hide();
-    if (_sticky != 0) setState(() => _sticky = 0);
+  void _close() => _portal.hide();
+
+  // The panel stays while its text area folds away; the menu goes the moment it closes.
+  @override
+  void initState() {
+    super.initState();
+    widget.session.composer.addListener(_composerChanged);
+  }
+
+  @override
+  void didUpdateWidget(ComposerPlus oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.session.composer, widget.session.composer)) return;
+    oldWidget.session.composer.removeListener(_composerChanged);
+    widget.session.composer.addListener(_composerChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.session.composer.removeListener(_composerChanged);
+    super.dispose();
+  }
+
+  void _composerChanged() {
+    if (!widget.session.composer.open && _portal.isShowing) _close();
   }
 
   /// The menu opens below 「＋」 when the button sits in the upper half of the overlay (a panel moved up
   /// there, floating-composer spec), else above it. Decided once, at open.
   bool _down = false;
 
+  /// The card's tallest height: the room on the side it opens into, less the 8 gap and an 8 margin. Taller content scrolls.
+  double _maxHeight = double.infinity;
+
   void _toggle() {
     if (_portal.isShowing) return _close();
     final box = context.findRenderObject();
     final overlay = Overlay.maybeOf(context)?.context.findRenderObject();
     if (box is RenderBox && overlay is RenderBox && box.hasSize) {
-      _down = box.localToGlobal(Offset.zero, ancestor: overlay).dy < overlay.size.height / 2;
+      final top = box.localToGlobal(Offset.zero, ancestor: overlay).dy;
+      _down = top < overlay.size.height / 2;
+      final room = _down ? overlay.size.height - (top + box.size.height) : top;
+      _maxHeight = (room - 16).clamp(0.0, double.infinity);
     }
     _portal.show();
   }
@@ -164,11 +163,6 @@ class _ComposerPlusState extends State<ComposerPlus> {
         ),
       ),
     );
-  }
-
-  void _key(int code) {
-    widget.port.key(widget.session.sid, code, _sticky);
-    setState(() => _sticky = 0);
   }
 
   void _copy() {
@@ -248,60 +242,56 @@ class _ComposerPlusState extends State<ComposerPlus> {
         ),
       );
 
-  Widget _keyCell(BuildContext context, RappTokens t, (String, int, int?) k) {
-    final (label, code, bit) = k;
-    return _cell(context, t, label, bit,
-        bit != null ? () => setState(() => _sticky ^= bit) : widget.blocked ? null : () => _key(code));
-  }
-
-  Widget _termKeyCell(BuildContext context, RappTokens t, (String, String) k) {
-    final (label, name) = k;
-    return _cell(context, t, label, null,
-        widget.blocked ? null : () => (widget.port as TermSessionPort).sendKeys(widget.session.sid, [name]));
-  }
-
-  /// A key; [bit] for a sticky one.
-  Widget _cell(BuildContext context, RappTokens t, String label, int? bit, VoidCallback? onTap) {
-    final on = bit != null && _sticky & bit != 0;
-    return Semantics(
-      button: true,
-      selected: bit == null ? null : on,
-      label: label,
-      excludeSemantics: true,
-      child: InkWell(
-        key: bit == null ? null : ValueKey('sticky-$label'),
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(t.r),
-        child: Container(
-          height: controlHeightOf(context),
-          alignment: Alignment.center,
-          decoration: t.raiseBox().copyWith(border: on ? Border.all(color: t.accent, width: 2) : Border.all(color: t.line)),
-          child: Text(label, style: TextStyle(fontSize: 13, color: onTap == null ? t.muted : t.text)),
-        ),
-      ),
-    );
-  }
+  /// The 快捷区 group: three switches (the menu stays open) and the phrases page.
+  Widget _quickGroup(RappTokens t) => ListenableBuilder(
+    listenable: widget.state,
+    builder: (context, _) {
+      final st = widget.state;
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text('快捷区', key: const Key('composer-plus-quick'), style: TextStyle(color: t.muted)),
+          ),
+          RappSwitchRow(
+              key: const Key('quick-auto-hide'),
+              label: '打字后自动收起',
+              value: st.quickAutoHide,
+              onChanged: st.setQuickAutoHide),
+          RappSwitchRow(
+              key: const Key('quick-phrase-strip'),
+              label: '显示常用语条',
+              value: st.prefs.phraseStrip,
+              onChanged: st.setPhraseStrip),
+          RappSwitchRow(
+              key: const Key('quick-more'), label: '更多按键', value: st.prefs.keyBarMore, onChanged: st.setKeyBarMore),
+          InkWell(
+            key: const Key('quick-edit-phrases'),
+            onTap: () {
+              _close();
+              openPhrasesPage(this.context, st);
+            },
+            borderRadius: BorderRadius.circular(t.r),
+            child: SizedBox(
+              height: 48,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Align(alignment: Alignment.centerLeft, child: Text('编辑常用语…', style: TextStyle(color: t.text))),
+              ),
+            ),
+          ),
+        ],
+      );
+    },
+  );
 
   Widget _menu(BuildContext context) {
     final t = RappTokens.of(context);
     final mac = defaultTargetPlatform == TargetPlatform.macOS;
-    final ios = defaultTargetPlatform == TargetPlatform.iOS;
     const rowGap = SizedBox(height: 6);
     final term = widget.terminal;
-    final cells = term
-        ? [for (final k in termComposerKeys) _termKeyCell(context, t, k)]
-        : [for (final k in composerKeys) _keyCell(context, t, k)];
-    final rows = <Widget>[
-      for (var i = 0; i < cells.length; i += 5)
-        Row(
-          children: [
-            for (var j = i; j < i + 5; j++) ...[
-              if (j > i) const SizedBox(width: 6),
-              Expanded(child: cells[j]),
-            ],
-          ],
-        ),
-    ];
     // The overlay gives tight constraints; the Align lets the follower be the menu's size.
     final menu = Align(
       alignment: Alignment.topLeft,
@@ -321,7 +311,9 @@ class _ComposerPlusState extends State<ComposerPlus> {
                 width: 300,
                 decoration: t.floatBox(),
                 padding: const EdgeInsets.all(8),
-                child: Column(
+                constraints: BoxConstraints(maxHeight: _maxHeight),
+                child: SingleChildScrollView(
+                  child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -337,15 +329,8 @@ class _ComposerPlusState extends State<ComposerPlus> {
                     if (widget.history != null) ...[_row(t, '输入历史', null, _openHistory), rowGap],
                     if (widget.onReturnAfter != null) ...[_returnAfter(t), rowGap],
                     if (widget.zoom != null && widget.onZoom != null) ...[_zoomRow(t), rowGap],
-                    // iOS has the key bar instead of the grid.
-                    if (!ios) ...[
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: Text('按键 · 直接发给远端', style: TextStyle(color: t.muted)),
-                      ),
-                      rowGap,
-                      for (final r in rows) ...[r, rowGap],
-                    ],
+                    _quickGroup(t),
+                    rowGap,
                     // On the right, next to ＋, so collapsing is a short move; Esc in the editor does the same.
                     InkWell(
                       key: const Key('composer-plus-collapse'),
@@ -370,6 +355,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
                       ),
                     ),
                   ],
+                ),
                 ),
               ),
             ),

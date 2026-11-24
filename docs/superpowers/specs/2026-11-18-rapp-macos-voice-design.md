@@ -94,7 +94,7 @@ iOS 上已经有按住说话了（`2026-11-18-rapp-voice-input-design.md`，下�
 ```
 
 - 在现有那排横向按钮（`composer_panel.dart` 里非 iOS 的那支）**最右边**加一个 `RappButton.secondary`：图标 `Icons.mic_none`（录音中是 `Icons.mic`），文字「按住说话」，`onPicture: true`，Key 为 `voice-hold`，读屏标签「语音」。大小和「输入」一样，不用 iOS 的大圆按钮。
-- 只在 macOS 上出现，出现条件和「输入」一样（`session.composerAllowed`，输入板没开），也只在 `state.voice` 不为空时出现。
+- 只在 macOS 上出现，出现条件和「输入」一样（`session.composerAllowed`，输入板没开（2026-11-24 输入块起，文本区开着也算，见 2026-11-24-rapp-input-dock-design.md §5.6），也只在 `state.voice` 不为空时出现。
 - 鼠标左键一按下就开始（和 iOS 一样不等），不需要长按阈值。
 - 录音时，这排里的其它按钮和进度行淡出（120 ms），「按住说话」留在原位、显示为按下的样子。
 
@@ -145,7 +145,7 @@ iOS 上已经有按住说话了（`2026-11-18-rapp-voice-input-design.md`，下�
 
 ### 6.1 默认：长按右 Option
 
-- 判断放在 `SessionPlugin.route` 的 `.main` 分支，在「打字就打开输入板」（`composeStart`）之前。只有这次按键本来就要发给 A 时（`targetSid` 不为空，即舞台上的画面有焦点）才算，并且要求这个会话 `composerAllowed`、输入板没开、Dart 侧说「能说话」。Dart 用一个通道方法把这些条件告诉原生，例如 `set_voice_ready {sid, ready}`。条件不满足时，右 Option 和现在完全一样。
+- 判断放在 `SessionPlugin.route` 的 `.main` 分支，在「打字就打开输入板」（`composeStart`）之前。只有这次按键本来就要发给 A 时（`targetSid` 不为空，即舞台上的画面有焦点）才算，并且要求这个会话 `composerAllowed`、输入板没开（2026-11-24 输入块起，文本区开着也算，见 2026-11-24-rapp-input-dock-design.md §5.6）、Dart 侧说「能说话」。Dart 用一个通道方法把这些条件告诉原生，例如 `set_voice_ready {sid, ready}`。条件不满足时，右 Option 和现在完全一样。
 - 右 Option（keyCode 61）按下，而且此刻**没有别的键按着**时，先扣住，不发给 A：
   - **0.3 秒内松开**：把按下和松开一起补发给 A，等于轻点了一下，和现在一样。
   - **0.3 秒内按了别的键**（包括另一个修饰键）：先把扣住的右 Option 按下补发给 A，再按原来的路线发那个键。之后就当普通的组合键处理，这次不会再触发语音。
@@ -185,7 +185,7 @@ iOS 上已经有按住说话了（`2026-11-18-rapp-voice-input-design.md`，下�
 - 鼠标按钮：终端舞台右下角那排按钮里同样有「按住说话」，行为和 §5 完全一样，发送走同一个 `sendVoice`。
 - 快捷键：终端的按键由 Flutter 舞台自己处理，不经过 `SessionPlugin.route`，所以在 Dart 侧另写一个纯 Dart 的判断类，放在终端按键路径（`term_keys` / `term_stage`）的最前面。规则和 §6.1、§6.2 一字不差：0.3 秒阈值、轻点补发、别的键或鼠标按下就补发、录音期间 Esc/Tab/吞键、松开规则、组合键快捷键。
 - 「补发」在终端里的意思是：把扣住的右 Option 按下事件交给终端原来的按键处理（例如「Option 当 Meta」的设置照常生效），然后再处理后来的键。
-- 只在终端舞台有焦点、输入板没开的时候生效。
+- 只在终端舞台有焦点、输入板没开的时候生效（2026-11-24 输入块起，文本区开着也算，见 2026-11-24-rapp-input-dock-design.md §5.6）。
 - 原生 Swift 和 Dart 两份判断共用同一张测试用例表（按键序列和时间 → 发出去的事件 + 语音动作），两边各跑一遍，保证规则一致。
 
 ## 7. 不变的东西

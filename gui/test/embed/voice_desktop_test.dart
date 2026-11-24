@@ -274,13 +274,54 @@ void main() {
     expect(find.text('正在听…'), findsNothing);
   });
 
-  macTest('a hotkey start is ignored while the panel is open', (tester) async {
+  // Final review: with the text area open the hotkey holds as the mouse (and iOS) does.
+  macTest('a hotkey hold with the panel open sends, as a mouse hold does; the panel stays', (tester) async {
     await view(tester);
+    await goLive(tester);
     rs.composer.open = true;
+    rs.composer.draft = '草稿';
     await tester.pumpWidget(layer());
+    await tester.pump();
     es.voiceKey(1, VoiceKeyPhase.start);
     await tester.pump();
-    expect(voice.starts, 0);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(voice.starts, 1);
+    expect(find.text('正在听…'), findsOneWidget);
+    voice.stopResult = '好的';
+    es.voiceKey(1, VoiceKeyPhase.release);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(sends(), [
+      [
+        {'text': '好的'}
+      ]
+    ]);
+    expect(rs.composer.open, isTrue);
+    expect(await rs.composer.readDraft(), '草稿');
+  });
+
+  macTest('a hotkey 编辑 with the panel open puts the words in the editor', (tester) async {
+    await view(tester);
+    await goLive(tester);
+    rs.composer.open = true;
+    rs.composer.draft = '草稿';
+    await tester.pumpWidget(layer());
+    await tester.pump();
+    es.voiceKey(1, VoiceKeyPhase.start);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(voice.starts, 1);
+    voice.stopResult = '你好';
+    es.voiceKey(1, VoiceKeyPhase.edit);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(sends(), isEmpty);
+    expect(rs.composer.open, isTrue);
+    final draft = await rs.composer.readDraft();
+    expect(draft, startsWith('草稿'));
+    expect(draft, endsWith('你好'));
   });
 
   macTest('disposing during a hotkey hold sends voice_end', (tester) async {
@@ -600,4 +641,76 @@ void main() {
     expect(c.draftText, contains('我们明天下午三点开会。'));
     expect(c.pendingAi?.original, said);
   });
+  // input-dock final review: the voice column (bubble, 编辑 / 取消, hint line) is drawn over the input block, which by
+  // default shares room with it on a 1000–1600 wide stage; the quick area neither comes nor goes in a hold (§5.6).
+  for (final width in [1000.0, 1200.0, 1600.0]) {
+    macTest('during a hold the voice column is on top of a terminal\'s input block at ${width.toInt()} wide', (tester) async {
+      tester.view.physicalSize = const Size(1700, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final term = FakeTermSessionPort();
+      final voice = FakeVoice(); // its own: the state disposes it
+      final ts = MainState(
+          hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, termPort: term, voice: voice, llmApi: api);
+      term.seed(2);
+      final tsess = RemoteSession(2, 'term');
+      try {
+        await _overBlock(tester, ts, tsess, term, voice, width);
+      } finally {
+        // The tree goes first: a hold still on ends into a live state.
+        await tester.pumpWidget(const SizedBox());
+        tsess.dispose();
+        ts.dispose();
+        term.dispose();
+      }
+    });
+  }
+}
+
+Future<void> _overBlock(
+    WidgetTester tester, MainState ts, RemoteSession tsess, FakeTermSessionPort term, FakeVoice voice, double width) async {
+  expect(ts.prefs.quickHiddenTerm, isFalse);
+  await tester.pumpWidget(wrap(SizedBox(
+      key: const Key('stage'),
+      width: width,
+      height: 700,
+      child: Stack(children: composerLayer(state: ts, session: tsess, port: term, editor: FlutterEditor.new)))));
+  await tester.pump();
+  final quick = find.byKey(const Key('dock-quick'));
+  expect(quick, findsOneWidget, reason: 'the quick area is shown');
+  final quickRect = tester.getRect(quick);
+  ts.voiceKey(2, VoiceKeyPhase.start);
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 200));
+  expect(voice.starts, 1);
+  expect(find.text('正在听…'), findsOneWidget);
+  expect(tester.getRect(quick), quickRect, reason: 'the quick area neither comes nor goes in a hold');
+
+  // The topmost render object hit at [f]'s centre is [f] or inside it (a TextSpan may come before it).
+  bool onTop(Finder f) {
+    final target = tester.renderObject(f);
+    final hit = tester.hitTestOnBinding(tester.getCenter(f));
+    for (RenderObject? r = hit.path.map((e) => e.target).whereType<RenderObject>().first; r != null; r = r.parent) {
+      if (identical(r, target)) return true;
+    }
+    return false;
+  }
+
+  final block = tester.getRect(quick);
+  final bubble = tester.getRect(find.byKey(const Key('voice-bubble')));
+  expect(block.overlaps(bubble), isTrue, reason: 'the default block and the column share room: $block $bubble');
+  final covered = [
+    for (final f in [
+      find.byKey(const Key('voice-cancel')),
+      find.byKey(const Key('voice-edit')),
+      find.byKey(const Key('voice-bubble')),
+      find.text('松手 发送'),
+    ])
+      if (!onTop(f)) f.describeMatch(Plurality.one),
+  ];
+  expect(covered, isEmpty, reason: 'the bubble, 编辑 / 取消 and the hint line are drawn over the block');
+  ts.voiceKey(2, VoiceKeyPhase.cancel);
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 300));
+  expect(tester.getRect(quick), quickRect);
 }

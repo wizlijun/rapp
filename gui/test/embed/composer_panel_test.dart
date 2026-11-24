@@ -11,15 +11,20 @@ import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/embed/geometry.dart';
+import 'package:rapp/embed/input_dock.dart' show desktopComposerAt, dockMove;
 import 'package:rapp/embed/key_bar.dart';
 import 'package:rapp/embed/modifier_latch.dart';
+import 'package:rapp/embed/panel_place.dart';
 import 'package:rapp/embed/picture.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/history/history_list.dart';
+import 'package:rapp/embed/voice_ring.dart' show VoicePick;
+import 'package:rapp/embed/voice_tidy_card.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/llm_api.dart';
+import 'package:rapp/pages/phrases_page.dart';
 import 'package:rapp/ui/controls.dart';
-import '../ui/platform_helpers.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/stage.dart';
@@ -135,7 +140,7 @@ void main() {
       expect(es.prefs.composerZoom, 0);
     });
 
-    testWidgets('open: one line, 720 wide, centred, 8 above the stage bottom', (tester) async {
+    testWidgets('open: one line, 720 wide, centred, standing on the desktop anchor', (tester) async {
       big(tester);
       await tester.pumpWidget(layer());
       await tester.pump();
@@ -143,8 +148,10 @@ void main() {
       final p = rect(tester, 'composer-panel');
       expect(p.size, const Size(720, 56 + 2)); // one line as tall as ＋/发送 and their 8s, inside a 1 px border
       expect(p.center.dx - host.left, 500);
-      // 8 above the key bar, which an open panel brings along.
-      expect(p.bottom - host.top, 700 - keyBarHeightOf(es, rs, host.width) - 8);
+      // Safari's 快捷区 is folded by default, so the panel is the whole block: its bottom on the anchor, a control's
+      // height and 20 over the stage's bottom.
+      expect(quickHidden(es, rs), isTrue);
+      expect(p.bottom - host.top, 700 - desktopComposerAt(controlHeightFor(defaultTargetPlatform)).dy);
       // W2: 15 on 22, no MATRIX glow in the editor.
       final style = field(tester).style!;
       expect(style.fontSize, 15);
@@ -218,6 +225,7 @@ void main() {
       expect(find.text('发送中'), findsNothing);
       // The default 直接回车且隐藏: the Return goes and the panel hides.
       expect(rs.composer.open, isFalse);
+      await tester.pumpAndSettle(); // the text area folds away
       expect(find.byKey(const Key('composer-panel')), findsNothing);
     });
 
@@ -675,66 +683,128 @@ void main() {
         es.setComposerZoom(0);
       });
 
-      testWidgets('plus opens a menu above it: 附件…, 在远端复制, the keys, 收起', (tester) async {
-        big(tester);
+      for (final platform in [TargetPlatform.macOS, TargetPlatform.linux, TargetPlatform.iOS]) {
+        testWidgets('${platform.name} ＋ menu: 附件, 在远端复制, 输入历史, 直接回车且隐藏, 大小, 快捷区 group, 收起; no key grid',
+            (tester) async {
+          big(tester);
+          final x = RemoteSession(3, 'Notes', appId: 'com.x')..composer.open = true;
+          addTearDown(x.dispose);
+          await tester.pumpWidget(layer(s: x));
+          await tester.pump();
+          expect(menu, findsNothing);
+          expect(find.bySemanticsLabel('更多'), findsOneWidget);
+          await openMenu(tester);
+          final m = tester.getRect(menu);
+          final plus = rect(tester, 'composer-plus');
+          expect(m.width, 300);
+          expect(m.bottom, plus.top - 8);
+          expect(m.right, plus.right);
+          expect(find.text('按键 · 直接发给远端'), findsNothing);
+          for (final l in ['Tab', '⌘', '⌥', '删除', '←', '↓', '↑', '→', '回车']) {
+            expect(find.descendant(of: menu, matching: find.text(l)), findsNothing, reason: l);
+          }
+          expect(find.text('附件…'), findsOneWidget);
+          expect(find.text('也可以直接粘贴'), findsOneWidget);
+          expect(find.text('在远端复制'), findsOneWidget);
+          expect(find.text(platform == TargetPlatform.macOS ? '⌘C' : 'Ctrl+C'), findsOneWidget);
+          expect(find.text('输入历史'), findsOneWidget);
+          expect(find.byKey(const Key('composer-plus-quick')), findsOneWidget);
+          expect(find.text('收起'), findsOneWidget);
+          // Vertical order.
+          double y(Finder f) => tester.getCenter(f).dy;
+          final order = [
+            find.text('附件…'),
+            find.text('在远端复制'),
+            find.text('输入历史'),
+            find.text('直接回车且隐藏'),
+            find.text('大小'),
+            find.byKey(const Key('composer-plus-quick')),
+            find.text('打字后自动收起'),
+            find.text('显示常用语条'),
+            find.text('更多按键'),
+            find.text('编辑常用语…'),
+            find.byKey(const Key('composer-plus-collapse')),
+          ];
+          for (var i = 1; i < order.length; i++) {
+            expect(y(order[i]), greaterThan(y(order[i - 1])), reason: 'row $i');
+          }
+        }, variant: TargetPlatformVariant.only(platform));
+      }
+
+      testWidgets('a short stage (390 tall): the menu fits inside the view and 收起 scrolls into reach', (tester) async {
+        tester.view.physicalSize = const Size(900, 390);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
         await tester.pumpWidget(layer());
         await tester.pump();
-        expect(menu, findsNothing);
-        expect(find.bySemanticsLabel('更多'), findsOneWidget);
         await openMenu(tester);
         final m = tester.getRect(menu);
-        final plus = rect(tester, 'composer-plus');
-        expect(m.width, 300);
-        expect(m.bottom, plus.top - 8);
-        expect(m.right, plus.right);
-        expect(find.text('附件…'), findsOneWidget);
-        expect(find.text('也可以直接粘贴'), findsOneWidget);
-        expect(find.text('在远端复制'), findsOneWidget);
-        expect(find.text('Ctrl+C'), findsOneWidget);
-        expect(find.text('按键 · 直接发给远端'), findsOneWidget);
-        expect(find.text('收起'), findsOneWidget);
-        // W9 order, reading left to right, row by row.
-        final labels = ['Esc', 'Tab', '⌘', '⌥', '删除', '←', '↓', '↑', '→', '回车'];
-        final pos = [for (final l in labels) tester.getCenter(find.descendant(of: menu, matching: find.text(l)).first)];
-        for (var i = 1; i < pos.length; i++) {
-          final sameRow = (pos[i].dy - pos[i - 1].dy).abs() < 1;
-          expect(sameRow ? pos[i].dx > pos[i - 1].dx : pos[i].dy > pos[i - 1].dy, isTrue, reason: labels[i]);
-        }
-      }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
-
-      testWidgets('iOS ＋ menu: no 按键 grid, 附件/在远端复制/输入历史/直接回车/缩放/收起 present', (tester) async {
-        big(tester);
-        final x = RemoteSession(3, 'Notes', appId: 'com.x')..composer.open = true;
-        addTearDown(x.dispose);
-        await tester.pumpWidget(layer(s: x));
+        expect(m.top, greaterThanOrEqualTo(0));
+        expect(m.bottom, lessThanOrEqualTo(390));
+        final collapse = find.byKey(const Key('composer-plus-collapse'));
+        await tester.scrollUntilVisible(collapse, 80, scrollable: find.descendant(of: menu, matching: find.byType(Scrollable)));
+        await tester.tap(collapse);
         await tester.pump();
-        await openMenu(tester);
-        expect(find.text('按键 · 直接发给远端'), findsNothing);
-        for (final l in ['Tab', '⌘', '⌥', '删除', '←', '↓', '↑', '→', '回车']) {
-          expect(find.descendant(of: menu, matching: find.text(l)), findsNothing, reason: l);
-        }
-        expect(find.text('附件…'), findsOneWidget);
-        expect(find.text('在远端复制'), findsOneWidget);
-        expect(find.text('输入历史'), findsOneWidget);
-        expect(find.byKey(const Key('composer-plus-return')), findsOneWidget);
-        expect(find.text('大小'), findsOneWidget);
-        expect(find.byType(Slider), findsOneWidget);
-        expect(find.byKey(const Key('composer-plus-collapse')), findsOneWidget);
-        expect(find.text('收起'), findsOneWidget);
-      }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+        expect(menu, findsNothing);
+        expect(rs.composer.open, isFalse);
+      });
 
-      testWidgets('macOS ＋ menu unchanged: the 按键 grid stays', (tester) async {
+      testWidgets('快捷区 switches flip quickAutoHide, phraseStrip, keyBarMore and the menu stays open', (tester) async {
         big(tester);
         await tester.pumpWidget(layer());
         await tester.pump();
         await openMenu(tester);
-        expect(find.text('按键 · 直接发给远端'), findsOneWidget);
-        expect(find.text('⌘C'), findsOneWidget);
-        for (final l in ['Tab', '⌘', '⌥', '删除', '←', '↓', '↑', '→', '回车']) {
-          expect(find.descendant(of: menu, matching: find.text(l)), findsOneWidget, reason: l);
-        }
-        expect(find.text('收起'), findsOneWidget);
+        bool on(String k) => tester.widget<Switch>(find.descendant(of: find.byKey(Key(k)), matching: find.byType(Switch))).value;
+        final auto0 = es.quickAutoHide;
+        final strip0 = es.prefs.phraseStrip;
+        final more0 = es.prefs.keyBarMore;
+        expect(on('quick-auto-hide'), auto0);
+        expect(on('quick-phrase-strip'), strip0);
+        expect(on('quick-more'), more0);
+        await tester.tap(find.byKey(const Key('quick-auto-hide')));
+        await tester.pump();
+        expect(es.quickAutoHide, !auto0);
+        expect(on('quick-auto-hide'), !auto0);
+        await tester.tap(find.byKey(const Key('quick-phrase-strip')));
+        await tester.pump();
+        expect(es.prefs.phraseStrip, !strip0);
+        expect(on('quick-phrase-strip'), !strip0);
+        await tester.tap(find.byKey(const Key('quick-more')));
+        await tester.pump();
+        expect(es.prefs.keyBarMore, !more0);
+        expect(on('quick-more'), !more0);
+        expect(menu, findsOneWidget);
+      });
+
+      testWidgets('打字后自动收起 shows on for macOS by default', (tester) async {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        final sw = find.descendant(of: find.byKey(const Key('quick-auto-hide')), matching: find.byType(Switch));
+        expect(tester.widget<Switch>(sw).value, isTrue);
       }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+      testWidgets('打字后自动收起 shows off for iOS by default', (tester) async {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        final sw = find.descendant(of: find.byKey(const Key('quick-auto-hide')), matching: find.byType(Switch));
+        expect(tester.widget<Switch>(sw).value, isFalse);
+      }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+      testWidgets('编辑常用语… closes the menu and pushes PhrasesPage', (tester) async {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        await tester.tap(find.byKey(const Key('quick-edit-phrases')));
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        expect(menu, findsNothing);
+        expect(find.byType(PhrasesPage), findsOneWidget);
+      });
 
       testWidgets('plus menu opens up from a panel at the bottom', (tester) async {
         big(tester);
@@ -767,52 +837,6 @@ void main() {
         await openMenu(tester);
         expect(find.text('⌘C'), findsOneWidget);
       }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
-
-      testWidgets('keys go to A in W9 order; ⌘ sticks for one key; the menu stays open', (tester) async {
-        big(tester);
-        await tester.pumpWidget(layer());
-        await tester.pump();
-        await openMenu(tester);
-        await tester.tap(find.descendant(of: menu, matching: find.text('⌘')));
-        await tester.pump();
-        await tester.tap(find.descendant(of: menu, matching: find.text('Tab')));
-        await tester.pump();
-        await tester.tap(find.descendant(of: menu, matching: find.text('Tab')));
-        await tester.pump();
-        expect(callsOf('key'), [
-          equals({'sid': 1, 'keyCode': 48, 'modifiers': 1048576}),
-          equals({'sid': 1, 'keyCode': 48, 'modifiers': 0}),
-        ]);
-        expect(menu, findsOneWidget);
-        await tester.tap(find.descendant(of: menu, matching: find.text('→')));
-        await tester.pump();
-        expect(callsOf('key').last, equals({'sid': 1, 'keyCode': 124, 'modifiers': 0}));
-      });
-
-      testWidgets('closing the menu lets go of an armed ⌘ (m1)', (tester) async {
-        big(tester);
-        await tester.pumpWidget(layer());
-        await tester.pump();
-        for (final close in ['outside', 'plus']) {
-          await openMenu(tester);
-          await tester.tap(find.descendant(of: menu, matching: find.text('⌘')));
-          await tester.pump();
-          if (close == 'outside') {
-            await tester.tapAt(const Offset(5, 5));
-          } else {
-            await tester.tap(find.byKey(const Key('composer-plus')));
-          }
-          await tester.pump();
-          expect(menu, findsNothing, reason: close);
-          await openMenu(tester);
-          port.calls.clear();
-          await tester.tap(find.descendant(of: menu, matching: find.text('Tab')));
-          await tester.pump();
-          expect(callsOf('key').single, equals({'sid': 1, 'keyCode': 48, 'modifiers': 0}), reason: close);
-          await tester.tapAt(const Offset(5, 5));
-          await tester.pump();
-        }
-      });
 
       testWidgets('在远端复制 sends ⌘C and the hint line says 已复制', (tester) async {
         big(tester);
@@ -848,6 +872,7 @@ void main() {
         await tester.pump();
         await tester.pump();
         expect(menu, findsNothing);
+        await tester.pumpAndSettle(); // the text area folds away
         expect(find.byKey(const Key('composer-panel')), findsNothing);
         expect(rs.composer.open, isFalse);
         expect(rs.composer.draft, '草稿');
@@ -900,27 +925,7 @@ void main() {
         expect(find.byKey(const Key('composer-plus-return')), findsNothing);
       });
 
-      testWidgets('a latched sticky key is a raise box with a 2 px accent border, not a text fill', (tester) async {
-        big(tester);
-        await tester.pumpWidget(layer());
-        await tester.pump();
-        await openMenu(tester);
-        final key = find.byKey(const ValueKey('sticky-⌘'));
-        BoxDecoration look() =>
-            tester.widget<Container>(find.descendant(of: key, matching: find.byType(Container)).first).decoration! as BoxDecoration;
-        final t = RappTokens.of(tester.element(key));
-        expect((look().border! as Border).top.color, t.line);
-        await tester.tap(key);
-        await tester.pump();
-        final on = look();
-        expect((on.border! as Border).top.color, t.accent);
-        expect((on.border! as Border).top.width, 2);
-        expect(on.color, isNot(t.text));
-        expect(on.gradient, t.raiseBox().gradient);
-        expect(tester.getSize(key).height, controlHeightOf(tester.element(key)));
-      });
-
-      testWidgets('the sticky keys and the menu never carry over to another session', (tester) async {
+      testWidgets('the menu never carries over to another session', (tester) async {
         big(tester);
         final rs2 = RemoteSession(2, 'Notes');
         addTearDown(rs2.dispose);
@@ -928,15 +933,9 @@ void main() {
         await tester.pumpWidget(layer());
         await tester.pump();
         await openMenu(tester);
-        await tester.tap(find.descendant(of: menu, matching: find.text('⌘')));
-        await tester.pump();
         await tester.pumpWidget(layer(s: rs2));
         await tester.pump();
         expect(menu, findsNothing);
-        await openMenu(tester);
-        await tester.tap(find.descendant(of: menu, matching: find.text('←')));
-        await tester.pump();
-        expect(callsOf('key').single, equals({'sid': 2, 'keyCode': 123, 'modifiers': 0}));
       });
 
       testWidgets('hint line: A on an input method, accent, a tap switches to English', (tester) async {
@@ -1165,7 +1164,7 @@ void main() {
       expect(sent.last.$2['window'], 0);
     });
 
-    testWidgets('hidden while the writing panel is open', (tester) async {
+    testWidgets('还原 hides while the text area is open', (tester) async {
       zoom();
       await tester.pumpWidget(layerFor(zport));
       expect(find.byKey(const Key('zoom-reset')), findsOneWidget);
@@ -1203,8 +1202,10 @@ void main() {
           visible: const Rect.fromLTWH(0, 0, 1, 1),
         );
 
-    // The key bar an open panel brings along: panels stand on it.
-    double bar() => keyBarHeightOf(es, es.currentRemote!, 800);
+    // What stands under the panel in its block: the 快捷区 and its 8 while shown (Safari folds it by default).
+    double bar() => quickHidden(es, es.currentRemote!) ? 0 : keyBarHeightOf(es, es.currentRemote!) + 8;
+    // The block's default bottom on the 800×600 stage: the desktop anchor.
+    double home() => 600 - desktopComposerAt(controlHeightFor(defaultTargetPlatform)).dy;
 
     Future<void> openEmbedded(WidgetTester tester, {int sid = 1, String app = 'Safari'}) async {
       await tester.runAsync(() async {
@@ -1377,11 +1378,11 @@ void main() {
       expect(open['y'], plain['y']);
     });
 
-    testWidgets('the panel starts bottom centre, 8 up, the grip above it', (tester) async {
+    testWidgets('the panel starts bottom centre on the desktop anchor, the grip above it', (tester) async {
       await showPicture(tester);
       await openPanel(tester);
       final p = panelRect(tester);
-      expect(p.bottom, 600 - 8 - bar());
+      expect(p.bottom, home() - bar());
       expect(p.center.dx, 400);
       final g = tester.getRect(grip);
       expect(g.width, greaterThanOrEqualTo(48));
@@ -1422,65 +1423,14 @@ void main() {
       await tester.pump(kDoubleTapTimeout);
     });
 
-    testWidgets('a touch on the panel shows the bar and the × (no hover to show them)', (tester) async {
+    testWidgets('a touch on the panel shows the bar (no hover to show it)', (tester) async {
       await showPicture(tester);
       await openPanel(tester);
-      final close = find.byKey(const Key('composer-grip-close'));
-      double shown() => tester.widget<AnimatedOpacity>(
-          find.ancestor(of: close, matching: find.byType(AnimatedOpacity)).first).opacity;
-      expect(shown(), 0);
+      double bar() => tester.widget<AnimatedOpacity>(find.byKey(const Key('composer-grip-bar'))).opacity;
+      expect(bar(), 0);
       await tester.tapAt(tester.getCenter(fieldFinder));
       await tester.pump();
-      expect(shown(), 1);
-      await tester.tap(close);
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('composer-panel')), findsNothing);
-    });
-
-    // iOS has no × (a pull down collapses there, G4/G6).
-    testWidgets('the grip × is at least 40 square on macOS', (tester) async {
-      await onPlatform(TargetPlatform.macOS, () async {
-        await showPicture(tester);
-        await openPanel(tester);
-        final s = tester.getSize(find.byKey(const Key('composer-grip-close')));
-        expect(s.width, greaterThanOrEqualTo(40));
-        expect(s.height, greaterThanOrEqualTo(40));
-      });
-    });
-
-    testWidgets('a small × right beside the grip shows with the bar and collapses the panel', (tester) async {
-      await showPicture(tester);
-      await openPanel(tester);
-      final close = find.byKey(const Key('composer-grip-close'));
-      double shown() => tester.widget<AnimatedOpacity>(
-          find.ancestor(of: close, matching: find.byType(AnimatedOpacity)).first).opacity;
-      expect(shown(), 0);
-      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      await mouse.addPointer(location: const Offset(400, 20));
-      await mouse.moveTo(panelRect(tester).center);
-      await tester.pump();
-      expect(shown(), 1);
-      final x = tester.getRect(close), p = panelRect(tester), g = tester.getRect(grip);
-      // The grip row is as tall as the grip: the panel starts right under it, as before the hit area grew.
-      expect(g.height, 20);
-      expect(p.top, g.bottom);
-      // The hit area is control-height square, hangs from the grip row's top and reaches down into the body
-      // (it has to stay inside the panel's own bounds); the drawn × is level with the grip, centred across it.
-      expect(x.size, Size.square(controlHeightOf(tester.element(close))));
-      expect(x.top, g.top);
-      final mark = tester.getCenter(find.descendant(of: close, matching: find.byIcon(Icons.close)));
-      expect(mark.dy, g.center.dy);
-      expect(mark.dx, x.center.dx);
-      expect(mark.dx - g.right, 14);
-      expect(g.center.dx, p.center.dx);
-      await mouse.moveTo(x.center);
-      await tester.pump();
-      expect(shown(), 1);
-      await mouse.down(x.center);
-      await mouse.up();
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('composer-panel')), findsNothing);
-      await mouse.removePointer();
+      expect(bar(), 1);
     });
 
     testWidgets('dragging the grip moves the panel and saves once on release', (tester) async {
@@ -1494,13 +1444,13 @@ void main() {
         await tester.pump();
       }
       expect(saves, 0);
-      expect(panelRect(tester).bottom, 392 - bar());
+      expect(panelRect(tester).bottom, home() - 200 - bar());
       expect(panelRect(tester).center.dx, 380);
       await g.up();
       await tester.pump();
       expect(saves, 1);
-      expect(es.profiles.resolve('Safari').composerAt, InputPoint.at(Offset(380, 392 - bar()), const Size(800, 600)));
-      expect(panelRect(tester).bottom, 392 - bar());
+      expect(es.profiles.resolve('Safari').composerAt, InputPoint.at(Offset(380, home() - 200 - bar()), const Size(800, 600)));
+      expect(panelRect(tester).bottom, home() - 200 - bar());
       expect(panelRect(tester).center.dx, 380);
       await tester.pump(kDoubleTapTimeout);
     });
@@ -1516,7 +1466,7 @@ void main() {
       await tester.tap(grip);
       await tester.pumpAndSettle();
       expect(es.profiles.resolve('Safari').composerAt, isNull);
-      expect(panelRect(tester).bottom, 592 - bar());
+      expect(panelRect(tester).bottom, home() - bar());
       expect(panelRect(tester).center.dx, 400);
       expect(fieldFocused(tester), isTrue);
     });
@@ -1527,7 +1477,7 @@ void main() {
       await tester.enterText(fieldFinder, 'keep');
       await tester.pump();
       await dragGrip(tester, const [Offset(0, -150), Offset(0, -50)]);
-      expect(panelRect(tester).bottom, 392 - bar());
+      expect(panelRect(tester).bottom, home() - 200 - bar());
       expect(text(tester), 'keep');
       expect(fieldFocused(tester), isTrue);
     });
@@ -1538,7 +1488,7 @@ void main() {
       // 720 wide on 800: the centre can go from 368 to 432.
       await dragGrip(tester, const [Offset(2000, 0), Offset(-50, 0)]);
       expect(panelRect(tester).center.dx, 382);
-      expect(panelRect(tester).bottom, 592 - bar());
+      expect(panelRect(tester).bottom, home() - bar());
     });
 
     testWidgets('a touch held still on the grip, then moved, still drags (no long-press tooltip)', (tester) async {
@@ -1553,7 +1503,7 @@ void main() {
       await g.up();
       await tester.pump();
       await tester.pump(kDoubleTapTimeout);
-      expect(panelRect(tester).bottom, 392 - bar());
+      expect(panelRect(tester).bottom, home() - 200 - bar());
       expect(find.text('拖动；双击回到底部居中'), findsNothing);
     });
 
@@ -1576,9 +1526,9 @@ void main() {
         await g.up();
         await tester.pump();
         await tester.pump(kDoubleTapTimeout);
-        expect(panelRect(tester).bottom, 392 - bar());
+        expect(panelRect(tester).bottom, home() - 200 - bar());
         expect(panelRect(tester).center.dx, 380);
-        expect(es.profiles.resolve('Safari').composerAt, InputPoint.at(Offset(380, 392 - bar()), const Size(800, 600)));
+        expect(es.profiles.resolve('Safari').composerAt, InputPoint.at(Offset(380, home() - 200 - bar()), const Size(800, 600)));
       });
     }
 
@@ -1596,7 +1546,7 @@ void main() {
         await g.up();
         await tester.pump();
         await tester.pump(kDoubleTapTimeout);
-        expect(panelRect(tester).bottom, 592 - bar());
+        expect(panelRect(tester).bottom, home() - bar());
         expect(es.profiles.resolve('Safari').composerAt, isNull);
         expect(text(tester), 'some text to select');
       });
@@ -1634,7 +1584,7 @@ void main() {
       await g.up();
       await tester.pump();
       await tester.pump(kDoubleTapTimeout);
-      expect(panelRect(tester).bottom, 392 - bar());
+      expect(panelRect(tester).bottom, home() - 200 - bar());
       expect(panelRect(tester).center.dx, 380);
       expect(text(tester), 'keep');
       expect(fieldFocused(tester), isTrue);
@@ -1656,7 +1606,7 @@ void main() {
       await g.panZoomEnd();
       await tester.pump();
       await tester.pump(kDoubleTapTimeout);
-      expect(panelRect(tester).bottom, 592 - bar());
+      expect(panelRect(tester).bottom, home() - bar());
       expect(saves, 0);
     });
 
@@ -1674,7 +1624,7 @@ void main() {
       // Open or not is the session's (R18): Notes' panel starts closed.
       expect(find.byKey(const Key('composer-panel')), findsNothing);
       await openPanel(tester);
-      expect(panelRect(tester).bottom, 592 - bar());
+      expect(panelRect(tester).bottom, home() - bar());
       expect(panelRect(tester).center.dx, 400);
     });
 
@@ -1702,7 +1652,7 @@ void main() {
       await tester.pump(kDoubleTapTimeout);
       expect(es.profiles.resolve('Notes').composerAt, isNull);
       expect(es.profiles.resolve('Safari').composerAt, isNull);
-      expect(panelRect(tester).bottom, 592 - bar());
+      expect(panelRect(tester).bottom, home() - bar());
     });
 
     testWidgets('a drag that ends where it started writes nothing', (tester) async {
@@ -1711,7 +1661,7 @@ void main() {
       var saves = 0;
       es.profiles.addListener(() => saves++);
       await dragGrip(tester, const [Offset(0, -100), Offset(0, 100)]);
-      expect(panelRect(tester).bottom, 592 - bar());
+      expect(panelRect(tester).bottom, home() - bar());
       expect(saves, 0);
       expect(es.profiles.mine, isEmpty);
     });
@@ -1749,18 +1699,6 @@ void main() {
       expect(after.bottom, before.bottom);
     });
 
-    testWidgets('no lift over a detached placeholder', (tester) async {
-      await showPicture(tester);
-      port.emit(const DetachedEvent(1, true));
-      await tester.pump();
-      expect(find.byType(Picture), findsNothing);
-      final before = tester.getTopLeft(find.byKey(const Key('stage'))).dy;
-      await tester.tap(find.byKey(const Key('composer-open')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('composer-panel')), findsOneWidget);
-      expect(tester.getTopLeft(find.byKey(const Key('stage'))).dy, before);
-    });
-
     testWidgets('opening the composer takes the caret from the picture', (tester) async {
       await showPicture(tester);
       port.calls.clear();
@@ -1795,7 +1733,7 @@ void main() {
       await showPicture(tester);
       await tester.tap(find.byKey(const Key('composer-open')));
       await tester.pump();
-      await tester.pump();
+      await tester.pump(dockMove); // the text area grows in
       await tester.tap(find.byKey(const Key('composer-plus')));
       await tester.pump();
       final menu = find.byKey(const Key('composer-plus-menu'));
@@ -1825,7 +1763,7 @@ void main() {
       });
       await tester.tap(find.byKey(const Key('composer-open')));
       await tester.pump();
-      await tester.pump();
+      await tester.pump(dockMove); // the text area grows in
       await tester.tap(find.byKey(const Key('composer-plus')));
       await tester.pump();
       await tester.tap(find.text('输入历史'));
@@ -1840,16 +1778,41 @@ void main() {
       expect(text(tester), contains('回头再看这段'));
     });
 
+    testWidgets('macOS 输入历史 has 加到常用语', (tester) async {
+      await showPicture(tester);
+      es.history.add({
+        'id': '01B',
+        'ts': '2026-11-15T09:00:00+09:00',
+        'kind': 'sent',
+        'from': {'id': 'dev1', 'name': 'x'},
+        'host': {'id': '111', 'name': 'mini'},
+        'app': {'id': 'Safari', 'name': 'Safari'},
+        'session': '111/Safari',
+        'text': '常用的一句',
+      });
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pump();
+      await tester.pump(dockMove); // the text area grows in
+      await tester.tap(find.byKey(const Key('composer-plus')));
+      await tester.pump();
+      await tester.tap(find.text('输入历史'));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('more-01B')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('add-phrase-01B')), findsOneWidget);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
     testWidgets('Esc with the plus menu open closes the panel and the menu', (tester) async {
       await showPicture(tester);
       await tester.tap(find.byKey(const Key('composer-open')));
       await tester.pump();
-      await tester.pump();
+      await tester.pump(dockMove); // the text area grows in
       await tester.tap(find.byKey(const Key('composer-plus')));
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pump();
       expect(find.byKey(const Key('composer-plus-menu')), findsNothing);
+      await tester.pumpAndSettle(); // the text area folds away
       expect(find.byKey(const Key('composer-panel')), findsNothing);
     });
 
@@ -1914,6 +1877,7 @@ void main() {
       await showPicture(tester);
       await tester.tap(find.byKey(const Key('composer-open')));
       await tester.pump();
+      await tester.pump(dockMove); // the text area grows in
       await tester.tap(fieldFinder);
       await tester.pump();
       final m = es.currentRemote!.composer;
@@ -2094,4 +2058,170 @@ void main() {
       expect(find.text('写给 Safari'), findsNothing);
     });
   });
+
+  group('stage buttons and the tidy card', () {
+    late _Api api;
+    late RemoteSession s;
+    const stage = Size(1000, 700);
+    const long = '嗯那个我门明天下午三点开会';
+    final toggle = find.byKey(const Key('composer-open'));
+    final card = find.byType(VoiceTidyCard);
+    final control = controlHeightFor(TargetPlatform.macOS);
+
+    void platformTest(TargetPlatform p, String name, Future<void> Function(WidgetTester) body) =>
+        testWidgets('${p.name}: $name', (tester) async {
+          debugDefaultTargetPlatformOverride = p;
+          try {
+            tester.view.physicalSize = stage;
+            tester.view.devicePixelRatio = 1;
+            addTearDown(tester.view.reset);
+            await body(tester);
+          } finally {
+            debugDefaultTargetPlatformOverride = null;
+          }
+        });
+    void macTest(String name, Future<void> Function(WidgetTester) body) => platformTest(TargetPlatform.macOS, name, body);
+
+    setUp(() {
+      api = _Api();
+      es.dispose();
+      es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(phraseStrip: false), port: port, llmApi: api);
+      es.setLlm(const LlmEndpoint(url: 'localhost:28001', key: 'k'));
+    });
+
+    // The live Safari session, on a 1000×700 stage with the composer layer over it.
+    Future<void> show(WidgetTester tester, {bool open = false, bool quick = false}) async {
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({
+              'event': 'opened', 'sid': 1, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              'port': 5001, 'token': 'tk', 'req': m['req'],
+            });
+          }
+        };
+        es.openOrSwitch('111', 'Safari', 'Safari');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      s = es.currentRemote!;
+      es.setQuickHidden(term: false, hidden: !quick);
+      s.composer.open = open;
+      await tester.pumpWidget(wrap(SizedBox(
+          key: const Key('stage'),
+          width: stage.width,
+          height: stage.height,
+          child: Stack(children: composerLayer(state: es, session: s, port: port, editor: FlutterEditor.new)))));
+      await tester.pumpAndSettle();
+    }
+
+    Rect block() => panelPlaceOf(s).value!;
+    Rect cardRect(WidgetTester tester) => tester.getRect(card);
+
+    Future<void> tidy(WidgetTester tester) async {
+      expect(es.tidyOf(s.sid).begin(long, VoicePick.send), isTrue);
+      await tester.pump();
+      await tester.pump();
+    }
+
+    macTest('输入 stays while open, reads 收起 and is active; a tap folds the text area only, the draft and the quick area stay',
+        (tester) async {
+      await show(tester, open: true, quick: true);
+      s.composer.setDraft('keep me');
+      await tester.pump();
+      expect(toggle, findsOneWidget);
+      expect(find.bySemanticsLabel('收起'), findsOneWidget);
+      expect(find.descendant(of: toggle, matching: find.byIcon(Icons.keyboard_hide_outlined)), findsOneWidget);
+      final open = tester.widget<OutlinedButton>(find.descendant(of: toggle, matching: find.byType(OutlinedButton)));
+      expect(open.style!.side!.resolve({})!.width, 1.5, reason: 'active: the accent border');
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(s.composer.open, isFalse);
+      expect(s.composer.draft, 'keep me');
+      expect(find.byType(ComposerPanel), findsNothing);
+      expect(find.byType(KeyBar), findsOneWidget);
+      expect(find.bySemanticsLabel('输入'), findsOneWidget);
+      expect(find.descendant(of: toggle, matching: find.byIcon(Icons.keyboard_outlined)), findsOneWidget);
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(s.composer.open, isTrue);
+      expect(find.byType(ComposerPanel), findsOneWidget);
+    });
+
+    macTest('the row rect is the same with the text area open or closed, and with the quick area shown or hidden',
+        (tester) async {
+      final rects = <Rect>[];
+      for (final open in [false, true]) {
+        for (final quick in [false, true]) {
+          await show(tester, open: open, quick: quick);
+          rects.add(tester.getRect(toggle));
+        }
+      }
+      expect(rects.toSet().length, 1, reason: '$rects');
+      expect(rects.first.bottom, stage.height - 12);
+      expect(rects.first.right, stage.width - 12);
+    });
+
+    macTest('desktop default: block bottom is controlHeight + 20 up, centred, not overlapping the row at a 1000-wide stage',
+        (tester) async {
+      await show(tester, open: true);
+      expect(block().bottom, stage.height - (control + 20));
+      expect(block().center.dx, stage.width / 2);
+      expect(block().bottom, lessThanOrEqualTo(tester.getRect(toggle).top - 8));
+    });
+
+    macTest('tidy card: above the block, right-aligned with it; below it with no room above; never off the stage',
+        (tester) async {
+      await show(tester, open: true);
+      await tidy(tester);
+      expect(cardRect(tester).right, block().right);
+      expect(cardRect(tester).bottom, block().top - 8);
+      // The block at the stage's top: no room above, so the card stands under it.
+      es.placeComposer(s, const InputPoint(0.5, 0));
+      await tester.pumpAndSettle();
+      expect(block().top, lessThan(cardRect(tester).height + 16));
+      expect(cardRect(tester).top, block().bottom + 8);
+      expect(cardRect(tester).right, block().right);
+      expect((Offset.zero & stage).inflate(0.01).contains(cardRect(tester).topLeft) &&
+          (Offset.zero & stage).inflate(0.01).contains(cardRect(tester).bottomRight), isTrue);
+    });
+
+    macTest('tidy card: a quick-only block counts as the block; with none, the card stands in the corner above the row',
+        (tester) async {
+      await show(tester, quick: true);
+      expect(block().height, greaterThan(0));
+      await tidy(tester);
+      expect(cardRect(tester).bottom, block().top - 8);
+      expect(cardRect(tester).right, block().right);
+      // Only the handle left: no block, the corner above the row.
+      es.setQuickHidden(term: false, hidden: true);
+      await tester.pumpAndSettle();
+      expect(block().height, 0);
+      expect(cardRect(tester).right, stage.width - 12);
+      expect(cardRect(tester).bottom, stage.height - 12 - control - 8);
+    });
+
+    platformTest(TargetPlatform.iOS, 'tidy card stands 12 above the stack, which stands above the block', (tester) async {
+      await show(tester, quick: true);
+      await tidy(tester);
+      final stack = tester.getRect(toggle);
+      expect(stack.bottom, block().top - 8);
+      expect(cardRect(tester).bottom, stack.top - 12);
+      s.composer.open = true;
+      await tester.pumpAndSettle();
+      expect(tester.getRect(toggle).bottom, block().top - 8);
+      expect(cardRect(tester).bottom, tester.getRect(toggle).top - 12);
+    });
+  });
+}
+
+class _Api extends LlmApi {
+  @override
+  LlmCall run(LlmEndpoint e, String app, String input,
+          {Map<String, String>? vars,
+          void Function(String text)? onText,
+          Duration firstByte = const Duration(seconds: 10),
+          bool think = false}) =>
+      LlmCall.manual();
 }

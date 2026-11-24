@@ -40,8 +40,8 @@ class RappButton extends StatefulWidget {
     this.size = 48,
     this.oneLine = false,
     this.seeThrough = false,
-  }) : _kind = _Kind.secondary,
-       active = false;
+    this.active = false,
+  }) : _kind = _Kind.secondary;
   const RappButton.accent({
     super.key,
     required this.label,
@@ -90,7 +90,7 @@ class RappButton extends StatefulWidget {
   final String label;
   final VoidCallback? onPressed;
 
-  /// [RappButton.stage] only: the button is a switch that is on, drawn with the accent border.
+  /// [RappButton.stage] and [RappButton.secondary] only: the button is a switch that is on, drawn with the accent border.
   final bool active;
   final String? semanticLabel;
   final FocusNode? focusNode;
@@ -199,7 +199,7 @@ class _RappButtonState extends State<RappButton> {
         style: OutlinedButton.styleFrom(
           backgroundColor: widget.onPicture ? Color.alphaBlend(t.raise.first, t.float.first) : t.raise.first,
           foregroundColor: t.text,
-          side: BorderSide(color: t.line),
+          side: BorderSide(color: widget.active ? t.accent : t.line, width: widget.active ? 1.5 : 1),
           minimumSize: min,
           tapTargetSize: tap,
           padding: pad,

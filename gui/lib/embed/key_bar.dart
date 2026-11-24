@@ -8,13 +8,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../platform_caps.dart';
 import '../term/term_session_port.dart';
 import '../ui/main_state.dart';
+import '../ui/terms_entry.dart' show terminalApps;
 import '../ui/tokens.dart';
 import 'key_bar_keys.dart';
 import 'modifier_latch.dart';
 import 'phrase_strip.dart';
+import 'composer_panel.dart' show seeThroughBox;
 import 'phrases.dart';
 import 'remote_session.dart';
 import 'session_port.dart';
@@ -32,27 +33,37 @@ bool _isTerm(MainState state, RemoteSession session) => state.termPort?.owns(ses
 ModifierLatch keyLatchOf(MainState state, RemoteSession session) =>
     _isTerm(state, session) ? session.keyLatch : state.appLatch;
 
-List<List<String?>> _rowsOf(MainState state, RemoteSession session, double width) => keyBarRows(
-      width: width,
-      app: !_isTerm(state, session),
-      more: state.prefs.keyBarMore,
-      slim: state.prefs.keyBarSlim,
-      hardware: hardwareKeyboard() || lastHardwareKey != null, // sticky: once seen, the ⊙ stays
-    );
+List<List<String>> _rowsOf(MainState state, RemoteSession session) =>
+    keyBarRows(app: !_isTerm(state, session), more: state.prefs.keyBarMore);
+
+/// Whether [session] is of the terminal kind: a text terminal or a terminal app. The kind picks which quick-area
+/// pref it follows.
+bool termKind(MainState state, RemoteSession session) => _isTerm(state, session) || terminalApps.contains(session.appId);
+
+/// Whether the 快捷区 is folded for [session]'s kind.
+bool quickHidden(MainState state, RemoteSession session) =>
+    termKind(state, session) ? state.prefs.quickHiddenTerm : state.prefs.quickHiddenApp;
+
+/// Key [e] typed into the picture: the picture has the keys and the writing panel's editor does not. An app's
+/// picture (a terminal app's too) has them as [MainState.pictureFocused]; a text terminal's stage by its own Focus
+/// ([RemoteSession.termTakesKey]), since [MainState.focusPicture] leaves pictureFocused alone for a terminal. A key
+/// that belongs to a voice hold — any key during a mouse hold on 语音, and on a terminal the hotkey's own down and
+/// every key while its hold runs — is the hold's, and the quick area stays as it was (spec §5.6).
+bool typedIntoPicture(MainState state, RemoteSession session, KeyEvent e) =>
+    (state.pictureFocused == session.sid || (session.termTakesKey?.call(e) ?? false)) &&
+    !session.composer.editorFocused &&
+    state.voiceMouseHold != session.sid;
 
 /// Whether the 常用语条 tops the bar (phrases spec §2): 显示常用语条 on, some phrases, a text terminal or an app whose
-/// profile has 常用语条 on; on iOS the bar not ⊙ slim either (the desktop keeps it over the slim bar: pc-key-bar spec).
+/// profile has 常用语条 on. Whether the quick area is folded is not its business.
 bool phraseStripShown(MainState state, RemoteSession session) {
   final p = state.prefs;
-  return p.phraseStrip &&
-      (!p.keyBarSlim || defaultTargetPlatform != TargetPlatform.iOS) &&
-      p.phrases.isNotEmpty &&
-      (_isTerm(state, session) || session.profile.phrases);
+  return p.phraseStrip && p.phrases.isNotEmpty && (_isTerm(state, session) || session.profile.phrases);
 }
 
-/// How high the bar is at [width], with the modes now on (the 常用语条 included).
-double keyBarHeightOf(MainState state, RemoteSession session, double width) =>
-    keyBarHeight(_rowsOf(state, session, width).length) + (phraseStripShown(state, session) ? phraseStripHeight : 0);
+/// How high the bar is, with the modes now on (the 常用语条 included).
+double keyBarHeightOf(MainState state, RemoteSession session) =>
+    keyBarHeight(_rowsOf(state, session).length) + (phraseStripShown(state, session) ? phraseStripHeight : 0);
 
 /// A terminal's wire name for [wire] with the latch's ⌃ and ⌥ added, in the wire's order `[Ctrl-][Alt-][Shift-]base`.
 String termWire(String wire, int flags) {
@@ -171,11 +182,12 @@ bool collapsesKeyBar(KeyEvent e) =>
     !HardwareKeyboard.instance.isMetaPressed &&
     !(defaultTargetPlatform == TargetPlatform.linux && HardwareKeyboard.instance.isControlPressed);
 
-/// Folds the bar to ⊙ for [session]: the keyboard was used. Not while a ⌃ ⌥ ⌘ ⇧ on the bar is lit: folding would
-/// hide a modifier A may still hold down; the next key after it goes folds.
+/// Folds the 快捷区 of [session]'s kind: a key was typed into the picture. Not with 打字后自动收起 off, not when it is
+/// folded already, and not while a ⌃ ⌥ ⌘ ⇧ on the bar is lit: folding would hide a modifier A may still hold down; the
+/// next key after it goes folds.
 void foldKeyBar(MainState state, RemoteSession session) {
-  if (state.prefs.keyBarSlim || keyLatchOf(state, session).flags != 0) return;
-  state.setKeyBarSlim(true);
+  if (!state.quickAutoHide || quickHidden(state, session) || keyLatchOf(state, session).flags != 0) return;
+  state.setQuickHidden(term: termKind(state, session), hidden: true);
 }
 
 class KeyBar extends StatefulWidget {
@@ -212,12 +224,12 @@ class _KeyBarState extends State<KeyBar> {
   void initState() {
     super.initState();
     _bind();
-    // The desktop: the keyboard in use folds the bar to ⊙ (pc-key-bar spec §3); ⊙ opens it till the next key.
-    if (defaultTargetPlatform != TargetPlatform.iOS) HardwareKeyboard.instance.addHandler(_onKey);
+    // A key typed into the picture folds the 快捷区 (打字后自动收起); ⊙ or the handle shows it again.
+    HardwareKeyboard.instance.addHandler(_onKey);
   }
 
   bool _onKey(KeyEvent e) {
-    if (collapsesKeyBar(e)) foldKeyBar(widget.state, widget.session);
+    if (collapsesKeyBar(e) && typedIntoPicture(widget.state, widget.session, e)) foldKeyBar(widget.state, widget.session);
     return false; // only watching: the key goes on
   }
 
@@ -308,8 +320,9 @@ class _KeyBarState extends State<KeyBar> {
         _paste();
       case BarKind.more:
         widget.state.setKeyBarMore(!widget.state.prefs.keyBarMore);
-      case BarKind.slim:
-        widget.state.setKeyBarSlim(!widget.state.prefs.keyBarSlim);
+      case BarKind.hide:
+        final term = termKind(widget.state, widget.session);
+        widget.state.setQuickHidden(term: term, hidden: !quickHidden(widget.state, widget.session));
     }
     return null;
   }
@@ -317,18 +330,16 @@ class _KeyBarState extends State<KeyBar> {
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
-    return LayoutBuilder(builder: (context, c) {
-      final width = c.maxWidth;
-      return ListenableBuilder(
+    return ListenableBuilder(
         listenable: Listenable.merge([widget.state, _latch]),
         builder: (context, _) {
-          final rows = _rowsOf(widget.state, widget.session, width);
+          final rows = _rowsOf(widget.state, widget.session);
           final strip = phraseStripShown(widget.state, widget.session);
           return Container(
-            height: keyBarHeightOf(widget.state, widget.session, width),
+            height: keyBarHeightOf(widget.state, widget.session),
             width: double.infinity,
             padding: const EdgeInsets.all(keyBarPad),
-            decoration: t.floatBox(),
+            decoration: seeThroughBox(t),
             child: Column(
               children: [
                 if (strip) ...[
@@ -343,18 +354,13 @@ class _KeyBarState extends State<KeyBar> {
             ),
           );
         },
-      );
-    });
+    );
   }
 
-  Widget _rowOf(List<String?> ids) {
+  Widget _rowOf(List<String> ids) {
     final children = <Widget>[];
     for (final (i, id) in ids.indexed) {
-      if (id == null) {
-        children.add(const SizedBox(width: keyBarGroupGap));
-        continue;
-      }
-      if (i > 0 && ids[i - 1] != null) children.add(const SizedBox(width: keyBarGap));
+      if (i > 0) children.add(const SizedBox(width: keyBarGap));
       final key = barKeys[id]!;
       children.add(Expanded(
         child: _BarKeyView(

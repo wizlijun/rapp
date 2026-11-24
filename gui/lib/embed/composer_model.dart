@@ -257,13 +257,50 @@ class ComposerModel extends ChangeNotifier {
     if (v) {
       _letterOpenAt = byLetter ? _clock() : null;
       _toCheck = null;
-    } else if (_letterOpenAt != null) {
-      _toCheck = _letterOpenAt;
-      _letterOpenAt = null;
-      // With an editor the check waits for [detach], which brings its text into [draft].
-      if (_editor == null) _checkDeclined();
+      _closeCopy = null; // open again before the fold ended: the editor is written in again
+    } else {
+      if (_letterOpenAt != null) {
+        _toCheck = _letterOpenAt;
+        _letterOpenAt = null;
+      }
+      // Collapse is a copy point: the editor stays while the text area folds away, so its text is read now
+      // (the check waits for it); without an editor the draft already has it.
+      final e = _editor;
+      if (e != null) {
+        _idleTimer?.cancel();
+        // A read that throws (the native view already gone) gives null: the copy is dropped and the [detach]
+        // at the fold's end reads again (or keeps the draft); the check waits for that read.
+        final copy = _closeCopy = _readInto(e).then<bool?>((mine) => mine, onError: (Object _) => null);
+        copy.then((mine) {
+          if (mine == null) {
+            if (identical(_closeCopy, copy)) _closeCopy = null;
+          } else if (!_disposed) {
+            _checkDeclined();
+          }
+        });
+      } else {
+        _checkDeclined();
+      }
     }
     notifyListeners();
+  }
+
+  /// The copy made when the panel closed with its editor still there ([_setOpen]); the [detach] at the fold's
+  /// end has nothing more to read. Null when its read failed.
+  Future<bool?>? _closeCopy;
+
+  /// [e]'s text into [draft], once [e] is attached, unless the draft was written since. True when it was.
+  Future<bool> _readInto(ComposerEditor e) {
+    final ready = _attached;
+    final epoch = _draftEpoch;
+    Future<bool> copy() async {
+      final text = await e.read();
+      // Assigning draft bumps the epoch, so decide before the write whether this read is still ours.
+      final mine = _draftEpoch == epoch;
+      if (mine) draft = text;
+      return mine;
+    }
+    return ready == null ? copy() : ready.then((_) => copy());
   }
 
   /// When a letter opened the panel, while it is open and nothing has been sent from it.
@@ -379,18 +416,23 @@ class ComposerModel extends ChangeNotifier {
     _editor = null;
     editorFocused = false;
     _idleTimer?.cancel();
-    final ready = _attached;
-    final epoch = _draftEpoch;
+    final closed = _open ? null : _closeCopy;
+    _closeCopy = null;
     Future<void> copy() async {
-      final text = await e.read();
-      // Assigning draft bumps the epoch, so decide before the write whether this read is still ours.
-      final mine = _draftEpoch == epoch;
-      if (mine) draft = text;
+      // Closed: the text was read when the panel closed. A write into the editor during the fold
+      // ([editorChanged], [insert]: typing, a [keep]) dropped that copy, so it is read again.
+      // A close copy whose read failed is read again; if that fails too, the draft keeps what it had.
+      bool mine;
+      try {
+        mine = (closed == null ? null : await closed) ?? await _readInto(e);
+      } catch (_) {
+        mine = false;
+      }
       if (_disposed) return;
       if (mine) _dropMissing(draft); // the editor's undo goes with it
       _checkDeclined();
     }
-    final work = ready == null ? copy() : ready.then((_) => copy());
+    final work = copy();
     late final Future<void> pending;
     pending = work.whenComplete(() {
       if (identical(_detaching, pending)) _detaching = null;
@@ -491,6 +533,7 @@ class ComposerModel extends ChangeNotifier {
 
   /// The editor's text changed: 1 s after the last change it is copied into [draft].
   void editorChanged() {
+    _closeCopy = null; // written in during the fold: the copy taken at the collapse is stale
     _idleTimer?.cancel();
     _idleTimer = Timer(const Duration(seconds: 1), () async {
       final e = _editor;
@@ -505,6 +548,7 @@ class ComposerModel extends ChangeNotifier {
   void insert(String s) {
     final e = _editor;
     if (e != null) {
+      _closeCopy = null; // see [editorChanged]
       _showChips(e);
       e.insert(s);
     } else {

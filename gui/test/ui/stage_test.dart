@@ -27,7 +27,7 @@ import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/stage.dart';
 import 'package:rapp/embed/composer_panel.dart' show composerFillOpacity, seeThroughBox;
-import 'package:rapp/embed/key_bar.dart' show keyBarHeightOf;
+import 'package:rapp/embed/key_bar.dart' show KeyBar, termKind;
 import 'package:rapp/ui/tokens.dart';
 import 'package:rapp/ui/top_bar.dart';
 
@@ -210,8 +210,7 @@ void main() {
         );
 
     for (final app in ['com.apple.Terminal', 'Safari']) {
-      testWidgets('iOS $app picture: lifted by its bar only, open or closed${app == 'Safari' ? ' (Safari: none)' : ''}',
-          (tester) async {
+      testWidgets('iOS $app picture: never moves, open or closed, with or without its 快捷区', (tester) async {
         debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
         try {
           await tester.pumpWidget(wrap(embedded()));
@@ -220,21 +219,25 @@ void main() {
           port.emit(WindowsEvent(1, [rw(7, 400, 328)]));
           await tester.pump();
           await tester.pump();
-          final lifts = find.ancestor(of: find.byKey(const Key('stage')), matching: find.byType(Transform));
-          double lift() => lifts.evaluate().isEmpty
-              ? 0
-              : -tester.widget<Transform>(lifts.first).transform.getTranslation().y;
+          final picture = find.byKey(const Key('stage'));
+          expect(find.ancestor(of: picture, matching: find.byType(Transform)), findsNothing);
           final rs = es.remote[1]!;
-          final bar = keyBarHeightOf(es, rs, 800);
-          expect(lift(), app == 'Safari' ? 0 : bar);
+          // The terminal app shows its 快捷区, Safari only the handle.
+          expect(find.byType(KeyBar), app == 'Safari' ? findsNothing : findsOneWidget);
+          final at = tester.getRect(picture);
+          Future<void> still() async {
+            for (var i = 0; i < 26; i++) {
+              await tester.pump(const Duration(milliseconds: 16));
+              expect(tester.getRect(picture), at);
+            }
+          }
           rs.composer.open = true;
-          await tester.pump();
-          await tester.pump(const Duration(milliseconds: 400));
-          expect(lift(), app == 'Safari' ? 0 : bar); // an app: the bar only, open or closed
+          await still();
+          es.setQuickHidden(term: termKind(es, rs), hidden: app == 'Safari' ? false : true);
+          await still();
           rs.composer.collapse();
-          await tester.pump();
-          await tester.pump(const Duration(milliseconds: 400));
-          expect(lift(), app == 'Safari' ? 0 : bar);
+          await still();
+          expect(find.ancestor(of: picture, matching: find.byType(Transform)), findsNothing);
         } finally {
           debugDefaultTargetPlatformOverride = null;
         }
@@ -696,7 +699,7 @@ void main() {
         await shown(tester);
         es.currentRemote!.composer.open = true;
         await tester.pump();
-        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400)); // the text area grows in
         await tester.enterText(field, 'git push');
         await tester.pump();
         port.emit(const DisconnectedEvent(1, 'connection closed'));
@@ -776,7 +779,7 @@ void main() {
         final rs = es.currentRemote!;
         rs.composer.open = true;
         await tester.pump();
-        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400)); // the text area grows in
         await tester.enterText(field, 'hello');
         await tester.sendKeyEvent(LogicalKeyboardKey.enter);
         await tester.pump();
@@ -794,12 +797,11 @@ void main() {
         await tester.pump(const Duration(seconds: 5));
       });
 
-      testWidgets('the frozen keys grid and copy send nothing', (tester) async {
+      testWidgets('the frozen copy sends nothing', (tester) async {
         await dropWithDraft(tester);
         await tester.tap(find.byKey(const Key('composer-plus')));
         await tester.pumpAndSettle();
         port.calls.clear();
-        await tester.tap(find.text('回车'));
         await tester.tap(find.text('在远端复制'));
         await tester.pump();
         expect(sends(), isEmpty);

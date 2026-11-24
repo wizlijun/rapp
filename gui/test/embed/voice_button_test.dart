@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/app_profile.dart' show defaultComposerAt;
 import 'package:rapp/embed/composer_float.dart' show gripSize;
 import 'package:rapp/embed/composer_model.dart';
 import 'package:rapp/embed/composer_panel.dart';
@@ -275,6 +276,8 @@ void main() {
     rs.composer.open = false;
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400)); // the stack eases back down with the panel
+    await tester.pump(); // the folded text area goes
+    await tester.pump(); // the block's place reaches the stack a frame later
     expect(stage.height - inStage(tester, hold).bottom, 88);
   });
 
@@ -413,17 +416,21 @@ void main() {
     expect(i.center.dx, v.center.dx);
   });
 
-  iosTest('terminal, open panel: the key bar under it; 语音 stands 8 above the panel', (tester) async {
-    final tport = FakeTermSessionPort();
+  iosTest('terminal, open panel: the 快捷区 under it on the anchor; 语音 stands 8 above the block', (tester) async {
+    final tport = FakeTermSessionPort()..seed(1);
     addTearDown(tport.dispose);
+    es.dispose(); // its voice goes with it
+    voice = FakeVoice();
+    es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, voice: voice, termPort: tport);
     rs.composer.open = true;
     await tester.pumpWidget(layer(p: tport));
     await tester.pump();
+    await tester.pump(); // the block's place reaches the stack a frame later
     final b = inStage(tester, hold);
     final bar = inStage(tester, find.byType(KeyBar));
-    expect(bar.bottom, stage.height);
+    expect(stage.height - bar.bottom, defaultComposerAt.dy);
     expect(bar.top - inStage(tester, find.byType(ComposerPanel)).bottom, 8);
-    expect(inStage(tester, find.byType(ComposerPanel)).top - b.bottom, 8);
+    expect(inStage(tester, find.byType(ComposerPanel)).top - gripSize.height - b.bottom, 8);
     expect(stage.width - b.right, 80);
   });
 

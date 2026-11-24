@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../embed/app_profile.dart' show InputPoint;
 import '../embed/phrases.dart';
 import '../embed/tidy_mode.dart';
 import '../embed/voice_key_gate.dart';
@@ -26,7 +27,10 @@ class UiPrefs {
     this.autoSaveTraffic = true,
     this.inputHistory = true,
     this.keyBarMore = false,
-    this.keyBarSlim = false,
+    this.quickHiddenTerm = false,
+    this.quickHiddenApp = true,
+    this.quickAutoHide,
+    this.termComposerAt,
     this.phraseStrip = true,
     List<Phrase>? phrases,
     this.termFit = true,
@@ -62,8 +66,18 @@ class UiPrefs {
   /// 按键区 (iOS): the second row is open (`key_bar_more`). Missing or bad means closed.
   bool keyBarMore;
 
-  /// 按键区 (iOS): the bar is cut to Esc, ⇧Tab and ⊙ (`key_bar_slim`). Missing or bad means full.
-  bool keyBarSlim;
+  /// 快捷区 folded to its handle for text terminals and terminal apps (`quick_hidden_term`). An old
+  /// `key_bar_slim: true` reads as true; missing means shown.
+  bool quickHiddenTerm;
+
+  /// 快捷区 folded for every other app (`quick_hidden_app`). Missing means hidden.
+  bool quickHiddenApp;
+
+  /// 打字后自动收起 (`quick_auto_hide`): null (missing) means on for macOS/Linux, off for iOS.
+  bool? quickAutoHide;
+
+  /// Where the writing panel stands for every text terminal (`term_composer_at`); null is the default place.
+  InputPoint? termComposerAt;
 
   /// 显示常用语条 (`phrase_strip`, iOS): the 常用语 strip over the key bar. Missing or bad means on.
   bool phraseStrip;
@@ -153,6 +167,9 @@ class UiPrefs {
       final to = j['term_open'];
       final ta = j['term_app'];
       final tm = j['voice_tidy_mode'];
+      final qt = j['quick_hidden_term'];
+      final qa = j['quick_hidden_app'];
+      final qh = j['quick_auto_hide'];
       return UiPrefs(
         theme: RappTheme.values.firstWhere(
           (t) => t.name == name,
@@ -162,7 +179,10 @@ class UiPrefs {
         autoSaveTraffic: save is bool ? save : true,
         inputHistory: ih is bool ? ih : true,
         keyBarMore: j['key_bar_more'] == true,
-        keyBarSlim: j['key_bar_slim'] == true,
+        quickHiddenTerm: qt is bool ? qt : j['key_bar_slim'] == true,
+        quickHiddenApp: qa is bool ? qa : true,
+        quickAutoHide: qh is bool ? qh : null,
+        termComposerAt: InputPoint.fromJson(j['term_composer_at']),
         phraseStrip: j['phrase_strip'] != false,
         phrases: j['phrases'] is List
             ? [for (final e in j['phrases'] as List) ?Phrase.fromJson(e)]
@@ -213,7 +233,10 @@ class UiPrefs {
         'auto_save_traffic': autoSaveTraffic,
         'input_history': inputHistory,
         'key_bar_more': keyBarMore,
-        'key_bar_slim': keyBarSlim,
+        'quick_hidden_term': quickHiddenTerm,
+        'quick_hidden_app': quickHiddenApp,
+        if (quickAutoHide != null) 'quick_auto_hide': quickAutoHide,
+        if (termComposerAt != null) 'term_composer_at': termComposerAt!.toJson(),
         'phrase_strip': phraseStrip,
         'phrases': [for (final p in phrases) p.toJson()],
         'term_fit': termFit,

@@ -61,6 +61,8 @@ class DesktopVoice extends StatefulWidget {
 
 class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderStateMixin {
   late final VoiceHold _hold;
+  // Always shown: what it holds (the column, the hint or nothing) is built with the row.
+  final _portal = OverlayPortalController()..show();
   StreamSubscription<(Object, VoiceKeyPhase)>? _keys;
   final _editBox = GlobalKey();
   final _cancelBox = GlobalKey();
@@ -205,7 +207,7 @@ class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderSt
     if (e.$1 != _sid) return;
     switch (e.$2) {
       case VoiceKeyPhase.start:
-        if (_mouse || (!_hold.active && widget.session.composer.open)) return;
+        if (_mouse) return; // the text area open or not, as a mouse hold (and iOS)
         unawaited(_hold.start());
       case VoiceKeyPhase.release:
         _hold.finish(VoicePick.send);
@@ -268,55 +270,64 @@ class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderSt
       listenable: Listenable.merge([_hold, voice]),
       builder: (context, _) {
         final active = _hold.active;
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            if (active)
-              _column(context, reduced)
-            else if (_hold.hint != null)
-              voiceHint(_hold, maxWidth: math.max(0.0, widget.maxWidth - _leftClear)),
-            if (active || _hold.hint != null) const SizedBox(height: 8),
-            Row(
-              mainAxisSize: MainAxisSize.min,
+        final above = active
+            ? _column(context, reduced)
+            : _hold.hint != null
+            ? voiceHint(_hold, maxWidth: math.max(0.0, widget.maxWidth - _leftClear))
+            : null;
+        // The bubble, the targets and the hint stand 8 above the row's right end, in the overlay: the input block
+        // (drawn over the corner row) must not cover them (input-dock final review).
+        return OverlayPortal.overlayChildLayoutBuilder(
+          controller: _portal,
+          overlayChildBuilder: (context, info) {
+            if (above == null) return const SizedBox.shrink();
+            final corner = MatrixUtils.transformPoint(info.childPaintTransform, Offset(info.childSize.width, 0));
+            return Stack(
               children: [
-                AnimatedOpacity(
-                  opacity: active ? 0 : 1,
-                  duration: reduced ? Duration.zero : _fade,
-                  child: IgnorePointer(
-                    ignoring: active,
-                    child: Listener(
-                      onPointerDown: (_) => _state.holdForPanel(widget.session),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [...widget.others, const SizedBox(width: 8)],
-                      ),
-                    ),
-                  ),
-                ),
-                Listener(
-                  onPointerDown: _down,
-                  onPointerMove: _move,
-                  onPointerUp: _lift,
-                  onPointerCancel: _lift,
-                  child: Tooltip(
-                    message: '按住说话',
-                    triggerMode: TooltipTriggerMode.manual,
-                    child: RappButton.secondary(
-                      key: const Key('voice-hold'),
-                      label: '按住说话',
-                      semanticLabel: '语音',
-                      icon: _hold.holding ? Icons.mic : Icons.mic_none,
-                      onPicture: true,
-                      seeThrough: true,
-                      // A no-op keeps the enabled look; the Listener does the work.
-                      onPressed: () {},
-                    ),
-                  ),
+                Positioned(
+                  right: info.overlaySize.width - corner.dx,
+                  bottom: info.overlaySize.height - corner.dy + 8,
+                  child: KeyedSubtree(key: const Key('voice-above'), child: above),
                 ),
               ],
-            ),
-          ],
+            );
+          },
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AnimatedOpacity(
+                opacity: active ? 0 : 1,
+                duration: reduced ? Duration.zero : _fade,
+                child: IgnorePointer(
+                  ignoring: active,
+                  child: Listener(
+                    onPointerDown: (_) => _state.holdForPanel(widget.session),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [...widget.others, const SizedBox(width: 8)]),
+                  ),
+                ),
+              ),
+              Listener(
+                onPointerDown: _down,
+                onPointerMove: _move,
+                onPointerUp: _lift,
+                onPointerCancel: _lift,
+                child: Tooltip(
+                  message: '按住说话',
+                  triggerMode: TooltipTriggerMode.manual,
+                  child: RappButton.secondary(
+                    key: const Key('voice-hold'),
+                    label: '按住说话',
+                    semanticLabel: '语音',
+                    icon: _hold.holding ? Icons.mic : Icons.mic_none,
+                    onPicture: true,
+                    seeThrough: true,
+                    // A no-op keeps the enabled look; the Listener does the work.
+                    onPressed: () {},
+                  ),
+                ),
+              ),
+            ],
+          ),
         );
       },
     );

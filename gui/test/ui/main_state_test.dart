@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' show Rect, Size;
 
+import 'package:flutter/foundation.dart' show TargetPlatform, debugDefaultTargetPlatformOverride;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:rapp/embed/app_profile.dart';
@@ -55,6 +56,38 @@ void main() {
   tearDown(() {
     Process.runSync('chmod', ['755', tmp.path]);
     tmp.deleteSync(recursive: true);
+  });
+
+  test('quickAutoHide: null pref is on for macOS, off for iOS', () {
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    expect(s.quickAutoHide, isTrue);
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    expect(s.quickAutoHide, isFalse);
+    s.setQuickAutoHide(true);
+    expect(s.quickAutoHide, isTrue);
+    expect(s.prefs.quickAutoHide, isTrue);
+  });
+
+  test('setQuickHidden keeps the two kinds apart and saves', () {
+    s.setQuickHidden(term: true, hidden: true);
+    expect([s.prefs.quickHiddenTerm, s.prefs.quickHiddenApp], [true, true]);
+    s.setQuickHidden(term: false, hidden: false);
+    expect([s.prefs.quickHiddenTerm, s.prefs.quickHiddenApp], [true, false]);
+  });
+
+  test('placeComposer on a text terminal writes term_composer_at; composerAtOf reads it for every terminal', () {
+    final term = FakeTermSessionPort()..seed(5)..seed(6);
+    final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), termPort: term);
+    addTearDown(st.dispose);
+    const p = InputPoint(0.3, 120, fromBottom: true);
+    final a = RemoteSession(5, 'sh'), b = RemoteSession(6, 'zsh');
+    expect(st.composerAtOf(a), isNull);
+    st.placeComposer(a, p);
+    expect(st.prefs.termComposerAt, p);
+    expect(st.composerAtOf(b), p);
+    st.placeComposer(b, null);
+    expect(st.composerAtOf(a), isNull);
   });
 
   test('relocate reads the workspace of the new root', () {
@@ -711,6 +744,8 @@ void main() {
         expect(st.profiles.mine, isEmpty);
         st.placeComposer(st.currentRemote!, p);
         expect(st.currentRemote!.profile.composerAt, p);
+        expect(st.composerAtOf(st.currentRemote!), p); // an app: the profile, not the terminal place
+        expect(st.prefs.termComposerAt, isNull);
         st.placeComposer(st.currentRemote!, null);
         expect(st.currentRemote!.profile.composerAt, isNull);
       }, app: chrome, profiles: store());

@@ -1,11 +1,9 @@
-// The writing panel over an app window (floating-composer spec §4): it floats over a still
-// picture where the app's `composerAt` says, and a drag on it moves it. Terminals keep the
-// bottom-centre panel and the lift (composer_panel.dart).
+// The input dock's block (floating-composer spec §4, input-dock spec): it floats over a still picture where the
+// session's `composerAt` says, and a drag on it moves it.
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/rendering.dart' show RenderMetaData;
 
 import '../ui/tokens.dart';
@@ -20,8 +18,12 @@ const composerMargin = 8.0;
 /// The grip's hit area (spec: at least 48×20).
 const gripSize = Size(48, 20);
 
-/// The room the collapse × takes in the grip row, so the grip stays centred.
-const _closeSize = Size(28, 20);
+/// The side handle's square (the quick area's handle, Task 5): it sits [_handleGap] beside the block.
+const quickHandleSize = 28.0;
+const _handleGap = 8.0;
+
+/// Wrap a subtree in `MetaData(metaData: composerNoDrag)`: neither a drag nor a held touch starts a move there.
+final composerNoDrag = Object();
 
 /// Marks the panel's text area (a [MetaData] around the editor): there a mouse selects text and a
 /// touch scrolls or selects as usual, and only a touch held still ([_holdToMove]) moves the panel.
@@ -41,12 +43,12 @@ const _dragDevices = {
   PointerDeviceKind.unknown,
 };
 
-bool _onText(PointerEvent e) {
+bool _onMeta(PointerEvent e, Object marker) {
   final r = HitTestResult();
   WidgetsBinding.instance.hitTestInView(r, e.position, e.viewId);
   return r.path.any((h) {
     final target = h.target;
-    return target is RenderMetaData && identical(target.metaData, composerTextArea);
+    return target is RenderMetaData && identical(target.metaData, marker);
   });
 }
 
@@ -59,7 +61,7 @@ class PanelPan extends PanGestureRecognizer {
   PanelPan({super.debugOwner}) : super(supportedDevices: _dragDevices);
 
   @override
-  bool isPointerAllowed(PointerEvent event) => super.isPointerAllowed(event) && !_onText(event);
+  bool isPointerAllowed(PointerEvent event) => super.isPointerAllowed(event) && !_onMeta(event, composerTextArea) && !_onMeta(event, composerNoDrag);
 }
 
 /// A touch held still on the text, then moved.
@@ -71,7 +73,7 @@ class _TextHold extends LongPressGestureRecognizer {
         );
 
   @override
-  bool isPointerAllowed(PointerDownEvent event) => super.isPointerAllowed(event) && _onText(event);
+  bool isPointerAllowed(PointerDownEvent event) => super.isPointerAllowed(event) && _onMeta(event, composerTextArea) && !_onMeta(event, composerNoDrag);
 }
 
 /// Top-left of a [panel]-sized box whose bottom centre is [bc], kept [composerMargin] inside
@@ -98,6 +100,10 @@ class FloatingComposer extends StatefulWidget {
   const FloatingComposer(
       {super.key,
       required this.session,
+      required this.at,
+      this.defaultAt = defaultComposerAt,
+      this.grip = true,
+      this.handle,
       required this.onPlace,
       required this.child,
       this.scale = 1,
@@ -118,6 +124,19 @@ class FloatingComposer extends StatefulWidget {
   final double keyboard;
 
   final RemoteSession session;
+
+  /// Where the block's bottom centre is saved; null: [defaultAt].
+  final InputPoint? at;
+  final InputPoint defaultAt;
+
+  /// The grip row above the block (drag handle, double-tap reset). False: the block is only [child].
+  final bool grip;
+
+  /// A widget beside the block, bottoms level, 8 off its right edge (its left edge when that would leave the
+  /// stage; 8 above the block, right edges level, when neither side has room, or 8 below it when the block is too
+  /// near the stage's top for that). Never over the block. Not part of [place]'s rect, and outside the drag.
+  final Widget? handle;
+
   final ValueChanged<InputPoint?> onPlace;
   final Widget child;
 
@@ -162,13 +181,13 @@ class _FloatingComposerState extends State<FloatingComposer> with SingleTickerPr
   bool _hover = false;
 
   /// A touch landed on the panel and no tap elsewhere since: a touch screen has no hover, so this
-  /// shows the bar (and, off iOS, the ×) instead.
+  /// shows the bar instead.
   bool _touched = false;
 
   /// Where the held touch was last, for its moves.
   Offset? _held;
 
-  InputPoint get _at => widget.session.profile.composerAt ?? defaultComposerAt;
+  InputPoint get _at => widget.at ?? widget.defaultAt;
 
   Size get _panel => _box.currentContext?.size ?? Size.zero;
 
@@ -211,8 +230,9 @@ class _FloatingComposerState extends State<FloatingComposer> with SingleTickerPr
     setState(() => _drag = null);
     final pull = widget.onPullClose;
     if (pull != null && _over > 0 && (_over > pullCloseDistance || (v?.pixelsPerSecond.dy ?? 0) > pullCloseSpeed)) {
-      // The dock takes it from where the panel is.
+      // The text area folds; the block (the 快捷区 stays in it) goes back up from where the finger left it.
       pull();
+      _springBack();
       return;
     }
     _springBack();
@@ -239,9 +259,8 @@ class _FloatingComposerState extends State<FloatingComposer> with SingleTickerPr
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
-    final shown = (_hover || _touched) && _drag == null;
     // The drag itself is the panel's (below); the grip shows where to take it, and resets on a double-tap.
-    final grip = GestureDetector(
+    final gripRow = !widget.grip ? null : GestureDetector(
       key: const Key('composer-grip'),
       behavior: HitTestBehavior.opaque,
       onDoubleTap: _reset,
@@ -273,126 +292,75 @@ class _FloatingComposerState extends State<FloatingComposer> with SingleTickerPr
         ),
       ),
     );
-    // A small × right beside the grip: collapses the panel (as Esc does), keeping the text.
-    // Shown with the bar, and only pressable while shown, so an unseen one never takes a click.
-    // Its hit area is control-height square, hung from the panel's top edge (a hit outside the panel's own
-    // bounds would never arrive) and reaching down into the body; the × is drawn at the top of it, level
-    // with the grip, so the grip row stays gripSize.height tall.
-    final side = controlHeightOf(context);
-    final ios = defaultTargetPlatform == TargetPlatform.iOS;
-    final close = ios ? null : AnimatedOpacity(
-      opacity: shown ? 1 : 0,
-      duration: const Duration(milliseconds: 120),
-      child: IgnorePointer(
-        ignoring: !shown,
-        child: Tooltip(
-          message: '收起（Esc）',
-          child: Semantics(
-            button: true,
-            label: '收起写作面板',
-            excludeSemantics: true,
-            child: Material(
-              type: MaterialType.transparency,
-              child: InkWell(
-                key: const Key('composer-grip-close'),
-                onTap: widget.session.composer.collapse,
-                borderRadius: BorderRadius.circular(t.r),
-                child: SizedBox.square(
-                  dimension: side,
-                  child: Align(
-                    alignment: Alignment.topCenter,
-                    child: SizedBox(height: gripSize.height, child: Center(child: Icon(Icons.close, size: 14, color: t.muted))),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
     return LayoutBuilder(builder: (context, c) {
       _stage = c.biggest;
-      return CustomSingleChildLayout(
-        delegate: _Place(_drag ?? _at.inContent(_stage), panelWidth(_stage.width, widget.scale), widget.keyboard),
-        child: Transform.translate(
-          offset: Offset(0, _over),
-          child: _placed(TapRegion(
-          onTapOutside: (_) {
-            if (_touched) setState(() => _touched = false);
-          },
-          child: Listener(
-            onPointerDown: (e) {
-              if (!_touched && e.kind != PointerDeviceKind.mouse && e.kind != PointerDeviceKind.trackpad) {
-                setState(() => _touched = true);
-              }
-            },
-            child: MouseRegion(
-              onEnter: (_) => setState(() => _hover = true),
-              onExit: (_) => setState(() => _hover = false),
-              child: RawGestureDetector(
-                gestures: {
-                  PanelPan: GestureRecognizerFactoryWithHandlers<PanelPan>(
-                    () => PanelPan(debugOwner: this),
-                    (r) => r
-                      ..dragStartBehavior = DragStartBehavior.down
-                      ..onStart = ((_) => _start())
-                      ..onUpdate = ((d) => _move(d.delta))
-                      ..onEnd = ((d) => _end(d.velocity))
-                      ..onCancel = _cancel,
-                  ),
-                  _TextHold: GestureRecognizerFactoryWithHandlers<_TextHold>(
-                    () => _TextHold(debugOwner: this),
-                    (r) => r
-                      ..onLongPressStart = (d) {
-                        _held = d.globalPosition;
-                        _start();
-                      }
-                      ..onLongPressMoveUpdate = (d) {
-                        final from = _held ?? d.globalPosition;
-                        _held = d.globalPosition;
-                        _move(d.globalPosition - from);
-                      }
-                      ..onLongPressEnd = ((d) => _end(d.velocity))
-                      ..onLongPressCancel = _cancel,
-                  ),
+      final handle = widget.handle;
+      return CustomMultiChildLayout(
+        delegate: _Place(_drag ?? _at.inContent(_stage), panelWidth(_stage.width, widget.scale), widget.keyboard,
+            handle != null),
+        children: [
+          LayoutId(
+            id: _block,
+            child: Transform.translate(
+              offset: Offset(0, _over),
+              child: _placed(TapRegion(
+                onTapOutside: (_) {
+                  if (_touched) setState(() => _touched = false);
                 },
-                child: Stack(
-                  children: [
-                    Column(
-                      key: _box,
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        // The grip centred, with a blank each side as wide as the × (keeping the grip centred).
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [SizedBox.fromSize(size: _closeSize), grip, SizedBox.fromSize(size: _closeSize)],
+                child: Listener(
+                  onPointerDown: (e) {
+                    if (!_touched && e.kind != PointerDeviceKind.mouse && e.kind != PointerDeviceKind.trackpad) {
+                      setState(() => _touched = true);
+                    }
+                  },
+                  child: MouseRegion(
+                    onEnter: (_) => setState(() => _hover = true),
+                    onExit: (_) => setState(() => _hover = false),
+                    child: RawGestureDetector(
+                      gestures: {
+                        PanelPan: GestureRecognizerFactoryWithHandlers<PanelPan>(
+                          () => PanelPan(debugOwner: this),
+                          (r) => r
+                            ..dragStartBehavior = DragStartBehavior.down
+                            ..onStart = ((_) => _start())
+                            ..onUpdate = ((d) => _move(d.delta))
+                            ..onEnd = ((d) => _end(d.velocity))
+                            ..onCancel = _cancel,
                         ),
-                        Flexible(child: widget.child),
-                      ],
-                    ),
-                    // The × over the blank right of the grip: a row [76 blank, hit area] centred puts the hit
-                    // area's middle 38 right of the panel's middle, where the blank's middle is.
-                    // None on iOS: a pull down collapses there.
-                    if (!ios)
-                      Positioned(
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            SizedBox(width: _closeSize.width + gripSize.width),
-                            close!,
-                          ],
+                        _TextHold: GestureRecognizerFactoryWithHandlers<_TextHold>(
+                          () => _TextHold(debugOwner: this),
+                          (r) => r
+                            ..onLongPressStart = (d) {
+                              _held = d.globalPosition;
+                              _start();
+                            }
+                            ..onLongPressMoveUpdate = (d) {
+                              final from = _held ?? d.globalPosition;
+                              _held = d.globalPosition;
+                              _move(d.globalPosition - from);
+                            }
+                            ..onLongPressEnd = ((d) => _end(d.velocity))
+                            ..onLongPressCancel = _cancel,
                         ),
+                      },
+                      child: Column(
+                        key: _box,
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (gripRow != null) Center(child: gripRow),
+                          Flexible(child: widget.child),
+                        ],
                       ),
-                  ],
+                    ),
+                  ),
                 ),
-              ),
+              )),
             ),
           ),
-        ))),
+          if (handle != null)
+            LayoutId(id: _handle, child: Transform.translate(offset: Offset(0, _over), child: handle)),
+        ],
       );
     });
   }
@@ -400,21 +368,44 @@ class _FloatingComposerState extends State<FloatingComposer> with SingleTickerPr
   Widget _placed(Widget w) => widget.place == null ? w : PanelPlace(place: widget.place!, child: w);
 }
 
-class _Place extends SingleChildLayoutDelegate {
-  _Place(this.bc, this.width, this.keyboard);
+const _block = #block;
+const _handle = #handle;
+
+class _Place extends MultiChildLayoutDelegate {
+  _Place(this.bc, this.width, this.keyboard, this.hasHandle);
 
   final Offset bc;
   final double width;
   final double keyboard;
-
-  // Only the room above the keyboard: a taller panel would reach under it.
-  @override
-  BoxConstraints getConstraintsForChild(BoxConstraints c) => BoxConstraints(
-      minWidth: width, maxWidth: width, maxHeight: math.max(0, c.maxHeight - 2 * composerMargin - keyboard));
+  final bool hasHandle;
 
   @override
-  Offset getPositionForChild(Size size, Size child) => _topLeftOf(bc, size, child, keyboard);
+  void performLayout(Size size) {
+    // Only the room above the keyboard: a taller panel would reach under it.
+    final block = layoutChild(
+        _block,
+        BoxConstraints(
+            minWidth: width, maxWidth: width, maxHeight: math.max(0, size.height - 2 * composerMargin - keyboard)));
+    final at = _topLeftOf(bc, size, block, keyboard);
+    positionChild(_block, at);
+    if (!hasHandle) return;
+    final h = layoutChild(_handle, const BoxConstraints());
+    var left = at.dx + block.width + _handleGap;
+    var top = at.dy + block.height - h.height;
+    if (left + h.width > size.width - composerMargin) left = at.dx - _handleGap - h.width;
+    if (left < composerMargin) {
+      // No room on either side (a block near the stage's width): above it, right edges level; below it when
+      // the block stands too near the stage's top for that. Never over the block.
+      left = at.dx + block.width - h.width;
+      top = at.dy - _handleGap - h.height;
+      if (top < 0) top = at.dy + block.height + _handleGap;
+    }
+    left = math.max(0, math.min(left, size.width - h.width));
+    top = math.max(0, math.min(top, size.height - h.height));
+    positionChild(_handle, Offset(left, top));
+  }
 
   @override
-  bool shouldRelayout(_Place old) => old.bc != bc || old.width != width || old.keyboard != keyboard;
+  bool shouldRelayout(_Place old) =>
+      old.bc != bc || old.width != width || old.keyboard != keyboard || old.hasHandle != hasHandle;
 }

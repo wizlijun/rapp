@@ -737,13 +737,13 @@ class MainState extends ChangeNotifier {
   /// What the runner was last told about [pictureFocused]'s voice.
   bool _voiceSent = false;
 
-  /// Hold-to-talk on [sid]'s picture (macOS): an app window on the stage, with no writing panel open to take the
-  /// voice (and the keys) itself.
+  /// Hold-to-talk on [sid]'s picture (macOS, Linux): an app window on the stage. The text area open or not, as a
+  /// mouse hold on 语音 (and iOS): its editor taking the keys blurs the picture, which keeps the gate off them.
   bool _voiceFor(Object sid) {
     if ((defaultTargetPlatform != TargetPlatform.macOS && defaultTargetPlatform != TargetPlatform.linux) || voice == null) return false;
     final rs = remote[sid];
     if (rs == null || rs.detached || termPort?.owns(sid) == true) return false;
-    return rs.composerAllowed && !rs.composer.open;
+    return rs.composerAllowed;
   }
 
   void _sendFocus(Object sid) {
@@ -2653,9 +2653,19 @@ class MainState extends ChangeNotifier {
   /// The writing panel of [rs] was dragged to [p] (null: back to the default); kept for its app.
   /// A session of an unknown app has nowhere to keep it.
   void placeComposer(RemoteSession rs, InputPoint? p) {
+    if (termPort?.owns(rs.sid) == true) {
+      prefs.termComposerAt = p;
+      _save();
+      notifyListeners();
+      return;
+    }
     if (rs.appId.isEmpty) return;
     profiles.setComposerAt(rs.appId, rs.appName, p);
   }
+
+  /// Where the writing panel of [rs] stands: one shared place for every text terminal, the app's own otherwise.
+  InputPoint? composerAtOf(RemoteSession rs) =>
+      termPort?.owns(rs.sid) == true ? prefs.termComposerAt : rs.profile.composerAt;
 
   /// The ＋ menu's 「直接回车且隐藏」 for [rs]'s app; a session without an app id has no profile to keep it in.
   void setAfterSend(RemoteSession rs, AfterSend a) {
@@ -3248,10 +3258,24 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
-  /// 按键区's ⊙: the bar cut to a narrow strip or whole again; saved.
-  void setKeyBarSlim(bool v) {
-    prefs.keyBarSlim = v;
+  /// 打字后自动收起: the pref, or on everywhere but iOS when unset.
+  bool get quickAutoHide => prefs.quickAutoHide ?? defaultTargetPlatform != TargetPlatform.iOS;
+
+  void setQuickAutoHide(bool v) {
+    prefs.quickAutoHide = v;
     _save();
+    notifyListeners();
+  }
+
+  /// 快捷区 folded or shown for the terminal kind ([term]) or for other apps; saved.
+  void setQuickHidden({required bool term, required bool hidden}) {
+    if (term) {
+      prefs.quickHiddenTerm = hidden;
+    } else {
+      prefs.quickHiddenApp = hidden;
+    }
+    _save();
+    notifyListeners();
   }
 
   /// 显示常用语条: the 常用语 strip over the key bar on or off; saved.

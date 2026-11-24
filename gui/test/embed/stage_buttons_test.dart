@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -6,7 +7,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/embed/geometry.dart';
+import 'package:rapp/embed/input_dock.dart' show desktopComposerAt;
 import 'package:rapp/embed/key_bar.dart';
+import 'package:rapp/embed/panel_place.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/stage_buttons.dart';
@@ -66,6 +69,15 @@ void main() {
       width: stage.width,
       height: stage.height,
       child: Stack(children: composerLayer(state: es, session: rs, port: p ?? port, keyboard: keyboard, editor: FlutterEditor.new))));
+
+  // rs as a text terminal: the state's terminal port owns it, so it is of the terminal kind (its 快捷区 shows).
+  FakeTermSessionPort termState() {
+    final tport = FakeTermSessionPort()..seed(1);
+    es.dispose();
+    es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, termPort: tport);
+    addTearDown(tport.dispose);
+    return tport;
+  }
 
   void big(WidgetTester tester) {
     tester.view.physicalSize = const Size(1200, 900);
@@ -178,43 +190,36 @@ void main() {
   });
 
   for (final platform in [TargetPlatform.macOS, TargetPlatform.linux]) {
-    iosTest('${platform.name}: terminal layer shows KeyBar full width at the bottom; 输入 sits above it', (tester) async {
+    iosTest('${platform.name}: terminal: the 快捷区 stands on the desktop anchor, panel wide; 输入 keeps its corner', (tester) async {
       debugDefaultTargetPlatformOverride = platform;
       big(tester);
-      final tport = FakeTermSessionPort();
-      addTearDown(tport.dispose);
+      final tport = termState();
       await tester.pumpWidget(layer(p: tport));
+      await tester.pump();
       final bar = inStage(tester, find.byType(KeyBar));
-      expect(bar.width, stage.width);
-      expect(bar.bottom, stage.height);
-      expect(bar.height, keyBarHeightOf(es, rs, stage.width));
-      expect(bar.top - inStage(tester, open).bottom, 12);
-      // ⊙: three keys; 输入 still stands on the bar.
-      es.setKeyBarSlim(true);
-      await tester.pump();
-      expect(find.byKey(const Key('bar-enter')), findsNothing);
-      expect(find.byKey(const Key('bar-slim')), findsOneWidget);
-      final slim = inStage(tester, find.byType(KeyBar));
-      expect(slim.top - inStage(tester, open).bottom, 12);
-      rs.composer.open = true;
-      await tester.pump();
-      expect(slim.top - inStage(tester, find.byType(ComposerPanel)).bottom, 8);
+      expect(bar.width, panelWidth(stage.width));
+      expect(bar.center.dx, stage.width / 2);
+      expect(stage.height - bar.bottom, desktopComposerAt(controlHeightFor(platform)).dy);
+      expect(bar.height, keyBarHeightOf(es, rs));
+      expect(stage.height - inStage(tester, open).bottom, 12);
     });
 
-    iosTest('${platform.name}: app session: no bar while closed, bar while panel open', (tester) async {
+    iosTest('${platform.name}: app session: only the handle while closed; the text area on the anchor while open', (tester) async {
       debugDefaultTargetPlatformOverride = platform;
       big(tester);
       await tester.pumpWidget(layer());
+      await tester.pump();
       expect(find.byType(KeyBar), findsNothing);
+      expect(find.byKey(const Key('quick-handle')), findsOneWidget);
       final closed = inStage(tester, open);
       rs.composer.open = true;
-      await tester.pump();
-      final bar = inStage(tester, find.byType(KeyBar));
-      expect(bar.bottom, stage.height);
-      expect(bar.top - inStage(tester, find.byType(ComposerPanel)).bottom, 8);
-      rs.composer.open = false;
-      await tester.pump();
+      await tester.pumpAndSettle();
       expect(find.byType(KeyBar), findsNothing);
+      final panel = inStage(tester, find.byType(ComposerPanel));
+      expect(stage.height - panel.bottom, desktopComposerAt(controlHeightFor(platform)).dy);
+      rs.composer.open = false;
+      await tester.pumpAndSettle();
+      expect(find.byType(ComposerPanel), findsNothing);
       expect(inStage(tester, open), closed);
     });
 
@@ -271,17 +276,23 @@ void main() {
     expect(stage.height - inStage(tester, open).bottom, 312);
   });
 
-  iosTest('terminal: the stack keeps its 88 (clear of the key bar); with the keyboard up, 12 above the bar on it', (tester) async {
+  iosTest('terminal: the stack stands 8 above the 快捷区; with the keyboard up, both ride on it', (tester) async {
     big(tester);
-    final tport = FakeTermSessionPort();
-    addTearDown(tport.dispose);
+    final tport = termState();
     await tester.pumpWidget(layer(p: tport));
-    final bar = keyBarHeightOf(es, rs, stage.width);
-    expect(stage.height - inStage(tester, find.byType(KeyBar)).bottom, 0);
-    expect(stage.height - inStage(tester, open).bottom, 88);
+    await tester.pump();
+    await tester.pump(); // the block's place reaches the stack a frame later
+    // The stack's bottom (its lowest button, 语音 here) stands 8 above the block's top, grip included.
+    double stack() => stage.height - inStage(tester, find.byType(StageButtons)).bottom;
+    double blockTop() => stage.height - panelPlaceOf(rs).value!.top;
+    expect(stage.height - inStage(tester, find.byType(KeyBar)).bottom, 8);
+    expect(blockTop(), greaterThan(8 + keyBarHeightOf(es, rs)));
+    expect(stack(), math.max(stageButtonsUp, blockTop() + 8));
     await tester.pumpWidget(layer(p: tport, keyboard: 300));
-    expect(stage.height - inStage(tester, find.byType(KeyBar)).bottom, 300);
-    expect(stage.height - inStage(tester, open).bottom, 300 + bar + 12);
+    await tester.pump();
+    await tester.pump();
+    expect(stage.height - inStage(tester, find.byType(KeyBar)).bottom, 308);
+    expect(stack(), blockTop() + 8);
   });
 
   iosTest('hidden: 输入 fades out and ignores taps; dragging is off', (tester) async {

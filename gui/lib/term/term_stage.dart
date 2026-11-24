@@ -200,13 +200,12 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   int _gateArmedAt = 0;
   StreamSubscription<Object>? _voiceEnds;
 
-  /// A hotkey press may start voice now: macOS, a voice engine, the panel allowed and not open (it takes the
-  /// voice and the keys itself), and the stage has the keyboard.
+  /// A hotkey press may start voice now: macOS or Linux, a voice engine, the panel allowed (open or not), and the
+  /// stage has the keyboard.
   bool get _voiceReady =>
       (_mac || defaultTargetPlatform == TargetPlatform.linux) &&
       widget.state.voice != null &&
       widget.session.composerAllowed &&
-      !widget.session.composer.open &&
       _focus.hasFocus;
 
   bool get _gateOn => (_mac || defaultTargetPlatform == TargetPlatform.linux) && widget.state.voice != null;
@@ -217,6 +216,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     _fling = createTicker(_tick);
     widget.session.addListener(_onSession);
     widget.session.termCopy = _copy;
+    widget.session.termTakesKey = _takesKey;
     _focus.addListener(_onFocus);
     HardwareKeyboard.instance.addHandler(_onKeys);
     _focusSeen = widget.state.termFocusTick;
@@ -241,6 +241,8 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       widget.session.addListener(_onSession);
       if (old.session.termCopy == _copy) old.session.termCopy = null;
       widget.session.termCopy = _copy;
+      if (old.session.termTakesKey == _takesKey) old.session.termTakesKey = null;
+      widget.session.termTakesKey = _takesKey;
       _focusIfWanted();
       // The element is reused for the new session: a hold of the hotkey was on the old one, and ends there.
       _gateTimer?.cancel();
@@ -264,6 +266,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   void dispose() {
     widget.session.removeListener(_onSession);
     if (widget.session.termCopy == _copy) widget.session.termCopy = null;
+    if (widget.session.termTakesKey == _takesKey) widget.session.termTakesKey = null;
     widget.state.removeListener(_onState);
     HardwareKeyboard.instance.removeHandler(_onKeys);
     _voiceEnds?.cancel();
@@ -364,6 +367,18 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     _noteTimer = Timer(_noteFor, () {
       if (mounted) setState(() => _note = null);
     });
+  }
+
+  /// The stage has the keyboard and [e] is the terminal's: not the voice hotkey's own down, nor any key while a
+  /// hotkey hold runs or has been decided (Esc, Tab and the rest stay the hold's until the hotkey's up, §5.6). The
+  /// key bar's 打字后自动收起 asks, through [RemoteSession.termTakesKey], before [_onKey] feeds the gate.
+  bool _takesKey(KeyEvent e) {
+    if (!_focus.hasFocus) return false;
+    if (!_gateOn) return true;
+    final code = macKeyCode(e.physicalKey);
+    if (code == null) return true;
+    _syncHotkey();
+    return !_gate.keeps(code, macFlags(HardwareKeyboard.instance), repeat: e is KeyRepeatEvent, ready: _voiceReady);
   }
 
   void _onFocus() {
