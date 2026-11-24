@@ -561,19 +561,22 @@ List<Widget> composerLayer(
   ];
 }
 
-/// Off iOS, the stage's corner row: 输入 at the bottom right, [rowRight] in and 12 over the [keyboard], with 还原 and
-/// the upload strip beside it; 语音 its right end on macOS and Linux. It stays where it is whatever the block does.
+/// Off iOS, the stage's corner row: 输入 (收起 while the text area is open) at the bottom right, [rowRight] in and 12
+/// over the [keyboard], with 还原 and the upload strip beside it; 语音 its right end on macOS and Linux. It stays where
+/// it is whatever the block does.
 Widget _cornerRow(BuildContext context, MainState state, RemoteSession session, SessionPort port, double keyboard,
     double rowRight, Size stage) {
   final transfer = session.transferStatus;
   final button = session.composerAllowed;
+  final open = session.composer.open && button;
   final zoomed = session.currentZoomed && !session.composer.open;
-  // An open panel hides it; a disallowed one is hidden, so the strip shows here.
+  // A disallowed panel hides 输入, so the strip shows here.
   // 还原 shows even where 输入 is not allowed: else a zoomed such session could only be pinched back.
-  if ((session.composer.open && button) || (transfer == null && !button && !zoomed)) return const SizedBox.shrink();
+  if (transfer == null && !button && !zoomed) return const SizedBox.shrink();
   final t = RappTokens.of(context);
   final items = <Widget>[
-    if (transfer != null) ...[
+    // Open, the panel's hint line carries the upload with its own 取消.
+    if (transfer != null && !open) ...[
       DecoratedBox(
         decoration: t.floatBox(),
         child: Padding(
@@ -597,15 +600,17 @@ Widget _cornerRow(BuildContext context, MainState state, RemoteSession session, 
       ),
       if (button) const SizedBox(width: 8),
     ],
+    // 输入 and 收起 are one button, always in its corner: it folds the text area only.
     if (button)
       RappButton.secondary(
         key: const Key('composer-open'),
-        label: '输入',
-        semanticLabel: '输入',
-        icon: Icons.keyboard_outlined,
+        label: open ? '收起' : '输入',
+        semanticLabel: open ? '收起' : '输入',
+        icon: open ? Icons.keyboard_hide_outlined : Icons.keyboard_outlined,
         onPicture: true,
         seeThrough: true,
-        onPressed: () => session.composer.open = true,
+        active: open,
+        onPressed: open ? session.composer.collapse : () => session.composer.open = true,
       ),
   ];
   // On the Mac the voice button is the row's right end; the rest fades while it holds, and it blurs the
@@ -690,9 +695,9 @@ Widget _iosStack(BuildContext context, MainState state, RemoteSession session, S
   );
 }
 
-/// Where [VoiceTidyCard] stands. Desktop: right-aligned with the stage row, just above it; with the panel open,
-/// above the panel and right-aligned with it (below it, or the row's corner, when there is no room). iOS: on the
-/// stack's line above the stack; with the panel open, above 语音 (which stands above the panel).
+/// Where [VoiceTidyCard] stands. Desktop: above the input block (text area, quick area or both) and right-aligned
+/// with it, 8 up; below it when there is no room above; in the corner above the row when there is no block (only the
+/// handle). iOS: 12 above the stack, which stands above the block.
 class _TidyLayer extends StatelessWidget {
   const _TidyLayer(
       {required this.state,
@@ -743,10 +748,9 @@ class _TidyLayer extends StatelessWidget {
 
   Offset _desktop(Size stage, Size card, double control) {
     final base = 12 + keyboard;
-    final corner = Offset(stage.width - rowRight - card.width, stage.height - base - card.height);
-    if (!_open) return corner.translate(0, -(control + 8));
+    final corner = Offset(stage.width - rowRight - card.width, stage.height - base - card.height - (control + 8));
     final p = panelPlaceOf(session).value;
-    if (p == null) return corner;
+    if (p == null || p.height == 0) return corner;
     final x = p.right - card.width;
     if (p.top - 8 - card.height >= 8) return Offset(x, p.top - 8 - card.height);
     if (p.bottom + 8 + card.height <= stage.height - 8) return Offset(x, p.bottom + 8);
@@ -759,9 +763,9 @@ class _TidyLayer extends StatelessWidget {
     // The stack's top, as InputDock puts it.
     final upright = stage.height > stage.width;
     final voice = state.voice != null;
-    final button = session.composerAllowed;
-    final n = (button && voice ? 1 : 0) + (button ? 1 : 0) + (session.currentZoomed ? 1 : 0);
-    final h = _open ? openStackHeight(upright, voice) : closedStackHeight(buttons: n, upright: upright);
+    final h = _open
+        ? openStackHeight(upright, voice)
+        : closedStackHeight(buttons: stackButtonCount(session, voice: voice), upright: upright);
     final bottom =
         stackBottomOf(stage: stage, block: panelPlaceOf(session).value, keyboard: keyboard, stackHeight: h) + h + 12;
     return Offset(x, stage.height - bottom - card.height);

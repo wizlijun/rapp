@@ -14,11 +14,15 @@ import 'package:rapp/embed/geometry.dart';
 import 'package:rapp/embed/input_dock.dart' show desktopComposerAt, dockMove;
 import 'package:rapp/embed/key_bar.dart';
 import 'package:rapp/embed/modifier_latch.dart';
+import 'package:rapp/embed/panel_place.dart';
 import 'package:rapp/embed/picture.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/history/history_list.dart';
+import 'package:rapp/embed/voice_ring.dart' show VoicePick;
+import 'package:rapp/embed/voice_tidy_card.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/llm_api.dart';
 import 'package:rapp/pages/phrases_page.dart';
 import 'package:rapp/ui/controls.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -1160,7 +1164,7 @@ void main() {
       expect(sent.last.$2['window'], 0);
     });
 
-    testWidgets('hidden while the writing panel is open', (tester) async {
+    testWidgets('还原 hides while the text area is open', (tester) async {
       zoom();
       await tester.pumpWidget(layerFor(zport));
       expect(find.byKey(const Key('zoom-reset')), findsOneWidget);
@@ -2054,4 +2058,170 @@ void main() {
       expect(find.text('写给 Safari'), findsNothing);
     });
   });
+
+  group('stage buttons and the tidy card', () {
+    late _Api api;
+    late RemoteSession s;
+    const stage = Size(1000, 700);
+    const long = '嗯那个我门明天下午三点开会';
+    final toggle = find.byKey(const Key('composer-open'));
+    final card = find.byType(VoiceTidyCard);
+    final control = controlHeightFor(TargetPlatform.macOS);
+
+    void platformTest(TargetPlatform p, String name, Future<void> Function(WidgetTester) body) =>
+        testWidgets('${p.name}: $name', (tester) async {
+          debugDefaultTargetPlatformOverride = p;
+          try {
+            tester.view.physicalSize = stage;
+            tester.view.devicePixelRatio = 1;
+            addTearDown(tester.view.reset);
+            await body(tester);
+          } finally {
+            debugDefaultTargetPlatformOverride = null;
+          }
+        });
+    void macTest(String name, Future<void> Function(WidgetTester) body) => platformTest(TargetPlatform.macOS, name, body);
+
+    setUp(() {
+      api = _Api();
+      es.dispose();
+      es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(phraseStrip: false), port: port, llmApi: api);
+      es.setLlm(const LlmEndpoint(url: 'localhost:28001', key: 'k'));
+    });
+
+    // The live Safari session, on a 1000×700 stage with the composer layer over it.
+    Future<void> show(WidgetTester tester, {bool open = false, bool quick = false}) async {
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({
+              'event': 'opened', 'sid': 1, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              'port': 5001, 'token': 'tk', 'req': m['req'],
+            });
+          }
+        };
+        es.openOrSwitch('111', 'Safari', 'Safari');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      s = es.currentRemote!;
+      es.setQuickHidden(term: false, hidden: !quick);
+      s.composer.open = open;
+      await tester.pumpWidget(wrap(SizedBox(
+          key: const Key('stage'),
+          width: stage.width,
+          height: stage.height,
+          child: Stack(children: composerLayer(state: es, session: s, port: port, editor: FlutterEditor.new)))));
+      await tester.pumpAndSettle();
+    }
+
+    Rect block() => panelPlaceOf(s).value!;
+    Rect cardRect(WidgetTester tester) => tester.getRect(card);
+
+    Future<void> tidy(WidgetTester tester) async {
+      expect(es.tidyOf(s.sid).begin(long, VoicePick.send), isTrue);
+      await tester.pump();
+      await tester.pump();
+    }
+
+    macTest('输入 stays while open, reads 收起 and is active; a tap folds the text area only, the draft and the quick area stay',
+        (tester) async {
+      await show(tester, open: true, quick: true);
+      s.composer.setDraft('keep me');
+      await tester.pump();
+      expect(toggle, findsOneWidget);
+      expect(find.bySemanticsLabel('收起'), findsOneWidget);
+      expect(find.descendant(of: toggle, matching: find.byIcon(Icons.keyboard_hide_outlined)), findsOneWidget);
+      final open = tester.widget<OutlinedButton>(find.descendant(of: toggle, matching: find.byType(OutlinedButton)));
+      expect(open.style!.side!.resolve({})!.width, 1.5, reason: 'active: the accent border');
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(s.composer.open, isFalse);
+      expect(s.composer.draft, 'keep me');
+      expect(find.byType(ComposerPanel), findsNothing);
+      expect(find.byType(KeyBar), findsOneWidget);
+      expect(find.bySemanticsLabel('输入'), findsOneWidget);
+      expect(find.descendant(of: toggle, matching: find.byIcon(Icons.keyboard_outlined)), findsOneWidget);
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(s.composer.open, isTrue);
+      expect(find.byType(ComposerPanel), findsOneWidget);
+    });
+
+    macTest('the row rect is the same with the text area open or closed, and with the quick area shown or hidden',
+        (tester) async {
+      final rects = <Rect>[];
+      for (final open in [false, true]) {
+        for (final quick in [false, true]) {
+          await show(tester, open: open, quick: quick);
+          rects.add(tester.getRect(toggle));
+        }
+      }
+      expect(rects.toSet().length, 1, reason: '$rects');
+      expect(rects.first.bottom, stage.height - 12);
+      expect(rects.first.right, stage.width - 12);
+    });
+
+    macTest('desktop default: block bottom is controlHeight + 20 up, centred, not overlapping the row at a 1000-wide stage',
+        (tester) async {
+      await show(tester, open: true);
+      expect(block().bottom, stage.height - (control + 20));
+      expect(block().center.dx, stage.width / 2);
+      expect(block().bottom, lessThanOrEqualTo(tester.getRect(toggle).top - 8));
+    });
+
+    macTest('tidy card: above the block, right-aligned with it; below it with no room above; never off the stage',
+        (tester) async {
+      await show(tester, open: true);
+      await tidy(tester);
+      expect(cardRect(tester).right, block().right);
+      expect(cardRect(tester).bottom, block().top - 8);
+      // The block at the stage's top: no room above, so the card stands under it.
+      es.placeComposer(s, const InputPoint(0.5, 0));
+      await tester.pumpAndSettle();
+      expect(block().top, lessThan(cardRect(tester).height + 16));
+      expect(cardRect(tester).top, block().bottom + 8);
+      expect(cardRect(tester).right, block().right);
+      expect((Offset.zero & stage).inflate(0.01).contains(cardRect(tester).topLeft) &&
+          (Offset.zero & stage).inflate(0.01).contains(cardRect(tester).bottomRight), isTrue);
+    });
+
+    macTest('tidy card: a quick-only block counts as the block; with none, the card stands in the corner above the row',
+        (tester) async {
+      await show(tester, quick: true);
+      expect(block().height, greaterThan(0));
+      await tidy(tester);
+      expect(cardRect(tester).bottom, block().top - 8);
+      expect(cardRect(tester).right, block().right);
+      // Only the handle left: no block, the corner above the row.
+      es.setQuickHidden(term: false, hidden: true);
+      await tester.pumpAndSettle();
+      expect(block().height, 0);
+      expect(cardRect(tester).right, stage.width - 12);
+      expect(cardRect(tester).bottom, stage.height - 12 - control - 8);
+    });
+
+    platformTest(TargetPlatform.iOS, 'tidy card stands 12 above the stack, which stands above the block', (tester) async {
+      await show(tester, quick: true);
+      await tidy(tester);
+      final stack = tester.getRect(toggle);
+      expect(stack.bottom, block().top - 8);
+      expect(cardRect(tester).bottom, stack.top - 12);
+      s.composer.open = true;
+      await tester.pumpAndSettle();
+      expect(tester.getRect(toggle).bottom, block().top - 8);
+      expect(cardRect(tester).bottom, tester.getRect(toggle).top - 12);
+    });
+  });
+}
+
+class _Api extends LlmApi {
+  @override
+  LlmCall run(LlmEndpoint e, String app, String input,
+          {Map<String, String>? vars,
+          void Function(String text)? onText,
+          Duration firstByte = const Duration(seconds: 10),
+          bool think = false}) =>
+      LlmCall.manual();
 }

@@ -50,6 +50,12 @@ double openStackHeight(bool upright, bool voice) => upright || !voice ? stageBut
 double closedStackHeight({required int buttons, required bool upright}) =>
     buttons == 0 ? 0 : upright ? stageButtonSize : buttons * stageButtonSize + (buttons - 1) * 12;
 
+/// How many buttons the stack holds with the text area closed: 语音 (when [voice]) and 输入, and 还原 while zoomed.
+int stackButtonCount(RemoteSession s, {required bool voice}) {
+  final button = s.composerAllowed;
+  return (button && voice ? 1 : 0) + (button ? 1 : 0) + (s.currentZoomed ? 1 : 0);
+}
+
 /// Lays out a session's input dock over the whole stage: the block in a [FloatingComposer] at the session's place
 /// (the [text] area over the [KeyBar], 8 between), and the [stack] 8 above the block's top ([stackBottomOf]).
 ///
@@ -202,8 +208,7 @@ class InputDockState extends State<InputDock> with TickerProviderStateMixin {
           // A terminal's 复制 copies its stage's selection here; an app's sends ⌘C.
           final copy = widget.port is TermSessionPort ? () => s.termCopy?.call() : null;
           final upright = c.maxHeight > c.maxWidth;
-          final button = s.composerAllowed;
-          final buttons = (button && widget.voice ? 1 : 0) + (button ? 1 : 0) + (s.currentZoomed ? 1 : 0);
+          final buttons = stackButtonCount(s, voice: widget.voice);
           final stackHeight =
               _open ? openStackHeight(upright, widget.voice) : closedStackHeight(buttons: buttons, upright: upright);
           final bottom = stackBottomOf(stage: c.biggest, block: panelPlaceOf(s).value, keyboard: k, stackHeight: stackHeight);
