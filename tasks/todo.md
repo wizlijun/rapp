@@ -970,3 +970,12 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 5 在画面里打字会自动收起快捷区，开关的灯随之熄灭。
 - [ ] 6 缩放加1、加2：三个键一起变大，不出滚动条。
 - [ ] 7 ＋ 菜单从 ＋ 往右开；块拖到左边缘时菜单不跑出舞台。
+
+
+## Linux 0.15.22 输入块与本机纠词对齐及发布（2026-11-25）
+
+- [x] 对齐 macOS 0.15.21：共享浮动输入块、快捷区开关、按类型保存显隐和 L1 本机纠词；补齐 Linux 中文优先语言选择及语音 timing 事件。
+- [x] 共 3081 项 Flutter 用例、14 项 Rust 用例通过；analyze 无 error/warning。发布包 40 个文件一致、14 个 ELF 依赖完整，隔离 QUIC 会话/CLI/端口共享及真实 Whisper 8 项检查通过。
+- [x] [Linux v0.15.22](https://github.com/wizlijun/rapp/releases/tag/v0.15.22) 已发布，源码 `6c6992a0`；三个远端资产大小及 SHA256 核对通过。macOS Latest 保持 v0.15.21，既有附件未变。
+- [x] 网站下载快照已更新；本轮不部署静态站、不自动安装或重启服务。
+- [ ] 实际麦克风中文/多语言效果、物理触屏和 macOS 真机对端验收。详见 `docs/superpowers/plans/2026-11-25-linux-01522-parity.md`。
