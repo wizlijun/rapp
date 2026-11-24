@@ -21,13 +21,9 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
   /// How long after `stop` this side gives up on the recogniser and sends `final` with what it has.
   /// Dart waits 1 s, so this lands just before.
   private static let finalGrace: TimeInterval = 0.9
-  /// The language to recognise: the system's first preferred language (not `Locale.current`, which is English
-  /// here); on iOS a Chinese entry anywhere in the list comes first.
-  #if os(iOS)
+  /// The language to recognise, from the system's preferred languages (not `Locale.current`, which is English
+  /// here): a Chinese entry anywhere in the list comes first, on iOS and macOS alike (user, 2026-11-25).
   private static var locale: Locale { speechLocale(preferred: Locale.preferredLanguages, chineseFirst: true) }
-  #else
-  private static var locale: Locale { speechLocale(preferred: Locale.preferredLanguages) }
-  #endif
 
   private let channel: FlutterMethodChannel
   /// The recording in progress: live, or stopped and waiting for its final text.

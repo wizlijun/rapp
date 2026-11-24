@@ -78,7 +78,8 @@ iOS 上已经有按住说话了（`2026-11-18-rapp-voice-input-design.md`，下�
 
 - 只用系统「首选语言」列表的**第一项**（`Locale.preferredLanguages.first`），经现有的 `SpeechLocales.normalise` 转成识别器认识的写法。苹果的识别器本身支持英文、欧洲语言、中文、日文、韩文等，rapp 不加任何语言判断。
 - 去掉现有 `SpeechLocales.candidates` 里的多余逻辑：不再把中文排到最前，不再逐项往下试，也不再退回 zh-CN。`normalise` 保留，因为它解决的是 `zh-Hans-CN` 这类写法识别器不认的问题，不是在选语言。
-- **iOS 例外（用户 2026-11-18 在 0.14.12 发布后定的）**：首选语言列表里有中文时，用排在最前的那一项中文，没有中文才用第一项。iPad 和 iPhone 上常见系统界面用英文、键盘用中文，只看第一项会把中文听成英文单词。macOS 仍只用第一项。不恢复逐项往下试，也不退回 zh-CN。
+- **iOS 例外（用户 2026-11-18 在 0.14.12 发布后定的）**：首选语言列表里有中文时，用排在最前的那一项中文，没有中文才用第一项。iPad 和 iPhone 上常见系统界面用英文、键盘用中文，只看第一项会把中文听成英文单词。不恢复逐项往下试，也不退回 zh-CN。
+- **macOS 也一样（用户 2026-11-25 定的）**：和 iOS 同样中文优先。起因是一台 Mac 的首选语言是 English (UK) 在前、中文在后，按住说中文被当成英文听。
 - 不用 `Locale.current`，原因见 iOS 规格（应用包只声明了英文，中文系统上它是 `en_CN`）。
 - 这种语言这台设备识别不了：照现有的 `unavailable` 处理，提示文字改为「这种系统语言暂不支持语音识别，可以在系统设置里换一种」。
 - 引导：**第一次用完以后**提示一次「识别语言跟随系统。要换语言：系统设置 → 通用 → 语言与地区」。macOS 上带「去设置」按钮，打开「语言与地区」（`x-apple.systempreferences:com.apple.Localization-Settings.extension`）；iOS 不能直接跳到那一页，只显示文字。只显示一次，记在 `gui.json` 里（`voice_language_hint_shown`）。
