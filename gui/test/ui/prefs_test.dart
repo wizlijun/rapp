@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/voice_key_gate.dart';
 import 'package:rapp/embed/tidy_mode.dart';
 import 'package:rapp/ui/prefs.dart';
@@ -16,6 +18,36 @@ void main() {
     } catch (_) {}
   });
 
+  test('quick area prefs: defaults', () {
+    final p = UiPrefs();
+    expect(p.quickHiddenTerm, false);
+    expect(p.quickHiddenApp, true);
+    expect(p.quickAutoHide, isNull);
+    expect(p.termComposerAt, isNull);
+    p.save(tmp.path);
+    expect(File('${tmp.path}/gui.json').readAsStringSync(), isNot(contains('quick_auto_hide')));
+  });
+  test('old key_bar_slim true reads as quick_hidden_term; never written back', () {
+    File('${tmp.path}/gui.json').writeAsStringSync('{"key_bar_slim":true}');
+    final loaded = UiPrefs.load(tmp.path);
+    expect(loaded.quickHiddenTerm, true);
+    loaded.save(tmp.path);
+    expect(jsonDecode(File('${tmp.path}/gui.json').readAsStringSync()).containsKey('key_bar_slim'), false);
+  });
+  test('quick_hidden_term false wins over an old key_bar_slim true', () {
+    File('${tmp.path}/gui.json').writeAsStringSync('{"key_bar_slim":true,"quick_hidden_term":false}');
+    expect(UiPrefs.load(tmp.path).quickHiddenTerm, false);
+  });
+  test('round trip: quick_hidden_*, quick_auto_hide, term_composer_at', () {
+    UiPrefs(quickHiddenTerm: true, quickHiddenApp: false, quickAutoHide: false, termComposerAt: const InputPoint(0.3, 120, fromBottom: true))
+        .save(tmp.path);
+    final p = UiPrefs.load(tmp.path);
+    expect([p.quickHiddenTerm, p.quickHiddenApp, p.quickAutoHide], [true, false, false]);
+    final at = p.termComposerAt!;
+    expect([at.x, at.dy, at.fromBottom], [0.3, 120, true]);
+    File('${tmp.path}/gui.json').writeAsStringSync('{"term_composer_at":{"x":5}}');
+    expect(UiPrefs.load(tmp.path).termComposerAt, isNull);
+  });
   test('defaults when file missing', () {
     final p = UiPrefs.load(tmp.path);
     expect(p.theme, RappTheme.matrix);

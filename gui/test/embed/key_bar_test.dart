@@ -512,7 +512,7 @@ void main() {
       await tester.pumpWidget(bar(tsess, width: 701));
       expect(k('slim'), findsOneWidget);
       await tap(tester, 'slim');
-      expect(s.prefs.keyBarSlim, isTrue);
+      expect(s.prefs.quickHiddenTerm, isTrue);
       await tester.pump();
       expect([for (final id in barKeys.keys) if (k(id).evaluate().isNotEmpty) id], ['esc', 'stab', 'slim']);
       expect(tester.getSize(find.byType(KeyBar)).height, 54);
@@ -562,9 +562,9 @@ void main() {
     });
 
     iosTest('⊙ slim or no phrases: no strip', (tester) async {
-      s.prefs.keyBarSlim = true;
+      s.prefs.quickHiddenTerm = true;
       expect(phraseStripShown(s, tsess), isFalse);
-      s.prefs.keyBarSlim = false;
+      s.prefs.quickHiddenTerm = false;
       s.setPhrases(const []);
       expect(phraseStripShown(s, tsess), isFalse);
       s.setPhrases(defaultPhrases);
@@ -575,7 +575,7 @@ void main() {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
       try {
         expect(phraseStripShown(s, tsess), isTrue);
-        s.prefs.keyBarSlim = true;
+        s.prefs.quickHiddenTerm = true;
         expect(phraseStripShown(s, tsess), isTrue);
         debugDefaultTargetPlatformOverride = TargetPlatform.linux;
         expect(phraseStripShown(s, tsess), isTrue);
@@ -657,33 +657,33 @@ void main() {
       await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.shiftLeft);
       await tester.pump();
-      expect(s.prefs.keyBarSlim, isFalse);
+      expect(s.prefs.quickHiddenTerm, isFalse);
       expect(k('enter'), findsOneWidget);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
       await tester.pump();
-      expect(s.prefs.keyBarSlim, isTrue);
+      expect(s.prefs.quickHiddenTerm, isTrue);
       expect([for (final id in barKeys.keys) if (k(id).evaluate().isNotEmpty) id], ['esc', 'stab', 'slim']);
       await tap(tester, 'slim');
-      expect(s.prefs.keyBarSlim, isFalse);
+      expect(s.prefs.quickHiddenTerm, isFalse);
       expect(k('enter'), findsOneWidget);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
       await tester.pump();
-      expect(s.prefs.keyBarSlim, isTrue);
+      expect(s.prefs.quickHiddenTerm, isTrue);
     });
 
     deskTest('a repeat does not collapse; no bar, no listening', (tester) async {
       await tester.pumpWidget(bar(tsess));
       await tester.sendKeyDownEvent(LogicalKeyboardKey.keyA);
       await tester.pump();
-      expect(s.prefs.keyBarSlim, isTrue);
-      s.setKeyBarSlim(false);
+      expect(s.prefs.quickHiddenTerm, isTrue);
+      s.setQuickHidden(term: true, hidden: false);
       await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyA);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.keyA);
       await tester.pump();
-      expect(s.prefs.keyBarSlim, isFalse);
+      expect(s.prefs.quickHiddenTerm, isFalse);
       await tester.pumpWidget(wrap(const SizedBox()));
       await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
-      expect(s.prefs.keyBarSlim, isFalse);
+      expect(s.prefs.quickHiddenTerm, isFalse);
     });
 
     deskTest('macOS: key_typed from the picture folds its own session\'s bar; not while ⌘ on the bar is lit', (tester) async {
@@ -694,18 +694,18 @@ void main() {
       await tester.pumpWidget(bar(app, width: 900));
       port.emit(const KeyTypedEvent(3)); // another session's
       await tester.pump();
-      expect(s.prefs.keyBarSlim, isFalse);
+      expect(s.prefs.quickHiddenTerm, isFalse);
       await tap(tester, 'cmd');
       port.emit(const KeyTypedEvent(1));
       await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
       await tester.pump();
-      expect(s.prefs.keyBarSlim, isFalse, reason: 'a lit ⌘ stays in sight');
+      expect(s.prefs.quickHiddenTerm, isFalse, reason: 'a lit ⌘ stays in sight');
       await tap(tester, 'cmd');
       await tap(tester, 'cmd'); // locked, then off
       expect(keyLatchOf(s, app).flags, 0);
       port.emit(const KeyTypedEvent(1));
       await tester.pump();
-      expect(s.prefs.keyBarSlim, isTrue);
+      expect(s.prefs.quickHiddenTerm, isTrue);
     }, macOnly: true);
 
     testWidgets('Linux: Ctrl-held keys (the app shortcuts) do not fold', (tester) async {
@@ -716,10 +716,10 @@ void main() {
         await tester.sendKeyEvent(LogicalKeyboardKey.bracketRight);
         await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
         await tester.pump();
-        expect(s.prefs.keyBarSlim, isFalse);
+        expect(s.prefs.quickHiddenTerm, isFalse);
         await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
         await tester.pump();
-        expect(s.prefs.keyBarSlim, isTrue);
+        expect(s.prefs.quickHiddenTerm, isTrue);
       } finally {
         debugDefaultTargetPlatformOverride = null;
       }

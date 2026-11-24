@@ -36,7 +36,7 @@ List<List<String?>> _rowsOf(MainState state, RemoteSession session, double width
       width: width,
       app: !_isTerm(state, session),
       more: state.prefs.keyBarMore,
-      slim: state.prefs.keyBarSlim,
+      slim: state.prefs.quickHiddenTerm,
       hardware: hardwareKeyboard() || lastHardwareKey != null, // sticky: once seen, the ⊙ stays
     );
 
@@ -45,7 +45,7 @@ List<List<String?>> _rowsOf(MainState state, RemoteSession session, double width
 bool phraseStripShown(MainState state, RemoteSession session) {
   final p = state.prefs;
   return p.phraseStrip &&
-      (!p.keyBarSlim || defaultTargetPlatform != TargetPlatform.iOS) &&
+      (!p.quickHiddenTerm || defaultTargetPlatform != TargetPlatform.iOS) &&
       p.phrases.isNotEmpty &&
       (_isTerm(state, session) || session.profile.phrases);
 }
@@ -174,8 +174,8 @@ bool collapsesKeyBar(KeyEvent e) =>
 /// Folds the bar to ⊙ for [session]: the keyboard was used. Not while a ⌃ ⌥ ⌘ ⇧ on the bar is lit: folding would
 /// hide a modifier A may still hold down; the next key after it goes folds.
 void foldKeyBar(MainState state, RemoteSession session) {
-  if (state.prefs.keyBarSlim || keyLatchOf(state, session).flags != 0) return;
-  state.setKeyBarSlim(true);
+  if (state.prefs.quickHiddenTerm || keyLatchOf(state, session).flags != 0) return;
+  state.setQuickHidden(term: true, hidden: true);
 }
 
 class KeyBar extends StatefulWidget {
@@ -309,7 +309,7 @@ class _KeyBarState extends State<KeyBar> {
       case BarKind.more:
         widget.state.setKeyBarMore(!widget.state.prefs.keyBarMore);
       case BarKind.slim:
-        widget.state.setKeyBarSlim(!widget.state.prefs.keyBarSlim);
+        widget.state.setQuickHidden(term: true, hidden: !widget.state.prefs.quickHiddenTerm);
     }
     return null;
   }

@@ -190,7 +190,7 @@ void main() {
       expect(bar.height, keyBarHeightOf(es, rs, stage.width));
       expect(bar.top - inStage(tester, open).bottom, 12);
       // ⊙: three keys; 输入 still stands on the bar.
-      es.setKeyBarSlim(true);
+      es.setQuickHidden(term: true, hidden: true);
       await tester.pump();
       expect(find.byKey(const Key('bar-enter')), findsNothing);
       expect(find.byKey(const Key('bar-slim')), findsOneWidget);
