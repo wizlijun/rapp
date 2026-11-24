@@ -1,7 +1,6 @@
 // The 快捷区 toggle in the writing box (quick-toggle spec §1, §8): lit while the 快捷区 shows, one pref per kind.
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -119,24 +118,39 @@ void main() {
     expect(tester.widget<TextField>(find.byKey(const Key('composer-field'))).controller!.text, 'abc');
   });
 
-  testWidgets('Linux: a mouse click on the toggle keeps the caret in the text', (tester) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
-    try {
+  for (final composing in [false, true]) {
+    testWidgets('Linux: the toggle preserves the selection and IME composition ($composing)', (tester) async {
       big(tester);
       await tester.pumpWidget(layer(app));
       await tester.pump();
       final field = find.byKey(const Key('composer-field'));
       await tester.tap(field, kind: PointerDeviceKind.mouse);
       await tester.pump();
-      FocusNode node() => tester.widget<EditableText>(find.descendant(of: field, matching: find.byType(EditableText))).focusNode;
-      expect(node().hasFocus, isTrue);
-      await tester.tap(toggle, kind: PointerDeviceKind.mouse);
-      await tester.pumpAndSettle();
-      expect(node().hasFocus, isTrue);
-    } finally {
-      debugDefaultTargetPlatformOverride = null;
-    }
-  });
+      EditableText editor() => tester.widget<EditableText>(find.descendant(of: field, matching: find.byType(EditableText)));
+      final before = TextEditingValue(
+        text: composing ? 'hello ni' : 'hello world',
+        selection: composing ? const TextSelection.collapsed(offset: 8) : const TextSelection(baseOffset: 6, extentOffset: 11),
+        composing: composing ? const TextRange(start: 6, end: 8) : TextRange.empty,
+      );
+      tester.testTextInput.updateEditingValue(before);
+      await tester.pump();
+      // Both opening and closing keep the caret/selection, including uncommitted input.
+      for (final hidden in [false, true]) {
+        await tester.tap(toggle, kind: PointerDeviceKind.mouse);
+        await tester.pumpAndSettle();
+        expect(editor().focusNode.hasFocus, isTrue);
+        expect(editor().controller.value, before);
+        expect(es.prefs.quickHiddenApp, hidden);
+        expect(app.composer.open, isTrue);
+      }
+      tester.testTextInput.updateEditingValue(const TextEditingValue(
+        text: 'hello 你', selection: TextSelection.collapsed(offset: 7)));
+      await tester.pump();
+      expect(editor().controller.text, 'hello 你');
+      expect(editor().controller.value.composing, TextRange.empty);
+      expect(port.calls.where((c) => c.$1 == 'composer_send'), isEmpty);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+  }
 
   testWidgets('a screen reader hears the toggle\'s name once, not again from its tooltip', (tester) async {
     big(tester);
@@ -147,7 +161,7 @@ void main() {
     expect(node.label, '收起快捷区');
     expect(node.tooltip, isEmpty);
     handle.dispose();
-  });
+  }, variant: TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
 
   testWidgets('beside 输入 the toggle fades in as the box folds, at once under reduced motion', (tester) async {
     big(tester);
@@ -166,7 +180,7 @@ void main() {
             child: Stack(children: composerLayer(state: es, session: app, port: port, editor: FlutterEditor.new))),
         disableAnimations: true));
     expect(opacity(), 1);
-  });
+  }, variant: TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
 
   testWidgets('tooltip names the action', (tester) async {
     big(tester);

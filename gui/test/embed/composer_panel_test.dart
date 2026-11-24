@@ -194,7 +194,7 @@ void main() {
       expect(send.left - editor.right, 16);
     });
 
-    testWidgets('zoomed on a phone: the keys give way so the text keeps 120 wide', (tester) async {
+    testWidgets('zoomed in a narrow view: the keys give way so the text keeps 120 wide', (tester) async {
       es.setComposerZoom(4);
       final k = es.composerScale;
       for (final w in [320.0, 375.0, 390.0]) {
@@ -204,14 +204,16 @@ void main() {
             child: Stack(children: composerLayer(state: es, session: rs, port: port, editor: FlutterEditor.new)))));
         await tester.pump();
         expect(rect(tester, 'composer-field').width, greaterThanOrEqualTo(120 - 1e-6), reason: 'stage $w');
-        // The keys stay square, never under their default 40 and never over the zoom; the text keeps the zoom.
+        // Keep the requested 40..40*k size and the platform's existing density (compact on desktop).
         for (final key in ['composer-plus', 'quick-toggle', 'composer-send']) {
           final r = rect(tester, key);
           expect(r.width, closeTo(r.height, 1e-6), reason: '$key at $w');
-          expect(r.width, inInclusiveRange(40 - 1e-6, 40 * k + 1e-6), reason: '$key at $w');
+          final button = find.byKey(Key(key));
+          final density = Theme.of(tester.element(button)).visualDensity.baseSizeAdjustment.dx;
+          expect(r.width, inInclusiveRange(40 + density - 1e-6, 40 * k + 1e-6), reason: '$key at $w');
         }
       }
-    });
+    }, variant: TargetPlatformVariant({TargetPlatform.iOS, TargetPlatform.macOS, TargetPlatform.linux}));
 
     testWidgets('zoomed and narrow', (tester) async {
       big(tester);
@@ -231,6 +233,26 @@ void main() {
       await tester.pump();
       expect(rect(tester, 'composer-field').width, greaterThan(100));
     });
+
+    testWidgets('Linux: one-line text stays unscrolled at every zoom after toggling the quick area', (tester) async {
+      big(tester);
+      await tester.pumpWidget(layer());
+      await tester.pump();
+      await tester.enterText(fieldFinder, 'hello');
+      for (var zoom = 0; zoom <= composerZoomMax; zoom++) {
+        es.setComposerZoom(zoom);
+        await tester.pumpAndSettle();
+        for (var i = 0; i < 2; i++) {
+          await tester.tap(find.byKey(const Key('quick-toggle')), kind: PointerDeviceKind.mouse);
+          await tester.pumpAndSettle();
+          final editable = find.descendant(of: fieldFinder, matching: find.byType(EditableText));
+          final scroll = tester.state<ScrollableState>(find.descendant(of: editable, matching: find.byType(Scrollable)));
+          expect(scroll.position.maxScrollExtent, 0, reason: 'zoom $zoom, toggle $i');
+          expect(fieldFocused(tester), isTrue);
+          expect(text(tester), 'hello');
+        }
+      }
+    }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 
     testWidgets('long text grows upward to half the stage, bottom and width fixed', (tester) async {
       big(tester);
@@ -723,7 +745,7 @@ void main() {
         final r = tester.getRect(menu);
         expect(r.left, greaterThanOrEqualTo(8 - 1e-6));
         expect(r.right, lessThanOrEqualTo(312 + 1e-6));
-      });
+      }, variant: TargetPlatformVariant({TargetPlatform.iOS, TargetPlatform.macOS, TargetPlatform.linux}));
 
       testWidgets('「大小」 slides the zoom; the menu keeps its own size at the top step', (tester) async {
         big(tester);
