@@ -49,6 +49,16 @@ const _edge = 8.0;
 /// The editor's extra room above and below, so its one line (48) fills those 56.
 const _pad = (40 + 2 * _edge - _line) / 2;
 
+/// The text's least width in the box when the zoom makes the keys big (a phone at the top zoom step).
+const _minText = 120.0;
+
+/// The box row's width that does not scale: the border and the text's 8 on either side.
+const _fixed = _border + 2 * 8;
+
+/// The box row's key width per unit of zoom: ＋, the toggle and 发送 (40 each), the 4 between ＋ and the toggle, and
+/// [_edge] on both sides of each group.
+const _keysPerScale = 3 * 40 + 4 + 4 * _edge;
+
 /// The panel's boxes let the picture behind show through: the float fill 30% transparent.
 const composerFillOpacity = 0.7;
 
@@ -379,7 +389,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
           data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(_k)),
           child: Builder(builder: (context) {
           final t = RappTokens.of(context);
-          final k = _k, line = _line * k, pad = _pad * k, edge = _edge * k;
+          final k = _k, line = _line * k, pad = _pad * k;
           final style = EditorStyle(
             text: TextStyle(
               fontSize: t.textSize * k, height: 22 / 15, fontFamily: t.font,
@@ -412,7 +422,12 @@ class _ComposerPanelState extends State<ComposerPanel> {
                   ),
                 ),
               ?_hint(t), // W11
-              Container(
+              LayoutBuilder(builder: (context, c) {
+              // The keys zoom with the text, but give way on a narrow panel so the text keeps [_minText] wide
+              // (never under their default 40); the text itself keeps the zoom.
+              final kk = math.min(k, math.max(1.0, (c.maxWidth - _fixed - _minText) / _keysPerScale));
+              final edge = _edge * kk;
+              return Container(
                 key: const Key('composer-box'),
                 decoration: seeThroughBox(t),
                 constraints: BoxConstraints(maxHeight: inner + _border),
@@ -420,7 +435,8 @@ class _ComposerPanelState extends State<ComposerPanel> {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     // ＋ and the 快捷区 toggle on the left, 发送 on the right: 40 square, [_edge] to the border on
-                    // every side (one line), 4 between the two on the left; all sit at the bottom as the text grows.
+                    // every side (one line), 4 between the two on the left, all times the keys' zoom; all sit at the bottom as the text
+                    // grows.
                     Padding(
                       padding: EdgeInsets.all(edge),
                       child: Row(
@@ -440,12 +456,12 @@ class _ComposerPanelState extends State<ComposerPanel> {
                                 : (on) => widget.state.setAfterSend(_s, on ? AfterSend.pressReturn : AfterSend.none),
                             terminal: _terminal,
                             blocked: _blocked,
-                            scale: k,
+                            scale: kk,
                             zoom: widget.state.composerZoom.value,
                             onZoom: widget.state.setComposerZoom,
                           ),
-                          const SizedBox(width: 4),
-                          QuickToggle(state: widget.state, session: _s, look: QuickToggleLook.box, scale: k),
+                          SizedBox(width: 4 * kk),
+                          QuickToggle(state: widget.state, session: _s, look: QuickToggleLook.box, scale: kk),
                         ],
                       ),
                     ),
@@ -495,7 +511,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
                             label: '发送',
                             semanticLabel: '发送',
                             icon: Icons.arrow_upward,
-                            size: 40 * k,
+                            size: 40 * kk,
                             onPressed: _m.sending || _blocked ? null : _submit,
                           ),
                         ],
@@ -503,7 +519,8 @@ class _ComposerPanelState extends State<ComposerPanel> {
                     ),
                   ],
                 ),
-              ),
+              );
+              }),
             ],
           );
           }),
@@ -542,7 +559,7 @@ List<Widget> composerLayer(
           session: session,
           port: port,
           keyboard: keyboard,
-          // The state too: ⊙, ⋯ and the 常用语条 change the 快捷区.
+          // The state too: the 快捷区 toggle, ⋯ and the 常用语条 change the 快捷区.
           listenable: Listenable.merge([both, state, session.zooms, ?hold]),
           voice: hold != null,
           text: (context, maxHeight) => ComposerPanel(
@@ -555,8 +572,8 @@ List<Widget> composerLayer(
             port: port,
             maxHeight: maxHeight,
           ),
-          stack: (context, bottom, stage) => ios
-              ? _iosStack(context, state, session, port, hold, bottom, stage)
+          stack: (context, bottom, stage, upright) => ios
+              ? _iosStack(context, state, session, port, hold, bottom, stage, upright)
               : _cornerRow(context, state, session, port, keyboard, rowRight, stage),
         ),
       ),
@@ -654,10 +671,10 @@ Widget _cornerRow(BuildContext context, MainState state, RemoteSession session, 
 }
 
 /// iOS's stage stack, its bottom [bottom] up off the [stage]'s bottom: 语音 and 输入 (收起 while the panel is open)
-/// one element either way, so the toggle's icon turns over; closed, 还原 and the upload strip too. [upright] by the
-/// stage itself, not what the keyboard leaves of it.
+/// one element either way, so the toggle's icon turns over; closed, 还原 and the upload strip too. [upright] as
+/// [stackUprightOf] has it: a portrait stage, or a column with no room above the block.
 Widget _iosStack(BuildContext context, MainState state, RemoteSession session, SessionPort port, VoiceHold? hold,
-    double bottom, Size stage) {
+    double bottom, Size stage, bool upright) {
   final transfer = session.transferStatus;
   final button = session.composerAllowed;
   final open = session.composer.open && button;
@@ -678,7 +695,7 @@ Widget _iosStack(BuildContext context, MainState state, RemoteSession session, S
         onSide: state.setStageSide,
         voice: hold != null && button ? voiceButton(hold) : null,
         hidden: hold?.active ?? false,
-        upright: stage.height > stage.width,
+        upright: upright,
         input: button ? _openToggle(session) : null,
         // Folded, the 快捷区 toggle stands above 输入 (quick-toggle spec §6); open, it is in the box.
         quick: button && !open ? QuickToggle(state: state, session: session, look: QuickToggleLook.stage) : null,
@@ -780,11 +797,16 @@ class _TidyLayer extends StatelessWidget {
     final left = state.stageSide.value == StageSide.left;
     final x = left ? stageButtonsIn : stage.width - stageButtonsIn - card.width;
     // The stack's top, as InputDock puts it.
-    final upright = stage.height > stage.width;
     final voice = state.voice != null;
+    final buttons = stackButtonCount(session, voice: voice);
+    final upright = stackUprightOf(
+        stage: stage,
+        block: panelPlaceOf(session).value,
+        keyboard: keyboard,
+        columnHeight: stackColumnHeight(open: _open, buttons: buttons, voice: voice));
     final h = _open
         ? openStackHeight(upright, voice)
-        : closedStackHeight(buttons: stackButtonCount(session, voice: voice), upright: upright);
+        : closedStackHeight(buttons: buttons, upright: upright);
     final bottom =
         stackBottomOf(stage: stage, block: panelPlaceOf(session).value, keyboard: keyboard, stackHeight: h) + h + 12;
     return Offset(x, stage.height - bottom - card.height);

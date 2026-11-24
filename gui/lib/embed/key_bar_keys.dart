@@ -56,7 +56,7 @@ const barKeys = <String, BarKey>{
   'more': (id: 'more', label: '⋯', spoken: '更多按键', kind: BarKind.more, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
 };
 
-/// The rows of the bar, each a list of key ids: one row of eleven, ⊙ last, and [more] adds the second row.
+/// The rows of the bar, each a list of key ids: one row of ten, ⋯ last, and [more] adds the second row.
 List<List<String>> keyBarRows({required bool app, required bool more}) {
   const first = ['esc', 'stab', 'tab', 'cc', 'left', 'up', 'down', 'right', 'enter', 'more'];
   if (!more) return [first];

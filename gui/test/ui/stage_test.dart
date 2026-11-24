@@ -222,7 +222,7 @@ void main() {
           final picture = find.byKey(const Key('stage'));
           expect(find.ancestor(of: picture, matching: find.byType(Transform)), findsNothing);
           final rs = es.remote[1]!;
-          // The terminal app shows its 快捷区, Safari only the handle.
+          // The terminal app shows its 快捷区; Safari's is hidden by default (the toggle brings it).
           expect(find.byType(KeyBar), app == 'Safari' ? findsNothing : findsOneWidget);
           final at = tester.getRect(picture);
           Future<void> still() async {

@@ -39,6 +39,16 @@ double stackBottomOf({required Size stage, required Rect? block, required double
   return math.max(rest, math.min(stage.height - block.top + 8, stage.height - 8 - stackHeight));
 }
 
+/// Whether the stack lies in a row: on a portrait stage, and also when its column [columnHeight] tall has no room
+/// between the block's top (8 above it, as [stackBottomOf] puts it) and the stage's top 8 — iPhone landscape with a
+/// tall 快捷区, where [stackBottomOf] would otherwise pull the column down over the keys.
+bool stackUprightOf({required Size stage, required Rect? block, required double keyboard, required double columnHeight}) {
+  if (stage.height > stage.width) return true;
+  final rest = restStackBottom(keyboard);
+  final bottom = block == null || block.height == 0 ? rest : math.max(rest, stage.height - block.top + 8);
+  return bottom + columnHeight > stage.height - 8;
+}
+
 /// Off iOS, the block's default anchor: bottom centre, clear of the corner row of controls [rowHeight] tall.
 InputPoint desktopComposerAt(double rowHeight) => InputPoint(0.5, rowHeight + 20, fromBottom: true);
 
@@ -48,6 +58,10 @@ double openStackHeight(bool upright, bool voice) => upright || !voice ? stageBut
 /// The closed stack's height: its [buttons] one above the other, or side by side in one row when [upright].
 double closedStackHeight({required int buttons, required bool upright}) =>
     buttons == 0 ? 0 : upright ? stageButtonSize : buttons * stageButtonSize + (buttons - 1) * 12;
+
+/// The stack's height as a column: open ([openStackHeight]) or closed with its [buttons] ([closedStackHeight]).
+double stackColumnHeight({required bool open, required int buttons, required bool voice}) =>
+    open ? openStackHeight(false, voice) : closedStackHeight(buttons: buttons, upright: false);
 
 /// How many buttons the stack holds with the text area closed: 语音 (when [voice]), 输入 and the 快捷区 toggle, and
 /// 还原 while zoomed.
@@ -92,7 +106,7 @@ class InputDock extends StatefulWidget {
   final Widget Function(BuildContext context, double maxHeight) text;
 
   /// The button stack, its bottom [bottom] up off the [stage]'s bottom.
-  final Widget Function(BuildContext context, double bottom, Size stage) stack;
+  final Widget Function(BuildContext context, double bottom, Size stage, bool upright) stack;
 
   @override
   State<InputDock> createState() => InputDockState();
@@ -208,8 +222,12 @@ class InputDockState extends State<InputDock> with TickerProviderStateMixin {
           final quickMounted = !_hidden || !_quick.isDismissed;
           // A terminal's 复制 copies its stage's selection here; an app's sends ⌘C.
           final copy = widget.port is TermSessionPort ? () => s.termCopy?.call() : null;
-          final upright = c.maxHeight > c.maxWidth;
           final buttons = stackButtonCount(s, voice: widget.voice);
+          final upright = stackUprightOf(
+              stage: c.biggest,
+              block: panelPlaceOf(s).value,
+              keyboard: k,
+              columnHeight: stackColumnHeight(open: _open, buttons: buttons, voice: widget.voice));
           final stackHeight =
               _open ? openStackHeight(upright, widget.voice) : closedStackHeight(buttons: buttons, upright: upright);
           final bottom = stackBottomOf(stage: c.biggest, block: panelPlaceOf(s).value, keyboard: k, stackHeight: stackHeight);
@@ -283,7 +301,7 @@ class InputDockState extends State<InputDock> with TickerProviderStateMixin {
                     ),
                   ),
                 );
-          final stack = widget.stack(context, bottom, c.biggest);
+          final stack = widget.stack(context, bottom, c.biggest, upright);
           return ClipRect(
             child: Stack(
               // iOS: the stack over the block (it stands above it); the desktop's corner row under the block.

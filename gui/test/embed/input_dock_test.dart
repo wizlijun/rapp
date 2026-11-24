@@ -175,6 +175,56 @@ void main() {
     expect(closedStackHeight(buttons: 3, upright: true), stageButtonSize);
   });
 
+  test('stackUprightOf: a row on a portrait stage, or when the column has no room above the block', () {
+    const land = Size(844, 340);
+    // Portrait: always a row.
+    expect(stackUprightOf(stage: const Size(390, 800), block: null, keyboard: 0, columnHeight: 260), isTrue);
+    // Landscape, nothing under it: the column stands at rest.
+    expect(stackUprightOf(stage: land, block: null, keyboard: 0, columnHeight: 3 * 56 + 24), isFalse);
+    // Landscape over the default 快捷区 (126 tall): three buttons (192) still fit above it.
+    expect(
+        stackUprightOf(
+            stage: land, block: const Rect.fromLTWH(62, 340 - 126, 720, 126), keyboard: 0, columnHeight: 3 * 56 + 24),
+        isFalse);
+    // Over 更多按键 and the 常用语条 (192 tall, 8 up): the column would reach past the top, so a row.
+    expect(
+        stackUprightOf(
+            stage: land, block: const Rect.fromLTWH(62, 340 - 8 - 192, 720, 192), keyboard: 0, columnHeight: 3 * 56 + 24),
+        isTrue);
+    // A wide, tall stage keeps the column above the same block.
+    expect(
+        stackUprightOf(stage: const Size(1000, 700), block: const Rect.fromLTWH(140, 500, 720, 192), keyboard: 0,
+            columnHeight: 3 * 56 + 24),
+        isFalse);
+  });
+
+  iosTest('iPhone landscape: the closed stack lies in a row above the 快捷区 and covers no key', (tester) async {
+    stage = const Size(844, 340);
+    tester.view.physicalSize = stage;
+    s.dispose();
+    // The 常用语条 on and 更多按键: the 快捷区 is tall enough that a column of 语音, the toggle and 输入 has no
+    // room above it on a 340-tall stage.
+    s = MainState(
+        hub: HubClient(FakeTransport()),
+        data: DataDir(tmp.path),
+        prefs: UiPrefs(phraseStrip: true),
+        port: port,
+        termPort: term,
+        voice: FakeVoice());
+    s.setKeyBarMore(true);
+    await tester.pumpWidget(layer(tsess));
+    await tester.pumpAndSettle();
+    final toggle = find.byKey(const Key('quick-toggle-stack'));
+    expect(toggle, findsOneWidget);
+    expect(bar, findsOneWidget);
+    final keys = tester.getRect(bar);
+    for (final b in [toggle, find.byKey(const Key('composer-open')), find.byKey(const Key('voice-hold'))]) {
+      final r = tester.getRect(b);
+      expect(r.bottom <= keys.top, isTrue, reason: '$b at $r over the key bar at $keys');
+      expect(r.top >= 0, isTrue);
+    }
+  });
+
   for (final p in [TargetPlatform.iOS, TargetPlatform.macOS, TargetPlatform.linux]) {
     dockTest(p, 'terminal: quick area at panelWidth, bottom at the default anchor, no handle', (tester) async {
       await tester.pumpWidget(layer(tsess));

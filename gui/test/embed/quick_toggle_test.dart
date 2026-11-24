@@ -1,6 +1,8 @@
 // The 快捷区 toggle in the writing box (quick-toggle spec §1, §8): lit while the 快捷区 shows, one pref per kind.
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/composer_panel.dart';
@@ -115,6 +117,55 @@ void main() {
     await tester.pumpAndSettle();
     expect(app.composer.open, isTrue);
     expect(tester.widget<TextField>(find.byKey(const Key('composer-field'))).controller!.text, 'abc');
+  });
+
+  testWidgets('Linux: a mouse click on the toggle keeps the caret in the text', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    try {
+      big(tester);
+      await tester.pumpWidget(layer(app));
+      await tester.pump();
+      final field = find.byKey(const Key('composer-field'));
+      await tester.tap(field, kind: PointerDeviceKind.mouse);
+      await tester.pump();
+      FocusNode node() => tester.widget<EditableText>(find.descendant(of: field, matching: find.byType(EditableText))).focusNode;
+      expect(node().hasFocus, isTrue);
+      await tester.tap(toggle, kind: PointerDeviceKind.mouse);
+      await tester.pumpAndSettle();
+      expect(node().hasFocus, isTrue);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('a screen reader hears the toggle\'s name once, not again from its tooltip', (tester) async {
+    big(tester);
+    final handle = tester.ensureSemantics();
+    await tester.pumpWidget(layer(tapp));
+    await tester.pump();
+    final node = tester.getSemantics(toggle);
+    expect(node.label, '收起快捷区');
+    expect(node.tooltip, isEmpty);
+    handle.dispose();
+  });
+
+  testWidgets('beside 输入 the toggle fades in as the box folds, at once under reduced motion', (tester) async {
+    big(tester);
+    app.composer.open = false;
+    final fade = find.byKey(const Key('quick-toggle-fade'));
+    double opacity() => tester.widget<Opacity>(fade).opacity;
+    await tester.pumpWidget(layer(app));
+    expect(opacity(), lessThan(0.5));
+    await tester.pumpAndSettle();
+    expect(opacity(), 1);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(wrap(
+        SizedBox(
+            width: 1000,
+            height: 700,
+            child: Stack(children: composerLayer(state: es, session: app, port: port, editor: FlutterEditor.new))),
+        disableAnimations: true));
+    expect(opacity(), 1);
   });
 
   testWidgets('tooltip names the action', (tester) async {
