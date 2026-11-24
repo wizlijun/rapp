@@ -850,3 +850,10 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] 对齐 macOS 0.15.12 / v15；补齐 GTK 主窗口和多分离窗口可见性，以及暂停期间未确认帧的超时/弱网处理。
 - [x] Flutter 2773 项、原生窗口、隔离 X11/Wayland 主机测试通过，Clippy 无警告，GUI release 构建成功。平台边界和测试细节见 `docs/superpowers/plans/2026-11-22-linux-v15-parity.md`。
 - [x] Rust 工作区 1227 项通过；最终包内容、依赖、隔离 QUIC 主机/服务/端口共享及远端 SHA256 校验通过。已发布 Linux v0.15.13（源码 `a5675f5f`），macOS Latest 保持 v0.15.12；未自动安装。
+
+
+## Linux 5 分钟语音对齐（2026-11-24，0.15.15）
+
+- [x] 对齐 macOS 0.15.14，修复 Linux 适配层仍以 80 秒终止长录音最终识别的遗漏，等待上限统一为 5 分钟。
+- [x] 598 项 Flutter 相关回归、2 项 Rust 语音测试、Clippy 和真实 Whisper 长录音/截断/进程回收验证通过。详见 `docs/superpowers/plans/2026-11-24-linux-01515-parity.md`。
+- [ ] 生成并验证 Linux 0.15.15 发行包，公开发布并校验远端资产。

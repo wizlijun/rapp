@@ -32,7 +32,7 @@ def start(extra=None, env=None):
 
 
 def event(p, wanted):
-    deadline = time.monotonic() + 90
+    deadline = time.monotonic() + 300
     # Unbuffered reads prevent select missing a line already in Python's user-space buffer.
     line = bytearray()
     while time.monotonic() < deadline:
@@ -64,9 +64,19 @@ def stopped(pid):
 
 with tempfile.TemporaryDirectory(prefix='rapp-voice-fixture-') as directory:
     tmp = Path(directory)
-    for name, pcm, word in [('speech', args.pcm.resolve(), 'country'), ('silence', tmp / 'silent.pcm', '')]:
-        if name == 'silence':
-            pcm.write_bytes(bytes(16000 * 2))
+    sample = args.pcm.read_bytes()
+    (tmp / 'silent.pcm').write_bytes(bytes(16000 * 2))
+    # Put the public speech near the five-minute boundary: a stale 60 s buffer
+    # would return silence. Feed speech after the cap too, which must be ignored.
+    assert len(sample) < 16000 * 2 * 60
+    (tmp / 'long.pcm').write_bytes(bytes(16000 * 2 * 299 - len(sample)) + sample)
+    (tmp / 'over-cap.pcm').write_bytes(bytes(16000 * 2 * 300) + sample)
+    for name, pcm, word in [
+        ('speech', args.pcm.resolve(), 'country'),
+        ('silence', tmp / 'silent.pcm', ''),
+        ('speech near five minutes', tmp / 'long.pcm', 'country'),
+        ('speech beyond five minutes is excluded', tmp / 'over-cap.pcm', ''),
+    ]:
         p = start({'pcm_path': str(pcm)})
         try:
             event(p, 'ready')

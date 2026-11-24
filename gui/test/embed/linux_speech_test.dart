@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -136,6 +137,28 @@ print(json.dumps({'event':'final','text':'hello world'}),flush=True)
       }
     },
   );
+
+  test('a stalled recognizer is still stopped at the five-minute deadline', () async {
+    final c = await channel(
+      "print(json.dumps({'event':'ready'}),flush=True)\ntime.sleep(360)",
+    );
+    final events = <MethodCall>[];
+    c.setMethodCallHandler((call) async { events.add(call); });
+    try {
+      expect(await c.invokeMethod<String>('start'), 'ok');
+      fakeAsync((clock) {
+        c.invokeMethod<void>('stop');
+        clock.flushMicrotasks();
+        clock.elapse(const Duration(seconds: 299));
+        expect(events.where((e) => e.method == 'error'), isEmpty);
+        clock.elapse(const Duration(seconds: 1));
+        expect(events.where((e) => e.method == 'error'), hasLength(1));
+      });
+    } finally {
+      await c.invokeMethod<void>('cancel');
+      c.setMethodCallHandler(null);
+    }
+  });
 
   test(
     'cancel while starting kills the subprocess and ignores late events',

@@ -134,6 +134,9 @@ class LinuxSpeechModel {
 /// Adapts a local worker to the existing native speech channel's contract.
 class LinuxSpeechChannel extends MethodChannel
     with WidgetsBindingObserver, WindowListener {
+  /// Long recordings may need the full recognition budget after capture stops.
+  static const finalResultWait = Duration(minutes: 5);
+
   LinuxSpeechChannel({
     String? executable,
     LinuxSpeechModel? model,
@@ -141,7 +144,7 @@ class LinuxSpeechChannel extends MethodChannel
     Future<bool> Function()? isFocused,
     Future<Process> Function(String, List<String>)? spawn,
     this.startWait = const Duration(seconds: 30),
-    this.finishWait = const Duration(seconds: 80),
+    this.finishWait = finalResultWait,
   }) : executable =
            executable ??
            '${binDir(Platform.environment, Platform.resolvedExecutable)}/rapp-speech',

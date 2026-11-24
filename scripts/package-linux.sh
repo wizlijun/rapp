@@ -72,6 +72,8 @@ This build targets current Omarchy/Arch; it is not a generic all-distributions b
 
 Hold the voice button or Right Alt to dictate. First use downloads a verified
 142 MB Whisper base model to ~/.cache/rapp/speech (or XDG_CACHE_HOME).
+Recordings can last up to five minutes. After release, capture stops immediately;
+local recognition can take up to five minutes to finish on slower CPUs.
 Recognition runs locally in the system language; audio stays in memory and is
 never saved or uploaded. Requires a PulseAudio-compatible server and libpulse.
 Esc cancels; Tab edits before sending. Change the shortcut in the sidebar.

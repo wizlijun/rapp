@@ -163,7 +163,7 @@ class VoiceHold extends ChangeNotifier {
   /// The overlay's root: the stage the ring is laid out in.
   final stageKey = GlobalKey();
 
-  /// From an `ok` start until the release (or the 60 s cap, an interruption, a pointer cancel).
+  /// From an `ok` start until the release (or the 5 minute cap, an interruption, a pointer cancel).
   bool holding = false;
   VoicePick pick = VoicePick.send;
   String? hint;
