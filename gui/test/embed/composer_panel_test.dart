@@ -194,6 +194,25 @@ void main() {
       expect(send.left - editor.right, 16);
     });
 
+    testWidgets('zoomed on a phone: the keys give way so the text keeps 120 wide', (tester) async {
+      es.setComposerZoom(4);
+      final k = es.composerScale;
+      for (final w in [320.0, 375.0, 390.0]) {
+        await tester.pumpWidget(wrap(SizedBox(
+            width: w,
+            height: 700,
+            child: Stack(children: composerLayer(state: es, session: rs, port: port, editor: FlutterEditor.new)))));
+        await tester.pump();
+        expect(rect(tester, 'composer-field').width, greaterThanOrEqualTo(120 - 1e-6), reason: 'stage $w');
+        // The keys stay square, never under their default 40 and never over the zoom; the text keeps the zoom.
+        for (final key in ['composer-plus', 'quick-toggle', 'composer-send']) {
+          final r = rect(tester, key);
+          expect(r.width, closeTo(r.height, 1e-6), reason: '$key at $w');
+          expect(r.width, inInclusiveRange(40 - 1e-6, 40 * k + 1e-6), reason: '$key at $w');
+        }
+      }
+    });
+
     testWidgets('zoomed and narrow', (tester) async {
       big(tester);
       es.setComposerZoom(4);
