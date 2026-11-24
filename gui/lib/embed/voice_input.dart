@@ -1,5 +1,6 @@
 // The Dart side of the `rapp/speech` channel (gui/ios/Runner, a later task): hold-to-talk speech recognition.
-// Dart calls `start` ({hotwords} when there are any) / `stop` / `cancel`; native answers with `partial` / `final` {text} and `error` {code} calls.
+// Dart calls `start` ({hotwords} when there are any) / `stop` / `cancel`; native answers with `partial` / `final` {text} and `error` {code} calls,
+// and `timing` {first_partial_ms, final_ms} just before `final`.
 // `start` replies `cancelled` when a cancel or an interruption overtook it natively.
 import 'dart:async';
 
@@ -10,6 +11,17 @@ import 'package:flutter/services.dart';
 enum VoiceStart { ok, asked, denied, unavailable, preparing, cancelled }
 
 enum VoicePhase { idle, starting, listening, finishing }
+
+/// How long one recording took natively; null where it did not happen (no partial, or no stop before the final).
+class VoiceTiming {
+  const VoiceTiming({this.firstPartialMs, this.finalMs});
+
+  /// Native `start` called to the first `partial`.
+  final int? firstPartialMs;
+
+  /// Native `stop` to the `final`.
+  final int? finalMs;
+}
 
 class VoiceInput extends ChangeNotifier {
   VoiceInput({
@@ -57,6 +69,11 @@ class VoiceInput extends ChangeNotifier {
   /// The latest partial (or final) transcript.
   String get text => _text;
 
+  VoiceTiming? _lastTiming;
+
+  /// The timing native reported for the current or last recording; cleared at each [start].
+  VoiceTiming? get lastTiming => _lastTiming;
+
   void _set({VoicePhase? phase, String? text}) {
     _phase = phase ?? _phase;
     _text = text ?? _text;
@@ -68,6 +85,7 @@ class VoiceInput extends ChangeNotifier {
     if (_phase != VoicePhase.idle) return VoiceStart.unavailable;
     _aborted = false;
     _earlyFinal = false;
+    _lastTiming = null;
     _set(phase: VoicePhase.starting, text: '');
     VoiceStart r;
     try {
@@ -166,7 +184,7 @@ class VoiceInput extends ChangeNotifier {
     if (done != null && !done.isCompleted) done.complete(text);
   }
 
-  /// Native to Dart: `partial` / `final` {text}, `level` {value}, `error` {code}. Ignored while idle, and while
+  /// Native to Dart: `partial` / `final` {text}, `level` {value}, `error` {code}, `timing` {first_partial_ms, final_ms}. Ignored while idle, and while
   /// starting: native sends nothing for a run before its `ok`, so anything then is a late one from the last run.
   @visibleForTesting
   Future<Object?> handle(MethodCall call) async {
@@ -186,6 +204,11 @@ class VoiceInput extends ChangeNotifier {
         if (_phase == VoicePhase.listening) {
           _level.value = ((args['value'] as num?)?.toDouble() ?? 0).clamp(0.0, 1.0);
         }
+      case 'timing':
+        _lastTiming = VoiceTiming(
+          firstPartialMs: (args['first_partial_ms'] as num?)?.toInt(),
+          finalMs: (args['final_ms'] as num?)?.toInt(),
+        );
       case 'error':
         _finish('');
         onError?.call('${args['code'] ?? ''}');
