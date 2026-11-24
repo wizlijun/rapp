@@ -906,4 +906,6 @@ macOS / Linux 改用 iOS 的 `KeyBar` 和常用语条，贴在画面底部；按
 - [x] Linux 共用 PC 按键区、常用语条和自动收起规则；补充与 macOS 同组的布局及键盘回归。
 - [x] GTK 独立客户端可见名称与包内说明统一为 rApp；核对新图标已进入 Linux 打包路径。
 - [x] 299 项不同 Flutter 用例、10 项 Rust 会话测试通过；GTK 编译检查、Linux release GUI 构建、构建路径回归和 diff 检查通过。
-- [ ] 实机确认触屏按住/上滑、实体快捷键及安装后的新图标。本轮仅修改代码与构建验证，尚未打包安装。详见 `docs/superpowers/plans/2026-11-24-linux-pc-controls-parity.md`。
+- [ ] 实机确认触屏按住/上滑、实体快捷键及安装后的新图标。代码及 Linux 0.15.18 发布包验证已完成，本机尚未升级。详见 `docs/superpowers/plans/2026-11-24-linux-pc-controls-parity.md`。
+
+- [x] Linux [v0.15.18](https://github.com/wizlijun/rapp/releases/tag/v0.15.18) 已公开发布（源码 `d1ce9a1a`）：Arch/便携包 40 个文件一致、14 个 ELF 依赖解析、隔离 QUIC 主机/服务/端口共享及真实 Whisper 8 项检查通过；三个远端资产 SHA256 校验通过。Latest 保留上传期间另一端发布的 macOS v0.15.19，本机未自动升级。

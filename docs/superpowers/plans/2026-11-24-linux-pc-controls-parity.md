@@ -23,3 +23,17 @@
 ## 后续 Linux 发布
 
 用户随后要求发布 Linux 版。整合远端 `ab1393ea`（macOS 0.15.17，只有版本与网站快照更新），Linux 发布号使用 0.15.18（Flutter 0.15.18+74），协议保持 v15。发布 Arch/Omarchy x86_64 包、便携包及 SHA256SUMS，以 `--latest=false` 保留 macOS 的自动更新清单。本次发布不自动安装。
+
+### 发布包验收
+
+- 构建源码 `d1ce9a1a39bfbaf0a39e03ddccb169a73c5c8222`；Flutter 3.50.0。Arch 安装包与便携包包含相同的 40 个文件，14 个 ELF 的动态依赖均可解析，源码/引擎版本和协议 v15 已核对。
+- 隔离 Wayland 与网络环境中，包内 hub → service → desktop QUIC 捕获、CLI、端口共享及监听器回收检查通过；新图标和启动器 rApp 名称正确。
+- 包内 Whisper 使用公开音频与真实模型的 8 项检查全部通过：短音频、热词、静音、五分钟边界、截断，以及停止/取消/崩溃后的采集进程清理。没有使用用户麦克风或录音。
+- 验证日志：`.build-logs/linux-01518-package.log`、`.build-logs/linux-01518-artifacts.log`、`.build-logs/linux-01518-speech.log`。物理触屏、实体快捷键和实际账号解锁仍待设备验收。
+
+### 发布结果
+
+- Linux [v0.15.18](https://github.com/wizlijun/rapp/releases/tag/v0.15.18) 已公开发布，源码标签指向 `d1ce9a1a`；三个远端资产的大小与 SHA256 均和本地一致，匿名下载的校验清单一致。
+- 便携包上传前改用 gzip 最高压缩率；已确认解压后的 tar 字节完全一致，并重新生成校验清单及重跑发布包验收。安装包没有改变。上传连接超时后通过当前请求绑定 Wi-Fi 接口完成；没有修改系统网络配置或创建临时 Actions 分支。
+- 上传期间另一端发布了 macOS v0.15.19，Latest 保留该版本；macOS v0.15.17 既有资产 ID、大小和 SHA256 均未改变。Linux 本次构建仍基于 macOS 0.15.17 的图标与功能基线。
+- 仓库网站下载快照已刷新至 Linux 0.15.18 / macOS 0.15.19；网站发布选择的 8 项测试、语法检查和静态构建通过。本轮未重新部署网站，也未自动升级本机。
