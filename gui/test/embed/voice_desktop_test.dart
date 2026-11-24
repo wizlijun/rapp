@@ -270,6 +270,25 @@ void main() {
     expect(rs.composer.pendingHeard?.fixed, '打开Python');
   });
 
+  macTest('a desktop 编辑 into a password field keeps the words, not what was heard (D7)', (tester) async {
+    await view(tester);
+    await goLive(tester);
+    await withRules(tester);
+    rs.composer.pendingHeard = const VoiceHeard(heard: '早先', fixed: '早先');
+    rs.secureFocus = true;
+    es.currentRemote!.secureFocus = true; // the state's copy, which voiceFix reads
+    await tester.pumpWidget(layer());
+    final g = await press(tester);
+    await g.moveTo(tester.getCenter(find.byKey(const Key('voice-edit'))));
+    await tester.pump();
+    voice.stopResult = '打开拍森';
+    await g.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(rs.composer.draft, endsWith('打开拍森')); // and no fixing either
+    expect(rs.composer.pendingHeard, isNull);
+  });
+
   macTest('drag onto 取消 then release sends nothing', (tester) async {
     await view(tester);
     await goLive(tester);

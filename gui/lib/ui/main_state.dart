@@ -415,7 +415,8 @@ class MainState extends ChangeNotifier {
               if (voice.ai != null) {
                 rs.composer.pendingAi = voice.ai;
               } else if (voice.heard != null) {
-                rs.composer.pendingHeard = voice.heard; // sent from the panel later, it still learns (D8)
+                // Sent from the panel later, it still learns (D8); not from a password field (D7).
+                rs.composer.pendingHeard = rs.secureFocus ? null : voice.heard;
               }
             }
             return voiceBlocked;

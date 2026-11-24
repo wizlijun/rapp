@@ -837,7 +837,8 @@ class _InputStageState extends State<_InputStage> {
         edit: (text, heard) {
           final c = widget.session.composer;
           unawaited(c.keep(text));
-          c.pendingHeard = heard;
+          // Words said into a password field are not learned, even once the focus has left it (D7).
+          c.pendingHeard = widget.session.secureFocus ? null : heard;
           c.open = true;
         },
         composer: () => widget.session.composer,

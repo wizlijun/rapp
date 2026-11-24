@@ -75,7 +75,8 @@ String? sendVoice({
   String keep(String hint) {
     unawaited(c.keep(t));
     if (voice.ai != null) c.pendingAi = voice.ai; // sent from the panel later, it is still the AI's text
-    if (voice.ai == null && voice.heard != null) c.pendingHeard = voice.heard; // and still what was heard
+    // And still what was heard; not from a password field, even once the focus has left it (D7).
+    if (voice.ai == null && voice.heard != null) c.pendingHeard = session.secureFocus ? null : voice.heard;
     return hint;
   }
 
@@ -411,7 +412,9 @@ class VoiceHold extends ChangeNotifier {
           _fixOut = r;
         }
         final text = r.text;
-        final heard = VoiceHeard(heard: words, fixed: text);
+        // Trimmed like the text that goes (sendVoice trims it): else the recorder sees heard ≠ sent and writes a
+        // fix.heard for words nothing fixed (D19).
+        final heard = VoiceHeard(heard: words.trim(), fixed: text.trim());
         // The words are handed on from here: the release to now is the log's `out`.
         final out = released.elapsedMilliseconds;
         if (_disposed) {

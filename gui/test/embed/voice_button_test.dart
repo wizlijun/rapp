@@ -698,6 +698,21 @@ void main() {
     expect(rs.composer.pendingHeard?.fixed, '你好');
   });
 
+  iosTest('an iOS 编辑 into a password field keeps the words, not what was heard (D7)', (tester) async {
+    rs.composer.pendingHeard = const VoiceHeard(heard: '早先', fixed: '早先');
+    rs.secureFocus = true;
+    await tester.pumpWidget(layer());
+    final r = ringOf(tester);
+    final g = await press(tester);
+    await g.moveTo(at(tester, r, VoicePick.edit));
+    await tester.pump();
+    voice.partial('你好');
+    voice.stopResult = '你好';
+    await lift(tester, g);
+    expect(rs.composer.draft, endsWith('你好'));
+    expect(rs.composer.pendingHeard, isNull); // learned once focus leaves the field otherwise
+  });
+
   iosTest('a session switch while the stop is out puts the words in the original draft', (tester) async {
     rs.composer.draft = 'x';
     final other = RemoteSession(2, 'Notes');
@@ -1235,6 +1250,18 @@ void main() {
         expect(h.fixedText, '打开拍森');
       });
 
+      test('what was heard is trimmed like the text that goes, so unfixed words record no fix (D19)', () async {
+        await h.start();
+        voice.partial(' 你好 ');
+        voice.stopResult = ' 你好 ';
+        h.finish(VoicePick.send);
+        await Future<void>.delayed(Duration.zero);
+        final (text, heard, fixed) = sent.single;
+        // sendVoice sends text.trim(); the recorder writes fix.heard when heard differs from what went.
+        expect((heard, fixed), (text.trim(), text.trim()));
+        expect(heard, '你好');
+      });
+
       test('release sends the fixed text with what was heard', () async {
         await h.start();
         voice.partial('打开拍森');
@@ -1331,6 +1358,17 @@ void main() {
         sendVoice(state: es, session: rs, port: port, text: '打开 Python。', voice: const VoiceOrigin(ai: ai, heard: heard));
         await Future<void>.delayed(Duration.zero);
         expect(rs.composer.pendingAi, ai);
+        expect(rs.composer.pendingHeard, isNull);
+      });
+
+      test('sendVoice into a password field keeps the words, not what was heard (D7)', () async {
+        rs.composer.submitText('还在路上'); // in flight: busy
+        rs.composer.pendingHeard = const VoiceHeard(heard: '早先', fixed: '早先');
+        rs.secureFocus = true;
+        const heard = VoiceHeard(heard: '你好', fixed: '你好');
+        expect(sendVoice(state: es, session: rs, port: port, text: '你好', voice: const VoiceOrigin(heard: heard)), voiceBusy);
+        await Future<void>.delayed(Duration.zero);
+        expect(rs.composer.draft, endsWith('你好'));
         expect(rs.composer.pendingHeard, isNull);
       });
     });
