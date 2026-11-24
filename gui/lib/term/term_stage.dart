@@ -788,29 +788,17 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     // An exited pane (T4) takes nothing: nothing is sent or kept, and the window's own keys
     // (Esc, Ctrl+[ / ], Ctrl+O, F11) are the window's again.
     if (!_canInput || widget.frozen) return KeyEventResult.ignored;
-    final ctrl = widget.session.termCtrl;
     // The key bar's sticky ⌃ ⌥: a letter goes as `Ctrl-<letter>` / `Alt-<letter>`, a named key with them added.
     final latch = widget.session.keyLatch;
     if (latch.flags & (latchCtrl | latchOpt) != 0 && input != null) {
       if (input case TermText(:final text) when RegExp(r'^[a-zA-Z]$').hasMatch(text)) {
-        ctrl.value = false;
         if (sendLatchedLetter(widget.state, widget.session, widget.port, text)) {
           _sentInput();
           return KeyEventResult.handled;
         }
       } else if (input case TermKeys(:final keys)) {
-        ctrl.value = false;
         widget.port.sendKeys(widget.session.sid, [for (final k in keys) termWire(k, latch.flags)]);
         latch.used();
-        _sentInput();
-        return KeyEventResult.handled;
-      }
-    }
-    if (ctrl.value && input != null) {
-      // The key row's sticky ⌃: a letter goes as `Ctrl-<letter>`, anything else as it is; the ⌃ is used up.
-      ctrl.value = false;
-      if (input case TermText(:final text) when RegExp(r'^[a-zA-Z]$').hasMatch(text)) {
-        widget.port.sendKeys(widget.session.sid, ['Ctrl-${text.toUpperCase()}']);
         _sentInput();
         return KeyEventResult.handled;
       }

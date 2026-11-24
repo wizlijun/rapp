@@ -143,7 +143,8 @@ void main() {
       final p = rect(tester, 'composer-panel');
       expect(p.size, const Size(720, 56 + 2)); // one line as tall as ＋/发送 and their 8s, inside a 1 px border
       expect(p.center.dx - host.left, 500);
-      expect(p.bottom - host.top, 692);
+      // 8 above the key bar, which an open panel brings along.
+      expect(p.bottom - host.top, 700 - keyBarHeightOf(es, rs, host.width) - 8);
       // W2: 15 on 22, no MATRIX glow in the editor.
       final style = field(tester).style!;
       expect(style.fontSize, 15);
@@ -694,7 +695,7 @@ void main() {
         expect(find.text('收起'), findsOneWidget);
         // W9 order, reading left to right, row by row.
         final labels = ['Esc', 'Tab', '⌘', '⌥', '删除', '←', '↓', '↑', '→', '回车'];
-        final pos = [for (final l in labels) tester.getCenter(find.text(l).first)];
+        final pos = [for (final l in labels) tester.getCenter(find.descendant(of: menu, matching: find.text(l)).first)];
         for (var i = 1; i < pos.length; i++) {
           final sameRow = (pos[i].dy - pos[i - 1].dy).abs() < 1;
           expect(sameRow ? pos[i].dx > pos[i - 1].dx : pos[i].dy > pos[i - 1].dy, isTrue, reason: labels[i]);
@@ -772,18 +773,18 @@ void main() {
         await tester.pumpWidget(layer());
         await tester.pump();
         await openMenu(tester);
-        await tester.tap(find.text('⌘'));
+        await tester.tap(find.descendant(of: menu, matching: find.text('⌘')));
         await tester.pump();
-        await tester.tap(find.text('Tab'));
+        await tester.tap(find.descendant(of: menu, matching: find.text('Tab')));
         await tester.pump();
-        await tester.tap(find.text('Tab'));
+        await tester.tap(find.descendant(of: menu, matching: find.text('Tab')));
         await tester.pump();
         expect(callsOf('key'), [
           equals({'sid': 1, 'keyCode': 48, 'modifiers': 1048576}),
           equals({'sid': 1, 'keyCode': 48, 'modifiers': 0}),
         ]);
         expect(menu, findsOneWidget);
-        await tester.tap(find.text('→'));
+        await tester.tap(find.descendant(of: menu, matching: find.text('→')));
         await tester.pump();
         expect(callsOf('key').last, equals({'sid': 1, 'keyCode': 124, 'modifiers': 0}));
       });
@@ -794,7 +795,7 @@ void main() {
         await tester.pump();
         for (final close in ['outside', 'plus']) {
           await openMenu(tester);
-          await tester.tap(find.text('⌘'));
+          await tester.tap(find.descendant(of: menu, matching: find.text('⌘')));
           await tester.pump();
           if (close == 'outside') {
             await tester.tapAt(const Offset(5, 5));
@@ -805,7 +806,7 @@ void main() {
           expect(menu, findsNothing, reason: close);
           await openMenu(tester);
           port.calls.clear();
-          await tester.tap(find.text('Tab'));
+          await tester.tap(find.descendant(of: menu, matching: find.text('Tab')));
           await tester.pump();
           expect(callsOf('key').single, equals({'sid': 1, 'keyCode': 48, 'modifiers': 0}), reason: close);
           await tester.tapAt(const Offset(5, 5));
@@ -927,13 +928,13 @@ void main() {
         await tester.pumpWidget(layer());
         await tester.pump();
         await openMenu(tester);
-        await tester.tap(find.text('⌘'));
+        await tester.tap(find.descendant(of: menu, matching: find.text('⌘')));
         await tester.pump();
         await tester.pumpWidget(layer(s: rs2));
         await tester.pump();
         expect(menu, findsNothing);
         await openMenu(tester);
-        await tester.tap(find.text('←'));
+        await tester.tap(find.descendant(of: menu, matching: find.text('←')));
         await tester.pump();
         expect(callsOf('key').single, equals({'sid': 2, 'keyCode': 123, 'modifiers': 0}));
       });
@@ -1202,6 +1203,9 @@ void main() {
           visible: const Rect.fromLTWH(0, 0, 1, 1),
         );
 
+    // The key bar an open panel brings along: panels stand on it.
+    double bar() => keyBarHeightOf(es, es.currentRemote!, 800);
+
     Future<void> openEmbedded(WidgetTester tester, {int sid = 1, String app = 'Safari'}) async {
       await tester.runAsync(() async {
         t.onSend = (m) {
@@ -1377,7 +1381,7 @@ void main() {
       await showPicture(tester);
       await openPanel(tester);
       final p = panelRect(tester);
-      expect(p.bottom, 600 - 8);
+      expect(p.bottom, 600 - 8 - bar());
       expect(p.center.dx, 400);
       final g = tester.getRect(grip);
       expect(g.width, greaterThanOrEqualTo(48));
@@ -1490,13 +1494,13 @@ void main() {
         await tester.pump();
       }
       expect(saves, 0);
-      expect(panelRect(tester).bottom, 392);
+      expect(panelRect(tester).bottom, 392 - bar());
       expect(panelRect(tester).center.dx, 380);
       await g.up();
       await tester.pump();
       expect(saves, 1);
-      expect(es.profiles.resolve('Safari').composerAt, InputPoint.at(const Offset(380, 392), const Size(800, 600)));
-      expect(panelRect(tester).bottom, 392);
+      expect(es.profiles.resolve('Safari').composerAt, InputPoint.at(Offset(380, 392 - bar()), const Size(800, 600)));
+      expect(panelRect(tester).bottom, 392 - bar());
       expect(panelRect(tester).center.dx, 380);
       await tester.pump(kDoubleTapTimeout);
     });
@@ -1512,7 +1516,7 @@ void main() {
       await tester.tap(grip);
       await tester.pumpAndSettle();
       expect(es.profiles.resolve('Safari').composerAt, isNull);
-      expect(panelRect(tester).bottom, 592);
+      expect(panelRect(tester).bottom, 592 - bar());
       expect(panelRect(tester).center.dx, 400);
       expect(fieldFocused(tester), isTrue);
     });
@@ -1523,7 +1527,7 @@ void main() {
       await tester.enterText(fieldFinder, 'keep');
       await tester.pump();
       await dragGrip(tester, const [Offset(0, -150), Offset(0, -50)]);
-      expect(panelRect(tester).bottom, 392);
+      expect(panelRect(tester).bottom, 392 - bar());
       expect(text(tester), 'keep');
       expect(fieldFocused(tester), isTrue);
     });
@@ -1534,7 +1538,7 @@ void main() {
       // 720 wide on 800: the centre can go from 368 to 432.
       await dragGrip(tester, const [Offset(2000, 0), Offset(-50, 0)]);
       expect(panelRect(tester).center.dx, 382);
-      expect(panelRect(tester).bottom, 592);
+      expect(panelRect(tester).bottom, 592 - bar());
     });
 
     testWidgets('a touch held still on the grip, then moved, still drags (no long-press tooltip)', (tester) async {
@@ -1549,7 +1553,7 @@ void main() {
       await g.up();
       await tester.pump();
       await tester.pump(kDoubleTapTimeout);
-      expect(panelRect(tester).bottom, 392);
+      expect(panelRect(tester).bottom, 392 - bar());
       expect(find.text('拖动；双击回到底部居中'), findsNothing);
     });
 
@@ -1572,9 +1576,9 @@ void main() {
         await g.up();
         await tester.pump();
         await tester.pump(kDoubleTapTimeout);
-        expect(panelRect(tester).bottom, 392);
+        expect(panelRect(tester).bottom, 392 - bar());
         expect(panelRect(tester).center.dx, 380);
-        expect(es.profiles.resolve('Safari').composerAt, InputPoint.at(const Offset(380, 392), const Size(800, 600)));
+        expect(es.profiles.resolve('Safari').composerAt, InputPoint.at(Offset(380, 392 - bar()), const Size(800, 600)));
       });
     }
 
@@ -1592,7 +1596,7 @@ void main() {
         await g.up();
         await tester.pump();
         await tester.pump(kDoubleTapTimeout);
-        expect(panelRect(tester).bottom, 592);
+        expect(panelRect(tester).bottom, 592 - bar());
         expect(es.profiles.resolve('Safari').composerAt, isNull);
         expect(text(tester), 'some text to select');
       });
@@ -1630,7 +1634,7 @@ void main() {
       await g.up();
       await tester.pump();
       await tester.pump(kDoubleTapTimeout);
-      expect(panelRect(tester).bottom, 392);
+      expect(panelRect(tester).bottom, 392 - bar());
       expect(panelRect(tester).center.dx, 380);
       expect(text(tester), 'keep');
       expect(fieldFocused(tester), isTrue);
@@ -1652,7 +1656,7 @@ void main() {
       await g.panZoomEnd();
       await tester.pump();
       await tester.pump(kDoubleTapTimeout);
-      expect(panelRect(tester).bottom, 592);
+      expect(panelRect(tester).bottom, 592 - bar());
       expect(saves, 0);
     });
 
@@ -1670,7 +1674,7 @@ void main() {
       // Open or not is the session's (R18): Notes' panel starts closed.
       expect(find.byKey(const Key('composer-panel')), findsNothing);
       await openPanel(tester);
-      expect(panelRect(tester).bottom, 592);
+      expect(panelRect(tester).bottom, 592 - bar());
       expect(panelRect(tester).center.dx, 400);
     });
 
@@ -1698,7 +1702,7 @@ void main() {
       await tester.pump(kDoubleTapTimeout);
       expect(es.profiles.resolve('Notes').composerAt, isNull);
       expect(es.profiles.resolve('Safari').composerAt, isNull);
-      expect(panelRect(tester).bottom, 592);
+      expect(panelRect(tester).bottom, 592 - bar());
     });
 
     testWidgets('a drag that ends where it started writes nothing', (tester) async {
@@ -1707,7 +1711,7 @@ void main() {
       var saves = 0;
       es.profiles.addListener(() => saves++);
       await dragGrip(tester, const [Offset(0, -100), Offset(0, 100)]);
-      expect(panelRect(tester).bottom, 592);
+      expect(panelRect(tester).bottom, 592 - bar());
       expect(saves, 0);
       expect(es.profiles.mine, isEmpty);
     });
@@ -1723,7 +1727,7 @@ void main() {
       stageSize = const Size(800, 400);
       await tester.pumpWidget(wrap(mainLike()));
       await tester.pump();
-      expect(panelRect(tester).bottom - tester.getTopLeft(find.byType(Stage)).dy, 392);
+      expect(panelRect(tester).bottom - tester.getTopLeft(find.byType(Stage)).dy, 392 - bar());
       stageSize = const Size(800, 600);
       await tester.pumpWidget(wrap(mainLike()));
       await tester.pump();

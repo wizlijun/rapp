@@ -25,7 +25,6 @@ class UiPrefs {
     this.startFullscreen = true,
     this.autoSaveTraffic = true,
     this.inputHistory = true,
-    this.termKeyRow = false,
     this.keyBarMore = false,
     this.keyBarSlim = false,
     this.phraseStrip = true,
@@ -59,9 +58,6 @@ class UiPrefs {
 
   /// 记下写作面板发出去的话 (`input_history`): the input record is kept. Missing or bad means on.
   bool inputHistory;
-
-  /// 按键排 (`term_key_row`): the six big keys on a terminal's stage, on this console. Missing or bad means off.
-  bool termKeyRow;
 
   /// 按键区 (iOS): the second row is open (`key_bar_more`). Missing or bad means closed.
   bool keyBarMore;
@@ -142,7 +138,6 @@ class UiPrefs {
       final fs = j['start_fullscreen'];
       final save = j['auto_save_traffic'];
       final ih = j['input_history'];
-      final kr = j['term_key_row'];
       final tf = j['term_fit'];
       final vt = j['voice_ai_tidy'];
       final vk = j['voice_ai_think'];
@@ -166,7 +161,6 @@ class UiPrefs {
         startFullscreen: fs is bool ? fs : true,
         autoSaveTraffic: save is bool ? save : true,
         inputHistory: ih is bool ? ih : true,
-        termKeyRow: kr is bool ? kr : false,
         keyBarMore: j['key_bar_more'] == true,
         keyBarSlim: j['key_bar_slim'] == true,
         phraseStrip: j['phrase_strip'] != false,
@@ -218,7 +212,6 @@ class UiPrefs {
         'start_fullscreen': startFullscreen,
         'auto_save_traffic': autoSaveTraffic,
         'input_history': inputHistory,
-        'term_key_row': termKeyRow,
         'key_bar_more': keyBarMore,
         'key_bar_slim': keyBarSlim,
         'phrase_strip': phraseStrip,

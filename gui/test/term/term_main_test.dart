@@ -338,8 +338,9 @@ void main() {
     await drop(tester);
     term.calls.clear();
     final grid = tester.getTopLeft(find.byKey(const Key('term-grid')));
-    final g = await tester.startGesture(grid + const Offset(2, 120), kind: PointerDeviceKind.mouse);
-    await g.moveTo(grid + const Offset(60, 120));
+    // The picture stands one key bar up, its top under the top bar: drag lower down.
+    final g = await tester.startGesture(grid + const Offset(2, 220), kind: PointerDeviceKind.mouse);
+    await g.moveTo(grid + const Offset(60, 220));
     await g.up();
     await tester.pump();
     expect(find.byKey(const Key('term-copy')), findsOneWidget);
@@ -364,18 +365,16 @@ void main() {
     expect(copied.first, startsWith('a'));
   }, variant: TargetPlatformVariant.only(TargetPlatform.macOS)..values.add(TargetPlatform.linux));
 
-  testWidgets('iOS terminal with prefs.termKeyRow true: no keyrow-*, KeyBar instead', (tester) async {
-    s.prefs.termKeyRow = true;
+  testWidgets('a terminal has the KeyBar, no keyrow-* (iOS and the desktop)', (tester) async {
     await tester.pumpWidget(wrap(window()));
     await openTerm(tester, two);
     await tester.pump();
     expect(find.byWidgetPredicate((w) => w.key is ValueKey<String> && (w.key as ValueKey<String>).value.startsWith('keyrow-')),
         findsNothing);
     expect(find.byType(KeyBar), findsOneWidget);
-  }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+  }, variant: TargetPlatformVariant({TargetPlatform.iOS, TargetPlatform.macOS}));
 
-  testWidgets('a frozen key row and the panel keys grid send no keys', (tester) async {
-    s.prefs.termKeyRow = true;
+  testWidgets('a frozen key bar and the panel keys grid send no keys', (tester) async {
     await tester.pumpWidget(wrap(window()));
     await openTerm(tester, two);
     await tester.tap(find.byKey(const Key('composer-open')));
@@ -383,8 +382,8 @@ void main() {
     await tester.pump();
     await drop(tester);
     term.calls.clear();
-    await tester.tap(find.byKey(const Key('keyrow-Ctrl-C')));
-    await tester.tap(find.byKey(const Key('keyrow-Enter')));
+    await tester.tap(find.byKey(const Key('bar-cc')));
+    await tester.tap(find.byKey(const Key('bar-enter')));
     await tester.pump();
     await tester.tap(find.byKey(const Key('composer-plus')));
     await tester.pumpAndSettle();

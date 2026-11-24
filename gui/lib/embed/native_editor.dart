@@ -9,7 +9,7 @@ import 'package:flutter/services.dart';
 import 'composer_editor.dart';
 
 class NativeEditor implements ComposerEditor {
-  NativeEditor({required this.onToggleFocus, this.onShortcut}) {
+  NativeEditor({required this.onToggleFocus, this.onShortcut, this.onTyped}) {
     _channel.setMethodCallHandler(_event);
   }
 
@@ -19,6 +19,10 @@ class NativeEditor implements ComposerEditor {
 
   final VoidCallback onToggleFocus;
   final ValueChanged<String>? onShortcut;
+
+  /// A key typed here (not a repeat, no ⌘): the desktop key bar folds to ⊙ (pc-key-bar spec §3). NSTextView takes
+  /// the keys before Flutter's keyboard sees them.
+  final VoidCallback? onTyped;
   @override
   EditorHandlers? handlers;
 
@@ -65,6 +69,8 @@ class NativeEditor implements ComposerEditor {
         onToggleFocus();
       case 'shortcut':
         onShortcut?.call(call.arguments as String);
+      case 'typed':
+        onTyped?.call();
     }
     return null;
   }

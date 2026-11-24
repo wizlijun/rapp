@@ -8,7 +8,6 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../term/term_key_row.dart';
 import '../term/term_session_port.dart';
 import '../ui/controls.dart';
 import '../ui/main_state.dart';
@@ -109,6 +108,9 @@ class _ComposerPanelState extends State<ComposerPanel> {
         (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS
             ? NativeEditor(
                 onToggleFocus: widget.state.composerKey,
+                onTyped: () {
+                  if (!widget.state.prefs.keyBarSlim) widget.state.setKeyBarSlim(true);
+                },
                 onShortcut: (key) {
                   switch (key) {
                     case '[': widget.state.step(-1);
@@ -508,36 +510,59 @@ class _ComposerPanelState extends State<ComposerPanel> {
 /// upload strip, if any), the writing panel at the bottom centre while open. Both float over
 /// the picture and never change the stage's size (R12).
 ///
-/// A terminal's [keyRow] (「按键排」) adds the six keys: on the panel's line at the stage's two bottom corners, with
-/// 「输入」 just left of the right group; on a stage narrower than [keyRowWideAt] with the panel open, a line of its
-/// own right above the panel.
+/// The key bar (and the 常用语条 over it), iOS's own, lies full width along the stage's bottom: a terminal's (or a
+/// terminal app's, [keyBarWhenClosed]) always, another app's while its panel is open; the panel stands 8 above it, the
+/// row 12 (pc-key-bar spec).
 ///
 /// With the soft keyboard up ([keyboard]: how far it reaches over the stage's bottom) all of it stands on the
 /// keyboard's top edge instead, the panel 8 above it; the picture under it stays as it is.
 ///
-/// iOS has its own: the key bar, the panel and the button stack in an [IosDock] (no [keyRow] there).
+/// iOS has its own: the key bar, the panel and the button stack in an [IosDock].
 List<Widget> composerLayer(
     {required MainState state,
     required RemoteSession session,
     required SessionPort port,
-    bool keyRow = false,
     double keyboard = 0,
     ComposerEditor Function()? editor}) {
   final both = Listenable.merge([session, session.composer, state.composerZoom, state.stageSide]);
   final term = port is TermSessionPort ? port : null;
-  final keys = keyRow && term != null;
-  // The stage row's right inset: clear of the terminal key row when it shows.
-  final rowRight = keys ? keyRowInset + keyRowGroupWidth + 8 : 12.0;
+  const rowRight = 12.0;
   bool open() => session.composer.open && session.composerAllowed;
   if (defaultTargetPlatform == TargetPlatform.iOS) {
     return _iosLayer(state: state, session: session, port: port, keyboard: keyboard, editor: editor, both: both);
   }
+  // What `both` and the bar's own modes decide: the bar's height at the stage's [width] while it shows, else 0.
+  final bars = Listenable.merge([both, state]);
+  double bar(double width) =>
+      keyBarWhenClosed(session, port) || open() ? keyBarHeightOf(state, session, width) : 0;
   return [
+    // The key bar along the stage's bottom; always in the list, so its coming and going moves nothing else.
+    Positioned.fill(
+      child: ListenableBuilder(
+        listenable: bars,
+        builder: (context, _) => LayoutBuilder(
+          builder: (context, c) => bar(c.maxWidth) == 0
+              ? const SizedBox.shrink()
+              : Container(
+                  alignment: Alignment.bottomCenter,
+                  padding: EdgeInsets.only(bottom: keyboard),
+                  child: KeyBar(
+                    // Per session: the old one's app modifiers go up for its own sid.
+                    key: ValueKey(('desk-bar', session.sid)),
+                    state: state,
+                    session: session,
+                    port: port,
+                    onCopy: term != null ? () => session.termCopy?.call() : null,
+                  ),
+                ),
+        ),
+      ),
+    ),
     Positioned.fill(
       // The stage's origin for where the panel is (iOS's voice button stands above it).
       child: StageMark(
       child: ListenableBuilder(
-        listenable: both,
+        listenable: bars,
         builder: (context, _) => open()
             ? LayoutBuilder(
                 builder: (context, c) => term == null
@@ -547,7 +572,7 @@ List<Widget> composerLayer(
                         key: ValueKey(session.sid),
                         session: session,
                         scale: state.composerScale,
-                        keyboard: keyboard,
+                        keyboard: keyboard + bar(c.maxWidth),
                         place: panelPlaceOf(session),
                         onPlace: (p) => state.placeComposer(session, p),
                         child: ComposerPanel(
@@ -562,30 +587,20 @@ List<Widget> composerLayer(
                     : Align(
                   alignment: Alignment.bottomCenter,
                   child: Padding(
-                    padding: EdgeInsets.only(bottom: 8 + keyboard),
+                    padding: EdgeInsets.only(bottom: 8 + keyboard + bar(c.maxWidth)),
                     child: PanelPlace(
                       place: panelPlaceOf(session),
                       child: SizedBox(
                       width: panelWidth(c.maxWidth, state.composerScale),
-                      // The key row comes and goes before the panel; the panel stays the same element.
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          if (keys && c.maxWidth < keyRowWideAt) TermKeyRow(port: term, sid: session.sid, ctrl: session.termCtrl, split: false, blocked: state.sendBlocked(session.sid)),
-                          Flexible(
-                            // Keyed by session: a switch is a new panel, and the old one's dispose
-                            // copies its text into its own session's draft.
-                            child: ComposerPanel(
-                              editor: editor,
-                              key: ValueKey(session.sid),
-                              state: state,
-                              session: session,
-                              port: port,
-                              maxHeight: c.maxHeight / 2,
-                            ),
-                          ),
-                        ],
+                      // Keyed by session: a switch is a new panel, and the old one's dispose
+                      // copies its text into its own session's draft.
+                      child: ComposerPanel(
+                        editor: editor,
+                        key: ValueKey(session.sid),
+                        state: state,
+                        session: session,
+                        port: port,
+                        maxHeight: c.maxHeight / 2,
                       ),
                     ),
                     ),
@@ -596,31 +611,15 @@ List<Widget> composerLayer(
       ),
       ),
     ),
-    // A terminal's key row on the panel's line; always in the list, so toggling it moves nothing else.
-    if (term != null)
-      Positioned.fill(
-        child: ListenableBuilder(
-          listenable: both,
-          builder: (context, _) => keys
-              ? LayoutBuilder(
-                  builder: (context, c) => open() && c.maxWidth < keyRowWideAt
-                      ? const SizedBox.shrink() // above the panel instead
-                      : Container(
-                          alignment: Alignment.bottomCenter,
-                          padding: EdgeInsets.only(bottom: keyboard),
-                          child: TermKeyRow(port: term, sid: session.sid, ctrl: session.termCtrl, split: true, blocked: state.sendBlocked(session.sid)),
-                        ),
-                )
-              : const SizedBox.shrink(),
-        ),
-      ),
     Positioned.fill(
       // The whole stage, so the Mac's voice bubble knows its width; the row sits in the corner as before.
       child: LayoutBuilder(
-        builder: (context, stage) => Padding(
+        builder: (context, stage) => ListenableBuilder(
+          listenable: bars,
+          builder: (context, _) => Padding(
       padding: EdgeInsets.only(
         right: rowRight,
-        bottom: (keys ? keyRowBottom : 12) + keyboard,
+        bottom: 12 + keyboard + bar(stage.maxWidth),
       ),
       child: Align(
       alignment: Alignment.bottomRight,
@@ -689,12 +688,14 @@ List<Widget> composerLayer(
         },
       ),
       ),
+          ),
         ),
       ),
     ),
     // 长语音先让 AI 整理's card, over everything; only the card takes taps (spec §5.3).
     Positioned.fill(
-      child: _TidyLayer(state: state, session: session, both: both, keys: keys, keyboard: keyboard, rowRight: rowRight),
+      child: _TidyLayer(state: state, session: session, both: bars, keyboard: keyboard, rowRight: rowRight,
+          bar: bar),
     ),
   ];
 }
@@ -773,7 +774,6 @@ List<Widget> _iosLayer(
           state: state,
           session: session,
           both: both,
-          keys: false,
           keyboard: keyboard,
           rowRight: 12,
           closedBar: keyBarWhenClosed(session, port)),
@@ -848,7 +848,7 @@ class _TidyLayer extends StatelessWidget {
       {required this.state,
       required this.session,
       required this.both,
-      required this.keys,
+      this.bar,
       required this.keyboard,
       required this.rowRight,
       this.closedBar = false});
@@ -856,7 +856,9 @@ class _TidyLayer extends StatelessWidget {
   final MainState state;
   final RemoteSession session;
   final Listenable both;
-  final bool keys;
+
+  /// The desktop: the key bar's height at a stage width (0 while it is not there).
+  final double Function(double width)? bar;
   final double keyboard;
   final double rowRight;
 
@@ -881,7 +883,7 @@ class _TidyLayer extends StatelessWidget {
           return CustomSingleChildLayout(
             delegate: _TidyPlace(
               width: math.max(0.0, math.min(local != null ? at!.width : 360.0, c.maxWidth - 24)),
-              place: (stage, card) => local ?? (ios ? _ios(stage, card) : _desktop(stage, card, control)),
+              place: (stage, card) => local ?? (ios ? _ios(stage, card) : _desktop(stage, card, control, bar?.call(c.maxWidth) ?? 0)),
             ),
             child: VoiceTidyCard(
               key: ValueKey(session.sid),
@@ -897,8 +899,8 @@ class _TidyLayer extends StatelessWidget {
 
   bool get _open => session.composer.open && session.composerAllowed;
 
-  Offset _desktop(Size stage, Size card, double control) {
-    final base = (keys ? keyRowBottom : 12) + keyboard;
+  Offset _desktop(Size stage, Size card, double control, double bar) {
+    final base = 12 + keyboard + bar;
     final corner = Offset(stage.width - rowRight - card.width, stage.height - base - card.height);
     if (!_open) return corner.translate(0, -(control + 8));
     final p = panelPlaceOf(session).value;
