@@ -2,7 +2,7 @@ name: rapp
 description: "rapp desktop GUI: client manager, and the connection manager with --cm."
 publish_to: 'none'
 
-version: 0.15.19+75
+version: 0.15.20+76
 
 environment:
   sdk: ^3.12.1
