@@ -406,7 +406,7 @@ class MainState extends ChangeNotifier {
           unawaited(_learnItems(items));
         },
         // The rules as they are now, not as they were when the tidy was made (spec D9).
-        fromVocabulary: (observed, avoid) => voiceRules.fromVocabulary(observed, avoid),
+        fromVocabulary: (heard, observed) => voiceRules.fromVocabulary(heard, observed),
         send: (s, text, voice) {
           final rs = remote[s], p = portOf(s);
           if (rs == null || p == null) {
@@ -2072,9 +2072,9 @@ class MainState extends ChangeNotifier {
         },
         onComposeKey: () => tidyIfAny(s.sid)?.closed(),
         followNewTabs: !term);
-    rs.composer.onAiSent = (ai, text) => _offerEditLearns(rs.sid, editLearns(ai.original, ai.result, text));
+    rs.composer.onAiSent = (ai, text) => _offerEditLearns(rs.sid, ai.original, editLearns(ai.original, ai.result, text));
     // Without the AI: what the user changed in the device's fixed words, against what was heard (spec D8).
-    rs.composer.onHeardSent = (h, text) => _offerEditLearns(rs.sid, editLearns(h.heard, h.fixed, text));
+    rs.composer.onHeardSent = (h, text) => _offerEditLearns(rs.sid, h.heard, editLearns(h.heard, h.fixed, text));
     final prof = profiles.resolve(r.app);
     rs.setProfile(prof);
     // Wired before any swap's adoptFrom; a reconnect's old session hands its text over itself.
@@ -3465,12 +3465,12 @@ class MainState extends ChangeNotifier {
       (remote[sid]?.secureFocus ?? true) ? FixResult(text, const []) : _voiceRules.fix(text);
 
   // What a sent edit teaches, offered in the session's tidy. Not from a password field; and a fix of the formal
-  // vocabulary put back is not offered to keep: that is changed in note.md (spec D9).
-  void _offerEditLearns(Object sid, List<LearnItem> items) {
+  // vocabulary put back in [heard] is not offered to keep: that is changed in note.md (spec D9).
+  void _offerEditLearns(Object sid, String heard, List<LearnItem> items) {
     if (remote[sid]?.secureFocus ?? true) return;
     final keep = [
       for (final i in items)
-        if (i.action != LearnAction.preserve || !voiceRules.fromVocabulary(i.observed, i.avoid!)) i,
+        if (i.action != LearnAction.preserve || !voiceRules.fromVocabulary(heard, i.observed)) i,
     ];
     if (keep.isNotEmpty) tidyOf(sid).offerLearn(keep);
   }

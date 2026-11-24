@@ -109,9 +109,9 @@ class VoiceTidy extends ChangeNotifier {
   /// ever shows.
   final void Function(Object sid, List<LearnItem> items)? learn;
 
-  /// The change [observed] → [avoid] came from the formal vocabulary (spec D9): flipping it back cannot be
+  /// Putting [observed] of [heard] back undoes the formal vocabulary (spec D9): flipping it back cannot be
   /// learned (the gateway drops such a preserve), so it only hints. Null: nothing is.
-  final bool Function(String observed, String avoid)? fromVocabulary;
+  final bool Function(String heard, String observed)? fromVocabulary;
 
   /// How long an offer outside the bubble stays.
   final Duration offerLife;
@@ -236,7 +236,7 @@ class VoiceTidy extends ChangeNotifier {
       _flips.add(i);
       _log('flip');
       final c = _changes[i];
-      if (learn != null && (fromVocabulary?.call(c.before, c.after) ?? false)) {
+      if (learn != null && (fromVocabulary?.call(_heard, c.before) ?? false)) {
         // The formal vocabulary's: only this once; changing it for good is note.md's (spec D9).
         if (_offer?.inBubble ?? false) _clearOffer();
         _flipHint = vocabularyHint;

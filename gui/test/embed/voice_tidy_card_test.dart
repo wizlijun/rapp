@@ -491,7 +491,7 @@ void main() {
     });
 
     tidyTest('flipping a vocabulary fix shows where to change it, nothing to remember', (tester) async {
-      fromVocabulary = (o, v) => o == '拍森';
+      fromVocabulary = (h, o) => o == '拍森';
       await ready(tester, heard, ai, fixed: '明天用Python跑一下黑猫瑞');
       await tester.tapOnText(find.textRange.ofSubstring('Python'));
       await tester.pump();

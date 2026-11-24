@@ -54,7 +54,7 @@ void main() {
   var mode = TidyMode.prompt;
   late List<TidyMode> setModes;
 
-  bool Function(String observed, String avoid)? fromVocabulary;
+  bool Function(String heard, String observed)? fromVocabulary;
   late List<(Object, String?)> helds;
 
   VoiceTidy make({bool learn = true}) => VoiceTidy(
@@ -208,7 +208,7 @@ void main() {
 
     test('flipping a learned fix offers preserve', () {
       fakeAsync((a) {
-        fromVocabulary = (o, v) => false;
+        fromVocabulary = (h, o) => false;
         final t = make();
         t.begin(fixed, VoicePick.send, heard: heard);
         api.calls.single.complete(const LlmDone(fixed));
@@ -224,8 +224,8 @@ void main() {
     test('flipping a vocabulary fix only hints', () {
       fakeAsync((a) {
         final asked = <(String, String)>[];
-        fromVocabulary = (o, v) {
-          asked.add((o, v));
+        fromVocabulary = (h, o) {
+          asked.add((h, o));
           return true;
         };
         final t = make();
@@ -233,7 +233,7 @@ void main() {
         api.calls.single.complete(const LlmDone(fixed));
         out(a, t);
         t.flip(0);
-        expect(asked, [('拍森', 'Python')]);
+        expect(asked, [(heard, '拍森')]);
         expect(t.text, heard); // this once it goes as heard
         expect(t.offer, isNull);
         expect(t.flipHint, '这条在正式词表里，要改请去 note.md');
@@ -250,7 +250,7 @@ void main() {
 
     test('a vocabulary hint gives way to a learned flip, and back', () {
       fakeAsync((a) {
-        fromVocabulary = (o, v) => o == '拍森';
+        fromVocabulary = (h, o) => o == '拍森';
         final t = make();
         t.begin('打开拍森跑一下黑猫瑞这个测试', VoicePick.send);
         api.calls.single.complete(const LlmDone('打开Python跑一下Hemory这个测试'));

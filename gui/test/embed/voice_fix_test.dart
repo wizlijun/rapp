@@ -99,14 +99,21 @@ void main() {
     }
   });
 
-  test('fromVocabulary', () {
-    final rules = VoiceRules.compile([_r('徐逊', '徐迅'), _r('拍森', 'Python', _l), _r('himory', 'Hemory')]);
-    expect(rules.fromVocabulary('徐逊', '徐迅'), isTrue);
-    expect(rules.fromVocabulary('叫徐逊来', '叫徐迅来'), isTrue);
-    expect(rules.fromVocabulary('打开 HIMORY', 'Hemory'), isTrue);
-    expect(rules.fromVocabulary('拍森', 'Python'), isFalse, reason: 'learned');
-    expect(rules.fromVocabulary('徐逊', 'Python'), isFalse, reason: 'output not in avoid');
-    expect(rules.fromVocabulary('himoryx', 'Hemory'), isFalse, reason: 'no word end');
+  test('fromVocabulary: the heard span touches a word the vocabulary fixes in the heard text', () {
+    final rules = VoiceRules.compile(
+        [_r('徐逊', '徐迅'), _r('拍森', 'Python', _l), _r('himory', 'Hemory'), _r('拍森脚本', 'Python脚本')]);
+    expect(rules.fromVocabulary('徐逊', '徐逊'), isTrue);
+    expect(rules.fromVocabulary('叫徐逊来', '叫徐逊来'), isTrue, reason: 'a diff wider than the rule');
+    expect(rules.fromVocabulary('打开 HIMORY', 'HIMORY'), isTrue);
+    expect(rules.fromVocabulary('运行一下拍森脚本看看结果', '拍森'), isTrue, reason: 'a diff narrower than the rule');
+    expect(rules.fromVocabulary('运行一下拍森脚本看看结果', '森脚'), isTrue);
+    expect(rules.fromVocabulary('😀运行拍森脚本', '拍森'), isTrue, reason: 'rune offsets');
+    expect(rules.fromVocabulary('用拍森跑', '拍森'), isFalse, reason: 'learned');
+    expect(rules.fromVocabulary('徐逊来了', '来了'), isFalse, reason: 'next to the fix, not on it');
+    expect(rules.fromVocabulary('himoryx', 'himoryx'), isFalse, reason: 'no word end');
+    expect(rules.fromVocabulary('徐逊来了', '黑猫瑞'), isFalse, reason: 'not in the heard text');
+    final held = VoiceRules.compile([_p('徐逊说'), _r('徐逊', '徐迅')]);
+    expect(held.fromVocabulary('徐逊说了', '徐逊'), isFalse, reason: 'a preserve kept the vocabulary from fixing it');
   });
 
   test('VoiceHeard', () {

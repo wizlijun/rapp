@@ -229,17 +229,32 @@ class VoiceRules {
     return FixResult(out.toString(), changes);
   }
 
-  /// Whether a vocabulary replace explains [avoid]: its observed is in [observed] (by the matching rules) and its
-  /// output is in [avoid]. Flipping such a fix back to the heard words is not learned (D9).
-  bool fromVocabulary(String observed, String avoid) {
-    final t = observed.runes.toList();
-    final f = t.map(_fold).toList();
-    for (final b in _replace.values) {
-      for (final r in b) {
-        if (r.rule.source != FixSource.vocabulary || !avoid.contains(r.rule.output!)) continue;
-        for (var i = 0; i < t.length; i++) {
-          if (r.at(t, f, i)) return true;
-        }
+  /// Whether putting [observed] of [heard] back is undoing the formal vocabulary (D9): some occurrence of it in
+  /// [heard] overlaps a span a vocabulary replace fixes when [fix] runs on [heard]. By overlap, since the diff can be
+  /// wider than the rule (叫徐逊来 for 徐逊) or narrower (拍森 for 拍森脚本 → Python脚本, the 脚本 being unchanged).
+  /// When [observed] is in [heard] more than once, any occurrence counts: offering to keep one the gateway would
+  /// drop (and that blocks the vocabulary here until the next sync) is worse than not offering one.
+  bool fromVocabulary(String heard, String observed) {
+    final o = observed.runes.toList();
+    if (o.isEmpty) return false;
+    // The vocabulary's spans in heard's runes: a change's start in the fixed text, less what the ones before grew.
+    final spans = <(int, int)>[];
+    var grew = 0;
+    for (final c in fix(heard).changes) {
+      final from = c.start - grew, len = c.before.runes.length;
+      if (c.source == FixSource.vocabulary) spans.add((from, from + len));
+      grew += (c.end - c.start) - len;
+    }
+    if (spans.isEmpty) return false;
+    final h = heard.runes.toList();
+    for (var i = 0; i + o.length <= h.length; i++) {
+      var k = 0;
+      while (k < o.length && h[i + k] == o[k]) {
+        k++;
+      }
+      if (k < o.length) continue;
+      for (final (a, b) in spans) {
+        if (i < b && a < i + o.length) return true;
       }
     }
     return false;

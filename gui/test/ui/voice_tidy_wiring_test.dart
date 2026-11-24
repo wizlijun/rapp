@@ -528,6 +528,14 @@ void main() {
       st.dispose();
     });
 
+    test('reverting a vocabulary fix wider than the diff offers nothing', () async {
+      final (st, _) = await editVoice('运行一下拍森脚本看看结果', '运行一下拍森脚本看看结果',
+          rules: const [FixRule.replace('拍森脚本', 'Python脚本', FixSource.vocabulary)]);
+      expect(st.tidyOf(sid).offer, isNull);
+      expect(api.learns, isEmpty);
+      st.dispose();
+    });
+
     test('no learn offer under secure focus', () async {
       final (st, _) = await editVoice('我们现在打开黑猫瑞看看', '我们现在打开Hemory看看', secure: true);
       expect(st.tidyOf(sid).offer, isNull);
