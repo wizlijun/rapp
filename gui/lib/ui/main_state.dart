@@ -1348,7 +1348,7 @@ class MainState extends ChangeNotifier {
   }
 
   void _onPortEvent(SessionEvent e) {
-    if (e is LatchUsedEvent) return; // the key bar's (AppKeySender listens for its own session)
+    if (e is LatchUsedEvent || e is KeyTypedEvent) return; // the key bar's (it listens for its own session)
     if (e is VoiceKeyEvent) {
       voiceKey(e.sid, e.phase);
       return;

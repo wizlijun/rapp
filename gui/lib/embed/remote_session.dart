@@ -457,8 +457,9 @@ class RemoteSession extends ChangeNotifier {
       case HostNoticeActionEvent():
         break; // MainState's notice.
       case LatchUsedEvent():
+      case KeyTypedEvent():
       case VoiceKeyEvent():
-        break; // MainState's key-row latch, and the voice hotkey.
+        break; // the key bar's latch and fold, and the voice hotkey.
       case ClosedEvent():
         endReason = e.reason;
     }

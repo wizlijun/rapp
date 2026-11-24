@@ -109,7 +109,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
             ? NativeEditor(
                 onToggleFocus: widget.state.composerKey,
                 onTyped: () {
-                  if (!widget.state.prefs.keyBarSlim) widget.state.setKeyBarSlim(true);
+                  foldKeyBar(widget.state, widget.session);
                 },
                 onShortcut: (key) {
                   switch (key) {

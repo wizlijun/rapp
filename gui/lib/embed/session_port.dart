@@ -381,6 +381,11 @@ class LatchUsedEvent extends SessionEvent {
   const LatchUsedEvent(super.sid);
 }
 
+/// macOS: a hardware key typed into the picture went to A (not a repeat, no ⌘, not a modifier); the key bar folds.
+class KeyTypedEvent extends SessionEvent {
+  const KeyTypedEvent(super.sid);
+}
+
 class ClosedEvent extends SessionEvent {
   const ClosedEvent(super.sid, this.reason);
   final String reason;
@@ -541,6 +546,8 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
         return SecureFocusEvent(sid, _as<bool>(m['on']));
       case 'latch_used':
         return LatchUsedEvent(sid);
+      case 'key_typed':
+        return KeyTypedEvent(sid);
       case 'closed':
         return ClosedEvent(sid, _as<String>(m['reason']));
     }
