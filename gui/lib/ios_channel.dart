@@ -9,7 +9,7 @@ class IosPaths {
   const IosPaths(this.support, this.documents);
   final String support, documents;
 
-  /// rapp's data root.
+  /// rApp's data root.
   String get dataRoot => '$support/rapp';
 }
 

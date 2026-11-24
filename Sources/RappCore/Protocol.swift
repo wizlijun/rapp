@@ -730,7 +730,7 @@ public struct RemoteAddress: Equatable {
 /// The title shown on the client: the window's title, or the app's name when
 /// the window has none, at most 200 characters.
 public func windowTitle(_ raw: String?, appName: String?) -> String {
-    let title = (raw?.isEmpty == false ? raw : nil) ?? appName ?? "rapp"
+    let title = (raw?.isEmpty == false ? raw : nil) ?? appName ?? "rApp"
     return String(title.prefix(200))
 }
 

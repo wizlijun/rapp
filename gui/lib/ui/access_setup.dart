@@ -16,7 +16,7 @@ Widget _frame(BuildContext context, List<Widget> children) {
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 420),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text('rapp', textAlign: TextAlign.center, style: TextStyle(color: t.text, fontSize: 28, fontWeight: FontWeight.w600)),
+          Text('rApp', textAlign: TextAlign.center, style: TextStyle(color: t.text, fontSize: 28, fontWeight: FontWeight.w600)),
           const SizedBox(height: 24),
           ...children,
         ]),

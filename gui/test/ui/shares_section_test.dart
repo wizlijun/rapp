@@ -160,7 +160,7 @@ void main() {
     Widget host(bool online) => wrap(SharesSection(api: api, online: online));
     await t.pumpWidget(host(false));
     await t.pump();
-    expect(find.text('本机的 rapp 服务没有在运行'), findsOneWidget);
+    expect(find.text('本机的 rApp 服务没有在运行'), findsOneWidget);
     api.next = (_) async => table([row(8000)]);
     await t.pumpWidget(host(true));
     await t.pump();
@@ -191,9 +191,9 @@ void main() {
 
     for (final (e, text) in <(Object, String)>[
       (ServiceException('offline'), '离线，读不到它的端口'),
-      (ServiceException('old version'), '对方的 rapp 还不支持分享端口'),
+      (ServiceException('old version'), '对方的 rApp 还不支持分享端口'),
       (ServiceException('policy'), '对方的策略不允许远程设置'),
-      (ServiceException('service not running'), '本机的 rapp 服务没有在运行'),
+      (ServiceException('service not running'), '本机的 rApp 服务没有在运行'),
     ]) {
       await showErr(t, e);
       expect(find.text(text), findsOneWidget, reason: text);

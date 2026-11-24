@@ -181,7 +181,7 @@ pub async fn serve_request(state: &Arc<State>, mut s: Pipe, peer: Peer) -> Resul
 }
 
 /// The `list_apps` reply: the apps, A's missing permissions (newer macOS hosts only), what this
-/// device can serve, and its rapp version (shown under its column in B's overview).
+/// device can serve, and its rApp version (shown under its column in B's overview).
 fn list_apps_reply(apps: Value, perms: Option<Value>, caps: Value) -> Value {
     let mut r = json!({"apps": apps, "capabilities": caps, "version": env!("CARGO_PKG_VERSION")});
     if let Some(perms) = perms {

@@ -1,5 +1,5 @@
 // Tray and Dock menus: one group per host, its open sessions (marked ●) then its idle 常用.
-// The tray adds 显示 rapp and 退出 around them; the Dock has its own (system) items for those.
+// The tray adds 显示 rApp and 退出 around them; the Dock has its own (system) items for those.
 import 'package:tray_manager/tray_manager.dart';
 
 import 'ui/lamp.dart';
@@ -30,7 +30,7 @@ List<MenuFavorite> menuFavorites(List<AppRef> idle,
     [for (final a in idle) MenuFavorite(a, host: hostName(a.device), offline: offline(a.device))];
 
 List<MenuItem> trayItems(List<SessionEntry> sessions, {List<MenuFavorite> favorites = const []}) => [
-      MenuItem(key: 'show', label: '显示 rapp'),
+      MenuItem(key: 'show', label: '显示 rApp'),
       MenuItem.separator(),
       ..._body(sessions, favorites),
       MenuItem.separator(),

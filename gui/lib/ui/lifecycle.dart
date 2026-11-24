@@ -145,7 +145,7 @@ String connectionFailureHint(String raw, {int? peerPort, bool relayed = false}) 
   final udp = port != null && port > 0 && port <= 65535
       ? 'UDP $port'
       : 'UDP 监听端口（以对方配置为准）';
-  return '连接超时，原因尚未确定。请确认对方在线、ID/IP 正确，检查网络隔离，并在对方及网络防火墙中允许 rapp 的 $udp。';
+  return '连接超时，原因尚未确定。请确认对方在线、ID/IP 正确，检查网络隔离，并在对方及网络防火墙中允许 rApp 的 $udp。';
 }
 
 /// The bar's words for a record that is down or coming back; [waiting] replaces the plain

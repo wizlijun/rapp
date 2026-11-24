@@ -864,3 +864,13 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [ ] 7–8：微信按「对人」、终端按「提示词」；气泡里点用途切换后重新整理，按应用记住；全局设置「恢复默认」
 - [ ] 9–11：网关停掉点「记住」不报错；整段重写不标虚线；密码框会话没有记住提示也没有 learn 请求
 - [ ] 12：iOS 上 1、2、7 各做一遍
+
+## 应用名统一为 rApp（feat/name-rApp）
+
+只改看得见的名字；命令 `rapp`、`rapp.app` 文件名（升级/回滚靠它）、`~/rapp` 数据目录和它的 `# rapp 数据目录` 标记、`rapp://`、key 前缀、SNI、bundle id、日志前缀 `rapp:` 都不动。
+
+实机检查：
+- [ ] macOS 菜单栏显示 rApp，「关于 / 隐藏 / 退出 rApp」；窗口标题、托盘「显示 rApp」、⌘Q「退出 rApp？」
+- [ ] macOS 程序坞和访达里的名字：文件名还是 rapp.app，看系统是否按 CFBundleDisplayName 显示 rApp；仍显示 rapp 的话再决定要不要把包改名（要连升级和回滚一起改）
+- [ ] iOS 主屏幕图标下显示 rApp；「文件」里 app 的文件夹显示 rApp，和 Rime 提示里的「文件 → rApp → Rime」一致
+- [ ] Linux 窗口标题和启动器名字是 rApp，`scripts/test-linux-single-gui.py` 通过

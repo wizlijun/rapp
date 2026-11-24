@@ -1,5 +1,5 @@
 //! The updater inside rapp-service (online-update plan Task 4): checks, downloads, waits until
-//! nobody uses rapp, installs and asks for a restart. Every external program is a FakeRunner
+//! nobody uses rApp, installs and asks for a restart. Every external program is a FakeRunner
 //! script; the "bundle" and every other path live in a temp dir.
 
 mod common;
@@ -379,7 +379,7 @@ async fn idle_installs_writes_marker_and_requests_restart() {
     let dl = ev.iter().position(|v| v["ev"] == "update_download" && v["version"] == "0.5.0" && v["result"] == "ok");
     assert!(check.is_some() && dl.is_some() && check < dl, "{ev:?}");
     assert!(ev[dl.unwrap()]["bytes"].as_u64() == Some(zip_bytes().len() as u64), "{ev:?}");
-    // Nobody had rapp open, so nothing was reopened.
+    // Nobody had rApp open, so nothing was reopened.
     assert!(e.calls_of(OPEN).is_empty());
 }
 
@@ -566,7 +566,7 @@ async fn signature_change_waits_for_confirm() {
 
 #[tokio::test]
 async fn manual_apply_goes_in_over_open_sessions() {
-    // People upgrade A from B through a rapp session: the session must not block it.
+    // People upgrade A from B through a rApp session: the session must not block it.
     let mut e = Env::new(Knobs { cfg: json!({"check_updates": false}), ..Default::default() });
     e.start().await;
     let (_ep, _conn, _s) = session(e.svc()).await;
@@ -601,7 +601,7 @@ async fn manual_apply_reopens_gui_when_still_in_use() {
     let mut gui = Ipc::open(e.svc(), &e.home).await;
     assert_eq!(gui.call(json!({"cmd":"update_apply"})).await["ok"], true);
     let u = e.wait_state("failed").await;
-    assert_eq!(u["error"], "rapp 还开着", "{u}");
+    assert_eq!(u["error"], "rApp 还开着", "{u}");
     assert!(e.calls_of(OPEN).contains(&vec![s(&e.bundle)]), "{:?}", e.calls_of(OPEN));
     assert_eq!(marker_of(&e.bundle), "current");
     drop(gui);

@@ -104,7 +104,7 @@ case let .serve(options):
     if !missing.isEmpty {
         output.finish(legacy ? ExitCode.usage : ExitCode.permission, """
             missing permission: \(missing.joined(separator: ", "))
-            Allow rapp (or the terminal running rapp-host) under System Settings > Privacy & Security, then connect again.
+            Allow rApp (or the terminal running rapp-host) under System Settings > Privacy & Security, then connect again.
             """)
     }
 

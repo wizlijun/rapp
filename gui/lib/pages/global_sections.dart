@@ -1,4 +1,4 @@
-// The side panel's 全局设置 beyond the switches: 版本升级 and 数据目录. They are about rapp on this machine as a
+// The side panel's 全局设置 beyond the switches: 版本升级 and 数据目录. They are about rApp on this machine as a
 // whole, not about the service the 本机 page controls, so they live with the other settings.
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';

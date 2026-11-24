@@ -1,6 +1,6 @@
 import Foundation
 
-/// Where rapp keeps its data. Same rules as the Rust side (`home_from`): `RAPP_HOME`,
+/// Where rApp keeps its data. Same rules as the Rust side (`home_from`): `RAPP_HOME`,
 /// then the first line of the `data-root` pointer file (absolute paths only), then `~/rapp`.
 /// An empty environment value counts as unset.
 public enum DataPaths {

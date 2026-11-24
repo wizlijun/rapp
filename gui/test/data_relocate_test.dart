@@ -25,7 +25,7 @@ void main() {
     expect(planRelocation('/t/rapp', '/t/rapp/./sub').error, nested);
   }, skip: Platform.isWindows);
 
-  test('refuses a non-empty folder that is not rapp\'s', () {
+  test('refuses a non-empty folder that is not rApp\'s', () {
     final to = Directory('${tmp.path}/to')..createSync();
     File('${to.path}/x.txt').writeAsStringSync('x');
     expect(planRelocation('${tmp.path}/from', to.path).error, '这个文件夹里已经有别的东西，选一个空文件夹');
@@ -56,7 +56,7 @@ void main() {
     }
   });
 
-  test('adopt: a folder with rapp\'s README is used as is', () async {
+  test('adopt: a folder with rApp\'s README is used as is', () async {
     final from = '${tmp.path}/from';
     prepareDataDir(from, '${tmp.path}/none');
     final to = '${tmp.path}/to';

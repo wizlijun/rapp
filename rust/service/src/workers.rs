@@ -138,7 +138,7 @@ fn permissions(v: &Value) -> Value {
     p
 }
 
-/// `rapp-host check`; with `prompt`, macOS is asked for what is missing, so rapp shows up in System Settings.
+/// `rapp-host check`; with `prompt`, macOS is asked for what is missing, so rApp shows up in System Settings.
 /// None when the check itself failed (that says nothing about the permissions).
 pub async fn check(state: &State, prompt: bool) -> Option<Value> {
     if client_only_linux(state) { return None; }
@@ -160,8 +160,8 @@ pub async fn refresh_permissions(state: &State, prompt: bool) -> Value {
     state.permissions.lock().unwrap().clone()
 }
 
-/// Resets rapp's own TCC records (never another app's: only `BUNDLE_ID`), then checks again with a
-/// prompt so rapp shows up in System Settings. A `_reset` is true only if tccutil exited 0 and the
+/// Resets rApp's own TCC records (never another app's: only `BUNDLE_ID`), then checks again with a
+/// prompt so rApp shows up in System Settings. A `_reset` is true only if tccutil exited 0 and the
 /// permission really reads as missing afterwards.
 pub async fn reset_permissions(state: &State) -> Value {
     if cfg!(target_os = "linux") {

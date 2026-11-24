@@ -22,8 +22,8 @@ pub const PASSWORD: &str = "a-pass-1";
 pub const WAIT: Duration = Duration::from_secs(10);
 
 /// The share numbers and local ports a test service hands out unless its test gives a range of
-/// its own: off rapp's real range (`rapp_service::MAP_PORTS`, 28000-28999), so that a test never
-/// listens on, or probes, the numbers of a rapp running on the developer's machine. Wide enough
+/// its own: off rApp's real range (`rapp_service::MAP_PORTS`, 28000-28999), so that a test never
+/// listens on, or probes, the numbers of a rApp running on the developer's machine. Wide enough
 /// for every test of one binary at once; the per-test ranges of `share_numbers.rs`, `maps.rs`
 /// and `share_set.rs` sit below it.
 pub const TEST_PORTS: (u16, u16) = (29800, 100);

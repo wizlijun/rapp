@@ -27,7 +27,7 @@ const passwordMask = '••••••••';
 /// What the key row shows until 显示 is pressed.
 const keyMask = '••••••';
 
-/// How 立即升级 / 仍然安装 / 回到上一版 leave the app (K28): the service installs once rapp is gone.
+/// How 立即升级 / 仍然安装 / 回到上一版 leave the app (K28): the service installs once rApp is gone.
 class UpdateHooks {
   const UpdateHooks({required this.confirmQuit, required this.quitNow});
 

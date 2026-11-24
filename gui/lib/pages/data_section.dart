@@ -1,4 +1,4 @@
-// 数据目录: where rapp keeps its data, whether git is tracking it, and a way to open it.
+// 数据目录: where rApp keeps its data, whether git is tracking it, and a way to open it.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -141,7 +141,7 @@ class _DataSectionState extends State<DataSection> {
     if (plan.error != null) return _say(plan.error!);
     final tail = '会重启服务，正在连着的会话会断一次。';
     final body = plan.kind == RelocateKind.adopt
-        ? '$to 里已经有 rapp 的数据，会直接用它，$from 里的不复制过去。$tail'
+        ? '$to 里已经有 rApp 的数据，会直接用它，$from 里的不复制过去。$tail'
         : '会把 $from 里的数据复制到 $to，原来的留着不动。$tail';
     final ok = await showDialog<bool>(
       context: context,

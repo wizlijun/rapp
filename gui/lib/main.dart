@@ -1,4 +1,4 @@
-// rapp GUI entry: the client manager, or the connection manager with `--cm`.
+// rApp GUI entry: the client manager, or the connection manager with `--cm`.
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -49,7 +49,7 @@ Future<void> main(List<String> args) async {
   final monitor = ServiceMonitor(readToken: tokenFileReader(() => (mainState?.data ?? data).localDir))..start();
 
   if (args.contains('--cm')) {
-    await _showWindow(const Size(400, 320), 'rapp 连接管理');
+    await _showWindow(const Size(400, 320), 'rApp 连接管理');
     await windowManager.setPreventClose(true);
     // Linux retains this window for reuse while the main GUI is alive. Closing
     // it must not tear down an engine's GL context in the shared process.
@@ -115,9 +115,9 @@ Future<void> main(List<String> args) async {
     final visible = call.arguments;
     if (call.method == 'visible' && visible is bool) state.mainVisible = visible;
   });
-  // rapp opens on the overview (全景): every device and project at a glance. Opening an app leaves it.
+  // rApp opens on the overview (全景): every device and project at a glance. Opening an app leaves it.
   state.overview = true;
-  await _showWindow(const Size(1194, 834), 'rapp');
+  await _showWindow(const Size(1194, 834), 'rApp');
   if (prefs.startFullscreen) await WindowManagerFullscreen().setFullScreen(true);
   await windowManager.setPreventClose(true);
   final shell = _Shell(hub, port, state);
@@ -170,7 +170,7 @@ class _App extends StatelessWidget {
     final st = state;
     if (st == null) {
       return MaterialApp(
-        title: 'rapp',
+        title: 'rApp',
         debugShowCheckedModeBanner: false,
         theme: themeDataFor(RappTheme.matrix, textSize: textSize),
         themeMode: ThemeMode.dark,
@@ -180,7 +180,7 @@ class _App extends StatelessWidget {
     return ListenableBuilder(
       listenable: st,
       builder: (context, _) => MaterialApp(
-        title: 'rapp',
+        title: 'rApp',
         navigatorKey: navigatorKey,
         debugShowCheckedModeBanner: false,
         theme: themeDataFor(st.prefs.theme, textSize: textSize),
@@ -220,7 +220,7 @@ class _Shell with WindowListener, TrayListener {
     try {
       await trayManager.setIcon('assets/tray_icon.png', isTemplate: true);
       // tray_manager does not implement setToolTip on Linux.
-      if (!Platform.isLinux) await trayManager.setToolTip('rapp');
+      if (!Platform.isLinux) await trayManager.setToolTip('rApp');
       _trayReady = true;
     } catch (e) {
       stderr.writeln('rapp: tray unavailable: $e');
@@ -331,14 +331,14 @@ class _Shell with WindowListener, TrayListener {
 
   /// The quit confirmation, shown once at a time: false for a request while one is already up.
   Future<bool> _askQuit() => _asking.ask(() => _confirmQuit(
-        title: '退出 rapp？',
+        title: '退出 rApp？',
         body: '还有 $openWindows 个远程窗口，退出后都会断开。',
         ok: '退出',
       ));
 
   /// The upgrade's confirmation, behind the same gate as quitting.
   Future<bool> _askUpgrade() => _asking.ask(() => _confirmQuit(
-        title: '升级 rapp？',
+        title: '升级 rApp？',
         body: '还有 $openWindows 个远程窗口，升级时会断开。',
         ok: '升级',
       ));

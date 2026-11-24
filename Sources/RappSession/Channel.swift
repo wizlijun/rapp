@@ -56,7 +56,7 @@ public enum ChannelCommand: Equatable {
     case setVoiceHotkey(VoiceHotkey)
     /// Dart's voice input for `sid` ended on its own: the gate swallows until the hotkey is up (macOS).
     case voiceEnd(Int64)
-    /// Re-dispatch the key events held for `sid`'s compose letter into rapp's own window.
+    /// Re-dispatch the key events held for `sid`'s compose letter into rApp's own window.
     case composeReplay(sid: Int64)
     /// Take A's clipboard entry `clip` onto B's clipboard, or (insert) into the composer.
     case clipPick(sid: Int64, clip: UInt32, insert: Bool)

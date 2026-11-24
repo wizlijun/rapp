@@ -22,7 +22,7 @@ void main() {
   test('sessions are grouped under a disabled host header, sorted, each marked open', () {
     final items = trayItems([e('2', 'mini', 'Safari'), e('1', 'air', 'Notes'), e('2', 'mini', 'Calculator')]);
     final labels = [for (final i in items) if (i.type != 'separator') i.label];
-    expect(labels, ['显示 rapp', 'air', '  ● Notes', 'mini', '  ● Calculator', '  ● Safari', '退出']);
+    expect(labels, ['显示 rApp', 'air', '  ● Notes', 'mini', '  ● Calculator', '  ● Safari', '退出']);
     expect(items.firstWhere((i) => i.label == 'mini').disabled, isTrue);
     expect(items.firstWhere((i) => i.label == '  ● Safari').key, '${sessionKeyPrefix}2/Safari');
   });
@@ -41,7 +41,7 @@ void main() {
     final items = trayItems([e('1', 'air', 'Notes')],
         favorites: [f('2', 'mini', 'Xcode'), f('1', 'air', 'Mail'), f('2', 'mini', 'Pages')]);
     final labels = [for (final i in items) if (i.type != 'separator') i.label];
-    expect(labels, ['显示 rapp', 'air', '  ● Notes', '     Mail', 'mini', '     Xcode', '     Pages', '退出']);
+    expect(labels, ['显示 rApp', 'air', '  ● Notes', '     Mail', 'mini', '     Xcode', '     Pages', '退出']);
     expect(items.any((i) => i.label == '常用'), isFalse);
     expect(items.firstWhere((i) => i.label == '     Xcode').key, '${favKeyPrefix}2/Xcode');
     expect(items.firstWhere((i) => i.label == '     Xcode').disabled, isFalse);
@@ -50,14 +50,14 @@ void main() {
   test('a host with only favourites is listed once, ordered by name among the others', () {
     final items = trayItems([e('3', 'zed', 'Notes')], favorites: [f('2', 'mini', 'Xcode'), f('3', 'zed', 'Mail')]);
     final labels = [for (final i in items) if (i.type != 'separator') i.label];
-    expect(labels, ['显示 rapp', 'mini', '     Xcode', 'zed', '  ● Notes', '     Mail', '退出']);
+    expect(labels, ['显示 rApp', 'mini', '     Xcode', 'zed', '  ● Notes', '     Mail', '退出']);
   });
 
   test('an offline host says so and its favourites are greyed, its sessions still listed', () {
     final items = trayItems([e('2', 'mini', 'Finder', lamp: Lamp.disconnected)],
         favorites: [f('2', 'mini', 'Xcode', offline: true)]);
     final labels = [for (final i in items) if (i.type != 'separator') i.label];
-    expect(labels, ['显示 rapp', 'mini（离线）', '  ● Finder（已断开）', '     Xcode', '退出']);
+    expect(labels, ['显示 rApp', 'mini（离线）', '  ● Finder（已断开）', '     Xcode', '退出']);
     expect(items.firstWhere((i) => i.label == 'mini（离线）').disabled, isTrue);
     expect(items.firstWhere((i) => i.label == '     Xcode').disabled, isTrue);
     expect(items.firstWhere((i) => i.label == '  ● Finder（已断开）').disabled, isFalse);
@@ -67,7 +67,7 @@ void main() {
     final items = trayItems([e('2', 'mini', 'D')],
         favorites: [f('1', 'mini', 'A'), f('2', 'mini', 'B'), f('1', 'mini', 'C')]);
     final labels = [for (final i in items) if (i.type != 'separator') i.label];
-    expect(labels, ['显示 rapp', 'mini', '  ● D', '     B', 'mini', '     A', '     C', '退出']);
+    expect(labels, ['显示 rApp', 'mini', '  ● D', '     B', 'mini', '     A', '     C', '退出']);
   });
 
   test('only favourites: no 没有打开的会话 hint; nothing at all: the hint', () {
@@ -80,7 +80,7 @@ void main() {
     expect(items.where((i) => i.type == 'separator').length, 2);
   });
 
-  test('the dock menu is the tray menu without 显示 rapp, 退出 and their separators', () {
+  test('the dock menu is the tray menu without 显示 rApp, 退出 and their separators', () {
     final items = dockItems([e('1', 'air', 'Notes')], favorites: [f('2', 'mini', 'Xcode')]);
     final shape = [for (final i in items) i.type == 'separator' ? '—' : i.label];
     expect(shape, ['air', '  ● Notes', 'mini', '     Xcode']);

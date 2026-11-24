@@ -93,7 +93,7 @@ class VoiceHotkeyRecorder {
       _poisoned = false;
       return const RecordAborted();
     }
-    // These keys belong to the Linux desktop or rapp's window navigation.
+    // These keys belong to the Linux desktop or rApp's window navigation.
     if (linux && (code == 54 || code == 55 || code == 103 || flags & _command != 0 ||
         (flags & (_control | _option | _shift) == _control && {31, 33, 30}.contains(code)))) {
       _lone = null;

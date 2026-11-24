@@ -16,7 +16,7 @@ public struct KeyOut: Equatable {
 
 /// What to do with one hardware-keyboard press on iOS.
 public enum PressAction: Equatable {
-    /// rapp's own: let it go on to Flutter.
+    /// rApp's own: let it go on to Flutter.
     case local
     /// A type-to-compose letter: open `sid`'s writing panel and hold the press for it.
     case compose(sid: Int64)

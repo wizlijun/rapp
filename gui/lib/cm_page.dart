@@ -76,7 +76,7 @@ class _CmPageState extends State<CmPage> {
     final st = widget.monitor.status;
     final sessions = st?.sessions ?? const <ServiceSession>[];
     return Scaffold(
-      appBar: AppBar(title: const Text('rapp 连接管理'), toolbarHeight: 44),
+      appBar: AppBar(title: const Text('rApp 连接管理'), toolbarHeight: 44),
       body: st == null
           ? Center(child: Text('服务未运行（${widget.monitor.error ?? 'connecting'}）'))
           : sessions.isEmpty

@@ -1,4 +1,4 @@
-// The system's body text size: every piece of rapp text uses it (the big dashboard numbers aside).
+// The system's body text size: every piece of rApp text uses it (the big dashboard numbers aside).
 import 'dart:io';
 
 import 'package:flutter/services.dart';
