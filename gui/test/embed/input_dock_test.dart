@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/app_profile.dart' show InputPoint, ResolvedProfile, defaultComposerAt;
-import 'package:rapp/embed/composer_float.dart' show quickHandleSize;
 import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/embed/input_dock.dart';
@@ -122,6 +121,8 @@ void main() {
   final toggle = find.byKey(const Key('composer-open'));
   final bar = find.byType(KeyBar);
   final handle = find.byKey(const Key('quick-handle'));
+  final stackToggle = find.byKey(const Key('quick-toggle-stack'));
+  final boxToggle = find.byKey(const Key('quick-toggle'));
   final barKeys = find.byWidgetPredicate((w) => w.key is ValueKey<String> && (w.key! as ValueKey<String>).value.startsWith('bar-'));
 
   // Up off the stage's bottom.
@@ -186,25 +187,16 @@ void main() {
       expect(panel, findsNothing);
     });
 
-    dockTest(p, 'Safari: only quick-handle, 28 square, 8 right of the anchor block; tap → KeyBar shows, '
-        'quick_hidden_app false', (tester) async {
+    dockTest(p, 'Safari, both folded: no block, the stack toggle brings the KeyBar back', (tester) async {
       await tester.pumpWidget(layer(app));
       await tester.pump();
       expect(bar, findsNothing);
-      expect(handle, findsOneWidget);
-      final h = tester.getRect(handle);
-      expect(h.size, const Size.square(quickHandleSize));
-      expect(h.left, (stage.width + panelWidth(stage.width)) / 2 + 8);
-      expect(bottomOf(tester, handle), anchor());
-      expect(find.descendant(of: handle, matching: find.byIcon(Icons.adjust)), findsOneWidget);
-      // The corner toggle beside 输入 carries the same label now; Task 4 takes the handle out.
-      expect(find.bySemanticsLabel('显示快捷区'), findsNWidgets(2));
-      await tester.tap(handle);
+      expect(handle, findsNothing);
+      await tester.tap(stackToggle);
       await settle(tester);
       expect(s.prefs.quickHiddenApp, isFalse);
       expect(bar, findsOneWidget);
       expect(bottomOf(tester, bar), anchor());
-      expect(handle, findsNothing);
     });
 
     dockTest(p, 'opening the text area leaves every bar-* key rect unchanged; the text area ends 8 above the bar',
@@ -232,7 +224,7 @@ void main() {
       final bottom = block(app).bottom;
       final text = tester.getRect(panel).bottom;
       expect(stage.height - text, anchor());
-      await tester.tap(handle);
+      await tester.tap(boxToggle);
       await settle(tester);
       expect(bar, findsOneWidget);
       expect(block(app).bottom, bottom);
@@ -240,18 +232,16 @@ void main() {
       expect(tester.getRect(panel).bottom, text - barH(app) - 8);
     });
 
-    dockTest(p, 'folding the quick area: the handle comes back; the open text area falls to the anchor',
+    dockTest(p, 'the box toggle folds the quick area; no handle comes; the open text area falls to the anchor',
         (tester) async {
       await openOn(tester, tsess);
       expect(bottomOf(tester, panel), anchor() + barH(tsess) + 8);
-      s.setQuickHidden(term: true, hidden: true);
+      await tester.tap(boxToggle);
       await settle(tester);
       expect(s.prefs.quickHiddenTerm, isTrue);
       expect(bar, findsNothing);
-      expect(handle, findsOneWidget);
+      expect(handle, findsNothing);
       expect(bottomOf(tester, panel), anchor());
-      expect(bottomOf(tester, handle), anchor());
-      expect(tester.getRect(handle).left, tester.getRect(panel).right + 8);
     });
 
     dockTest(p, 'close then open within 200ms: one ComposerPanel, same State, draft intact', (tester) async {
@@ -293,7 +283,7 @@ void main() {
       expect(bottomOf(tester, bar), anchor());
     });
 
-    dockTest(p, 'session switch terminal → Safari: handle only, the terminal KeyBar is gone; a picture key no longer '
+    dockTest(p, 'session switch terminal → Safari: the stack toggle only, the terminal KeyBar is gone; a picture key no longer '
         'changes quick_hidden_term', (tester) async {
       s.setQuickAutoHide(true);
       await tester.pumpWidget(layer(tapp));
@@ -307,7 +297,7 @@ void main() {
       await tester.pumpWidget(layer(app));
       await settle(tester);
       expect(bar, findsNothing);
-      expect(handle, findsOneWidget);
+      expect(stackToggle, findsOneWidget);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
       expect(s.prefs.quickHiddenTerm, isFalse);
       s.pictureFocused = app.sid;
@@ -316,7 +306,7 @@ void main() {
     });
   }
 
-  iosTest('keyboard 300: the block bottom 308; with only the handle, the handle bottom 308 and the stack at '
+  iosTest('keyboard 300: the block bottom 308; both folded, nothing on the block and the stack at '
       'restStackBottom(300)', (tester) async {
     keyboard(tester, 300);
     await tester.pumpWidget(layer(tsess));
@@ -326,7 +316,7 @@ void main() {
     await tester.pumpWidget(layer(app));
     await settle(tester);
     expect(bar, findsNothing);
-    expect(bottomOf(tester, handle), 308);
+    expect(handle, findsNothing);
     expect(bottomOf(tester, toggle), restStackBottom(300));
   });
 
@@ -347,7 +337,7 @@ void main() {
     expect(bottomOf(tester, toggle), topOf(tester, find.byKey(const Key('composer-grip'))) + 8);
   });
 
-  iosTest('the stack stands 8 above the block top; with only the handle at restStackBottom', (tester) async {
+  iosTest('the stack stands 8 above the block top; both folded at restStackBottom', (tester) async {
     await tester.pumpWidget(layer(tsess));
     await settle(tester);
     expect(bottomOf(tester, toggle), stage.height - block(tsess).top + 8);
@@ -358,7 +348,7 @@ void main() {
     expect(block(tsess).top, lessThan(tester.getRect(panel).top));
     await tester.pumpWidget(layer(app));
     await settle(tester);
-    expect(handle, findsOneWidget);
+    expect(handle, findsNothing);
     expect(bottomOf(tester, toggle), restStackBottom(0));
   });
 
@@ -424,40 +414,6 @@ void main() {
     expect(tsess.composer.open, isTrue);
     expect(tester.getRect(panel).top, closeTo(top0, 0.5));
     expect(tester.getRect(bar), quick);
-  });
-
-  iosTest('a narrow stage: the handle stands above the block, never over it', (tester) async {
-    stage = const Size(390, 700);
-    tester.view.physicalSize = stage;
-    await openOn(tester, app);
-    expect(bar, findsNothing);
-    final h = tester.getRect(handle);
-    final b = block(app);
-    expect(h.overlaps(b), isFalse);
-    expect((Offset.zero & stage).contains(h.topLeft) && (Offset.zero & stage).contains(h.bottomRight - const Offset(0.01, 0.01)),
-        isTrue);
-    expect(h.right, b.right);
-    expect(h.bottom, b.top - 8);
-  });
-
-  iosTest('a narrow stage, the block at its top: no room above, so the handle stands below it', (tester) async {
-    stage = const Size(390, 700);
-    tester.view.physicalSize = stage;
-    // A session with an app id: [app] has none, so it keeps no place.
-    final notes = RemoteSession(4, 'Notes', appId: 'com.apple.Notes');
-    addTearDown(notes.dispose);
-    s.placeComposer(notes, const InputPoint(0.5, 0)); // dragged up to the stage's top
-    notes.setProfile(s.profiles.resolve(notes.appId));
-    await openOn(tester, notes);
-    expect(bar, findsNothing);
-    final h = tester.getRect(handle);
-    final b = block(notes);
-    expect(b.top, lessThan(h.height + 8)); // the room above the block is too short for the handle
-    expect(h.overlaps(b), isFalse);
-    expect((Offset.zero & stage).contains(h.topLeft) && (Offset.zero & stage).contains(h.bottomRight - const Offset(0.01, 0.01)),
-        isTrue);
-    expect(h.right, b.right);
-    expect(h.top, b.bottom + 8);
   });
 
   iosTest('close then open in its last 100 ms: the text area fades back in from where it was, no snap to opaque',
@@ -563,8 +519,6 @@ void main() {
     expect(tsess.composer.open, isFalse);
   });
 
-  final stackToggle = find.byKey(const Key('quick-toggle-stack'));
-  final boxToggle = find.byKey(const Key('quick-toggle'));
   bool lit(WidgetTester tester, Finder f) => tester.widget<RappButton>(f).active;
 
   iosTest('text folded — the toggle stands in the stack, 56 square, lit while the 快捷区 shows', (tester) async {

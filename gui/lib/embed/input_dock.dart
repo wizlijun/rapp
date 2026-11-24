@@ -11,8 +11,7 @@ import '../term/term_session_port.dart';
 import '../ui/main_state.dart';
 import '../ui/tokens.dart';
 import 'app_profile.dart' show InputPoint, defaultComposerAt;
-import 'composer_float.dart' show FloatingComposer, composerNoDrag, quickHandleSize;
-import 'composer_panel.dart' show seeThroughBox;
+import 'composer_float.dart' show FloatingComposer, composerNoDrag;
 import 'key_bar.dart';
 import 'panel_place.dart';
 import 'remote_session.dart';
@@ -62,7 +61,8 @@ int stackButtonCount(RemoteSession s, {required bool voice}) {
 ///
 /// The text area stays while it goes: it folds down into the block's bottom in [dockMove] and fades out over the
 /// last 100 ms; opened again before that is over, the same panel comes back from the height and the opacity it had.
-/// The 快捷区 follows [quickHidden] the same way. With both gone a [QuickHandle] stands where the block was.
+/// The 快捷区 follows [quickHidden] the same way. With both folded nothing stands where the block was: the 快捷区
+/// toggle waits in the [stack], beside 输入.
 class InputDock extends StatefulWidget {
   const InputDock(
       {super.key,
@@ -229,9 +229,6 @@ class InputDockState extends State<InputDock> with TickerProviderStateMixin {
                     onPlace: (p) => st.placeComposer(s, p),
                     onPullClose: ios && _open ? s.composer.collapse : null,
                     grip: textMounted || quickMounted,
-                    handle: _quick.isDismissed && _hidden
-                        ? QuickHandle(onTap: () => st.setQuickHidden(term: termKind(st, s), hidden: false))
-                        : null,
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -296,39 +293,6 @@ class InputDockState extends State<InputDock> with TickerProviderStateMixin {
             ),
           );
         },
-      ),
-    );
-  }
-}
-
-/// The 快捷区's handle while it is folded: a [quickHandleSize] round see-through button beside the block.
-class QuickHandle extends StatelessWidget {
-  const QuickHandle({super.key, required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RappTokens.of(context);
-    final d = seeThroughBox(t);
-    return Semantics(
-      button: true,
-      label: '显示快捷区',
-      excludeSemantics: true,
-      child: GestureDetector(
-        key: const Key('quick-handle'),
-        behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        child: MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: Container(
-            width: quickHandleSize,
-            height: quickHandleSize,
-            decoration: BoxDecoration(
-                color: d.color, gradient: d.gradient, border: d.border, boxShadow: d.boxShadow, shape: BoxShape.circle),
-            child: Icon(Icons.adjust, size: 18, color: t.muted),
-          ),
-        ),
       ),
     );
   }

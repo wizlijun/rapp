@@ -2224,7 +2224,7 @@ void main() {
       await tidy(tester);
       expect(cardRect(tester).bottom, block().top - 8);
       expect(cardRect(tester).right, block().right);
-      // Only the handle left: no block, the corner above the row.
+      // Both folded: no block, the corner above the row.
       es.setQuickHidden(term: false, hidden: true);
       await tester.pumpAndSettle();
       expect(block().height, 0);

@@ -715,8 +715,8 @@ Widget _iosStack(BuildContext context, MainState state, RemoteSession session, S
 }
 
 /// Where [VoiceTidyCard] stands. Desktop: above the input block (text area, quick area or both) and right-aligned
-/// with it, 8 up; below it when there is no room above; in the corner above the row when there is no block (only the
-/// handle). iOS: 12 above the stack, which stands above the block.
+/// with it, 8 up; below it when there is no room above; in the corner above the row when there is no block (both
+/// folded). iOS: 12 above the stack, which stands above the block.
 class _TidyLayer extends StatelessWidget {
   const _TidyLayer(
       {required this.state,
