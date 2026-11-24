@@ -260,20 +260,19 @@ class _Footer extends StatelessWidget {
             if (defaultTargetPlatform == TargetPlatform.iOS)
               toggle(const Key('rime-switch'), '实体键盘用内置输入法', state.prefs.rimeEnabled, state.setRimeEnabled,
                   note: 'Rime 雾凇拼音，候选在文字下一行'),
-            if (defaultTargetPlatform == TargetPlatform.iOS)
-              InkWell(
-                key: const Key('phrases-settings'),
-                borderRadius: BorderRadius.circular(t.r),
-                onTap: () => openPhrasesPage(context, state),
-                child: SizedBox(
-                  height: rowHeight,
-                  child: Row(children: [
-                    Expanded(child: Text('常用语', style: small)),
-                    Text(state.prefs.phraseStrip ? '${state.prefs.phrases.length} 条' : '已关', style: small.copyWith(color: t.muted)),
-                    Icon(Icons.chevron_right, color: t.muted, size: 18),
-                  ]),
-                ),
+            InkWell(
+              key: const Key('phrases-settings'),
+              borderRadius: BorderRadius.circular(t.r),
+              onTap: () => openPhrasesPage(context, state),
+              child: SizedBox(
+                height: rowHeight,
+                child: Row(children: [
+                  Expanded(child: Text('常用语', style: small)),
+                  Text(state.prefs.phraseStrip ? '${state.prefs.phrases.length} 条' : '已关', style: small.copyWith(color: t.muted)),
+                  Icon(Icons.chevron_right, color: t.muted, size: 18),
+                ]),
               ),
+            ),
             if (defaultTargetPlatform == TargetPlatform.macOS || defaultTargetPlatform == TargetPlatform.linux) _VoiceHotkeyRow(state: state, style: small, minHeight: rowHeight),
             toggle(const Key('voice-ai-tidy'), '长语音先让 AI 整理', state.prefs.voiceAiTidy, state.setVoiceAiTidy,
                 note: '超过 10 个字时，先用 LLM 接入点整理再发'),

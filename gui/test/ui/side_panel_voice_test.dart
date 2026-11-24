@@ -38,6 +38,9 @@ void main() {
 
   Future<void> mount(WidgetTester tester, TargetPlatform p) async {
     debugDefaultTargetPlatformOverride = p;
+    // The 常用语 row sits above the voice row on the desktop too: room for both.
+    await tester.binding.setSurfaceSize(const Size(800, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(wrap(SidePanel(state: s, devicesTab: const Text('d'))));
   }
 

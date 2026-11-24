@@ -1,4 +1,4 @@
-// The key bar (iOS input toggle): Esc, Tab, arrows, ⌃ ⌥ ⌘, copy and paste over a terminal or an app session, laid out
+// The key bar (iOS input toggle; the desktop's too, pc-key-bar spec): Esc, Tab, arrows, ⌃ ⌥ ⌘, copy and paste over a terminal or an app session, laid out
 // by [keyBarRows]. A terminal gets wire key names, an app macOS key codes. The modifiers are sticky ([ModifierLatch]);
 // the arrows and ⌫ repeat while held, and an arrow swiped up sends its alt (Home, PgUp, PgDn, End). A key takes no
 // focus: whatever had it keeps it.
@@ -40,13 +40,12 @@ List<List<String?>> _rowsOf(MainState state, RemoteSession session, double width
       hardware: hardwareKeyboard() || lastHardwareKey != null, // sticky: once seen, the ⊙ stays
     );
 
-/// Whether the 常用语条 tops the bar (phrases spec §2): iOS, 显示常用语条 on, the bar not ⊙ slim, some phrases,
-/// and a text terminal or an app whose profile has 常用语条 on.
+/// Whether the 常用语条 tops the bar (phrases spec §2): 显示常用语条 on, some phrases, a text terminal or an app whose
+/// profile has 常用语条 on; on iOS the bar not ⊙ slim either (the desktop keeps it over the slim bar: pc-key-bar spec).
 bool phraseStripShown(MainState state, RemoteSession session) {
   final p = state.prefs;
-  return defaultTargetPlatform == TargetPlatform.iOS &&
-      p.phraseStrip &&
-      !p.keyBarSlim &&
+  return p.phraseStrip &&
+      (!p.keyBarSlim || defaultTargetPlatform != TargetPlatform.iOS) &&
       p.phrases.isNotEmpty &&
       (_isTerm(state, session) || session.profile.phrases);
 }
@@ -154,6 +153,19 @@ class AppKeySender {
   }
 }
 
+final _modifierKeys = <LogicalKeyboardKey>{
+  LogicalKeyboardKey.shiftLeft, LogicalKeyboardKey.shiftRight, LogicalKeyboardKey.controlLeft,
+  LogicalKeyboardKey.controlRight, LogicalKeyboardKey.altLeft, LogicalKeyboardKey.altRight,
+  LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.metaRight, LogicalKeyboardKey.capsLock, LogicalKeyboardKey.fn,
+  LogicalKeyboardKey.fnLock, LogicalKeyboardKey.shift, LogicalKeyboardKey.control, LogicalKeyboardKey.alt,
+  LogicalKeyboardKey.meta, LogicalKeyboardKey.superKey, LogicalKeyboardKey.hyper,
+};
+
+/// The desktop's "used the keyboard" (pc-key-bar spec §3): a key going down that is not a modifier, with ⌘ / Super not
+/// held (⌘Tab and the app's shortcuts leave the bar as it is). A repeat or a release is not one.
+bool collapsesKeyBar(KeyEvent e) =>
+    e is KeyDownEvent && !_modifierKeys.contains(e.logicalKey) && !HardwareKeyboard.instance.isMetaPressed;
+
 class KeyBar extends StatefulWidget {
   const KeyBar(
       {super.key,
@@ -187,6 +199,13 @@ class _KeyBarState extends State<KeyBar> {
   void initState() {
     super.initState();
     _bind();
+    // The desktop: the keyboard in use folds the bar to ⊙ (pc-key-bar spec §3); ⊙ opens it till the next key.
+    if (defaultTargetPlatform != TargetPlatform.iOS) HardwareKeyboard.instance.addHandler(_onKey);
+  }
+
+  bool _onKey(KeyEvent e) {
+    if (collapsesKeyBar(e) && !widget.state.prefs.keyBarSlim) widget.state.setKeyBarSlim(true);
+    return false; // only watching: the key goes on
   }
 
   void _bind() {
@@ -211,6 +230,7 @@ class _KeyBarState extends State<KeyBar> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onKey);
     _unbind();
     super.dispose();
   }

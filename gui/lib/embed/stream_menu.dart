@@ -4,9 +4,8 @@
 // - 远程 (🖥): the remote app's mirrored menus, nothing else;
 // - 流量优化 (the traffic label): stream presets and settings.
 // A bar too narrow for three buttons keeps the traffic label alone, with all three parts in it.
-// A terminal session (its port is a TermSessionPort) has 「跟着我的窗口」 and 「本机 · 按键排」 for traffic and only
+// A terminal session (its port is a TermSessionPort) has 「本机 · 跟着我的窗口」 for traffic and only
 // the session group besides.
-import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
 import '../hub_client.dart';
@@ -49,8 +48,6 @@ class StreamMenuAnchor extends StatefulWidget {
     this.onToggleRoute,
     this.onMarkInput,
     this.onClearInput,
-    this.termKeyRow = false,
-    this.onTermKeyRow,
     this.termFit = true,
     this.onTermFit,
     this.parts = allMenuParts,
@@ -130,9 +127,7 @@ class StreamMenuAnchor extends StatefulWidget {
   final VoidCallback? onMarkInput;
   final VoidCallback? onClearInput;
 
-  /// A terminal's 「本机 · 按键排」: whether the key row is on, and the switch (null greys it).
-  final bool termKeyRow;
-  final ValueChanged<bool>? onTermKeyRow;
+  /// A terminal's 「本机 · 跟着我的窗口」: whether it is on, and the switch (null greys it).
   final bool termFit;
   final ValueChanged<bool>? onTermFit;
 
@@ -162,8 +157,6 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
         parts: parts,
         onMarkInput: widget.onMarkInput,
         onClearInput: widget.onClearInput,
-        termKeyRow: widget.termKeyRow,
-        onTermKeyRow: widget.onTermKeyRow,
         termFit: widget.termFit,
         onTermFit: widget.onTermFit,
         port: widget.port,
@@ -301,8 +294,6 @@ class StreamMenu extends StatefulWidget {
     this.onToggleRoute,
     this.onMarkInput,
     this.onClearInput,
-    this.termKeyRow = false,
-    this.onTermKeyRow,
     this.termFit = true,
     this.onTermFit,
     this.parts = allMenuParts,
@@ -322,8 +313,6 @@ class StreamMenu extends StatefulWidget {
   final Set<MenuPart> parts;
   final VoidCallback? onMarkInput;
   final VoidCallback? onClearInput;
-  final bool termKeyRow;
-  final ValueChanged<bool>? onTermKeyRow;
   final bool termFit;
   final ValueChanged<bool>? onTermFit;
   final List<ClipEntry> clips;
@@ -426,15 +415,6 @@ class _StreamMenuState extends State<StreamMenu> {
                     enabled: widget.onTermFit != null,
                     onTap: () => _then(() => widget.onTermFit!(!widget.termFit)),
                   ),
-                  // iOS has the key bar instead.
-                  if (defaultTargetPlatform != TargetPlatform.iOS)
-                    _Item(
-                      '按键排',
-                      key: const Key('term-key-row'),
-                      checked: widget.termKeyRow,
-                      enabled: widget.onTermKeyRow != null,
-                      onTap: () => _then(() => widget.onTermKeyRow!(!widget.termKeyRow)),
-                    ),
                 ] else if (!reduced)
                   ..._streamGroups(t, c)
                 else if (!all)

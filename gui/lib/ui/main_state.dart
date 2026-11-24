@@ -3242,12 +3242,6 @@ class MainState extends ChangeNotifier {
         ZoomKey.reset => 0,
       });
 
-  /// 「按键排」: the terminal key row on or off; saved.
-  void setTermKeyRow(bool v) {
-    prefs.termKeyRow = v;
-    _save();
-  }
-
   /// 按键区's ⋯: the second row open or closed; saved.
   void setKeyBarMore(bool v) {
     prefs.keyBarMore = v;

@@ -571,8 +571,17 @@ void main() {
       expect(phraseStripShown(s, tsess), isTrue);
     });
 
-    testWidgets('not on macOS', (tester) async {
-      expect(phraseStripShown(s, tsess), isFalse);
+    testWidgets('the desktop too, and it stays while slim (iOS hides it while slim)', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      try {
+        expect(phraseStripShown(s, tsess), isTrue);
+        s.prefs.keyBarSlim = true;
+        expect(phraseStripShown(s, tsess), isTrue);
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+        expect(phraseStripShown(s, tsess), isFalse);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
     });
 
     iosTest('a tap sends the text, ✓ and a light tap', (tester) async {
@@ -620,6 +629,72 @@ void main() {
       expect(ph('phrases-all-2'), findsNothing);
       expect(port.calls.where((c) => c.$1 == 'composer_send').single.$2.toString(), contains('听你的'));
       await tester.pump(phraseRepeatWindow);
+    });
+  });
+
+  group('desktop: a hardware key cuts the bar to ⊙', () {
+    void deskTest(String name, Future<void> Function(WidgetTester) body) => testWidgets(name, (tester) async {
+          debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+          try {
+            await body(tester);
+          } finally {
+            debugDefaultTargetPlatformOverride = null;
+          }
+        });
+
+    deskTest('a letter key collapses the bar to ⊙; ⊙ expands; ⌘ alone and ⌘-held keys do not', (tester) async {
+      await tester.pumpWidget(bar(tsess));
+      expect(k('slim'), findsOneWidget);
+      expect(k('enter'), findsOneWidget);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump();
+      expect(s.prefs.keyBarSlim, isFalse);
+      expect(k('enter'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+      await tester.pump();
+      expect(s.prefs.keyBarSlim, isTrue);
+      expect([for (final id in barKeys.keys) if (k(id).evaluate().isNotEmpty) id], ['esc', 'stab', 'slim']);
+      await tap(tester, 'slim');
+      expect(s.prefs.keyBarSlim, isFalse);
+      expect(k('enter'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+      await tester.pump();
+      expect(s.prefs.keyBarSlim, isTrue);
+    });
+
+    deskTest('a repeat does not collapse; no bar, no listening', (tester) async {
+      await tester.pumpWidget(bar(tsess));
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.keyA);
+      await tester.pump();
+      expect(s.prefs.keyBarSlim, isTrue);
+      s.setKeyBarSlim(false);
+      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyA);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.keyA);
+      await tester.pump();
+      expect(s.prefs.keyBarSlim, isFalse);
+      await tester.pumpWidget(wrap(const SizedBox()));
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+      expect(s.prefs.keyBarSlim, isFalse);
+    });
+
+    test('collapsesKeyBar: downs of non-modifier keys without ⌘', () {
+      KeyDownEvent down(LogicalKeyboardKey l) =>
+          KeyDownEvent(physicalKey: PhysicalKeyboardKey.keyA, logicalKey: l, timeStamp: Duration.zero);
+      expect(collapsesKeyBar(down(LogicalKeyboardKey.keyA)), isTrue);
+      expect(collapsesKeyBar(down(LogicalKeyboardKey.enter)), isTrue);
+      for (final m in [
+        LogicalKeyboardKey.shiftLeft, LogicalKeyboardKey.controlRight, LogicalKeyboardKey.altLeft,
+        LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.capsLock, LogicalKeyboardKey.fn,
+      ]) {
+        expect(collapsesKeyBar(down(m)), isFalse, reason: '$m');
+      }
+      expect(
+          collapsesKeyBar(const KeyUpEvent(
+              physicalKey: PhysicalKeyboardKey.keyA, logicalKey: LogicalKeyboardKey.keyA, timeStamp: Duration.zero)),
+          isFalse);
     });
   });
 

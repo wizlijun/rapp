@@ -21,7 +21,6 @@ import 'package:rapp/embed/voice_overlay.dart';
 import 'package:rapp/embed/voice_ring.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
-import 'package:rapp/term/term_key_row.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 
@@ -156,14 +155,14 @@ void main() {
         }
       });
 
-  Widget layer({RemoteSession? session, bool reduced = false, SessionPort? p, bool keyRow = false, Size size = stage}) => wrap(
+  Widget layer({RemoteSession? session, bool reduced = false, SessionPort? p, Size size = stage}) => wrap(
       SizedBox(
           key: const Key('stage'),
           width: size.width,
           height: size.height,
           child: Stack(
               children: composerLayer(
-                  state: es, session: session ?? rs, port: p ?? port, keyRow: keyRow, editor: FlutterEditor.new))),
+                  state: es, session: session ?? rs, port: p ?? port, editor: FlutterEditor.new))),
       disableAnimations: reduced);
 
   final hold = find.byKey(const Key('voice-hold'));
@@ -414,14 +413,13 @@ void main() {
     expect(i.center.dx, v.center.dx);
   });
 
-  iosTest('terminal, open panel: the key bar under it, not the key row; 语音 stands 8 above the panel', (tester) async {
+  iosTest('terminal, open panel: the key bar under it; 语音 stands 8 above the panel', (tester) async {
     final tport = FakeTermSessionPort();
     addTearDown(tport.dispose);
     rs.composer.open = true;
-    await tester.pumpWidget(layer(p: tport, keyRow: true));
+    await tester.pumpWidget(layer(p: tport));
     await tester.pump();
     final b = inStage(tester, hold);
-    expect(find.byType(TermKeyRow), findsNothing);
     final bar = inStage(tester, find.byType(KeyBar));
     expect(bar.bottom, stage.height);
     expect(bar.top - inStage(tester, find.byType(ComposerPanel)).bottom, 8);

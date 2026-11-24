@@ -88,15 +88,6 @@ void main() {
     expect(UiPrefs.load(tmp.path).termFit, isFalse);
   });
 
-  test('term_key_row: off by default and when bad, saved when on', () {
-    expect(UiPrefs().termKeyRow, isFalse);
-    expect(UiPrefs.load(tmp.path).termKeyRow, isFalse);
-    File('${tmp.path}/gui.json').writeAsStringSync('{"term_key_row":"x"}');
-    expect(UiPrefs.load(tmp.path).termKeyRow, isFalse);
-    UiPrefs(termKeyRow: true).save(tmp.path);
-    expect(File('${tmp.path}/gui.json').readAsStringSync(), contains('"term_key_row":true'));
-    expect(UiPrefs.load(tmp.path).termKeyRow, isTrue);
-  });
   test('voice_tidy_mode round-trips and drops bad values', () {
     File('${tmp.path}/gui.json').writeAsStringSync('{"voice_tidy_mode":{"a":"chat","b":"loud"}}');
     final p = UiPrefs.load(tmp.path);
