@@ -119,6 +119,10 @@ class _Rule {
   }
 }
 
+/// When two rules' observed are the same one (a latin one by case): the later one wins in [VoiceRules.compile].
+String fixRuleKey(String observed) =>
+    _latin.hasMatch(observed) ? String.fromCharCodes(observed.runes.map(_fold)) : observed;
+
 /// Rules bucketed by (folded) first rune, longest first.
 Map<int, List<_Rule>> _buckets(Iterable<_Rule> rules) {
   final m = <int, List<_Rule>>{};
@@ -151,7 +155,7 @@ class VoiceRules {
     for (final rule in rules) {
       if (rule.observed.replaceAll(_space, '').runes.length < 2) continue;
       final r = _Rule(rule);
-      final key = String.fromCharCodes(r.runes);
+      final key = fixRuleKey(rule.observed);
       kept.remove(key);
       kept[key] = r;
     }

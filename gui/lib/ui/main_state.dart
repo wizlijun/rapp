@@ -37,7 +37,8 @@ import 'net_marker.dart' show weakRttMs;
 import 'pin_files.dart';
 import 'prefs.dart';
 import '../embed/composer_editor.dart' show ZoomKey;
-import '../embed/tidy_diff.dart' show LearnItem, editLearns;
+import '../embed/tidy_diff.dart' show LearnAction, LearnItem, editLearns;
+import '../embed/voice_fix.dart';
 import 'project_positions.dart';
 import '../llm_api.dart';
 import 'projects.dart';
@@ -164,6 +165,7 @@ class MainState extends ChangeNotifier {
     recorder.onSent = history.remember;
     this.voice?.hotwords = voiceHotwords;
     _refreshHotwords();
+    _loadRules();
     resources.addListener(notifyListeners);
     _portSub = port?.events.listen(_onPortEvent);
     _termSub = termPort?.events.listen(_onPortEvent);
@@ -223,6 +225,7 @@ class MainState extends ChangeNotifier {
     final oldRoot = data.root;
     data = d;
     llm = LlmEndpoint.load(d.localDir);
+    _loadRules();
     _forgetHotwords();
     final loaded = loadWorkspace(d.sharedDir);
     workspace = loaded.workspace;
@@ -3396,20 +3399,23 @@ class MainState extends ChangeNotifier {
   /// The words the next recording should expect; asks the gateway again in the background when the list is old.
   List<String> voiceHotwords() {
     _refreshHotwords();
+    _refreshRules();
     return _hotwords;
   }
 
   Future<void> _learnItems(List<LearnItem> items) async {
     final e = llm;
-    var any = false;
+    final learned = <LearnItem>[];
     for (final item in items) {
       if (await llmApi.learn(e, item)) {
-        any = true;
+        learned.add(item);
       } else {
         _log('rapp: voice learn failed');
       }
     }
-    if (any && !_disposed) _forgetHotwords();
+    if (learned.isEmpty || _disposed) return;
+    if (e == llm) _learnRules(e, learned);
+    _forgetHotwords();
   }
 
   /// What the gateway was taught; null when it cannot be asked.
@@ -3426,6 +3432,125 @@ class MainState extends ChangeNotifier {
     _hotwords = const [];
     _hotwordsAt = null;
     _refreshHotwords();
+    _forgetRules();
+  }
+
+  // On-device voice fixing (spec D4, D7, D10, D18): the gateway's rules (GET /v1/vocabulary/rules), kept in
+  // `local/voice-rules.json` and asked for at the hotwords' times. Only a 200 changes them; a 304 moves fetchedAt;
+  // a failure keeps the copy. A copy of another endpoint is not used: no rules until this one answers.
+  VoiceRules _voiceRules = VoiceRules.empty;
+  List<FixRule>? _voiceRulesFrom; // what [_voiceRules] was compiled from
+  VoiceRulesCopy? _rulesCopy;
+  DateTime? _rulesAt;
+  bool _rulesAsking = false, _rulesLoading = false;
+  String? _rulesLoadDir;
+  // Bumped when the rules asked for may be out of date (a new endpoint, a lesson, a forget): an answer to an
+  // older ask is dropped and asked again.
+  int _rulesGen = 0;
+
+  /// The rules on-device fixing applies now; empty with no endpoint, or none from it yet.
+  VoiceRules get voiceRules => _voiceRules;
+
+  /// [text] through [voiceRules]; a password field (or a session that is gone) gets it back unchanged (D7).
+  FixResult voiceFix(Object sid, String text) =>
+      (remote[sid]?.secureFocus ?? true) ? FixResult(text, const []) : _voiceRules.fix(text);
+
+  /// One line for the log (counts and milliseconds only, never words: D20).
+  void voiceLog(String line) => _log(line);
+
+  // Reads the copy of the current data dir, then asks the gateway (with the copy's etag when it is this one's).
+  void _loadRules() {
+    final dir = data.localDir;
+    _rulesLoadDir = dir;
+    _rulesLoading = true;
+    _rulesCopy = null;
+    _rulesGen++;
+    _useRules();
+    VoiceRulesCopy.load(dir).then((c) {
+      if (_disposed || _rulesLoadDir != dir) return;
+      _rulesLoading = false;
+      _rulesCopy ??= c; // a lesson learned meanwhile made one already
+      _useRules();
+      _refreshRules();
+    });
+  }
+
+  void _useRules() {
+    final c = _rulesCopy;
+    final from = c != null && llm.configured && c.isFor(llm) ? c.rules : null;
+    if (identical(from, _voiceRulesFrom)) return;
+    _voiceRulesFrom = from;
+    _voiceRules = from == null ? VoiceRules.empty : VoiceRules.compile(from);
+  }
+
+  void _keepRules(VoiceRulesCopy c) {
+    _rulesCopy = c;
+    _useRules();
+    c.save(data.localDir).catchError((Object x) => _log('rapp: voice rules not saved: ${_fsReason(x)}'));
+  }
+
+  void _forgetRules() {
+    _rulesAt = null;
+    _rulesGen++;
+    _useRules();
+    _refreshRules();
+  }
+
+  void _refreshRules() {
+    final e = llm;
+    if (_disposed || !e.configured || _rulesAsking || _rulesLoading) return;
+    final at = _rulesAt;
+    if (at != null && _now().difference(at) < _hotwordsAge) return;
+    unawaited(_askRules(e));
+  }
+
+  Future<void> _askRules(LlmEndpoint e) async {
+    _rulesAsking = true;
+    final gen = _rulesGen;
+    final c = _rulesCopy;
+    final mine = c != null && c.isFor(e) ? c : null;
+    RulesReply? r;
+    try {
+      r = await llmApi.rules(e, etag: mine == null || mine.etag.isEmpty ? null : mine.etag);
+    } catch (_) {
+      r = null; // a fake's throw: rules never throws
+    } finally {
+      _rulesAsking = false;
+    }
+    if (_disposed) return;
+    if (gen != _rulesGen) return _refreshRules();
+    if (r == null) return; // asked again at the next recording
+    final now = _now();
+    if (r.unchanged) {
+      if (mine == null) return;
+      _rulesAt = now;
+      _keepRules(VoiceRulesCopy(endpoint: mine.endpoint, fetchedAt: now, etag: mine.etag, rules: mine.rules));
+      return;
+    }
+    _rulesAt = now;
+    _keepRules(VoiceRulesCopy(endpoint: e.base!, fetchedAt: now, etag: r.etag, rules: r.rules));
+    _log('rapp: voice rules ${r.rules.length}');
+  }
+
+  // What was just taught applies at once (D10): each lesson goes into the copy over the rule of the same observed,
+  // as learned. The copy is then no longer the gateway's list, so its etag goes; the gateway is asked after.
+  void _learnRules(LlmEndpoint e, List<LearnItem> items) {
+    final c = _rulesCopy;
+    final base = c != null && c.isFor(e) ? c : null;
+    final keys = {for (final i in items) fixRuleKey(i.observed)};
+    _keepRules(VoiceRulesCopy(
+      endpoint: base?.endpoint ?? e.base!,
+      fetchedAt: base?.fetchedAt ?? _now(),
+      etag: '',
+      rules: [
+        for (final r in base?.rules ?? const <FixRule>[])
+          if (!keys.contains(fixRuleKey(r.observed))) r,
+        for (final i in items)
+          i.action == LearnAction.replace
+              ? FixRule.replace(i.observed, i.output!, FixSource.learned)
+              : FixRule.preserve(i.observed, FixSource.learned),
+      ],
+    ));
   }
 
   void _refreshHotwords() {

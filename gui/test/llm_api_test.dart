@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/tidy_diff.dart';
+import 'package:rapp/embed/voice_fix.dart';
 import 'package:rapp/llm_api.dart';
 
 void main() {
@@ -39,6 +40,52 @@ void main() {
       expect(LlmEndpoint.load(tmp.path).configured, isFalse);
       File('${tmp.path}/$llmFile').writeAsStringSync('{not json');
       expect(LlmEndpoint.load(tmp.path), const LlmEndpoint());
+    });
+  });
+
+
+  group('VoiceRulesCopy file', () {
+    late Directory tmp;
+    setUp(() => tmp = Directory.systemTemp.createTempSync('llm_api_rules'));
+    tearDown(() => tmp.deleteSync(recursive: true));
+
+    test('round-trips and is private', () async {
+      final c = VoiceRulesCopy(
+        endpoint: 'http://localhost:28001',
+        fetchedAt: DateTime.utc(2026, 11, 25, 9),
+        etag: 'e1',
+        rules: const [FixRule.replace('徐逊', '徐迅', FixSource.vocabulary), FixRule.preserve('黑猫瑞', FixSource.learned)],
+      );
+      await c.save(tmp.path);
+      final back = (await VoiceRulesCopy.load(tmp.path))!;
+      expect(back.endpoint, c.endpoint);
+      expect(back.fetchedAt, c.fetchedAt);
+      expect(back.etag, 'e1');
+      expect(back.rules, c.rules);
+      final j = jsonDecode(File('${tmp.path}/$voiceRulesFile').readAsStringSync()) as Map;
+      expect(j.keys, containsAll(['endpoint', 'fetchedAt', 'etag', 'rules']));
+      if (!Platform.isWindows) {
+        expect(File('${tmp.path}/$voiceRulesFile').statSync().modeString(), 'rw-------');
+      }
+    });
+
+    test('missing or corrupt is null; a bad rule is skipped', () async {
+      expect(await VoiceRulesCopy.load(tmp.path), isNull);
+      File('${tmp.path}/$voiceRulesFile').writeAsStringSync('{not json');
+      expect(await VoiceRulesCopy.load(tmp.path), isNull);
+      File('${tmp.path}/$voiceRulesFile').writeAsStringSync(jsonEncode({'endpoint': 'x', 'rules': []}));
+      expect(await VoiceRulesCopy.load(tmp.path), isNull);
+      File('${tmp.path}/$voiceRulesFile').writeAsStringSync(jsonEncode({
+        'endpoint': 'http://localhost:28001',
+        'fetchedAt': '2026-11-25T09:00:00.000Z',
+        'etag': 'e1',
+        'rules': [
+          {'action': 'replace', 'observed': '徐逊', 'output': '徐迅', 'source': 'vocabulary'},
+          {'action': 'weird', 'observed': 'x', 'source': 'learned'},
+          7,
+        ],
+      }));
+      expect((await VoiceRulesCopy.load(tmp.path))!.rules, const [FixRule.replace('徐逊', '徐迅', FixSource.vocabulary)]);
     });
   });
 
@@ -79,6 +126,81 @@ void main() {
         await r.response.close();
       };
       expect(await const LlmApi().hotwords(ep), isEmpty);
+    });
+
+
+    test('rules: 200 with the key, bad entries skipped, the etag kept', () async {
+      String? inm;
+      handler = (r) async {
+        expect(r.method, 'GET');
+        expect(r.uri.path, '/v1/vocabulary/rules');
+        expect(authed(r), isTrue);
+        inm = r.headers.value(HttpHeaders.ifNoneMatchHeader);
+        r.response.headers.set(HttpHeaders.etagHeader, '"e1"');
+        r.response.write(jsonEncode({
+          'etag': 'e1',
+          'rules': [
+            {'action': 'replace', 'observed': '徐逊', 'output': '徐迅', 'source': 'vocabulary'},
+            {'action': 'replace', 'observed': 'x'},
+            {'action': 'preserve', 'observed': '黑猫瑞', 'source': 'learned'},
+            'junk',
+          ],
+        }));
+        await r.response.close();
+      };
+      final r = (await const LlmApi().rules(ep))!;
+      expect(inm, isNull);
+      expect(r.unchanged, isFalse);
+      expect(r.etag, 'e1');
+      expect(r.rules, const [
+        FixRule.replace('徐逊', '徐迅', FixSource.vocabulary),
+        FixRule.preserve('黑猫瑞', FixSource.learned),
+      ]);
+    });
+
+    test('rules: the etag goes up quoted; 304 is unchanged', () async {
+      String? inm;
+      handler = (r) async {
+        inm = r.headers.value(HttpHeaders.ifNoneMatchHeader);
+        r.response.statusCode = 304;
+        await r.response.close();
+      };
+      final r = (await const LlmApi().rules(ep, etag: 'e1'))!;
+      expect(inm, '"e1"');
+      expect(r.unchanged, isTrue);
+      expect(r.etag, 'e1');
+      expect(r.rules, isEmpty);
+    });
+
+    test('rules: the etag header serves when the body has none', () async {
+      handler = (r) async {
+        r.response.headers.set(HttpHeaders.etagHeader, '"e2"');
+        r.response.write(jsonEncode({'rules': []}));
+        await r.response.close();
+      };
+      expect((await const LlmApi().rules(ep))!.etag, 'e2');
+    });
+
+    test('rules: 404, bad JSON, not set up and no server are null', () async {
+      handler = (r) async {
+        r.response.statusCode = 404;
+        await r.response.close();
+      };
+      expect(await const LlmApi().rules(ep), isNull);
+      handler = (r) async {
+        r.response.write('{nope');
+        await r.response.close();
+      };
+      expect(await const LlmApi().rules(ep), isNull);
+      handler = (r) async {
+        r.response.write(jsonEncode({'etag': 'e1', 'rules': 'nope'}));
+        await r.response.close();
+      };
+      expect(await const LlmApi().rules(ep), isNull);
+      expect(await const LlmApi().rules(const LlmEndpoint()), isNull);
+      await server.close(force: true);
+      expect(await const LlmApi().rules(ep), isNull);
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0); // for tearDown
     });
 
     const item = LearnItem.replace(observed: '黑猫瑞', output: 'Hemory', excerpt: '我们用黑猫瑞');

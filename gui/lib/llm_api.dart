@@ -8,9 +8,13 @@ import 'dart:io';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import 'embed/tidy_diff.dart' show LearnAction, LearnItem;
+import 'embed/voice_fix.dart' show FixRule;
 import 'data_dir.dart' show writePrivate;
 
 const llmFile = 'llm.json';
+
+/// The device's copy of the gateway's voice rules (spec D4): `local/`, 0600, never synced (it has names in it).
+const voiceRulesFile = 'voice-rules.json';
 
 /// The hint shown in an empty 接入点 field: the gateway as it is usually shared into this network.
 const llmUrlHint = 'http://localhost:28001';
@@ -223,6 +227,41 @@ class LlmApi {
     }
   }
 
+  /// `GET /v1/vocabulary/rules` (spec D18): the rules on-device fixing applies, conflicts already settled by the
+  /// gateway. [etag] goes up as `If-None-Match`; a 304 is [RulesReply.unchanged]. Null on anything else (an old
+  /// gateway's 404, a timeout, a body that is not the list). A rule it cannot read is skipped. Never throws.
+  Future<RulesReply?> rules(LlmEndpoint e, {String? etag}) async {
+    final base = e.base;
+    if (base == null || e.key.isEmpty) return null;
+    final client = HttpClient()..connectionTimeout = probeTimeout;
+    try {
+      final req = await client.getUrl(Uri.parse('$base/v1/vocabulary/rules')).timeout(probeTimeout);
+      req.headers.set(HttpHeaders.authorizationHeader, 'Bearer ${e.key}');
+      if (etag != null && etag.isNotEmpty) req.headers.set(HttpHeaders.ifNoneMatchHeader, '"$etag"');
+      final res = await req.close().timeout(probeTimeout);
+      final body = await res.transform(utf8.decoder).join().timeout(probeTimeout);
+      if (res.statusCode == 304 && etag != null && etag.isNotEmpty) {
+        return RulesReply(unchanged: true, etag: etag, rules: const []);
+      }
+      if (res.statusCode != 200) return null;
+      final j = jsonDecode(body);
+      if (j is! Map || j['rules'] is! List) return null;
+      final tag = j['etag'] is String ? j['etag'] as String : _unquote(res.headers.value(HttpHeaders.etagHeader) ?? '');
+      return RulesReply(unchanged: false, etag: tag, rules: _readRules(j['rules'] as List));
+    } catch (_) {
+      return null;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  static String _unquote(String tag) {
+    var t = tag.trim();
+    if (t.startsWith('W/')) t = t.substring(2);
+    if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) t = t.substring(1, t.length - 1);
+    return t;
+  }
+
   /// `POST /v1/vocabulary/learn`: teaches the gateway one correction. True only on a 200; never throws.
   Future<bool> learn(LlmEndpoint e, LearnItem item) async {
     final base = e.base;
@@ -386,4 +425,73 @@ class LearnedEntry {
   final String? output;
 
   String get label => action == LearnAction.replace ? '$observed → $output' : '不改：$observed';
+}
+
+
+/// What [LlmApi.rules] got: a new list ([unchanged] false), or a 304 for [etag] (no rules with it).
+class RulesReply {
+  const RulesReply({required this.unchanged, required this.etag, required this.rules});
+  final bool unchanged;
+  final String etag;
+  final List<FixRule> rules;
+}
+
+/// The rules as JSON, each read by [FixRule.fromJson]; one it cannot read is skipped.
+List<FixRule> _readRules(List<Object?> list) => [
+      for (final r in list)
+        if (r is Map) ?_readRule(r.cast<String, Object?>()),
+    ];
+
+FixRule? _readRule(Map<String, Object?> j) {
+  try {
+    return FixRule.fromJson(j);
+  } on FormatException {
+    return null;
+  }
+}
+
+/// `local/voice-rules.json` (spec D4): the last rules a gateway gave, which gateway ([endpoint], as normalized by
+/// [normalizeLlmUrl]) and when. A copy of another endpoint is not used.
+class VoiceRulesCopy {
+  const VoiceRulesCopy({required this.endpoint, required this.fetchedAt, required this.etag, required this.rules});
+
+  final String endpoint;
+  final DateTime fetchedAt;
+
+  /// The gateway's etag for [rules]; empty once a rule learned here was added (the copy is no longer the
+  /// gateway's list).
+  final String etag;
+  final List<FixRule> rules;
+
+  /// Whether this copy belongs to [e].
+  bool isFor(LlmEndpoint e) {
+    final b = e.base;
+    return b != null && normalizeLlmUrl(endpoint) == b;
+  }
+
+  /// Null when missing, unreadable or not this shape; never throws.
+  static Future<VoiceRulesCopy?> load(String localDir) async {
+    try {
+      final j = jsonDecode(await File('$localDir/$voiceRulesFile').readAsString());
+      if (j is! Map) return null;
+      final endpoint = j['endpoint'], at = j['fetchedAt'], etag = j['etag'], rules = j['rules'];
+      if (endpoint is! String || at is! String || rules is! List) return null;
+      final fetchedAt = DateTime.tryParse(at);
+      if (fetchedAt == null) return null;
+      return VoiceRulesCopy(
+          endpoint: endpoint, fetchedAt: fetchedAt, etag: etag is String ? etag : '', rules: _readRules(rules));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Writes `local/voice-rules.json` with mode 0600. Throws [FileSystemException].
+  Future<void> save(String localDir) async => writePrivate(
+      '$localDir/$voiceRulesFile',
+      utf8.encode(jsonEncode({
+        'endpoint': endpoint,
+        'fetchedAt': fetchedAt.toUtc().toIso8601String(),
+        'etag': etag,
+        'rules': [for (final r in rules) r.toJson()],
+      })));
 }
