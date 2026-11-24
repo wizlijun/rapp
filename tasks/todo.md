@@ -898,4 +898,4 @@ macOS / Linux 改用 iOS 的 `KeyBar` 和常用语条，贴在画面底部；按
 - [x] 对齐 main `833d134e` 的共享语音纠错、学习和按用途整理，补齐 Linux 热词到 Whisper 的传递。
 - [x] 722 项 Flutter、4 项 Rust 单元测试、Clippy、真实模型 8 项检查通过；analyze 无 error/warning。
 - [x] 源码 `0b5672d0` 构建 Arch/便携包，内容、依赖、SHA256 及隔离运行校验通过；产物在 `dist/`。
-- [ ] 本机安装窗口已打开，待管理员认证；安装后自动校验文件并更新后台服务。详见 `docs/superpowers/plans/2026-11-24-linux-01516-parity.md`。
+- [x] 本机已安装 0.15.16-1，40 个文件与包一致，pacman 检查 0 改动；后台服务已重启且运行二进制摘要一致。当前 GUI 退出重开后使用新版。详见 `docs/superpowers/plans/2026-11-24-linux-01516-parity.md`。
