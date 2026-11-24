@@ -53,6 +53,10 @@ class RemoteSession extends ChangeNotifier {
   /// bar's 复制 calls it).
   VoidCallback? termCopy;
 
+  /// Whether a terminal stage mounted for this session has the keyboard (its own Focus: a terminal never sets
+  /// [MainState.pictureFocused]); null while none is mounted. The key bar's 打字后自动收起 reads it.
+  ValueGetter<bool>? termHasKeys;
+
   /// A terminal's key bar modifiers (⌃ ⌥, sticky); the app's live in [MainState.appLatch].
   final keyLatch = ModifierLatch();
 

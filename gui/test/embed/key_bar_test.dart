@@ -29,7 +29,7 @@ void main() {
   late FakeTermSessionPort term;
   late MainState s;
   late Directory tmp;
-  late RemoteSession app, tsess, app2;
+  late RemoteSession app, tsess, app2, tapp;
   var copied = 0;
   var haptics = <String>[];
 
@@ -46,11 +46,12 @@ void main() {
     app = RemoteSession(1, 'Safari');
     tsess = RemoteSession(2, 'term');
     app2 = RemoteSession(3, 'Notes');
+    tapp = RemoteSession(4, 'Terminal', appId: 'com.apple.Terminal');
     copied = 0;
   });
 
   tearDown(() {
-    for (final r in [app, tsess, app2]) {
+    for (final r in [app, tsess, app2, tapp]) {
       r.dispose();
     }
     s.dispose();
@@ -641,6 +642,9 @@ void main() {
   });
 
   group('a key typed into the picture folds the quick area', () {
+    // A terminal app (terminalApps) is an app picture: focusPicture sets pictureFocused for it, and it folds the
+    // terminal kind's pref. A text terminal's stage has the keys by its own Focus: term_stage_latch_test covers it
+    // with the real stage, and the helper test below with termHasKeys.
     void deskTest(String name, Future<void> Function(WidgetTester) body, {bool macOnly = false}) {
       for (final platform in [TargetPlatform.macOS, if (!macOnly) TargetPlatform.linux]) {
         testWidgets('${platform.name}: $name', (tester) async {
@@ -655,29 +659,29 @@ void main() {
     }
 
     deskTest('a letter typed into the focused picture folds; typed with the editor focused it does not', (tester) async {
-      await tester.pumpWidget(bar(tsess));
-      s.pictureFocused = tsess.sid;
+      await tester.pumpWidget(bar(tapp));
+      s.pictureFocused = tapp.sid;
       await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.shiftLeft);
       await tester.pump();
-      expect(quickHidden(s, tsess), isFalse);
+      expect(quickHidden(s, tapp), isFalse);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
       await tester.pump();
-      expect(quickHidden(s, tsess), isTrue);
+      expect(quickHidden(s, tapp), isTrue);
       expect(s.prefs.quickHiddenApp, isTrue, reason: 'the other kind is untouched');
       await tap(tester, 'hide');
-      expect(quickHidden(s, tsess), isFalse);
-      tsess.composer.editorFocused = true;
+      expect(quickHidden(s, tapp), isFalse);
+      tapp.composer.editorFocused = true;
       await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
       await tester.pump();
-      expect(quickHidden(s, tsess), isFalse, reason: 'the editor has the key');
-      tsess.composer.editorFocused = false;
+      expect(quickHidden(s, tapp), isFalse, reason: 'the editor has the key');
+      tapp.composer.editorFocused = false;
       s.pictureFocused = null;
       await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
       await tester.pump();
-      expect(quickHidden(s, tsess), isFalse, reason: 'the picture has no focus');
+      expect(quickHidden(s, tapp), isFalse, reason: 'the picture has no focus');
     });
 
     deskTest('an app folds quick_hidden_app, not the terminal pref', (tester) async {
@@ -692,16 +696,16 @@ void main() {
 
     deskTest('quick_auto_hide off: a picture key does not fold', (tester) async {
       s.setQuickAutoHide(false);
-      await tester.pumpWidget(bar(tsess));
-      s.pictureFocused = tsess.sid;
+      await tester.pumpWidget(bar(tapp));
+      s.pictureFocused = tapp.sid;
       await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
       await tester.pump();
-      expect(quickHidden(s, tsess), isFalse);
+      expect(quickHidden(s, tapp), isFalse);
     });
 
     deskTest('a repeat does not fold; no bar, no listening', (tester) async {
-      await tester.pumpWidget(bar(tsess));
-      s.pictureFocused = tsess.sid;
+      await tester.pumpWidget(bar(tapp));
+      s.pictureFocused = tapp.sid;
       await tester.sendKeyDownEvent(LogicalKeyboardKey.keyA);
       await tester.pump();
       expect(s.prefs.quickHiddenTerm, isTrue);
@@ -742,22 +746,22 @@ void main() {
       debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
       try {
         s.setQuickAutoHide(true);
-        await tester.pumpWidget(bar(tsess));
-        s.pictureFocused = tsess.sid;
+        await tester.pumpWidget(bar(tapp));
+        s.pictureFocused = tapp.sid;
         await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
         await tester.pump();
-        expect(quickHidden(s, tsess), isTrue);
+        expect(quickHidden(s, tapp), isTrue);
         s.setQuickHidden(term: true, hidden: false);
-        tsess.composer.editorFocused = true;
+        tapp.composer.editorFocused = true;
         await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
         await tester.pump();
-        expect(quickHidden(s, tsess), isFalse, reason: 'the iOS editor has the key');
-        tsess.composer.editorFocused = false;
+        expect(quickHidden(s, tapp), isFalse, reason: 'the iOS editor has the key');
+        tapp.composer.editorFocused = false;
         s.setQuickAutoHide(false);
-        s.pictureFocused = tsess.sid;
+        s.pictureFocused = tapp.sid;
         await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
         await tester.pump();
-        expect(quickHidden(s, tsess), isFalse);
+        expect(quickHidden(s, tapp), isFalse);
       } finally {
         debugDefaultTargetPlatformOverride = null;
       }
@@ -766,8 +770,8 @@ void main() {
     testWidgets('Linux: Ctrl-held keys (the app shortcuts) do not fold', (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.linux;
       try {
-        await tester.pumpWidget(bar(tsess));
-        s.pictureFocused = tsess.sid;
+        await tester.pumpWidget(bar(tapp));
+        s.pictureFocused = tapp.sid;
         await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
         await tester.sendKeyEvent(LogicalKeyboardKey.bracketRight);
         await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
@@ -779,6 +783,25 @@ void main() {
       } finally {
         debugDefaultTargetPlatformOverride = null;
       }
+    });
+
+    test('typedIntoPicture: a text terminal by its stage\'s Focus, an app by pictureFocused; never the editor\'s', () {
+      expect(typedIntoPicture(s, tsess), isFalse, reason: 'no stage mounted');
+      var keys = true;
+      tsess.termHasKeys = () => keys;
+      expect(typedIntoPicture(s, tsess), isTrue);
+      tsess.composer.editorFocused = true;
+      expect(typedIntoPicture(s, tsess), isFalse, reason: 'the editor has the keys');
+      tsess.composer.editorFocused = false;
+      s.voiceMouseHold = tsess.sid;
+      expect(typedIntoPicture(s, tsess), isFalse, reason: 'a mouse hold on 语音 owns the keys');
+      s.voiceMouseHold = null;
+      keys = false;
+      expect(typedIntoPicture(s, tsess), isFalse);
+      expect(typedIntoPicture(s, tapp), isFalse);
+      s.pictureFocused = tapp.sid;
+      expect(typedIntoPicture(s, tapp), isTrue);
+      expect(termKind(s, tapp), isTrue, reason: 'a terminal app folds quick_hidden_term');
     });
 
     test('collapsesKeyBar: downs of non-modifier keys without ⌘', () {

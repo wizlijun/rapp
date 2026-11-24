@@ -1,9 +1,11 @@
 // The terminal stage reads the key bar's sticky modifiers (iOS input toggle, Task 2).
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/key_bar.dart';
 import 'package:rapp/embed/modifier_latch.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
@@ -144,4 +146,59 @@ void main() {
     ]);
     expect(rs.keyLatch.flags, 0);
   });
+
+  // input-dock spec §5.3: a key typed into the terminal stage folds the 快捷区, the way the app focuses it (no
+  // pictureFocused: a terminal's keys are the stage's own Focus).
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.linux]) {
+    testWidgets('${platform.name}: a key typed into the focused terminal stage folds the quick area', (tester) async {
+      debugDefaultTargetPlatformOverride = platform;
+      try {
+        await openTerm(tester);
+        final rs = s.currentRemote!;
+        expect(s.prefs.quickHiddenTerm, isFalse);
+        expect(find.byType(KeyBar), findsOneWidget);
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+        await tester.pump();
+        expect(s.prefs.quickHiddenTerm, isFalse, reason: 'the stage does not have the keys');
+        s.focusPicture(rs.sid);
+        await tester.pump();
+        await tester.pump();
+        expect(Focus.of(tester.element(find.byKey(const Key('term-grid')))).hasFocus, isTrue);
+        expect(s.pictureFocused, isNull, reason: 'a terminal never sets pictureFocused');
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.pump();
+        expect(s.prefs.quickHiddenTerm, isFalse, reason: 'a modifier alone does not fold');
+        rs.keyLatch.tap(latchCtrl);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyR);
+        await tester.pump();
+        expect(s.prefs.quickHiddenTerm, isFalse, reason: 'a lit ⌃ stays in sight');
+        expect(rs.keyLatch.flags, 0);
+        rs.composer.editorFocused = true;
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+        await tester.pump();
+        expect(s.prefs.quickHiddenTerm, isFalse, reason: 'the editor has the key');
+        rs.composer.editorFocused = false;
+        s.voiceMouseHold = rs.sid;
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pump();
+        expect(s.prefs.quickHiddenTerm, isFalse, reason: 'a key during a mouse hold on 语音 is the hold\'s (§5.6)');
+        s.voiceMouseHold = null;
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+        await tester.pump();
+        expect(s.prefs.quickHiddenTerm, isTrue);
+        expect(s.prefs.quickHiddenApp, isTrue, reason: 'the app kind is untouched');
+        s.setQuickHidden(term: true, hidden: false);
+        await tester.pump();
+        s.setQuickAutoHide(false);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+        await tester.pump();
+        expect(s.prefs.quickHiddenTerm, isFalse, reason: '打字后自动收起 off');
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+  }
 }

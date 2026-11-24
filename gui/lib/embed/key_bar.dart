@@ -44,9 +44,14 @@ bool termKind(MainState state, RemoteSession session) => _isTerm(state, session)
 bool quickHidden(MainState state, RemoteSession session) =>
     termKind(state, session) ? state.prefs.quickHiddenTerm : state.prefs.quickHiddenApp;
 
-/// A key typed into the picture: the picture has the keys and the writing panel's editor does not.
+/// A key typed into the picture: the picture has the keys and the writing panel's editor does not. An app's picture
+/// (a terminal app's too) has them as [MainState.pictureFocused]; a text terminal's stage by its own Focus
+/// ([RemoteSession.termHasKeys]), since [MainState.focusPicture] leaves pictureFocused alone for a terminal. A key
+/// during a mouse hold on 语音 is the hold's (its Esc ends it), and the quick area stays as it was (spec §5.6).
 bool typedIntoPicture(MainState state, RemoteSession session) =>
-    state.pictureFocused == session.sid && !session.composer.editorFocused;
+    (state.pictureFocused == session.sid || (session.termHasKeys?.call() ?? false)) &&
+    !session.composer.editorFocused &&
+    state.voiceMouseHold != session.sid;
 
 /// Whether the 常用语条 tops the bar (phrases spec §2): 显示常用语条 on, some phrases, a text terminal or an app whose
 /// profile has 常用语条 on. Whether the quick area is folded is not its business.
