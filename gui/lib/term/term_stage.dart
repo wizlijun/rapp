@@ -217,7 +217,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     _fling = createTicker(_tick);
     widget.session.addListener(_onSession);
     widget.session.termCopy = _copy;
-    widget.session.termHasKeys = _hasKeys;
+    widget.session.termTakesKey = _takesKey;
     _focus.addListener(_onFocus);
     HardwareKeyboard.instance.addHandler(_onKeys);
     _focusSeen = widget.state.termFocusTick;
@@ -242,8 +242,8 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       widget.session.addListener(_onSession);
       if (old.session.termCopy == _copy) old.session.termCopy = null;
       widget.session.termCopy = _copy;
-      if (old.session.termHasKeys == _hasKeys) old.session.termHasKeys = null;
-      widget.session.termHasKeys = _hasKeys;
+      if (old.session.termTakesKey == _takesKey) old.session.termTakesKey = null;
+      widget.session.termTakesKey = _takesKey;
       _focusIfWanted();
       // The element is reused for the new session: a hold of the hotkey was on the old one, and ends there.
       _gateTimer?.cancel();
@@ -267,7 +267,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   void dispose() {
     widget.session.removeListener(_onSession);
     if (widget.session.termCopy == _copy) widget.session.termCopy = null;
-    if (widget.session.termHasKeys == _hasKeys) widget.session.termHasKeys = null;
+    if (widget.session.termTakesKey == _takesKey) widget.session.termTakesKey = null;
     widget.state.removeListener(_onState);
     HardwareKeyboard.instance.removeHandler(_onKeys);
     _voiceEnds?.cancel();
@@ -370,8 +370,17 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     });
   }
 
-  /// The stage has the keyboard (the key bar's 打字后自动收起 asks, through [RemoteSession.termHasKeys]).
-  bool _hasKeys() => _focus.hasFocus;
+  /// The stage has the keyboard and [e] is the terminal's: not the voice hotkey's own down, nor any key while a
+  /// hotkey hold runs or has been decided (Esc, Tab and the rest stay the hold's until the hotkey's up, §5.6). The
+  /// key bar's 打字后自动收起 asks, through [RemoteSession.termTakesKey], before [_onKey] feeds the gate.
+  bool _takesKey(KeyEvent e) {
+    if (!_focus.hasFocus) return false;
+    if (!_gateOn) return true;
+    final code = macKeyCode(e.physicalKey);
+    if (code == null) return true;
+    _syncHotkey();
+    return !_gate.keeps(code, macFlags(HardwareKeyboard.instance), repeat: e is KeyRepeatEvent, ready: _voiceReady);
+  }
 
   void _onFocus() {
     // Losing the keyboard interrupts a hold (R7).

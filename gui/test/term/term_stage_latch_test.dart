@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/key_bar.dart';
 import 'package:rapp/embed/modifier_latch.dart';
 import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/embed/voice_key_gate.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/term/term_stage.dart';
@@ -16,6 +17,7 @@ import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/stage.dart';
 import 'package:rapp/ui/top_bar.dart';
 
+import '../embed/voice_button_test.dart' show FakeVoice;
 import '../fakes.dart';
 import '../ui/helpers.dart';
 import 'term_main_test.dart' show tp, windowsOf;
@@ -197,6 +199,81 @@ void main() {
         await tester.pump();
         expect(s.prefs.quickHiddenTerm, isFalse, reason: '打字后自动收起 off');
       } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+  }
+  // Final review follow-up: a hotkey hold on the terminal owns its keys, so the quick area neither comes nor goes
+  // (§5.6). Real key events through the stage's voice gate: the key bar's handler sees them first.
+  Future<FakeVoice> voiced(WidgetTester tester) async {
+    final voice = FakeVoice();
+    s.dispose();
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, termPort: term, voice: voice);
+    await openTerm(tester);
+    s.focusPicture(s.currentRemote!.sid);
+    await tester.pump();
+    await tester.pump();
+    expect(Focus.of(tester.element(find.byKey(const Key('term-grid')))).hasFocus, isTrue);
+    expect(s.prefs.quickHiddenTerm, isFalse);
+    return voice;
+  }
+
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.linux]) {
+    final p = platform == TargetPlatform.linux ? 'linux' : 'macos';
+    for (final key in [LogicalKeyboardKey.escape, LogicalKeyboardKey.tab]) {
+      testWidgets('${platform.name}: ${key.keyLabel} in a hotkey hold on the terminal leaves the quick area', (tester) async {
+        debugDefaultTargetPlatformOverride = platform;
+        try {
+          final voice = await voiced(tester);
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.altRight, platform: p);
+          await tester.pump(const Duration(milliseconds: 400)); // past the hold delay
+          await tester.pump();
+          expect(voice.starts, 1, reason: 'the long ⌥ started a hold');
+          await tester.sendKeyDownEvent(key, platform: p);
+          await tester.sendKeyUpEvent(key, platform: p);
+          await tester.pump();
+          expect(s.prefs.quickHiddenTerm, isFalse, reason: '${key.keyLabel} ends the hold, not the quick area');
+          await tester.sendKeyEvent(LogicalKeyboardKey.keyA, platform: p);
+          await tester.pump();
+          expect(s.prefs.quickHiddenTerm, isFalse, reason: 'until ⌥ goes up every key is the hold\'s');
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.altRight, platform: p);
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 400));
+          expect(s.prefs.quickHiddenTerm, isFalse);
+          if (key == LogicalKeyboardKey.escape) {
+            await tester.sendKeyEvent(LogicalKeyboardKey.keyA, platform: p);
+            await tester.pump();
+            expect(s.prefs.quickHiddenTerm, isTrue, reason: 'the hold over, a typed key folds again');
+          }
+        } finally {
+          await tester.pumpWidget(const SizedBox());
+          debugDefaultTargetPlatformOverride = null;
+        }
+      });
+    }
+
+    testWidgets('${platform.name}: a combo hotkey\'s own key down does not fold the quick area', (tester) async {
+      debugDefaultTargetPlatformOverride = platform;
+      try {
+        final voice = await voiced(tester);
+        s.setVoiceHotkey(const VoiceHotkey.holdCombo(49, 1 << 19)); // ⌥Space
+        await tester.pump();
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft, platform: p);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.space, platform: p);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 200));
+        expect(voice.starts, 1, reason: '⌥Space started a hold');
+        expect(s.prefs.quickHiddenTerm, isFalse, reason: 'the hotkey is not typing');
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.space, platform: p);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft, platform: p);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(s.prefs.quickHiddenTerm, isFalse);
+        await tester.sendKeyEvent(LogicalKeyboardKey.space, platform: p);
+        await tester.pump();
+        expect(s.prefs.quickHiddenTerm, isTrue, reason: 'Space without ⌥ is typing');
+      } finally {
+        await tester.pumpWidget(const SizedBox());
         debugDefaultTargetPlatformOverride = null;
       }
     });

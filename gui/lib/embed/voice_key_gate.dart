@@ -223,6 +223,19 @@ class VoiceKeyGate {
 
   bool get recording => _state == _State.recording;
 
+  /// Whether a down of [code] with [flags] now would be the voice hold's rather than A's: the hotkey's own down
+  /// (a combo's start, a modifier's arm, a repeat of it while pending) or any key while a recording runs or is
+  /// decided. A query only, Dart side (the key bar asks it before [handle] sees the key); it changes nothing.
+  bool keeps(int code, int flags, {bool repeat = false, required bool ready}) => switch (_state) {
+        _State.idle => !hotkey.isOff &&
+            code == hotkey.keyCode &&
+            !repeat &&
+            ready &&
+            (hotkey.isModifier ? !_othersDown(code, flags) : flags & _comboMask == hotkey.modifiers),
+        _State.pending => code == hotkey.keyCode,
+        _State.recording || _State.decided => true,
+      };
+
   /// The setting changes (关, 恢复默认 or a new key recorded) while keys may be held. A real change starts
   /// over: a hold of the old key is no hold any more, and its up never reaches the hotkey rules, so a
   /// recording is cancelled here (or it would end in `decided`, swallowing every key with no hotkey up to

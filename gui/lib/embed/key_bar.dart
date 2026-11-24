@@ -44,12 +44,13 @@ bool termKind(MainState state, RemoteSession session) => _isTerm(state, session)
 bool quickHidden(MainState state, RemoteSession session) =>
     termKind(state, session) ? state.prefs.quickHiddenTerm : state.prefs.quickHiddenApp;
 
-/// A key typed into the picture: the picture has the keys and the writing panel's editor does not. An app's picture
-/// (a terminal app's too) has them as [MainState.pictureFocused]; a text terminal's stage by its own Focus
-/// ([RemoteSession.termHasKeys]), since [MainState.focusPicture] leaves pictureFocused alone for a terminal. A key
-/// during a mouse hold on 语音 is the hold's (its Esc ends it), and the quick area stays as it was (spec §5.6).
-bool typedIntoPicture(MainState state, RemoteSession session) =>
-    (state.pictureFocused == session.sid || (session.termHasKeys?.call() ?? false)) &&
+/// Key [e] typed into the picture: the picture has the keys and the writing panel's editor does not. An app's
+/// picture (a terminal app's too) has them as [MainState.pictureFocused]; a text terminal's stage by its own Focus
+/// ([RemoteSession.termTakesKey]), since [MainState.focusPicture] leaves pictureFocused alone for a terminal. A key
+/// that belongs to a voice hold — any key during a mouse hold on 语音, and on a terminal the hotkey's own down and
+/// every key while its hold runs — is the hold's, and the quick area stays as it was (spec §5.6).
+bool typedIntoPicture(MainState state, RemoteSession session, KeyEvent e) =>
+    (state.pictureFocused == session.sid || (session.termTakesKey?.call(e) ?? false)) &&
     !session.composer.editorFocused &&
     state.voiceMouseHold != session.sid;
 
@@ -228,7 +229,7 @@ class _KeyBarState extends State<KeyBar> {
   }
 
   bool _onKey(KeyEvent e) {
-    if (collapsesKeyBar(e) && typedIntoPicture(widget.state, widget.session)) foldKeyBar(widget.state, widget.session);
+    if (collapsesKeyBar(e) && typedIntoPicture(widget.state, widget.session, e)) foldKeyBar(widget.state, widget.session);
     return false; // only watching: the key goes on
   }
 

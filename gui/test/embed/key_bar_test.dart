@@ -644,7 +644,7 @@ void main() {
   group('a key typed into the picture folds the quick area', () {
     // A terminal app (terminalApps) is an app picture: focusPicture sets pictureFocused for it, and it folds the
     // terminal kind's pref. A text terminal's stage has the keys by its own Focus: term_stage_latch_test covers it
-    // with the real stage, and the helper test below with termHasKeys.
+    // with the real stage, and the helper test below with termTakesKey.
     void deskTest(String name, Future<void> Function(WidgetTester) body, {bool macOnly = false}) {
       for (final platform in [TargetPlatform.macOS, if (!macOnly) TargetPlatform.linux]) {
         testWidgets('${platform.name}: $name', (tester) async {
@@ -786,21 +786,28 @@ void main() {
     });
 
     test('typedIntoPicture: a text terminal by its stage\'s Focus, an app by pictureFocused; never the editor\'s', () {
-      expect(typedIntoPicture(s, tsess), isFalse, reason: 'no stage mounted');
+      const a = KeyDownEvent(
+          physicalKey: PhysicalKeyboardKey.keyA, logicalKey: LogicalKeyboardKey.keyA, character: 'a', timeStamp: Duration.zero);
+      expect(typedIntoPicture(s, tsess, a), isFalse, reason: 'no stage mounted');
       var keys = true;
-      tsess.termHasKeys = () => keys;
-      expect(typedIntoPicture(s, tsess), isTrue);
+      KeyEvent? asked;
+      tsess.termTakesKey = (e) {
+        asked = e;
+        return keys;
+      };
+      expect(typedIntoPicture(s, tsess, a), isTrue);
+      expect(asked, same(a), reason: 'the stage is asked about this key (a voice hold may own it)');
       tsess.composer.editorFocused = true;
-      expect(typedIntoPicture(s, tsess), isFalse, reason: 'the editor has the keys');
+      expect(typedIntoPicture(s, tsess, a), isFalse, reason: 'the editor has the keys');
       tsess.composer.editorFocused = false;
       s.voiceMouseHold = tsess.sid;
-      expect(typedIntoPicture(s, tsess), isFalse, reason: 'a mouse hold on 语音 owns the keys');
+      expect(typedIntoPicture(s, tsess, a), isFalse, reason: 'a mouse hold on 语音 owns the keys');
       s.voiceMouseHold = null;
       keys = false;
-      expect(typedIntoPicture(s, tsess), isFalse);
-      expect(typedIntoPicture(s, tapp), isFalse);
+      expect(typedIntoPicture(s, tsess, a), isFalse);
+      expect(typedIntoPicture(s, tapp, a), isFalse);
       s.pictureFocused = tapp.sid;
-      expect(typedIntoPicture(s, tapp), isTrue);
+      expect(typedIntoPicture(s, tapp, a), isTrue);
       expect(termKind(s, tapp), isTrue, reason: 'a terminal app folds quick_hidden_term');
     });
 
