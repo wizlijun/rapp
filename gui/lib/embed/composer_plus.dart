@@ -97,12 +97,18 @@ class _ComposerPlusState extends State<ComposerPlus> {
   /// there, floating-composer spec), else above it. Decided once, at open.
   bool _down = false;
 
+  /// The card's tallest height: the room on the side it opens into, less the 8 gap and an 8 margin. Taller content scrolls.
+  double _maxHeight = double.infinity;
+
   void _toggle() {
     if (_portal.isShowing) return _close();
     final box = context.findRenderObject();
     final overlay = Overlay.maybeOf(context)?.context.findRenderObject();
     if (box is RenderBox && overlay is RenderBox && box.hasSize) {
-      _down = box.localToGlobal(Offset.zero, ancestor: overlay).dy < overlay.size.height / 2;
+      final top = box.localToGlobal(Offset.zero, ancestor: overlay).dy;
+      _down = top < overlay.size.height / 2;
+      final room = _down ? overlay.size.height - (top + box.size.height) : top;
+      _maxHeight = (room - 16).clamp(0.0, double.infinity);
     }
     _portal.show();
   }
@@ -280,7 +286,9 @@ class _ComposerPlusState extends State<ComposerPlus> {
                 width: 300,
                 decoration: t.floatBox(),
                 padding: const EdgeInsets.all(8),
-                child: Column(
+                constraints: BoxConstraints(maxHeight: _maxHeight),
+                child: SingleChildScrollView(
+                  child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -322,6 +330,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
                       ),
                     ),
                   ],
+                ),
                 ),
               ),
             ),

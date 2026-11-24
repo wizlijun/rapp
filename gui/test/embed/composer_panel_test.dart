@@ -724,6 +724,24 @@ void main() {
         }, variant: TargetPlatformVariant.only(platform));
       }
 
+      testWidgets('a short stage (390 tall): the menu fits inside the view and 收起 scrolls into reach', (tester) async {
+        tester.view.physicalSize = const Size(900, 390);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        final m = tester.getRect(menu);
+        expect(m.top, greaterThanOrEqualTo(0));
+        expect(m.bottom, lessThanOrEqualTo(390));
+        final collapse = find.byKey(const Key('composer-plus-collapse'));
+        await tester.scrollUntilVisible(collapse, 80, scrollable: find.descendant(of: menu, matching: find.byType(Scrollable)));
+        await tester.tap(collapse);
+        await tester.pump();
+        expect(menu, findsNothing);
+        expect(rs.composer.open, isFalse);
+      });
+
       testWidgets('快捷区 switches flip quickAutoHide, phraseStrip, keyBarMore and the menu stays open', (tester) async {
         big(tester);
         await tester.pumpWidget(layer());

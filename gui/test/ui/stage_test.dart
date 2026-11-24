@@ -753,10 +753,6 @@ void main() {
       });
 
       testWidgets('a frozen panel still pastes and attaches locally', (tester) async {
-        // The ＋ menu now carries the 快捷区 group and is taller than the default test window.
-        tester.view.physicalSize = const Size(800, 1200);
-        tester.view.devicePixelRatio = 1;
-        addTearDown(tester.view.reset);
         await dropWithDraft(tester);
         await tester.showKeyboard(field);
         port.calls.clear();
