@@ -674,7 +674,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     guard decision.route == .remote, let target, let sid = targetSid else { return event }
     keysHolder = sid
     target.session.send(.key(keyCode: event.keyCode, modifiers: UInt64(event.modifierFlags.rawValue), down: down))
-    // The keyboard in use folds the key bar to ⊙ (pc-key-bar spec §3); ⌘ shortcuts and modifiers alone do not.
+    // The keyboard in use hides the 快捷区 when 打字后自动收起 is on (foldKeyBar); ⌘ shortcuts and modifiers alone do not.
     if down, event.type == .keyDown, !event.isARepeat, !event.modifierFlags.contains(.command) {
       channel.invokeMethod("key_typed", arguments: ["sid": sid])
     }

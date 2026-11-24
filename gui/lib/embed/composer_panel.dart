@@ -559,7 +559,7 @@ List<Widget> composerLayer(
           session: session,
           port: port,
           keyboard: keyboard,
-          // The state too: ⊙, ⋯ and the 常用语条 change the 快捷区.
+          // The state too: the 快捷区 toggle, ⋯ and the 常用语条 change the 快捷区.
           listenable: Listenable.merge([both, state, session.zooms, ?hold]),
           voice: hold != null,
           text: (context, maxHeight) => ComposerPanel(

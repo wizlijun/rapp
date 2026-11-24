@@ -195,7 +195,7 @@ static NSAttributedStringKey const RappChipMark=@"RappChipMark";
         if(!event.isARepeat && owner.event)owner.event(@"toggleFocus",nil,nil);
         return;
     }
-    // The keyboard in use folds the key bar to ⊙ (pc-key-bar spec §3); ⌘ shortcuts leave it as it is.
+    // The keyboard in use hides the 快捷区 when 打字后自动收起 is on (foldKeyBar); ⌘ shortcuts leave it as it is.
     if(!event.isARepeat && !(flags & NSEventModifierFlagCommand) && owner.event)owner.event(@"typed",nil,nil);
     [super keyDown:event];
 }
