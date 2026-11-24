@@ -275,13 +275,54 @@ void main() {
     expect(find.text('正在听…'), findsNothing);
   });
 
-  macTest('a hotkey start is ignored while the panel is open', (tester) async {
+  // Final review: with the text area open the hotkey holds as the mouse (and iOS) does.
+  macTest('a hotkey hold with the panel open sends, as a mouse hold does; the panel stays', (tester) async {
     await view(tester);
+    await goLive(tester);
     rs.composer.open = true;
+    rs.composer.draft = '草稿';
     await tester.pumpWidget(layer());
+    await tester.pump();
     es.voiceKey(1, VoiceKeyPhase.start);
     await tester.pump();
-    expect(voice.starts, 0);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(voice.starts, 1);
+    expect(find.text('正在听…'), findsOneWidget);
+    voice.stopResult = '好的';
+    es.voiceKey(1, VoiceKeyPhase.release);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(sends(), [
+      [
+        {'text': '好的'}
+      ]
+    ]);
+    expect(rs.composer.open, isTrue);
+    expect(await rs.composer.readDraft(), '草稿');
+  });
+
+  macTest('a hotkey 编辑 with the panel open puts the words in the editor', (tester) async {
+    await view(tester);
+    await goLive(tester);
+    rs.composer.open = true;
+    rs.composer.draft = '草稿';
+    await tester.pumpWidget(layer());
+    await tester.pump();
+    es.voiceKey(1, VoiceKeyPhase.start);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(voice.starts, 1);
+    voice.stopResult = '你好';
+    es.voiceKey(1, VoiceKeyPhase.edit);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(sends(), isEmpty);
+    expect(rs.composer.open, isTrue);
+    final draft = await rs.composer.readDraft();
+    expect(draft, startsWith('草稿'));
+    expect(draft, endsWith('你好'));
   });
 
   macTest('disposing during a hotkey hold sends voice_end', (tester) async {

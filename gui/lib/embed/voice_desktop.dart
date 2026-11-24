@@ -207,7 +207,7 @@ class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderSt
     if (e.$1 != _sid) return;
     switch (e.$2) {
       case VoiceKeyPhase.start:
-        if (_mouse || (!_hold.active && widget.session.composer.open)) return;
+        if (_mouse) return; // the text area open or not, as a mouse hold (and iOS)
         unawaited(_hold.start());
       case VoiceKeyPhase.release:
         _hold.finish(VoicePick.send);
