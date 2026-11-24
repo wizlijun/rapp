@@ -15,7 +15,7 @@ import FlutterMacOS
 /// this side sends `partial` / `final` {text} and `error` {code}, and `timing` {first_partial_ms, final_ms}
 /// (milliseconds, or null) just before each `final`. Everything runs on the main thread except
 /// the audio tap, which only hands buffers to the recogniser. On iOS this plugin owns the app's AVAudioSession; macOS has no shared session, so it only owns its audio engine.
-/// iOS 26+ uses SpeechAnalyzer + SpeechTranscriber; older systems (or no transcriber for the locale) use
+/// iOS 26+ uses SpeechAnalyzer + DictationTranscriber; older systems (or no transcriber for the locale) use
 /// SFSpeechRecognizer.
 final class SpeechPlugin: NSObject, FlutterPlugin {
   /// How long after `stop` this side gives up on the recogniser and sends `final` with what it has.
@@ -341,22 +341,23 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
   @available(iOS 26, macOS 26, *)
   @MainActor
   private func startAnalyzer(_ gen: Int, hotwords: [String], pressedAt: TimeInterval) async -> String? {
-    guard SpeechTranscriber.isAvailable else { return nil }
     let key = Self.locale.identifier
     if analyzerCache?.key != key { analyzerCache = nil }
     let supported: Locale?
     if let cache = analyzerCache {
       supported = cache.locale
     } else {
-      supported = await SpeechTranscriber.supportedLocale(equivalentTo: Self.locale)
+      supported = await DictationTranscriber.supportedLocale(equivalentTo: Self.locale)
       analyzerCache = AnalyzerCache(key: key, locale: supported)
     }
     guard let locale = supported else { return nil }
-    // .fastResults: words show while being said instead of after the transcriber gathers more context (user
-    // 2026-11-18: 「实时显示不太即时……确保说完立即显示」); the finalised text still corrects them.
-    let transcriber = SpeechTranscriber(
-      locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults, .fastResults],
-      attributeOptions: [])
+    // DictationTranscriber, not SpeechTranscriber: with the hotwords it got the names and products right in
+    // 17 of 30 probe clips against 4, at a lower error rate and no later first word (voice local fix spec §8,
+    // D13). The progressive preset shows words while they are being said; the finalised text still corrects them.
+    let preset = DictationTranscriber.Preset.progressiveLongDictation
+    let transcriber = DictationTranscriber(
+      locale: locale, contentHints: preset.contentHints, transcriptionOptions: preset.transcriptionOptions,
+      reportingOptions: preset.reportingOptions, attributeOptions: preset.attributeOptions)
 
     if assetsInstalling { return "preparing" }
     if analyzerCache?.key == key, analyzerCache?.assetsInstalled == true {
@@ -418,7 +419,8 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
         self?.failed(run)
       }
     }
-    // The hotwords as the analysis context: the transcriber leans toward them. Without them it still runs.
+    // The hotwords as the analysis context: DictationTranscriber leans toward them (probe P1/P2, voice local fix
+    // spec §8: SpeechTranscriber ignored them, 4/30 clips right either way). Without them it still runs.
     if !hotwords.isEmpty {
       let context = AnalysisContext()
       context.contextualStrings[.general] = hotwords
@@ -513,7 +515,7 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
 /// The analyzer lookups for one language (`key`, a `Locale.identifier`); main thread only.
 private struct AnalyzerCache {
   let key: String
-  /// `SpeechTranscriber.supportedLocale(equivalentTo:)`; nil = no transcriber for this language.
+  /// `DictationTranscriber.supportedLocale(equivalentTo:)`; nil = no transcriber for this language.
   let locale: Locale?
   /// `assetInstallationRequest` said nothing needs installing.
   var assetsInstalled = false
