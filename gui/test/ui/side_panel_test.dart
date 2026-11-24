@@ -5,6 +5,7 @@ import 'package:rapp/llm_api.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/tidy_mode.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/traffic_label.dart' show formatRate;
 import 'package:rapp/hub_client.dart';
@@ -249,6 +250,24 @@ void main() {
     await tester.pump();
     expect(s.prefs.voiceAiTidy, false);
     expect(UiPrefs.load('${tmp.path}/devices/dev1').voiceAiTidy, false);
+  });
+
+  testWidgets('恢复默认 clears voice_tidy_mode', (tester) async {
+    await tester.pumpWidget(wrap(panel()));
+    expect(find.byKey(const Key('voice-tidy-mode-note')), findsOneWidget);
+    expect(find.text('发给聊天软件的话按『对人』整理（保留口气，不分点），其余按『提示词』；在整理气泡上点用途可改'), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const Key('voice-tidy-mode-reset')));
+    await tester.tap(find.byKey(const Key('voice-tidy-mode-reset')));
+    await tester.pump();
+    expect(s.prefs.voiceTidyMode, isEmpty);
+    s.prefs.voiceTidyMode['com.x'] = TidyMode.chat;
+    s.notifyListeners();
+    await tester.pump();
+    await tester.ensureVisible(find.byKey(const Key('voice-tidy-mode-reset')));
+    await tester.tap(find.byKey(const Key('voice-tidy-mode-reset')));
+    await tester.pump();
+    expect(s.prefs.voiceTidyMode, isEmpty);
+    expect(UiPrefs.load('${tmp.path}/devices/dev1').voiceTidyMode, isEmpty);
   });
 
   testWidgets('the AI think switch is off by default and saves', (tester) async {

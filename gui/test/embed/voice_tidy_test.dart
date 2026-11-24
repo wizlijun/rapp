@@ -3,6 +3,8 @@ import 'dart:ui' show Rect;
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/composer_model.dart';
+import 'package:rapp/embed/tidy_diff.dart';
+import 'package:rapp/embed/tidy_mode.dart';
 import 'package:rapp/embed/voice_button.dart' show voiceBusy;
 import 'package:rapp/embed/voice_ring.dart' show VoicePick;
 import 'package:rapp/embed/voice_tidy.dart';
@@ -46,9 +48,18 @@ void main() {
   late List<(Object, String, VoiceAi?)> edited;
   late List<(Object, String)> kept;
   late List<String> logs;
+  late List<List<LearnItem>> learned;
   String? sendHint;
 
-  VoiceTidy make() => VoiceTidy(
+  var mode = TidyMode.prompt;
+  late List<TidyMode> setModes;
+
+  VoiceTidy make({bool learn = true}) => VoiceTidy(
+        mode: (_) => mode,
+        setMode: (sid, m) {
+          mode = m;
+          setModes.add(m);
+        },
         sid: 1,
         endpoint: () => const LlmEndpoint(url: 'localhost:28001', key: 'k'),
         api: api,
@@ -60,6 +71,7 @@ void main() {
         edit: (sid, t, ai) => edited.add((sid, t, ai)),
         keep: (sid, t) => kept.add((sid, t)),
         log: logs.add,
+        learn: learn ? (sid, items) => learned.add(items) : null,
       );
 
   setUp(() {
@@ -69,7 +81,113 @@ void main() {
     edited = [];
     kept = [];
     logs = [];
+    learned = [];
     sendHint = null;
+    mode = TidyMode.prompt;
+    setModes = [];
+  });
+
+  group('tidy mode (按用途整理)', () {
+    test("the tidy runs the session's mode", () {
+      fakeAsync((a) {
+        mode = TidyMode.chat;
+        final t = make();
+        t.begin(long, VoicePick.send);
+        expect(api.runs.single.$1, 'dictation-chat');
+        expect(t.running, TidyMode.chat);
+        api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+        out(a, t);
+        a.elapse(const Duration(milliseconds: 1500));
+        expect(sent.single.$3.ai!.app, 'dictation-chat');
+        expect(logs.any((l) => l.contains('dictation-chat')), isTrue);
+        t.dispose();
+      });
+    });
+
+    test('switchMode re-tidies the original with the other mode and saves it', () {
+      fakeAsync((a) {
+        mode = TidyMode.chat;
+        final t = make();
+        t.begin(long, VoicePick.send);
+        api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+        out(a, t);
+        expect(t.phase, TidyPhase.ready);
+        expect(t.changes, isNotEmpty);
+        t.switchMode();
+        expect(api.runs.last, ('dictation', long));
+        expect(setModes, [TidyMode.prompt]);
+        expect(t.running, TidyMode.prompt);
+        expect(t.changes, isEmpty);
+        expect(t.phase, TidyPhase.tidying);
+        expect(t.shown, '');
+        a.elapse(const Duration(seconds: 5));
+        expect(sent, isEmpty);
+        api.calls.last.complete(const LlmDone('明天下午三点开会'));
+        out(a, t);
+        a.elapse(const Duration(milliseconds: 1500));
+        expect(sent.single.$3.ai!.app, 'dictation');
+        t.dispose();
+      });
+    });
+
+    test('switchMode drops an in-bubble offer, keeps a standalone box, and restarts the timer', () {
+      fakeAsync((a) {
+        final t = make();
+        t.begin(long, VoicePick.send);
+        a.elapse(const Duration(seconds: 25));
+        t.offerLearn([LearnItem.preserve(observed: 'a', avoid: 'b', excerpt: 'c')]);
+        t.switchMode();
+        expect(t.offer, isNotNull); // standalone survives
+        a.elapse(const Duration(seconds: 25)); // 50 s since start, 25 s since the switch
+        expect(t.phase, TidyPhase.tidying);
+        a.elapse(const Duration(seconds: 6));
+        expect(sent.single.$2, long);
+        t.dispose();
+      });
+    });
+
+    test('a switch after a flip settles normally and sends the new result', () {
+      fakeAsync((a) {
+        final t = make();
+        t.begin('明天用拍森跑一下黑猫瑞', VoicePick.send);
+        api.calls.single.complete(const LlmDone('明天用Python跑一下Hemory'));
+        out(a, t);
+        t.flip(0);
+        expect(t.stopped, isTrue);
+        t.switchMode();
+        expect(t.stopped, isFalse);
+        api.calls.last.complete(const LlmDone('明天用Python跑一下Hemory。'));
+        out(a, t);
+        a.elapse(const Duration(milliseconds: 1500));
+        expect(sent.single.$2, '明天用Python跑一下Hemory。');
+        t.dispose();
+      });
+    });
+
+    test('canSwitch is false while comparing', () {
+      fakeAsync((a) {
+        final t = make();
+        t.begin(long, VoicePick.send);
+        expect(t.canSwitch, isTrue);
+        t.compare();
+        expect(t.canSwitch, isFalse);
+        t.dispose();
+      });
+    });
+
+    test('a prefetch in the other mode is not used', () {
+      fakeAsync((a) {
+        final t = make();
+        t.prefetch(long);
+        expect(api.runs.single, ('dictation', long));
+        mode = TidyMode.chat;
+        t.begin(long, VoicePick.send);
+        expect(api.runs, hasLength(2));
+        expect(api.runs.last, ('dictation-chat', long));
+        expect(api.calls.first.cancelled, isTrue);
+        t.dispose();
+      });
+    });
   });
 
   group('prefetch (边说边整理)', () {
@@ -716,6 +834,253 @@ void main() {
         expect(l, isNot(contains('开会')));
       }
       t.dispose();
+    });
+  });
+
+  group('flip an AI change back (切换词)', () {
+    const heard = '明天用拍森跑一下黑猫瑞';
+    const ai = '明天用Python跑一下Hemory';
+
+    // A done send whose words are all out.
+    VoiceTidy ready(FakeAsync a, {bool learn = true, VoicePick pick = VoicePick.send}) {
+      final t = make(learn: learn);
+      t.begin(heard, pick);
+      api.calls.single.complete(const LlmDone(ai));
+      out(a, t);
+      return t;
+    }
+
+    test('a done send lists the AI\'s changes', () {
+      fakeAsync((a) {
+        final t = ready(a);
+        expect(t.changes.map((c) => c.before), ['拍森', '黑猫瑞']);
+        expect(t.changes.map((c) => c.after), ['Python', 'Hemory']);
+        expect(t.flipped(0), isFalse);
+        expect(t.text, ai);
+        t.dispose();
+      });
+    });
+
+    test('flip holds the send and sends the flipped text', () {
+      fakeAsync((a) {
+        final t = ready(a);
+        t.flip(1);
+        expect(t.flipped(1), isTrue);
+        expect(t.stopped, isTrue);
+        expect(t.text, '明天用Python跑一下黑猫瑞');
+        a.elapse(const Duration(seconds: 5));
+        expect(sent, isEmpty);
+        expect(t.phase, TidyPhase.ready);
+        t.sendNow();
+        expect(sent.single.$2, '明天用Python跑一下黑猫瑞');
+        expect(sent.single.$3.ai!.result, ai);
+        expect(t.changes, isEmpty);
+        t.dispose();
+      });
+    });
+
+    test('flip builds the text by rune offsets past an emoji', () {
+      fakeAsync((a) {
+        final t = make();
+        t.begin('😀明天用拍森跑一下黑猫瑞', VoicePick.send);
+        api.calls.single.complete(const LlmDone('😀明天用Python跑一下Hemory'));
+        out(a, t);
+        t.flip(0);
+        expect(t.text, '😀明天用拍森跑一下Hemory');
+        t.dispose();
+      });
+    });
+
+    test('edit after a flip puts the flipped text in the panel, ai.result unchanged', () {
+      fakeAsync((a) {
+        final t = ready(a);
+        t.flip(0);
+        t.editNow();
+        expect(edited.single.$2, '明天用拍森跑一下Hemory');
+        expect(edited.single.$3!.result, ai);
+        expect(edited.single.$3!.original, heard);
+        t.dispose();
+      });
+    });
+
+    test('flip before the words are out does nothing', () {
+      fakeAsync((a) {
+        final t = make();
+        t.begin(heard, VoicePick.send);
+        t.flip(0);
+        expect(t.stopped, isFalse);
+        api.calls.single.complete(const LlmDone(ai));
+        a.flushMicrotasks();
+        expect(t.writing, isTrue);
+        t.flip(0);
+        expect(t.flipped(0), isFalse);
+        expect(t.stopped, isFalse);
+        expect(t.offer, isNull);
+        t.dispose();
+      });
+    });
+
+    test('a flip on a long original offers preserve with a clipped excerpt', () {
+      fakeAsync((a) {
+        final pad = '天地玄黄' * 100;
+        final h = '$pad拍森跑一下$pad', r = '${pad}Python跑一下$pad';
+        final t = make(learn: true);
+        t.begin(h, VoicePick.send);
+        api.calls.single.complete(LlmDone(r));
+        out(a, t);
+        t.flip(0);
+        final item = t.offer!.items.single;
+        expect(item.observed, '拍森');
+        expect(item.excerpt.runes.length, lessThanOrEqualTo(2000));
+        expect(item.excerpt.runes.length, lessThan(h.runes.length));
+        expect(item.excerpt, contains('拍森'));
+        t.dispose();
+      });
+    });
+
+    test('flipping back to the heard words offers preserve; flipping again takes it away', () {
+      fakeAsync((a) {
+        final t = ready(a);
+        t.flip(1);
+        final o = t.offer!;
+        expect(o.items.single, LearnItem.preserve(observed: '黑猫瑞', avoid: 'Hemory', excerpt: heard));
+        expect(o.inBubble, isTrue);
+        expect(o.done, isFalse);
+        t.flip(1);
+        expect(t.offer, isNull);
+        expect(t.stopped, isTrue);
+        t.dispose();
+      });
+    });
+
+    test('flipping another change replaces the offer', () {
+      fakeAsync((a) {
+        final t = ready(a);
+        t.flip(0);
+        t.flip(1);
+        expect(t.offer!.items.single.observed, '黑猫瑞');
+        t.flip(1);
+        expect(t.offer, isNull);
+        t.dispose();
+      });
+    });
+
+    test('remember sends the picked items once and shows done', () {
+      fakeAsync((a) {
+        final t = ready(a);
+        t.flip(1);
+        t.remember();
+        expect(learned.single.single, LearnItem.preserve(observed: '黑猫瑞', avoid: 'Hemory', excerpt: heard));
+        expect(t.offer!.done, isTrue);
+        t.remember();
+        expect(learned, hasLength(1));
+        a.elapse(const Duration(milliseconds: 1400));
+        expect(t.offer, isNotNull);
+        a.elapse(const Duration(milliseconds: 200));
+        expect(t.offer, isNull);
+        t.dispose();
+      });
+    });
+
+    test('no learn callback, no offer', () {
+      fakeAsync((a) {
+        final t = ready(learn: false, a);
+        t.flip(1);
+        expect(t.flipped(1), isTrue);
+        expect(t.offer, isNull);
+        t.offerLearn([const LearnItem.replace(observed: 'a', output: 'b', excerpt: 'x')]);
+        expect(t.offer, isNull);
+        t.remember();
+        expect(learned, isEmpty);
+        t.dispose();
+      });
+    });
+
+    test('sending with an open bubble offer moves it to the 8 s box', () {
+      fakeAsync((a) {
+        final t = ready(a);
+        t.flip(1);
+        t.sendNow();
+        expect(t.offer!.inBubble, isFalse);
+        expect(t.offer!.items.single.observed, '黑猫瑞');
+        a.elapse(const Duration(seconds: 7));
+        expect(t.offer, isNotNull);
+        a.elapse(const Duration(seconds: 1));
+        expect(t.offer, isNull);
+        expect(learned, isEmpty);
+        t.dispose();
+      });
+    });
+
+    test('closing the bubble drops its open offer', () {
+      fakeAsync((a) {
+        final t = ready(a);
+        t.flip(1);
+        t.closed();
+        expect(t.offer, isNull);
+        expect(kept.single.$2, '明天用Python跑一下黑猫瑞');
+        t.dispose();
+      });
+    });
+
+    test('offerLearn: at most 3, all picked, gone after 8 s; a new begin keeps it', () {
+      fakeAsync((a) {
+        final t = make();
+        final items = [for (var i = 0; i < 5; i++) LearnItem.replace(observed: 'o$i', output: 'p$i', excerpt: heard)];
+        t.offerLearn(items);
+        expect(t.offer!.items, hasLength(3));
+        expect(t.offer!.picked, {0, 1, 2});
+        expect(t.offer!.inBubble, isFalse);
+        t.togglePick(1);
+        expect(t.offer!.picked, {0, 2});
+        t.begin(heard, VoicePick.send);
+        expect(t.offer, isNotNull);
+        a.elapse(const Duration(seconds: 7));
+        expect(t.offer, isNotNull);
+        a.elapse(const Duration(seconds: 1));
+        expect(t.offer, isNull);
+        t.dispose();
+      });
+    });
+
+    test('offerLearn remember sends only the picked ones; dismiss clears', () {
+      fakeAsync((a) {
+        final t = make();
+        t.offerLearn([for (var i = 0; i < 2; i++) LearnItem.replace(observed: 'o$i', output: 'p$i', excerpt: heard)]);
+        t.togglePick(0);
+        t.remember();
+        expect(learned.single.map((i) => i.observed), ['o1']);
+        a.elapse(const Duration(seconds: 2));
+        t.offerLearn([const LearnItem.replace(observed: 'a', output: 'b', excerpt: heard)]);
+        t.dismissOffer();
+        expect(t.offer, isNull);
+        t.dispose();
+      });
+    });
+
+    test('an edit pick computes no changes', () {
+      fakeAsync((a) {
+        final t = ready(a, pick: VoicePick.edit);
+        expect(t.changes, isEmpty);
+        t.flip(0);
+        expect(t.stopped, isFalse);
+        t.dispose();
+      });
+    });
+
+    test('the log carries events and milliseconds, never words', () {
+      fakeAsync((a) {
+        final t = ready(a);
+        t.flip(1);
+        t.remember();
+        t.sendNow();
+        for (final l in logs) {
+          expect(l, isNot(contains('黑猫瑞')));
+          expect(l, isNot(contains('Hemory')));
+        }
+        expect(logs.where((l) => l.contains('flip')), isNotEmpty);
+        t.dispose();
+      });
     });
   });
 }

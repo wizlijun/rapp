@@ -37,10 +37,12 @@ import 'net_marker.dart' show weakRttMs;
 import 'pin_files.dart';
 import 'prefs.dart';
 import '../embed/composer_editor.dart' show ZoomKey;
+import '../embed/tidy_diff.dart' show LearnItem, editLearns;
 import 'project_positions.dart';
 import '../llm_api.dart';
 import 'projects.dart';
 import 'resources_state.dart';
+import '../embed/tidy_mode.dart';
 import 'session_model.dart';
 import 'terms_entry.dart';
 import 'tokens.dart';
@@ -378,6 +380,28 @@ class MainState extends ChangeNotifier {
         api: llmApi,
         allowed: (s) => prefs.voiceAiTidy && llm.configured && !(remote[s]?.secureFocus ?? true),
         think: () => prefs.voiceAiThink,
+        mode: (s) {
+          for (final r in _records.values) {
+            if (r.sid == s || r.lastSid == s) {
+              return prefs.voiceTidyMode[tidyModeKey(r.app, r.id)] ?? defaultTidyMode(r.app, r.appName);
+            }
+          }
+          return TidyMode.prompt;
+        },
+        setMode: (s, m) {
+          for (final r in _records.values) {
+            if (r.sid == s || r.lastSid == s) {
+              prefs.voiceTidyMode[tidyModeKey(r.app, r.id)] = m;
+              _save();
+              notifyListeners();
+              return;
+            }
+          }
+        },
+        learn: (s, items) {
+          if (remote[s]?.secureFocus ?? true) return;
+          unawaited(_learnItems(items));
+        },
         send: (s, text, voice) {
           final rs = remote[s], p = portOf(s);
           if (rs == null || p == null) {
@@ -2034,6 +2058,11 @@ class MainState extends ChangeNotifier {
         },
         onComposeKey: () => tidyIfAny(s.sid)?.closed(),
         followNewTabs: !term);
+    rs.composer.onAiSent = (ai, text) {
+      if (rs.secureFocus) return;
+      final items = editLearns(ai.original, ai.result, text);
+      if (items.isNotEmpty) tidyOf(rs.sid).offerLearn(items);
+    };
     final prof = profiles.resolve(r.app);
     rs.setProfile(prof);
     // Wired before any swap's adoptFrom; a reconnect's old session hands its text over itself.
@@ -3262,6 +3291,14 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
+  /// 恢复默认: forgets every per-app 整理用途 the user chose.
+  void resetVoiceTidyModes() {
+    if (prefs.voiceTidyMode.isEmpty) return;
+    prefs.voiceTidyMode.clear();
+    _save();
+    notifyListeners();
+  }
+
   /// 「AI 整理时先思考」 on or off; saved. The next tidy reads it.
   void setVoiceAiThink(bool v) {
     prefs.voiceAiThink = v;
@@ -3342,6 +3379,29 @@ class MainState extends ChangeNotifier {
   List<String> voiceHotwords() {
     _refreshHotwords();
     return _hotwords;
+  }
+
+  Future<void> _learnItems(List<LearnItem> items) async {
+    final e = llm;
+    var any = false;
+    for (final item in items) {
+      if (await llmApi.learn(e, item)) {
+        any = true;
+      } else {
+        _log('rapp: voice learn failed');
+      }
+    }
+    if (any && !_disposed) _forgetHotwords();
+  }
+
+  /// What the gateway was taught; null when it cannot be asked.
+  Future<List<LearnedEntry>?> voiceLearned() => llmApi.learned(llm);
+
+  /// Takes one taught correction back; the hotwords are asked again after. True only when the gateway did.
+  Future<bool> forgetLearned(String id) async {
+    final ok = await llmApi.forget(llm, id);
+    if (ok && !_disposed) _forgetHotwords();
+    return ok;
   }
 
   void _forgetHotwords() {

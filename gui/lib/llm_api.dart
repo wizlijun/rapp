@@ -7,6 +7,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
+import 'embed/tidy_diff.dart' show LearnAction, LearnItem;
 import 'data_dir.dart' show writePrivate;
 
 const llmFile = 'llm.json';
@@ -222,6 +223,85 @@ class LlmApi {
     }
   }
 
+  /// `POST /v1/vocabulary/learn`: teaches the gateway one correction. True only on a 200; never throws.
+  Future<bool> learn(LlmEndpoint e, LearnItem item) async {
+    final base = e.base;
+    if (base == null || e.key.isEmpty) return false;
+    final client = HttpClient()..connectionTimeout = probeTimeout;
+    try {
+      final req = await client.postUrl(Uri.parse('$base/v1/vocabulary/learn')).timeout(probeTimeout);
+      req.headers
+        ..set(HttpHeaders.authorizationHeader, 'Bearer ${e.key}')
+        ..contentType = ContentType.json;
+      req.add(utf8.encode(jsonEncode(item.toJson())));
+      final res = await req.close().timeout(probeTimeout);
+      await res.drain<void>().timeout(probeTimeout);
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  /// `GET /v1/vocabulary/learned`: what was taught. Null: not set up, unreachable or not a 200. Never throws.
+  Future<List<LearnedEntry>?> learned(LlmEndpoint e) async {
+    final base = e.base;
+    if (base == null || e.key.isEmpty) return null;
+    final client = HttpClient()..connectionTimeout = probeTimeout;
+    try {
+      final req = await client.getUrl(Uri.parse('$base/v1/vocabulary/learned')).timeout(probeTimeout);
+      req.headers.set(HttpHeaders.authorizationHeader, 'Bearer ${e.key}');
+      final res = await req.close().timeout(probeTimeout);
+      final body = await res.transform(utf8.decoder).join().timeout(probeTimeout);
+      if (res.statusCode != 200) return null;
+      final j = jsonDecode(body);
+      final data = j is Map ? j['data'] : null;
+      if (data is! List) return null;
+      return [
+        for (final d in data)
+          if (d is Map && d['id'] is String && d['observed'] is String)
+            if (_learnAction(d['action']) case final a?)
+              LearnedEntry(
+                id: d['id'] as String,
+                action: a,
+                observed: d['observed'] as String,
+                output: d['output'] is String ? d['output'] as String : null,
+              ),
+      ];
+    } catch (_) {
+      return null;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  /// `DELETE /v1/vocabulary/learned/<id>`: true only on a 200; never throws.
+  Future<bool> forget(LlmEndpoint e, String id) async {
+    final base = e.base;
+    if (base == null || e.key.isEmpty) return false;
+    final client = HttpClient()..connectionTimeout = probeTimeout;
+    try {
+      final req = await client
+          .deleteUrl(Uri.parse('$base/v1/vocabulary/learned/${Uri.encodeComponent(id)}'))
+          .timeout(probeTimeout);
+      req.headers.set(HttpHeaders.authorizationHeader, 'Bearer ${e.key}');
+      final res = await req.close().timeout(probeTimeout);
+      await res.drain<void>().timeout(probeTimeout);
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  static LearnAction? _learnAction(Object? a) => switch (a) {
+        'replace' => LearnAction.replace,
+        'preserve' => LearnAction.preserve,
+        _ => null,
+      };
+
   /// `POST /v1/apps/<app>` streamed. [onText] gets the whole text so far after each chunk. Completes with
   /// [LlmDone] only when the gateway finished normally; a non-200, a dropped stream or no first byte within
   /// [firstByte] is [LlmFailed]. [think]: the app's think.* settings go up too (dictation: the model thinks first).
@@ -294,4 +374,16 @@ class LlmApi {
       return '';
     }
   }
+}
+
+/// One correction the gateway holds (`GET /v1/vocabulary/learned`).
+class LearnedEntry {
+  const LearnedEntry({required this.id, required this.action, required this.observed, this.output});
+
+  final String id;
+  final LearnAction action;
+  final String observed;
+  final String? output;
+
+  String get label => action == LearnAction.replace ? '$observed → $output' : '不改：$observed';
 }

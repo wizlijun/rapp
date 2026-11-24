@@ -110,6 +110,9 @@ class ComposerModel extends ChangeNotifier {
   /// still holds its text.
   void Function(Outgoing o)? onSubmitted;
 
+  /// A send that carried [pendingAi] (the AI's text, maybe edited): the AI record and the text sent.
+  void Function(VoiceAi ai, String text)? onAiSent;
+
   /// Called once per send round after `done` updated `o.sent`; [all]: everything went by now.
   void Function(Outgoing o, {required bool all})? onFinished;
 
@@ -651,6 +654,7 @@ class ComposerModel extends ChangeNotifier {
     final o = Outgoing(parts, voice: ai == null ? null : VoiceOrigin(ai: ai))..at = now;
     pendingAi = null;
     onSubmitted?.call(o);
+    if (ai != null) onAiSent?.call(ai, o.text);
     draft = '';
     // The row holds them now; the ones deleted from the text leave the runner.
     final liveBack = live == null ? null : _withoutMarksOf(live, o.blocks);
