@@ -74,11 +74,14 @@ Hold the voice button or Right Alt to dictate. First use downloads a verified
 142 MB Whisper base model to ~/.cache/rapp/speech (or XDG_CACHE_HOME).
 Recordings can last up to five minutes. After release, capture stops immediately;
 local recognition can take up to five minutes to finish on slower CPUs.
-Recognition runs locally in the system language; audio stays in memory and is
-never saved or uploaded. Requires a PulseAudio-compatible server and libpulse.
+Recognition runs locally; Chinese is preferred when present in the system
+language list (including LANGUAGE), otherwise the first language is used.
+Audio stays in memory and is never saved or uploaded. Requires a PulseAudio-compatible server and libpulse.
 Esc cancels; Tab edits before sending. Change the shortcut in the sidebar.
 AI correction learning and prompt/chat modes use the shared LLM endpoint.
-Gateway hotwords now provide spelling context to local recognition on each recording.
+Gateway hotwords provide spelling context to local recognition on each recording.
+Cached correction rules fix recognized words locally before sending or editing.
+The input dock and quick-area toggle share the macOS layout and preferences.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and

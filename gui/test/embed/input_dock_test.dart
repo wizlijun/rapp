@@ -175,7 +175,7 @@ void main() {
     expect(closedStackHeight(buttons: 3, upright: true), stageButtonSize);
   });
 
-  for (final p in [TargetPlatform.iOS, TargetPlatform.macOS]) {
+  for (final p in [TargetPlatform.iOS, TargetPlatform.macOS, TargetPlatform.linux]) {
     dockTest(p, 'terminal: quick area at panelWidth, bottom at the default anchor, no handle', (tester) async {
       await tester.pumpWidget(layer(tsess));
       await tester.pump();
@@ -538,24 +538,26 @@ void main() {
     expect(bar, findsOneWidget);
   });
 
-  dockTest(TargetPlatform.macOS, 'text folded — the toggle stands left of 输入 in the corner row, 8 apart',
-      (tester) async {
-    await tester.pumpWidget(layer(app));
-    await settle(tester);
-    expect(boxToggle, findsNothing);
-    final q = tester.getRect(stackToggle), o = tester.getRect(toggle);
-    expect(o.left - q.right, 8);
-    expect(q.size, o.size);
-    expect(q.center.dy, o.center.dy);
-    expect(lit(tester, stackToggle), isFalse, reason: 'an app hides its 快捷区 by default');
-    await tester.tap(stackToggle);
-    await settle(tester);
-    expect(s.prefs.quickHiddenApp, isFalse);
-    expect(bar, findsOneWidget);
-    expect(lit(tester, stackToggle), isTrue);
-  });
+  for (final p in [TargetPlatform.macOS, TargetPlatform.linux]) {
+    dockTest(p, 'text folded — the toggle stands left of 输入 in the corner row, 8 apart',
+        (tester) async {
+      await tester.pumpWidget(layer(app));
+      await settle(tester);
+      expect(boxToggle, findsNothing);
+      final q = tester.getRect(stackToggle), o = tester.getRect(toggle);
+      expect(o.left - q.right, 8);
+      expect(q.size, o.size);
+      expect(q.center.dy, o.center.dy);
+      expect(lit(tester, stackToggle), isFalse, reason: 'an app hides its 快捷区 by default');
+      await tester.tap(stackToggle);
+      await settle(tester);
+      expect(s.prefs.quickHiddenApp, isFalse);
+      expect(bar, findsOneWidget);
+      expect(lit(tester, stackToggle), isTrue);
+    });
+  }
 
-  for (final p in [TargetPlatform.iOS, TargetPlatform.macOS]) {
+  for (final p in [TargetPlatform.iOS, TargetPlatform.macOS, TargetPlatform.linux]) {
     dockTest(p, 'text open — no stack toggle, the box one only', (tester) async {
       await openOn(tester, tsess);
       expect(stackToggle, findsNothing);

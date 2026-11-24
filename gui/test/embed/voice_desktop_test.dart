@@ -13,7 +13,7 @@ import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/voice_desktop.dart';
 import 'package:rapp/embed/voice_fix.dart';
-import 'package:rapp/embed/voice_button.dart' show voiceLanguageHint, voiceSettingsRunner;
+import 'package:rapp/embed/voice_button.dart' show voiceLanguageHint, linuxVoiceLanguageHint, voiceSettingsRunner;
 import 'package:rapp/embed/voice_input.dart' show VoiceStart;
 import 'package:rapp/embed/voice_key_gate.dart';
 import 'package:rapp/embed/voice_ring.dart';
@@ -113,15 +113,19 @@ void main() {
           child: Stack(children: composerLayer(state: es, session: rs, port: port, editor: FlutterEditor.new))),
       disableAnimations: reduced);
 
-  // macOS for the test; the override must be unset before the binding checks its invariants.
-  void macTest(String name, Future<void> Function(WidgetTester) body) => testWidgets(name, (tester) async {
-        debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+  // Exercise the same desktop behavior with both native speech transports.
+  void desktopTest(String name, Future<void> Function(WidgetTester) body, {bool macOnly = false}) {
+    for (final platform in [TargetPlatform.macOS, if (!macOnly) TargetPlatform.linux]) {
+      testWidgets('${platform.name}: $name', (tester) async {
+        debugDefaultTargetPlatformOverride = platform;
         try {
           await body(tester);
         } finally {
           debugDefaultTargetPlatformOverride = null;
         }
       });
+    }
+  }
 
   Future<void> view(WidgetTester tester) async {
     tester.view.physicalSize = const Size(1200, 900);
@@ -147,7 +151,7 @@ void main() {
     expect(desktopPick(const Offset(73, 50), cancel, edit), VoicePick.edit);
   });
 
-  macTest('the row has 按住说话 rightmost on macOS and Linux', (tester) async {
+  desktopTest('the row has 按住说话 rightmost on macOS and Linux', (tester) async {
     await view(tester);
     await tester.pumpWidget(layer());
     expect(hold, findsOneWidget);
@@ -158,7 +162,7 @@ void main() {
   });
 
   // User 2026-11-18: 「其他端同样的按钮透明度都修改 一致。修改为30%透明吧」.
-  macTest('the row\'s 还原, 输入 and 按住说话 are 30 % see-through at rest, solid under the mouse or a press', (tester) async {
+  desktopTest('the row\'s 还原, 输入 and 按住说话 are 30 % see-through at rest, solid under the mouse or a press', (tester) async {
     await view(tester);
     rs.apply(WindowsEvent(1, [
       RemoteWindow(
@@ -199,7 +203,7 @@ void main() {
     expect(look(reset), 0.7);
   });
 
-  macTest('press shows 正在听… then send', (tester) async {
+  desktopTest('press shows 正在听… then send', (tester) async {
     await view(tester);
     await goLive(tester);
     await tester.pumpWidget(layer());
@@ -231,7 +235,7 @@ void main() {
         expect(es.voiceRules.isEmpty, isFalse);
       });
 
-  macTest('the bubble shows the fixed words while holding, and the release sends them', (tester) async {
+  desktopTest('the bubble shows the fixed words while holding, and the release sends them', (tester) async {
     await view(tester);
     await goLive(tester);
     await withRules(tester);
@@ -252,7 +256,7 @@ void main() {
     ]);
   });
 
-  macTest('a desktop 编辑 keeps the fixed words with what was heard', (tester) async {
+  desktopTest('a desktop 编辑 keeps the fixed words with what was heard', (tester) async {
     await view(tester);
     await goLive(tester);
     await withRules(tester);
@@ -270,7 +274,7 @@ void main() {
     expect(rs.composer.pendingHeard?.fixed, '打开Python');
   });
 
-  macTest('a desktop 编辑 into a password field keeps the words, not what was heard (D7)', (tester) async {
+  desktopTest('a desktop 编辑 into a password field keeps the words, not what was heard (D7)', (tester) async {
     await view(tester);
     await goLive(tester);
     await withRules(tester);
@@ -289,7 +293,7 @@ void main() {
     expect(rs.composer.pendingHeard, isNull);
   });
 
-  macTest('drag onto 取消 then release sends nothing', (tester) async {
+  desktopTest('drag onto 取消 then release sends nothing', (tester) async {
     await view(tester);
     await goLive(tester);
     await tester.pumpWidget(layer());
@@ -305,7 +309,7 @@ void main() {
     expect(voice.cancelled, isTrue);
   });
 
-  macTest('drag onto 编辑 opens the panel with the words', (tester) async {
+  desktopTest('drag onto 编辑 opens the panel with the words', (tester) async {
     await view(tester);
     await goLive(tester);
     await tester.pumpWidget(layer());
@@ -321,7 +325,7 @@ void main() {
     expect(rs.composer.draft, endsWith('你好'));
   });
 
-  macTest('Esc during a mouse hold cancels', (tester) async {
+  desktopTest('Esc during a mouse hold cancels', (tester) async {
     await view(tester);
     await goLive(tester);
     await tester.pumpWidget(layer());
@@ -336,7 +340,7 @@ void main() {
     await tester.pump();
   });
 
-  macTest('hotkey start and release send', (tester) async {
+  desktopTest('hotkey start and release send', (tester) async {
     await view(tester);
     await goLive(tester);
     await tester.pumpWidget(layer());
@@ -354,7 +358,7 @@ void main() {
   });
 
   // Final review: with the text area open the hotkey holds as the mouse (and iOS) does.
-  macTest('a hotkey hold with the panel open sends, as a mouse hold does; the panel stays', (tester) async {
+  desktopTest('a hotkey hold with the panel open sends, as a mouse hold does; the panel stays', (tester) async {
     await view(tester);
     await goLive(tester);
     rs.composer.open = true;
@@ -380,7 +384,7 @@ void main() {
     expect(await rs.composer.readDraft(), '草稿');
   });
 
-  macTest('a hotkey 编辑 with the panel open puts the words in the editor', (tester) async {
+  desktopTest('a hotkey 编辑 with the panel open puts the words in the editor', (tester) async {
     await view(tester);
     await goLive(tester);
     rs.composer.open = true;
@@ -403,7 +407,7 @@ void main() {
     expect(draft, endsWith('你好'));
   });
 
-  macTest('disposing during a hotkey hold sends voice_end', (tester) async {
+  desktopTest('disposing during a hotkey hold sends voice_end', (tester) async {
     await view(tester);
     await goLive(tester);
     await tester.pumpWidget(layer());
@@ -416,7 +420,7 @@ void main() {
     expect(voice.cancelled, isTrue);
   });
 
-  macTest('bubble width', (tester) async {
+  desktopTest('bubble width', (tester) async {
     await view(tester);
     await goLive(tester);
     await tester.pumpWidget(layer(width: 400));
@@ -433,7 +437,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
   });
 
-  macTest('other buttons fade while holding', (tester) async {
+  desktopTest('other buttons fade while holding', (tester) async {
     await view(tester);
     await goLive(tester);
     await tester.pumpWidget(layer());
@@ -452,7 +456,7 @@ void main() {
 
   List<Object?> focuses() => [for (final c in port.calls) if (c.$1 == 'picture_focus') c.$2['sid']];
 
-  macTest('a refused start (denied) leaves the picture focused again', (tester) async {
+  desktopTest('a refused start (denied) leaves the picture focused again', (tester) async {
     await view(tester);
     await goLive(tester);
     voice.startResult = VoiceStart.denied;
@@ -466,7 +470,7 @@ void main() {
     await tester.pump(const Duration(seconds: 6));
   });
 
-  macTest('a quick click (up before the start resolves) refocuses the picture', (tester) async {
+  desktopTest('a quick click (up before the start resolves) refocuses the picture', (tester) async {
     await view(tester);
     await goLive(tester);
     voice.startGate = Completer<VoiceStart>();
@@ -482,7 +486,7 @@ void main() {
     expect(focuses().last, 1);
   });
 
-  macTest('a blank 编辑 refocuses the picture; a real one leaves it to the panel', (tester) async {
+  desktopTest('a blank 编辑 refocuses the picture; a real one leaves it to the panel', (tester) async {
     await view(tester);
     await goLive(tester);
     await tester.pumpWidget(layer());
@@ -498,7 +502,7 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
   });
 
-  macTest('a mouse press is refused while the recogniser is busy, and blurs nothing', (tester) async {
+  desktopTest('a mouse press is refused while the recogniser is busy, and blurs nothing', (tester) async {
     await view(tester);
     await goLive(tester);
     es.focusPicture(1);
@@ -517,7 +521,7 @@ void main() {
     expect(await tester.sendKeyEvent(LogicalKeyboardKey.escape), isFalse);
   });
 
-  macTest('去设置 in the hint can be clicked', (tester) async {
+  desktopTest('去设置 in the hint can be clicked', (tester) async {
     await view(tester);
     await goLive(tester);
     final ran = <String>[];
@@ -539,9 +543,9 @@ void main() {
     expect(ran, hasLength(1));
     expect(ran.single, contains('Privacy_Microphone'));
     await tester.pump(const Duration(seconds: 6));
-  });
+  }, macOnly: true);
 
-  macTest('a first use via 编辑 keeps the language hint for the next send', (tester) async {
+  desktopTest('a first use via 编辑 keeps the language hint for the next send', (tester) async {
     await view(tester);
     await goLive(tester);
     await tester.pumpWidget(layer());
@@ -561,12 +565,12 @@ void main() {
     await g.up();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text(voiceLanguageHint), findsOneWidget);
+    expect(find.text(defaultTargetPlatform == TargetPlatform.linux ? linuxVoiceLanguageHint : voiceLanguageHint), findsOneWidget);
     expect(es.prefs.voiceLanguageHintShown, isTrue);
     await tester.pump(const Duration(seconds: 7));
   });
 
-  macTest('on a narrow stage the language hint wraps and 去设置 stays clickable', (tester) async {
+  desktopTest('on a narrow stage the language hint fits with the platform settings action', (tester) async {
     await view(tester);
     await goLive(tester);
     final ran = <String>[];
@@ -582,21 +586,26 @@ void main() {
     await g.up();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text(voiceLanguageHint), findsOneWidget);
+    expect(find.text(defaultTargetPlatform == TargetPlatform.linux ? linuxVoiceLanguageHint : voiceLanguageHint), findsOneWidget);
     final stage = tester.getRect(find.byKey(const Key('stage')));
     final hint = tester.getRect(find.byKey(const Key('voice-hint')));
     expect(hint.left, greaterThanOrEqualTo(stage.left));
     expect(hint.right, lessThanOrEqualTo(stage.right));
-    final settings = tester.getRect(find.byKey(const Key('voice-settings')));
-    expect(settings.right, lessThanOrEqualTo(hint.right));
-    await tester.tap(find.byKey(const Key('voice-settings')));
-    await tester.pump();
-    expect(ran, hasLength(1));
-    expect(ran.single, contains('Localization'));
+    if (defaultTargetPlatform == TargetPlatform.linux) {
+      expect(find.byKey(const Key('voice-settings')), findsNothing);
+      expect(ran, isEmpty);
+    } else {
+      final settings = tester.getRect(find.byKey(const Key('voice-settings')));
+      expect(settings.right, lessThanOrEqualTo(hint.right));
+      await tester.tap(find.byKey(const Key('voice-settings')));
+      await tester.pump();
+      expect(ran, hasLength(1));
+      expect(ran.single, contains('Localization'));
+    }
     await tester.pump(const Duration(seconds: 7));
   });
 
-  macTest('the targets carry icons and the button a tooltip', (tester) async {
+  desktopTest('the targets carry icons and the button a tooltip', (tester) async {
     await view(tester);
     await goLive(tester);
     await tester.pumpWidget(layer());
@@ -607,7 +616,7 @@ void main() {
     expect(find.descendant(of: find.byKey(const Key('voice-cancel')), matching: find.byIcon(Icons.close)), findsOneWidget);
   });
 
-  macTest('编辑 draws a cursor after the words', (tester) async {
+  desktopTest('编辑 draws a cursor after the words', (tester) async {
     await view(tester);
     await goLive(tester);
     await tester.pumpWidget(layer());
@@ -622,7 +631,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
   });
 
-  macTest('the bubble fades out after a release, rising on send; reduced motion is instant', (tester) async {
+  desktopTest('the bubble fades out after a release, rising on send; reduced motion is instant', (tester) async {
     await view(tester);
     await goLive(tester);
     await tester.pumpWidget(layer());
@@ -648,7 +657,7 @@ void main() {
     expect(bubble, findsNothing);
   });
 
-  macTest('a long send stays up where it was and becomes the tidy, which replaces the words, waits, then sends', (tester) async {
+  desktopTest('a long send stays up where it was and becomes the tidy, which replaces the words, waits, then sends', (tester) async {
     const said = '嗯那个我门明天下午三点开会';
     await view(tester);
     await goLive(tester);
@@ -697,7 +706,7 @@ void main() {
     expect(tidy, findsNothing);
   });
 
-  macTest('编辑 while the tidy waits to send opens the panel with the AI text', (tester) async {
+  desktopTest('编辑 while the tidy waits to send opens the panel with the AI text', (tester) async {
     const said = '嗯那个我门明天下午三点开会';
     await view(tester);
     await goLive(tester);
@@ -724,7 +733,7 @@ void main() {
   // input-dock final review: the voice column (bubble, 编辑 / 取消, hint line) is drawn over the input block, which by
   // default shares room with it on a 1000–1600 wide stage; the quick area neither comes nor goes in a hold (§5.6).
   for (final width in [1000.0, 1200.0, 1600.0]) {
-    macTest('during a hold the voice column is on top of a terminal\'s input block at ${width.toInt()} wide', (tester) async {
+    desktopTest('during a hold the voice column is on top of a terminal\'s input block at ${width.toInt()} wide', (tester) async {
       tester.view.physicalSize = const Size(1700, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);

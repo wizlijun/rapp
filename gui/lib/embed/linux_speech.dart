@@ -15,6 +15,23 @@ const linuxSpeechModelBytes = 147951465;
 const linuxSpeechModelSha256 =
     '60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe';
 
+/// Match the Apple clients: Chinese anywhere in the preferred list wins.
+/// GTK may expose only one locale, so also read GNU's colon-separated LANGUAGE
+/// list. Whisper accepts the language code, without region, encoding or modifier.
+String linuxSpeechLanguage(List<Locale> locales, {String? languageList}) {
+  final preferred = [
+    for (final id in (languageList ?? '').split(':'))
+      if (id.trim().isNotEmpty)
+        id.trim().split(RegExp(r'[-_.@]')).first.toLowerCase(),
+  ];
+  final codes = preferred.isNotEmpty
+      ? preferred
+      : locales.map((locale) => locale.languageCode.toLowerCase()).toList();
+  if (codes.contains('zh')) return 'zh';
+  final first = codes.isEmpty ? 'en' : codes.first;
+  return first == 'c' || first == 'posix' ? 'en' : first;
+}
+
 /// A verified model in the user's cache, separate from the git-backed rApp data directory.
 class LinuxSpeechModel {
   LinuxSpeechModel({
@@ -150,7 +167,11 @@ class LinuxSpeechChannel extends MethodChannel
            '${binDir(Platform.environment, Platform.resolvedExecutable)}/rapp-speech',
        model = model ?? LinuxSpeechModel(),
        language =
-           language ?? (() => PlatformDispatcher.instance.locale.languageCode),
+           language ??
+           (() => linuxSpeechLanguage(
+             PlatformDispatcher.instance.locales,
+             languageList: Platform.environment['LANGUAGE'],
+           )),
        isFocused = isFocused ?? windowManager.isFocused,
        _spawn = spawn ?? ((exe, args) => Process.start(exe, args)),
        super('rapp/linux-speech');
@@ -168,6 +189,8 @@ class LinuxSpeechChannel extends MethodChannel
   int _epoch = 0;
   bool _disposed = false, _final = false;
   bool _observing = false;
+  Stopwatch? _clock;
+  int? _firstPartialMs, _stoppedMs;
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -217,9 +240,19 @@ class LinuxSpeechChannel extends MethodChannel
         case 'partial':
         case 'final':
           if (data['text'] is! String) throw const FormatException();
+          if (_final) return;
           if (data['event'] == 'final') {
             _final = true;
             _finishTimer?.cancel();
+            _event(epoch, 'timing', {
+              'first_partial_ms': _firstPartialMs,
+              'final_ms': _stoppedMs == null
+                  ? null
+                  : _clock!.elapsedMilliseconds - _stoppedMs!,
+            });
+            _clock?.stop();
+          } else if ((data['text'] as String).isNotEmpty) {
+            _firstPartialMs ??= _clock?.elapsedMilliseconds;
           }
           _event(epoch, data['event'] as String, {
             'text': data['text'] as String,
@@ -240,6 +273,9 @@ class LinuxSpeechChannel extends MethodChannel
 
   Future<String> _start(dynamic arguments) async {
     if (_disposed || _process != null || _ready != null) return 'unavailable';
+    // Include model checks and process startup, just as native start does on macOS.
+    _clock = Stopwatch()..start();
+    _firstPartialMs = _stoppedMs = null;
     if (!_observing) {
       WidgetsBinding.instance.addObserver(this);
       windowManager.addListener(this);
@@ -294,7 +330,10 @@ class LinuxSpeechChannel extends MethodChannel
             'hotwords': (arguments['hotwords'] as List)
                 .whereType<String>()
                 .map((w) => w.trim())
-                .where((w) => w.isNotEmpty && !w.contains(RegExp(r'[\x00-\x1f\x7f]')))
+                .where(
+                  (w) =>
+                      w.isNotEmpty && !w.contains(RegExp(r'[\x00-\x1f\x7f]')),
+                )
                 .take(100)
                 .map((w) => String.fromCharCodes(w.runes.take(64)))
                 .toList(),
@@ -322,6 +361,7 @@ class LinuxSpeechChannel extends MethodChannel
 
   Future<void> _cancel() async {
     ++_epoch;
+    _clock?.stop();
     _finishTimer?.cancel();
     final ready = _ready;
     _ready = null;
@@ -345,6 +385,8 @@ class LinuxSpeechChannel extends MethodChannel
       case 'start':
         return await _start(arguments) as T;
       case 'stop':
+        if (_process == null || _final || _stoppedMs != null) return null;
+        _stoppedMs = _clock?.elapsedMilliseconds;
         final epoch = _epoch;
         _process?.stdin.writeln('{"cmd":"stop"}');
         _finishTimer?.cancel();

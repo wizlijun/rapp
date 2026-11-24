@@ -27,6 +27,55 @@ void main() {
   setUp(() => tmp = Directory.systemTemp.createTempSync('rapp-speech-test-'));
   tearDown(() => tmp.deleteSync(recursive: true));
 
+  test(
+    'Linux speech prefers Chinese and passes only Whisper language codes',
+    () {
+      expect(
+        linuxSpeechLanguage(const [
+          Locale('en', 'GB'),
+          Locale.fromSubtags(
+            languageCode: 'zh',
+            scriptCode: 'Hans',
+            countryCode: 'JP',
+          ),
+        ]),
+        'zh',
+      );
+      expect(
+        linuxSpeechLanguage(const [Locale('fr', 'FR'), Locale('en')]),
+        'fr',
+      );
+      expect(linuxSpeechLanguage(const []), 'en');
+      expect(
+        linuxSpeechLanguage(const [
+          Locale('en'),
+        ], languageList: 'en_GB.UTF-8:zh_TW.UTF-8'),
+        'zh',
+      );
+      expect(
+        linuxSpeechLanguage(const [Locale('en')], languageList: 'en:zh-Hant'),
+        'zh',
+      );
+      expect(
+        linuxSpeechLanguage(const [
+          Locale('en'),
+        ], languageList: ' de_DE.UTF-8@euro :en'),
+        'de',
+      );
+      expect(
+        linuxSpeechLanguage(const [Locale('zh')], languageList: 'en_GB:fr'),
+        'en',
+      );
+      expect(
+        linuxSpeechLanguage(const [Locale('zh')], languageList: ' : '),
+        'zh',
+      );
+      for (final id in ['C', 'C.UTF-8', 'POSIX']) {
+        expect(linuxSpeechLanguage(const [], languageList: id), 'en');
+      }
+    },
+  );
+
   for (final invalid in [false, true]) {
     test(
       'model download verifies size and SHA256 (invalid=$invalid)',
@@ -129,6 +178,78 @@ print(json.dumps({'event':'final','text':json.dumps(start.get('hotwords',[]))}),
       voice.dispose();
     }
   });
+
+  test(
+    'timing precedes final, resets each run and ignores empty partials',
+    () async {
+      final c = await channel('''
+print(json.dumps({'event':'ready'}),flush=True)
+print(json.dumps({'event':'partial','text':''}),flush=True)
+if start.get('hotwords'):
+    time.sleep(.03)
+    print(json.dumps({'event':'partial','text':'hello'}),flush=True)
+json.loads(sys.stdin.readline())
+time.sleep(.03)
+print(json.dumps({'event':'final','text':'hello world'}),flush=True)
+''');
+      final voice = VoiceInput(
+        channel: c,
+        finalWait: const Duration(seconds: 3),
+      );
+      try {
+        for (final partial in [true, false]) {
+          voice.hotwords = () => partial ? ['hello'] : [];
+          expect(await voice.start(), VoiceStart.ok);
+          expect(voice.lastTiming, isNull);
+          // The command is read only after the fixture has emitted its partial.
+          expect(await voice.stop(), 'hello world');
+          final timing = voice.lastTiming!;
+          expect(
+            timing.firstPartialMs,
+            partial ? greaterThanOrEqualTo(30) : isNull,
+          );
+          expect(timing.finalMs, greaterThanOrEqualTo(30));
+          await c.invokeMethod<void>('cancel');
+        }
+      } finally {
+        voice.dispose();
+      }
+    },
+  );
+
+  test(
+    'an automatic final has no stop timing and a late stop is harmless',
+    () async {
+      final c = await channel('''
+print(json.dumps({'event':'ready'}),flush=True)
+print(json.dumps({'event':'final','text':'automatic'}),flush=True)
+''');
+      final calls = <MethodCall>[];
+      final done = Completer<void>();
+      c.setMethodCallHandler((call) async {
+        calls.add(call);
+        if (call.method == 'final') done.complete();
+      });
+      try {
+        expect(await c.invokeMethod<String>('start'), 'ok');
+        await done.future.timeout(const Duration(seconds: 3));
+        expect(calls.map((c) => c.method), ['timing', 'final']);
+        expect(calls.first.arguments, {
+          'first_partial_ms': null,
+          'final_ms': null,
+        });
+        fakeAsync((clock) {
+          c.invokeMethod<void>('stop');
+          clock.flushMicrotasks();
+          clock.elapse(LinuxSpeechChannel.finalResultWait);
+          expect(calls.map((c) => c.method), ['timing', 'final']);
+        });
+      } finally {
+        await c.invokeMethod<void>('cancel');
+        c.setMethodCallHandler(null);
+      }
+    },
+  );
 
   test('Linux bounds hotwords and drops malformed or control entries', () async {
     final c = await channel('''
