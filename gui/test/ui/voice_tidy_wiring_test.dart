@@ -7,6 +7,7 @@ import 'dart:ui' show Rect;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/tidy_diff.dart';
+import 'package:rapp/embed/voice_fix.dart';
 import 'package:rapp/embed/voice_input.dart';
 import 'package:rapp/embed/voice_ring.dart' show VoicePick;
 import 'package:rapp/embed/voice_tidy.dart';
@@ -25,6 +26,13 @@ class _FakeApi extends LlmApi {
   List<String> words = const ['Dify', 'Lovable'];
   final learns = <LearnItem>[];
   bool learnOk = true;
+  List<FixRule>? rulesGiven; // null: the rules ask fails
+
+  @override
+  Future<RulesReply?> rules(LlmEndpoint e, {String? etag}) async {
+    final r = rulesGiven;
+    return r == null ? null : RulesReply(unchanged: false, etag: 'e1', rules: r);
+  }
 
   @override
   Future<bool> learn(LlmEndpoint e, LearnItem item) async {
@@ -424,6 +432,19 @@ void main() {
     st.dispose();
   });
 
+  test('the undo under the AI text is the fixed words, as 还原 (spec D6)', () async {
+    final (st, _) = await start();
+    final rs = st.currentRemote!;
+    st.tidyOf(sid).begin('打开Python跑一下这个测试脚本吧', VoicePick.edit, heard: '打开拍森跑一下这个测试脚本吧');
+    api.calls.single.complete(const LlmDone('打开Python跑一下这个测试脚本。'));
+    await pump();
+    final e = FakeEditor();
+    await rs.composer.attach(e);
+    expect(e.undoTo, '打开Python跑一下这个测试脚本吧');
+    expect(rs.composer.pendingAi!.original, '打开拍森跑一下这个测试脚本吧');
+    st.dispose();
+  });
+
   // The edit pick, then the user fixes a word in the panel and sends.
   Future<(MainState, FakeSessionPort)> edited({bool secure = false}) async {
     final (st, port) = await start();
@@ -464,6 +485,101 @@ void main() {
     expect(st.tidyOf(sid).offer, isNull);
     expect(api.learns, isEmpty);
     st.dispose();
+  });
+
+  group('learning without the AI (spec D8, D9)', () {
+    // A voice hold's 编辑 without the AI: the fixed words in the panel, what was heard with them; the user makes
+    // the panel say [sent] and sends.
+    Future<(MainState, FakeSessionPort)> editVoice(String heard, String sent,
+        {List<FixRule>? rules, bool secure = false}) async {
+      api.rulesGiven = rules;
+      final (st, port) = await start();
+      st.prefs.voiceAiTidy = false;
+      if (rules != null) await until(() => !st.voiceRules.isEmpty);
+      final rs = st.currentRemote!;
+      final fixed = st.voiceFix(sid, heard).text;
+      await rs.composer.keep(fixed);
+      rs.composer.pendingHeard = VoiceHeard(heard: heard, fixed: fixed);
+      final e = FakeEditor();
+      await rs.composer.attach(e);
+      expect(e.value, fixed);
+      e.value = sent;
+      if (secure) port.emit(SecureFocusEvent(sid, true));
+      await rs.composer.submit();
+      return (st, port);
+    }
+
+    test('editing without AI offers to remember', () async {
+      final (st, _) = await editVoice('徐逊说打开黑猫瑞', '徐迅说打开Hemory', rules: const [FixRule.replace('徐逊', '徐迅', FixSource.vocabulary)]);
+      expect(st.tidyOf(sid).offer!.items, [const LearnItem.replace(observed: '黑猫瑞', output: 'Hemory', excerpt: '徐逊说打开黑猫瑞')]);
+      st.dispose();
+    });
+
+    test('reverting a learned fix offers preserve', () async {
+      final (st, _) = await editVoice('我们现在打开拍森看看', '我们现在打开拍森看看', rules: const [FixRule.replace('拍森', 'Python', FixSource.learned)]);
+      expect(st.tidyOf(sid).offer!.items, [const LearnItem.preserve(observed: '拍森', avoid: 'Python', excerpt: '我们现在打开拍森看看')]);
+      st.dispose();
+    });
+
+    test('reverting a vocabulary fix offers nothing', () async {
+      final (st, _) = await editVoice('徐逊来了', '徐逊来了', rules: const [FixRule.replace('徐逊', '徐迅', FixSource.vocabulary)]);
+      expect(st.tidyOf(sid).offer, isNull);
+      expect(api.learns, isEmpty);
+      st.dispose();
+    });
+
+    test('reverting a vocabulary fix wider than the diff offers nothing', () async {
+      final (st, _) = await editVoice('运行一下拍森脚本看看结果', '运行一下拍森脚本看看结果',
+          rules: const [FixRule.replace('拍森脚本', 'Python脚本', FixSource.vocabulary)]);
+      expect(st.tidyOf(sid).offer, isNull);
+      expect(api.learns, isEmpty);
+      st.dispose();
+    });
+
+    test('no learn offer under secure focus', () async {
+      final (st, _) = await editVoice('我们现在打开黑猫瑞看看', '我们现在打开Hemory看看', secure: true);
+      expect(st.tidyOf(sid).offer, isNull);
+      expect(api.learns, isEmpty);
+      st.dispose();
+    });
+
+    test('a tidy that fails on 编辑 puts the fixed words in the panel with what was heard', () async {
+      api.rulesGiven = const [FixRule.replace('黑猫瑞', 'Hemory', FixSource.learned)];
+      final (st, _) = await start();
+      await until(() => !st.voiceRules.isEmpty);
+      final rs = st.currentRemote!;
+      st.tidyOf(sid).begin('我们现在打开Hemory看看', VoicePick.edit, heard: '我们现在打开黑猫瑞看看');
+      api.calls.single.complete(const LlmFailed('连不上 LLM 接入点'));
+      await pump();
+      expect(rs.composer.pendingAi, isNull);
+      expect(rs.composer.pendingHeard?.heard, '我们现在打开黑猫瑞看看');
+      expect(rs.composer.pendingHeard?.fixed, '我们现在打开Hemory看看');
+      final e = FakeEditor();
+      await rs.composer.attach(e);
+      e.value = '我们现在打开黑猫瑞看看';
+      await rs.composer.submit();
+      expect(st.tidyOf(sid).offer!.items,
+          [const LearnItem.preserve(observed: '黑猫瑞', avoid: 'Hemory', excerpt: '我们现在打开黑猫瑞看看')]);
+      st.dispose();
+    });
+
+    test('an AI edit that reverts a vocabulary fix offers nothing either', () async {
+      api.rulesGiven = const [FixRule.replace('徐逊', '徐迅', FixSource.vocabulary)];
+      final (st, _) = await start();
+      await until(() => !st.voiceRules.isEmpty);
+      final rs = st.currentRemote!;
+      st.tidyOf(sid).begin('嗯那个徐迅明天用黑猫瑞开会', VoicePick.edit, heard: '嗯那个徐逊明天用黑猫瑞开会');
+      api.calls.single.complete(const LlmDone('徐迅明天用黑猫瑞开会。'));
+      await pump();
+      final e = FakeEditor();
+      await rs.composer.attach(e);
+      e.value = '徐逊明天用Hemory开会。';
+      await rs.composer.submit();
+      final items = st.tidyOf(sid).offer!.items;
+      expect(items.where((i) => i.action == LearnAction.preserve), isEmpty);
+      expect(items, contains(const LearnItem.replace(observed: '黑猫瑞', output: 'Hemory', excerpt: '嗯那个徐逊明天用黑猫瑞开会')));
+      st.dispose();
+    });
   });
 
   test('a tidy in the session on show leaves the hint to the card', () async {

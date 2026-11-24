@@ -37,7 +37,8 @@ import 'net_marker.dart' show weakRttMs;
 import 'pin_files.dart';
 import 'prefs.dart';
 import '../embed/composer_editor.dart' show ZoomKey;
-import '../embed/tidy_diff.dart' show LearnItem, editLearns;
+import '../embed/tidy_diff.dart' show LearnAction, LearnItem, editLearns;
+import '../embed/voice_fix.dart';
 import 'project_positions.dart';
 import '../llm_api.dart';
 import 'projects.dart';
@@ -164,6 +165,7 @@ class MainState extends ChangeNotifier {
     recorder.onSent = history.remember;
     this.voice?.hotwords = voiceHotwords;
     _refreshHotwords();
+    _loadRules();
     resources.addListener(notifyListeners);
     _portSub = port?.events.listen(_onPortEvent);
     _termSub = termPort?.events.listen(_onPortEvent);
@@ -223,6 +225,7 @@ class MainState extends ChangeNotifier {
     final oldRoot = data.root;
     data = d;
     llm = LlmEndpoint.load(d.localDir);
+    _loadRules();
     _forgetHotwords();
     final loaded = loadWorkspace(d.sharedDir);
     workspace = loaded.workspace;
@@ -402,12 +405,19 @@ class MainState extends ChangeNotifier {
           if (remote[s]?.secureFocus ?? true) return;
           unawaited(_learnItems(items));
         },
+        // The rules as they are now, not as they were when the tidy was made (spec D9).
+        fromVocabulary: (heard, observed) => voiceRules.fromVocabulary(heard, observed),
         send: (s, text, voice) {
           final rs = remote[s], p = portOf(s);
           if (rs == null || p == null) {
             if (rs != null) {
               unawaited(rs.composer.keep(text));
-              if (voice.ai != null) rs.composer.pendingAi = voice.ai;
+              if (voice.ai != null) {
+                rs.composer.pendingAi = voice.ai;
+              } else if (voice.heard != null) {
+                // Sent from the panel later, it still learns (D8); not from a password field (D7).
+                rs.composer.pendingHeard = rs.secureFocus ? null : voice.heard;
+              }
             }
             return voiceBlocked;
           }
@@ -418,9 +428,14 @@ class MainState extends ChangeNotifier {
         edit: (s, text, ai) {
           final c = remote[s]?.composer;
           if (c == null) return;
-          // The AI's text over the original: one ⌘Z gives the original back (§8.2).
-          unawaited(c.keep(text, undo: ai?.original));
-          if (ai != null) c.pendingAi = ai;
+          // The AI's text over the original: one ⌘Z gives the original back (§8.2) — the fixed words, as 还原
+          // does, not the heard ones [VoiceAi.original] keeps for learning (spec D6).
+          unawaited(c.keep(text, undo: ai == null ? null : (tidyIfAny(s)?.original ?? ai.original)));
+          if (ai != null) {
+            c.pendingAi = ai;
+          } else if (tidyIfAny(s) case final t?) {
+            c.pendingHeard = VoiceHeard(heard: t.heard, fixed: text); // the fixed words, without the AI (D8)
+          }
           c.open = true;
           if (ai != null) _tidyAside(s, 'AI 整理好了，放在写作面板里');
         },
@@ -2058,11 +2073,9 @@ class MainState extends ChangeNotifier {
         },
         onComposeKey: () => tidyIfAny(s.sid)?.closed(),
         followNewTabs: !term);
-    rs.composer.onAiSent = (ai, text) {
-      if (rs.secureFocus) return;
-      final items = editLearns(ai.original, ai.result, text);
-      if (items.isNotEmpty) tidyOf(rs.sid).offerLearn(items);
-    };
+    rs.composer.onAiSent = (ai, text) => _offerEditLearns(rs.sid, ai.original, editLearns(ai.original, ai.result, text));
+    // Without the AI: what the user changed in the device's fixed words, against what was heard (spec D8).
+    rs.composer.onHeardSent = (h, text) => _offerEditLearns(rs.sid, h.heard, editLearns(h.heard, h.fixed, text));
     final prof = profiles.resolve(r.app);
     rs.setProfile(prof);
     // Wired before any swap's adoptFrom; a reconnect's old session hands its text over itself.
@@ -3396,20 +3409,23 @@ class MainState extends ChangeNotifier {
   /// The words the next recording should expect; asks the gateway again in the background when the list is old.
   List<String> voiceHotwords() {
     _refreshHotwords();
+    _refreshRules();
     return _hotwords;
   }
 
   Future<void> _learnItems(List<LearnItem> items) async {
     final e = llm;
-    var any = false;
+    final learned = <LearnItem>[];
     for (final item in items) {
       if (await llmApi.learn(e, item)) {
-        any = true;
+        learned.add(item);
       } else {
         _log('rapp: voice learn failed');
       }
     }
-    if (any && !_disposed) _forgetHotwords();
+    if (learned.isEmpty || _disposed) return;
+    if (e == llm) _learnRules(e, learned);
+    _forgetHotwords();
   }
 
   /// What the gateway was taught; null when it cannot be asked.
@@ -3426,6 +3442,136 @@ class MainState extends ChangeNotifier {
     _hotwords = const [];
     _hotwordsAt = null;
     _refreshHotwords();
+    _forgetRules();
+  }
+
+  // On-device voice fixing (spec D4, D7, D10, D18): the gateway's rules (GET /v1/vocabulary/rules), kept in
+  // `local/voice-rules.json` and asked for at the hotwords' times. Only a 200 changes them; a 304 moves fetchedAt;
+  // a failure keeps the copy. A copy of another endpoint is not used: no rules until this one answers.
+  VoiceRules _voiceRules = VoiceRules.empty;
+  List<FixRule>? _voiceRulesFrom; // what [_voiceRules] was compiled from
+  VoiceRulesCopy? _rulesCopy;
+  DateTime? _rulesAt;
+  bool _rulesAsking = false, _rulesLoading = false;
+  String? _rulesLoadDir;
+  // Bumped when the rules asked for may be out of date (a new endpoint, a lesson, a forget): an answer to an
+  // older ask is dropped and asked again.
+  int _rulesGen = 0;
+
+  /// The rules on-device fixing applies now; empty with no endpoint, or none from it yet.
+  VoiceRules get voiceRules => _voiceRules;
+
+  /// [text] through [voiceRules]; a password field (or a session that is gone) gets it back unchanged (D7).
+  FixResult voiceFix(Object sid, String text) =>
+      (remote[sid]?.secureFocus ?? true) ? FixResult(text, const []) : _voiceRules.fix(text);
+
+  // What a sent edit teaches, offered in the session's tidy. Not from a password field; and a fix of the formal
+  // vocabulary put back in [heard] is not offered to keep: that is changed in note.md (spec D9).
+  void _offerEditLearns(Object sid, String heard, List<LearnItem> items) {
+    if (remote[sid]?.secureFocus ?? true) return;
+    final keep = [
+      for (final i in items)
+        if (i.action != LearnAction.preserve || !voiceRules.fromVocabulary(heard, i.observed)) i,
+    ];
+    if (keep.isNotEmpty) tidyOf(sid).offerLearn(keep);
+  }
+
+  /// One line for the log (counts and milliseconds only, never words: D20).
+  void voiceLog(String line) => _log(line);
+
+  // Reads the copy of the current data dir, then asks the gateway (with the copy's etag when it is this one's).
+  void _loadRules() {
+    final dir = data.localDir;
+    _rulesLoadDir = dir;
+    _rulesLoading = true;
+    _rulesCopy = null;
+    _rulesGen++;
+    _useRules();
+    VoiceRulesCopy.load(dir).then((c) {
+      if (_disposed || _rulesLoadDir != dir) return;
+      _rulesLoading = false;
+      _rulesCopy ??= c; // a lesson learned meanwhile made one already
+      _useRules();
+      _refreshRules();
+    });
+  }
+
+  void _useRules() {
+    final c = _rulesCopy;
+    final from = c != null && llm.configured && c.isFor(llm) ? c.rules : null;
+    if (identical(from, _voiceRulesFrom)) return;
+    _voiceRulesFrom = from;
+    _voiceRules = from == null ? VoiceRules.empty : VoiceRules.compile(from);
+  }
+
+  void _keepRules(VoiceRulesCopy c) {
+    _rulesCopy = c;
+    _useRules();
+    c.save(data.localDir).catchError((Object x) => _log('rapp: voice rules not saved: ${_fsReason(x)}'));
+  }
+
+  void _forgetRules() {
+    _rulesAt = null;
+    _rulesGen++;
+    _useRules();
+    _refreshRules();
+  }
+
+  void _refreshRules() {
+    final e = llm;
+    if (_disposed || !e.configured || _rulesAsking || _rulesLoading) return;
+    final at = _rulesAt;
+    if (at != null && _now().difference(at) < _hotwordsAge) return;
+    unawaited(_askRules(e));
+  }
+
+  Future<void> _askRules(LlmEndpoint e) async {
+    _rulesAsking = true;
+    final gen = _rulesGen;
+    final c = _rulesCopy;
+    final mine = c != null && c.isFor(e) ? c : null;
+    RulesReply? r;
+    try {
+      r = await llmApi.rules(e, etag: mine == null || mine.etag.isEmpty ? null : mine.etag);
+    } catch (_) {
+      r = null; // a fake's throw: rules never throws
+    } finally {
+      _rulesAsking = false;
+    }
+    if (_disposed) return;
+    if (gen != _rulesGen) return _refreshRules();
+    if (r == null) return; // asked again at the next recording
+    final now = _now();
+    if (r.unchanged) {
+      if (mine == null) return;
+      _rulesAt = now;
+      _keepRules(VoiceRulesCopy(endpoint: mine.endpoint, fetchedAt: now, etag: mine.etag, rules: mine.rules));
+      return;
+    }
+    _rulesAt = now;
+    _keepRules(VoiceRulesCopy(endpoint: e.base!, fetchedAt: now, etag: r.etag, rules: r.rules));
+    _log('rapp: voice rules ${r.rules.length}');
+  }
+
+  // What was just taught applies at once (D10): each lesson goes into the copy over the rule of the same observed,
+  // as learned. The copy is then no longer the gateway's list, so its etag goes; the gateway is asked after.
+  void _learnRules(LlmEndpoint e, List<LearnItem> items) {
+    final c = _rulesCopy;
+    final base = c != null && c.isFor(e) ? c : null;
+    final keys = {for (final i in items) fixRuleKey(i.observed)};
+    _keepRules(VoiceRulesCopy(
+      endpoint: base?.endpoint ?? e.base!,
+      fetchedAt: base?.fetchedAt ?? _now(),
+      etag: '',
+      rules: [
+        for (final r in base?.rules ?? const <FixRule>[])
+          if (!keys.contains(fixRuleKey(r.observed))) r,
+        for (final i in items)
+          i.action == LearnAction.replace
+              ? FixRule.replace(i.observed, i.output!, FixSource.learned)
+              : FixRule.preserve(i.observed, FixSource.learned),
+      ],
+    ));
   }
 
   void _refreshHotwords() {

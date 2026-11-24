@@ -534,6 +534,9 @@ class InputRecorder {
       'after': all && o.failure == null && (o.phrase || after == AfterSend.pressReturn) ? 'return' : 'none',
       'source': o.phrase ? 'phrase' : (o.voice != null ? 'voice' : 'typed'),
       if (o.voice?.ai case final ai?) 'ai': ai.toJson(),
+      // A voice send without the AI whose words differ from what was heard: the heard words, for the
+      // gateway to learn from later (spec D8). Fixed or edited, the text is what went.
+      if (o.voice case VoiceOrigin(ai: null, heard: final h?) when h.heard != o.text) 'fix': {'heard': h.heard},
     };
   }
 

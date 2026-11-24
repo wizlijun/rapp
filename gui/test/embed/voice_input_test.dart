@@ -268,4 +268,43 @@ void main() {
     expect(v.phase, VoicePhase.idle);
     v.dispose();
   });
+  test('timing arrives before final and is kept', () async {
+    mock(ok);
+    final v = VoiceInput();
+    addTearDown(v.dispose);
+    await v.start();
+    expect(v.lastTiming, isNull);
+    final f = v.stop();
+    await Future<void>.delayed(Duration.zero);
+    await v.handle(const MethodCall('timing', {'first_partial_ms': 420, 'final_ms': 310}));
+    await v.handle(const MethodCall('final', {'text': '你好'}));
+    expect(await f, '你好');
+    expect(v.lastTiming?.firstPartialMs, 420);
+    expect(v.lastTiming?.finalMs, 310);
+  });
+
+  test('timing may carry nulls, and is dropped while idle', () async {
+    mock(ok);
+    final v = VoiceInput();
+    addTearDown(v.dispose);
+    await v.handle(const MethodCall('timing', {'first_partial_ms': 1, 'final_ms': 2}));
+    expect(v.lastTiming, isNull);
+    await v.start();
+    await v.handle(const MethodCall('timing', {'first_partial_ms': null, 'final_ms': 90}));
+    expect(v.lastTiming?.firstPartialMs, isNull);
+    expect(v.lastTiming?.finalMs, 90);
+  });
+
+  test('a new start clears lastTiming', () async {
+    mock(ok);
+    final v = VoiceInput();
+    addTearDown(v.dispose);
+    await v.start();
+    await v.handle(const MethodCall('timing', {'first_partial_ms': 420, 'final_ms': 310}));
+    await v.handle(const MethodCall('final', {'text': '你好'}));
+    expect(await v.stop(), '你好');
+    expect(v.lastTiming, isNotNull);
+    await v.start();
+    expect(v.lastTiming, isNull);
+  });
 }

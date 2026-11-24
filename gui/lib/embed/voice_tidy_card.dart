@@ -140,6 +140,15 @@ class VoiceTidyCard extends StatelessWidget {
     );
   }
 
+  // In the offer line's place, for a flipped word the formal vocabulary changed: nothing to remember here.
+  Widget _hintLine(String hint, TextStyle small) => _Appear(
+        key: const ValueKey('flip-hint-line'),
+        child: Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(hint, key: const Key('flip-hint'), style: small, maxLines: 2, overflow: TextOverflow.ellipsis),
+        ),
+      );
+
   Widget _note(BuildContext context) {
     final t = RappTokens.of(context);
     return DecoratedBox(
@@ -246,7 +255,7 @@ class VoiceTidyCard extends StatelessWidget {
                 child: Text.rich(
                   TextSpan(children: [
                     TextSpan(text: '原话 · ', style: small.copyWith(fontWeight: FontWeight.w600)),
-                    TextSpan(text: tidy.original),
+                    TextSpan(text: tidy.heard), // as recognized, before the device fix (spec D6)
                   ]),
                   key: const Key('tidy-original'),
                   style: small.copyWith(color: ink.withValues(alpha: .55)),
@@ -255,7 +264,10 @@ class VoiceTidyCard extends StatelessWidget {
                 ),
               ),
             ],
-            if (tidy.offer case final o? when o.inBubble) _offerLine(o, small, ink),
+            if (tidy.offer case final o? when o.inBubble)
+              _offerLine(o, small, ink)
+            else if (tidy.flipHint case final h?)
+              _hintLine(h, small),
             const SizedBox(height: 8),
             SizedBox(
               height: 20,

@@ -372,9 +372,14 @@ void main() {
     late List<List<LearnItem>> learned;
     late VoiceTidy tidy;
 
-    setUp(() => learned = []);
+    bool Function(String, String)? fromVocabulary;
+    setUp(() {
+      learned = [];
+      fromVocabulary = null;
+    });
 
     VoiceTidy makeTidy() => tidy = VoiceTidy(
+          fromVocabulary: fromVocabulary,
           sid: 1,
           endpoint: () => const LlmEndpoint(url: 'localhost:28001', key: 'k'),
           api: api,
@@ -388,9 +393,9 @@ void main() {
     Widget host(VoiceTidy t, {bool reduced = false}) =>
         wrap(SizedBox(width: 360, child: VoiceTidyCard(tidy: t)), disableAnimations: reduced);
 
-    Future<void> ready(WidgetTester tester, String h, String a, {bool reduced = false}) async {
+    Future<void> ready(WidgetTester tester, String h, String a, {bool reduced = false, String? fixed}) async {
       await tester.pumpWidget(host(makeTidy(), reduced: reduced));
-      tidy.begin(h, VoicePick.send);
+      tidy.begin(fixed ?? h, VoicePick.send, heard: fixed == null ? null : h);
       api.calls.single.complete(LlmDone(a));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 700));
@@ -471,6 +476,41 @@ void main() {
       expect(learned.single.single, LearnItem.preserve(observed: '黑猫瑞', avoid: 'Hemory', excerpt: heard));
       expect(find.byKey(const Key('learn-done')), findsOneWidget);
       expect(find.text('已记住'), findsOneWidget);
+    });
+
+    tidyTest('the 原话 line reads the heard words, the body starts from the fixed ones', (tester) async {
+      await tester.pumpWidget(host(makeTidy()));
+      tidy.begin('明天用Python跑一下黑猫瑞', VoicePick.send, heard: heard);
+      await tester.pump();
+      expect(body(tester), '明天用Python跑一下黑猫瑞');
+      api.calls.single.complete(const LlmDone(ai));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 700));
+      expect(text('tidy-original'), contains(heard));
+      expect(dashed(tester), ['Python', 'Hemory']);
+    });
+
+    tidyTest('flipping a vocabulary fix shows where to change it, nothing to remember', (tester) async {
+      fromVocabulary = (h, o) => o == '拍森';
+      await ready(tester, heard, ai, fixed: '明天用Python跑一下黑猫瑞');
+      await tester.tapOnText(find.textRange.ofSubstring('Python'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byKey(const Key('flip-hint')), findsOneWidget);
+      expect(find.text('这条在正式词表里，要改请去 note.md'), findsOneWidget);
+      expect(find.byKey(const Key('learn-remember')), findsNothing);
+      expect(find.byKey(const Key('learn-ignore')), findsNothing);
+      expect(find.byKey(const Key('learn-offer')), findsNothing);
+      await tester.tapOnText(find.textRange.ofSubstring('拍森').first);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byKey(const Key('flip-hint')), findsNothing);
+      // A learned one still asks.
+      await tester.tapOnText(find.textRange.ofSubstring('Hemory'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byKey(const Key('learn-remember')), findsOneWidget);
+      expect(find.byKey(const Key('flip-hint')), findsNothing);
     });
 
     tidyTest('忽略 takes the bubble offer away', (tester) async {

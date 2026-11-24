@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import '../ui/controls.dart';
 import '../ui/main_state.dart';
 import '../ui/tokens.dart';
+import 'composer_model.dart' show VoiceOrigin;
 import 'remote_session.dart';
 import 'session_port.dart';
 import 'voice_button.dart';
@@ -90,14 +91,20 @@ class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderSt
     _hold = VoiceHold(
       voice: voice,
       // The widget, not the first one: a rebuild may bring a new port for the same session.
-      send: (text) => sendVoice(state: widget.state, session: widget.session, port: widget.port, text: text),
-      edit: (text) {
+      send: (text, heard) => sendVoice(
+          state: widget.state, session: widget.session, port: widget.port, text: text, voice: VoiceOrigin(heard: heard)),
+      edit: (text, heard) {
         final c = widget.session.composer;
         unawaited(c.keep(text));
+        // Words said into a password field are not learned, even once the focus has left it (D7).
+        c.pendingHeard = widget.session.secureFocus ? null : heard;
         c.open = true;
       },
       composer: () => widget.session.composer,
-      tidy: (text, pick, at) => widget.state.tidyOf(widget.session.sid).begin(text, pick, at: at),
+      tidy: (text, pick, at, heard) =>
+          widget.state.tidyOf(widget.session.sid).begin(text, pick, at: at, heard: heard.heard),
+      fix: (t) => widget.state.voiceFix(widget.session.sid, t),
+      log: widget.state.voiceLog,
       wouldTidy: (text) => widget.state.tidyOf(widget.session.sid).would(text),
       onPress: () => widget.state.tidyIfAny(widget.session.sid)?.interrupt(),
       prefetch: (t) => t == null
@@ -413,7 +420,7 @@ class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderSt
     };
     final style = TextStyle(color: ink, fontSize: 17, height: 1.35);
     // Holding: the live words. Going out: the last of them (a cancel has cleared the recogniser's).
-    final said = _hold.holding ? (_said = voice.text) : _said;
+    final said = _hold.holding ? (_said = _hold.fixedText) : _said;
     final words = said.isEmpty ? '正在听…' : voiceTail(said, style, width - 32, MediaQuery.textScalerOf(context));
     return KeyedSubtree(
       key: _bubbleBox,

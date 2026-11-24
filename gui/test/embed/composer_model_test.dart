@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/composer_editor.dart';
 import 'package:rapp/embed/composer_model.dart';
 import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/embed/voice_fix.dart' show VoiceHeard;
 
 import '../fakes.dart';
 
@@ -1087,6 +1088,74 @@ void main() {
       ed.value = '再说一句';
       await m.submit();
       expect(got.last.voice, isNull);
+    });
+
+    test('pendingHeard is sent and cleared like pendingAi', () async {
+      const heard = VoiceHeard(heard: '打开拍森', fixed: '打开Python');
+      final got = <Outgoing>[];
+      final heards = <(VoiceHeard, String)>[];
+      var ais = 0;
+      m.onSubmitted = got.add;
+      m.onHeardSent = (h, t) => heards.add((h, t));
+      m.onAiSent = (a, t) => ais++;
+      m.pendingHeard = heard;
+      ed.value = '打开拍森';
+      await m.submit();
+      expect(got.single.voice!.heard, heard);
+      expect(got.single.voice!.ai, isNull);
+      expect(heards, [(heard, '打开拍森')]);
+      expect(ais, 0);
+      expect(m.pendingHeard, isNull);
+      m.done(1, null);
+      ed.value = '再说一句';
+      await m.submit();
+      expect(got.last.voice, isNull);
+      expect(heards, hasLength(1));
+    });
+
+    test('pendingHeard goes when the draft is emptied, or ↑ recalls another text', () async {
+      const heard = VoiceHeard(heard: '打开拍森', fixed: '打开Python');
+      await m.detach(ed);
+      m.draft = '打开Python';
+      m.pendingHeard = heard;
+      m.draft = '';
+      expect(m.pendingHeard, isNull);
+      await m.attach(ed);
+      m.recall = () => ['older'];
+      ed.value = '打开Python';
+      m.pendingHeard = heard;
+      expect(m.arrow(true), isTrue);
+      await Future<void>.delayed(Duration.zero);
+      expect(ed.value, 'older');
+      expect(m.pendingHeard, isNull);
+    });
+
+    test('the AI mark takes over from what was heard', () async {
+      final heards = <VoiceHeard>[];
+      m.onHeardSent = (h, t) => heards.add(h);
+      m.pendingHeard = const VoiceHeard(heard: '打开拍森', fixed: '打开Python');
+      m.pendingAi = ai;
+      expect(m.pendingHeard, isNull);
+      ed.value = '我们明天开会。';
+      await m.submit();
+      expect(heards, isEmpty);
+    });
+
+    test('adoptFrom carries pendingHeard only with the draft it takes', () async {
+      const heard = VoiceHeard(heard: '打开拍森', fixed: '打开Python');
+      await m.detach(ed);
+      m.draft = '打开Python';
+      m.pendingHeard = heard;
+      final own = ComposerModel();
+      addTearDown(own.dispose);
+      own.draft = '别的话';
+      own.adoptFrom(m);
+      expect(own.pendingHeard, isNull);
+      final took = ComposerModel();
+      addTearDown(took.dispose);
+      took.adoptFrom(m);
+      expect(took.draft, '打开Python');
+      expect(took.pendingHeard, heard);
     });
 
     test('pendingAi goes when the draft is emptied', () {

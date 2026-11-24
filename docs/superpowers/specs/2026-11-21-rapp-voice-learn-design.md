@@ -262,7 +262,7 @@ rapp（Dart）                         rapp-llm 网关                     note.
   `replace` 一律写成 `(always)`：这是用户亲手确认过的改法。
 - `dictation`、`dictation-chat` 的 `context:` 加上 `voice_learned`，放在 `vocabulary` 后面；提示词第 1 条改为「先按 <vocabulary> 和 <voice_learned> 改；两者冲突时按 <vocabulary>」。
 - `/v1/hotwords`：`voice_learned` 里 `→` 右边的词排在最前面（它们是用户刚纠正的，最容易再错），然后是原来的顺序，总数仍最多 100。
-- **收编**：每次读 `voice-learned.md`（整理请求、hotwords、learned 列表）时，解析当时的 `vocabulary.md`；某条 `observed → output` 在任一场景里已有同样的规则（或 `do not change` 同一个词），就从 `voice-learned.md` 删掉它。正式词表里同一个 `observed` 有**不同**的 `output` 时，也删掉网关这条（以正式词表为准），日志记一行。
+- **收编**：每次读 `voice-learned.md`（整理请求、hotwords、learned 列表、rules）时，解析当时的 `vocabulary.md`；某条 `observed → output` 在任一场景里已有同样的规则**且那条带 `(always)`**（或 `do not change` 同一个词），就从 `voice-learned.md` 删掉它。正式词表里那条不带 `(always)` 时保留学到的这条：不带的只在上下文对得上时才改，设备本机纠词不用它，删了会让本机从「会改」变成「不改」（2026-11-25 改，见本机纠词规格 D9；rapp-llm 672e022）。正式词表里同一个 `observed` 有**不同**的 `output` 时，也删掉网关这条（以正式词表为准），日志记一行。
 - 文件不存在就当空表；写文件用临时文件 + rename，防止并发请求写坏。
 
 ### 6.4 新小 API `dictation-chat`

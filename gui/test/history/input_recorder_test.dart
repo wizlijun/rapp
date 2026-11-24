@@ -7,6 +7,7 @@ import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/composer_model.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/embed/voice_fix.dart' show VoiceHeard;
 import 'package:rapp/history/draft_store.dart';
 import 'package:rapp/history/input_recorder.dart';
 import 'package:rapp/paths.dart';
@@ -874,6 +875,29 @@ void main() {
               ai: VoiceAi(app: 'dictation', original: '嗯那个我门明天开会', result: '我们明天开会。'))));
       expect(r['source'], 'voice');
       expect(r['ai'], {'app': 'dictation', 'original': '嗯那个我门明天开会', 'result': '我们明天开会。'});
+    });
+
+    test('fix.heard only without ai and when it differs', () async {
+      final r = await sendOne((a) => a.composer.submitText('打开Python',
+          voice: const VoiceOrigin(heard: VoiceHeard(heard: '打开拍森', fixed: '打开Python'))));
+      expect(r['source'], 'voice');
+      expect(r['fix'], {'heard': '打开拍森'});
+      expect(r.containsKey('ai'), isFalse);
+    });
+
+    test('fix.heard: none when the heard words went as they were', () async {
+      final r = await sendOne((a) => a.composer.submitText('打开拍森',
+          voice: const VoiceOrigin(heard: VoiceHeard(heard: '打开拍森', fixed: '打开Python'))));
+      expect(r.containsKey('fix'), isFalse);
+    });
+
+    test('fix.heard: none with ai (ai.original has it)', () async {
+      final r = await sendOne((a) => a.composer.submitText('打开Python。',
+          voice: const VoiceOrigin(
+              ai: VoiceAi(app: 'dictation', original: '打开拍森', result: '打开Python。'),
+              heard: VoiceHeard(heard: '打开拍森', fixed: '打开Python'))));
+      expect(r.containsKey('fix'), isFalse);
+      expect((r['ai'] as Map)['original'], '打开拍森');
     });
 
     test('a 常用语 records source phrase and a Return, and is not remembered for ↑', () async {

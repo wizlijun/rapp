@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 
 import '../llm_api.dart';
 import 'composer_model.dart' show VoiceAi, VoiceOrigin;
+import 'voice_fix.dart' show VoiceHeard;
 import 'tidy_diff.dart';
 import 'tidy_mode.dart';
 import 'voice_ring.dart' show VoicePick;
@@ -55,6 +56,7 @@ class VoiceTidy extends ChangeNotifier {
     bool Function()? think,
     TidyMode Function(Object sid)? mode,
     this.setMode,
+    this.fromVocabulary,
   })  : think = think ?? _no,
         mode = mode ?? _prompt;
 
@@ -107,6 +109,10 @@ class VoiceTidy extends ChangeNotifier {
   /// ever shows.
   final void Function(Object sid, List<LearnItem> items)? learn;
 
+  /// Putting [observed] of [heard] back undoes the formal vocabulary (spec D9): flipping it back cannot be
+  /// learned (the gateway drops such a preserve), so it only hints. Null: nothing is.
+  final bool Function(String heard, String observed)? fromVocabulary;
+
   /// How long an offer outside the bubble stays.
   final Duration offerLife;
   static const _doneLife = Duration(milliseconds: 1500);
@@ -121,8 +127,16 @@ class VoiceTidy extends ChangeNotifier {
   Object sid;
   TidyPhase get phase => _phase;
   TidyPhase _phase = TidyPhase.idle;
+
+  /// The words as the device fixed them (spec D6): what the AI tidies and what goes when no AI result does.
   String get original => _original;
   String _original = '';
+
+  /// What the recognizer heard for [original] (before the device fix); [original] when [begin] was not told.
+  /// Only for comparing and learning (spec D6): the diff base of [changes], [VoiceAi.original], the bubble's
+  /// 原话 line and the excerpt of what is learned.
+  String get heard => _heard;
+  String _heard = '';
 
   /// The AI's text so far; empty until its first chunk.
   String get shown => _shown;
@@ -176,6 +190,12 @@ class VoiceTidy extends ChangeNotifier {
     return b.toString();
   }
 
+  /// Where the in-bubble offer goes, when the flipped change is the vocabulary's ([fromVocabulary]).
+  String? get flipHint => _flipHint;
+  String? _flipHint;
+  int? _hintFor; // the change [flipHint] is about
+  static const vocabularyHint = '这条在正式词表里，要改请去 note.md';
+
   /// The question to remember a correction, if any.
   LearnOffer? get offer => _offer;
   LearnOffer? _offer;
@@ -211,13 +231,19 @@ class VoiceTidy extends ChangeNotifier {
     if (_flips.remove(i)) {
       _log('flip back');
       if (_offerFor == i && _offer != null && _offer!.inBubble) _clearOffer();
+      if (_hintFor == i) _clearHint();
     } else {
       _flips.add(i);
       _log('flip');
       final c = _changes[i];
-      if (learn != null) {
+      if (learn != null && (fromVocabulary?.call(_heard, c.before) ?? false)) {
+        // The formal vocabulary's: only this once; changing it for good is note.md's (spec D9).
+        if (_offer?.inBubble ?? false) _clearOffer();
+        _flipHint = vocabularyHint;
+        _hintFor = i;
+      } else if (learn != null) {
         _setOffer(
-          LearnOffer(items: [LearnItem.preserve(observed: c.before, avoid: c.after, excerpt: learnExcerpt(_original, c.before))], inBubble: true),
+          LearnOffer(items: [LearnItem.preserve(observed: c.before, avoid: c.after, excerpt: learnExcerpt(_heard, c.before))], inBubble: true),
           null,
         );
         _offerFor = i;
@@ -265,6 +291,7 @@ class VoiceTidy extends ChangeNotifier {
   }
 
   void _setOffer(LearnOffer o, Duration? life) {
+    _clearHint();
     _offerTimer?.cancel();
     _offerTimer = null;
     _offer = o;
@@ -278,7 +305,13 @@ class VoiceTidy extends ChangeNotifier {
     }
   }
 
+  void _clearHint() {
+    _flipHint = null;
+    _hintFor = null;
+  }
+
   void _clearOffer() {
+    _clearHint();
     _offerTimer?.cancel();
     _offerTimer = null;
     _offer = null;
@@ -353,7 +386,7 @@ class VoiceTidy extends ChangeNotifier {
     return call;
   }
 
-  bool begin(String text, VoicePick pick, {Rect? at}) {
+  bool begin(String text, VoicePick pick, {Rect? at, String? heard}) {
     if (_disposed || !long(text) || !allowed(sid)) {
       _dropAhead();
       return false;
@@ -361,6 +394,7 @@ class VoiceTidy extends ChangeNotifier {
     if (_phase != TidyPhase.idle) interrupt();
     _clearNote();
     _original = text.trim();
+    _heard = (heard ?? text).trim();
     _shown = '';
     _result = null;
     _clearChanges();
@@ -443,7 +477,7 @@ class VoiceTidy extends ChangeNotifier {
         }
         _log('done');
         _result = t;
-        _changes = _pick == VoicePick.send ? tidyChanges(_original, t) : const [];
+        _changes = _pick == VoicePick.send ? tidyChanges(_heard, t) : const [];
         if (_pick != VoicePick.edit) {
           _phase = TidyPhase.ready;
           held?.call(sid, t);
@@ -525,7 +559,10 @@ class VoiceTidy extends ChangeNotifier {
     _carry = 0;
   }
 
-  VoiceAi _ai(String t) => VoiceAi(app: _running.app, original: _original, result: t);
+  VoiceAi _ai(String t) => VoiceAi(app: _running.app, original: _heard, result: t);
+
+  // The fixed words going without the AI: what was heard goes along, to learn from an edit and to record.
+  VoiceOrigin get _plain => VoiceOrigin(heard: VoiceHeard(heard: _heard, fixed: _original));
 
   void _sendResult() {
     final r = _result!;
@@ -537,7 +574,7 @@ class VoiceTidy extends ChangeNotifier {
     _endWith(hint);
   }
 
-  // The original as heard, as the release's pick would have done without a tidy.
+  // The original (the fixed words), as the release's pick would have done without a tidy.
   void _goOriginal() {
     _stop();
     if (_pick == VoicePick.edit) {
@@ -547,7 +584,7 @@ class VoiceTidy extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    final hint = send(sid, _original, const VoiceOrigin());
+    final hint = send(sid, _original, _plain);
     _release();
     _endWith(hint);
   }
@@ -576,7 +613,7 @@ class VoiceTidy extends ChangeNotifier {
     if (!_waiting) return;
     _stop();
     _log('send original');
-    final hint = send(sid, _original, const VoiceOrigin());
+    final hint = send(sid, _original, _plain);
     _release();
     _endWith(hint);
   }
@@ -679,6 +716,7 @@ class VoiceTidy extends ChangeNotifier {
   void _clearChanges() {
     _changes = const [];
     _flips.clear();
+    _clearHint();
     _stopped = false;
   }
 

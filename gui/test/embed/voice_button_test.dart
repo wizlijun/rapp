@@ -17,6 +17,7 @@ import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/stage_buttons.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/voice_button.dart';
+import 'package:rapp/embed/voice_fix.dart';
 import 'package:rapp/embed/voice_input.dart';
 import 'package:rapp/embed/voice_overlay.dart';
 import 'package:rapp/embed/voice_ring.dart';
@@ -43,6 +44,11 @@ class FakeVoice extends VoiceInput {
   String _text = '';
   final lv = ValueNotifier<double>(0);
 
+  /// What [lastTiming] answers: native's report for the recording.
+  VoiceTiming? timing;
+
+  @override
+  VoiceTiming? get lastTiming => timing;
   @override
   VoicePhase get phase => _phase;
   @override
@@ -102,6 +108,13 @@ class FakeVoice extends VoiceInput {
     super.dispose();
   }
 }
+
+/// 拍森 → Python, as a learned rule would give it.
+FixResult fixPython(String t) => _python.fix(t);
+final _python = VoiceRules.compile(const [FixRule.replace('拍森', 'Python', FixSource.learned)]);
+
+/// The one line a release logs (D14 first step, D20): counts and milliseconds, never words.
+final voiceTimingLine = RegExp(r'^voice: first (\d+|-)ms, final (\d+|-)ms, fix \d+ in [\d.]+ms, out \d+ms$');
 
 void main() {
   late FakeTransport t;
@@ -614,10 +627,10 @@ void main() {
     final tookAt = <Rect?>[];
     final h = VoiceHold(
       voice: voice,
-      send: (_) => null,
-      edit: (_) {},
+      send: (_, _) => null,
+      edit: (_, _) {},
       composer: () => rs.composer,
-      tidy: (text, pick, at) {
+      tidy: (text, pick, at, _) {
         tookAt.add(at);
         return true;
       },
@@ -649,6 +662,55 @@ void main() {
     expect(words, findsNothing);
     expect(h.showing, isFalse);
     expect(tookAt.single!.contains(before.center), isTrue);
+  });
+
+  iosTest('the bubble shows the fixed words while holding', (tester) async {
+    final h = VoiceHold(
+      voice: voice,
+      send: (_, _) => null,
+      edit: (_, _) {},
+      composer: () => rs.composer,
+      fix: fixPython,
+    );
+    addTearDown(h.dispose);
+    await tester.pumpWidget(wrap(SizedBox(width: stage.width, height: stage.height, child: VoiceOverlay(hold: h, voice: voice))));
+    unawaited(h.down(const Offset(900, 600), stage, true));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 240));
+    voice.partial('打开拍森');
+    await tester.pump();
+    expect(h.fixedText, '打开Python');
+    expect(find.textContaining('Python', findRichText: true), findsOneWidget);
+    expect(find.textContaining('拍森', findRichText: true), findsNothing);
+  });
+
+  iosTest('an iOS 编辑 keeps the words with what was heard', (tester) async {
+    await tester.pumpWidget(layer());
+    final r = ringOf(tester);
+    final g = await press(tester);
+    await g.moveTo(at(tester, r, VoicePick.edit));
+    await tester.pump();
+    voice.partial('你好');
+    voice.stopResult = '你好';
+    await lift(tester, g);
+    expect(rs.composer.draft, endsWith('你好'));
+    expect(rs.composer.pendingHeard?.heard, '你好');
+    expect(rs.composer.pendingHeard?.fixed, '你好');
+  });
+
+  iosTest('an iOS 编辑 into a password field keeps the words, not what was heard (D7)', (tester) async {
+    rs.composer.pendingHeard = const VoiceHeard(heard: '早先', fixed: '早先');
+    rs.secureFocus = true;
+    await tester.pumpWidget(layer());
+    final r = ringOf(tester);
+    final g = await press(tester);
+    await g.moveTo(at(tester, r, VoicePick.edit));
+    await tester.pump();
+    voice.partial('你好');
+    voice.stopResult = '你好';
+    await lift(tester, g);
+    expect(rs.composer.draft, endsWith('你好'));
+    expect(rs.composer.pendingHeard, isNull); // learned once focus leaves the field otherwise
   });
 
   iosTest('a session switch while the stop is out puts the words in the original draft', (tester) async {
@@ -922,8 +984,8 @@ void main() {
       h = VoiceHold(
         voice: voice,
         composer: () => rs.composer,
-        send: (text) => sendVoice(state: es, session: rs, port: port, text: text),
-        edit: (text) => rs.composer.keep(text),
+        send: (text, _) => sendVoice(state: es, session: rs, port: port, text: text),
+        edit: (text, _) => rs.composer.keep(text),
         onEnd: ends.add,
         languageHintDue: () => due,
         languageHintShown: () => shown++,
@@ -986,15 +1048,15 @@ void main() {
       VoiceHold hold() => VoiceHold(
             voice: voice,
             composer: () => rs.composer,
-            send: (t) {
+            send: (t, _) {
               sent.add(t);
               return null;
             },
-            edit: edited.add,
+            edit: (t, _) => edited.add(t),
             onEnd: ends.add,
             languageHintDue: () => true,
             languageHintShown: () => shown++,
-            tidy: (t, p, at) {
+            tidy: (t, p, at, _) {
               took.add((t, p));
               tookAt.add(at);
               return take;
@@ -1139,6 +1201,178 @@ void main() {
       });
     });
 
+    group('the device fix (spec D5, D20)', () {
+      late List<(String, String, String)> sent, edited, took;
+      late List<String> would, lines;
+      late List<String?> ahead;
+      var take = false;
+      VoiceHold hold() => VoiceHold(
+            voice: voice,
+            composer: () => rs.composer,
+            send: (t, v) {
+              sent.add((t, v.heard, v.fixed));
+              return null;
+            },
+            edit: (t, v) => edited.add((t, v.heard, v.fixed)),
+            tidy: (t, p, at, v) {
+              took.add((t, v.heard, v.fixed));
+              return take;
+            },
+            wouldTidy: (t) {
+              would.add(t);
+              return t.runes.length >= 10;
+            },
+            prefetch: ahead.add,
+            fix: fixPython,
+            log: (l) => lines.add(l),
+            pauseFor: const Duration(milliseconds: 20),
+          );
+      setUp(() {
+        sent = [];
+        edited = [];
+        took = [];
+        would = [];
+        lines = [];
+        ahead = [];
+        take = false;
+        h.dispose();
+        h = hold();
+      });
+
+      test('fixedText is the words so far through fix; without fix it is the words', () async {
+        await h.start();
+        voice.partial('打开拍森');
+        expect(h.fixedText, '打开Python');
+        h.dispose();
+        h = VoiceHold(voice: voice, composer: () => rs.composer, send: (t, _) => null, edit: (_, _) {});
+        await h.start();
+        voice.partial('打开拍森');
+        expect(h.fixedText, '打开拍森');
+      });
+
+      test('what was heard is trimmed like the text that goes, so unfixed words record no fix (D19)', () async {
+        await h.start();
+        voice.partial(' 你好 ');
+        voice.stopResult = ' 你好 ';
+        h.finish(VoicePick.send);
+        await Future<void>.delayed(Duration.zero);
+        final (text, heard, fixed) = sent.single;
+        // sendVoice sends text.trim(); the recorder writes fix.heard when heard differs from what went.
+        expect((heard, fixed), (text.trim(), text.trim()));
+        expect(heard, '你好');
+      });
+
+      test('release sends the fixed text with what was heard', () async {
+        await h.start();
+        voice.partial('打开拍森');
+        voice.stopResult = '打开拍森';
+        h.finish(VoicePick.send);
+        await Future<void>.delayed(Duration.zero);
+        expect(sent, [('打开Python', '打开拍森', '打开Python')]);
+        expect(took, [('打开Python', '打开拍森', '打开Python')]);
+      });
+
+      test('wouldTidy and tidy see the same fixed text', () async {
+        // 9 heard, 13 fixed: the fix takes it over the tidy's 10.
+        const heard = '打开拍森跑一下脚本';
+        take = true;
+        voice.stopGate = Completer<String>();
+        await h.start();
+        voice.partial(heard);
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        expect(ahead, ['打开Python跑一下脚本']);
+        h.finish(VoicePick.send);
+        await Future<void>.delayed(Duration.zero);
+        expect(would, ['打开Python跑一下脚本']);
+        expect(h.handingOver, isTrue);
+        voice.stopGate!.complete(heard);
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        expect(took, [('打开Python跑一下脚本', heard, '打开Python跑一下脚本')]);
+        expect(ahead, ['打开Python跑一下脚本', '打开Python跑一下脚本']);
+        expect(h.handedOver, isTrue);
+        expect(sent, isEmpty);
+      });
+
+      test('edit and draft.keep get the fixed text', () async {
+        voice.stopResult = '打开拍森';
+        await h.start();
+        h.finish(VoicePick.edit);
+        await Future<void>.delayed(Duration.zero);
+        expect(edited, [('打开Python', '打开拍森', '打开Python')]);
+
+        // The hold gone while the stop is out (a session switch): the draft it was said for keeps the fixed words.
+        voice.stopGate = Completer<String>();
+        await h.start();
+        h.finish(VoicePick.send);
+        await Future<void>.delayed(Duration.zero);
+        h.dispose();
+        voice.stopGate!.complete('打开拍森');
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        expect(rs.composer.draft, '打开Python');
+        expect(sent, isEmpty);
+        h = hold();
+      });
+
+      test('one timing line per release, counts and ms only', () async {
+        voice.timing = const VoiceTiming(firstPartialMs: 320, finalMs: 85);
+        voice.stopResult = '打开拍森说拍森';
+        await h.start();
+        voice.partial('打开拍森说拍森');
+        h.finish(VoicePick.send);
+        await Future<void>.delayed(Duration.zero);
+        expect(lines, hasLength(1));
+        expect(lines.single, matches(voiceTimingLine));
+        expect(lines.single, startsWith('voice: first 320ms, final 85ms, fix 2 in '));
+        for (final w in ['打开', '拍森', 'Python', '说']) {
+          expect(lines.single, isNot(contains(w)));
+        }
+
+        // No timing from native: dashes. An 编辑 logs too; a cancel does not.
+        voice.timing = null;
+        voice.stopResult = '你好';
+        await h.start();
+        h.finish(VoicePick.edit);
+        await Future<void>.delayed(Duration.zero);
+        expect(lines, hasLength(2));
+        expect(lines.last, matches(voiceTimingLine));
+        expect(lines.last, startsWith('voice: first -ms, final -ms, fix 0 in '));
+        await h.start();
+        voice.partial('你好');
+        h.finish(VoicePick.cancel);
+        await Future<void>.delayed(Duration.zero);
+        expect(lines, hasLength(2));
+      });
+
+      test('sendVoice keeps what was heard with pendingHeard when busy, unless the text is the AI\'s', () async {
+        rs.composer.submitText('还在路上'); // in flight: busy
+        const heard = VoiceHeard(heard: '打开拍森', fixed: '打开Python');
+        expect(sendVoice(state: es, session: rs, port: port, text: '打开Python', voice: const VoiceOrigin(heard: heard)),
+            voiceBusy);
+        await Future<void>.delayed(Duration.zero);
+        expect(rs.composer.draft, endsWith('打开Python'));
+        expect(rs.composer.pendingHeard, same(heard));
+        rs.composer.pendingHeard = null;
+        const ai = VoiceAi(app: 'dictation', original: '打开拍森', result: '打开 Python。');
+        sendVoice(state: es, session: rs, port: port, text: '打开 Python。', voice: const VoiceOrigin(ai: ai, heard: heard));
+        await Future<void>.delayed(Duration.zero);
+        expect(rs.composer.pendingAi, ai);
+        expect(rs.composer.pendingHeard, isNull);
+      });
+
+      test('sendVoice into a password field keeps the words, not what was heard (D7)', () async {
+        rs.composer.submitText('还在路上'); // in flight: busy
+        rs.composer.pendingHeard = const VoiceHeard(heard: '早先', fixed: '早先');
+        rs.secureFocus = true;
+        const heard = VoiceHeard(heard: '你好', fixed: '你好');
+        expect(sendVoice(state: es, session: rs, port: port, text: '你好', voice: const VoiceOrigin(heard: heard)), voiceBusy);
+        await Future<void>.delayed(Duration.zero);
+        expect(rs.composer.draft, endsWith('你好'));
+        expect(rs.composer.pendingHeard, isNull);
+      });
+    });
+
     test('choose changes the pick without haptics', () async {
       final calls = <String>[];
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
@@ -1177,7 +1411,7 @@ void main() {
       expect(shown, 1);
       due = false;
       h.dispose();
-      h = VoiceHold(voice: voice, composer: () => rs.composer, send: (t) => null, edit: (_) {}, languageHintDue: () => due);
+      h = VoiceHold(voice: voice, composer: () => rs.composer, send: (t, _) => null, edit: (_, _) {}, languageHintDue: () => due);
       voice.stopResult = '好';
       await h.start();
       h.finish(VoicePick.send);
@@ -1198,7 +1432,7 @@ void main() {
       await h.start();
       h.dispose();
       expect(ends, [null]);
-      h = VoiceHold(voice: voice, composer: () => rs.composer, send: (t) => null, edit: (_) {});
+      h = VoiceHold(voice: voice, composer: () => rs.composer, send: (t, _) => null, edit: (_, _) {});
     });
 
     test('macOS 去设置 opens the pane', () async {

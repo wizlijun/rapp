@@ -12,6 +12,7 @@ import 'package:rapp/embed/geometry.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/voice_desktop.dart';
+import 'package:rapp/embed/voice_fix.dart';
 import 'package:rapp/embed/voice_button.dart' show voiceLanguageHint, voiceSettingsRunner;
 import 'package:rapp/embed/voice_input.dart' show VoiceStart;
 import 'package:rapp/embed/voice_key_gate.dart';
@@ -29,6 +30,16 @@ import 'voice_button_test.dart' show FakeVoice;
 class _Api extends LlmApi {
   final calls = <LlmCall>[];
   void Function(String)? onText;
+
+  /// What the gateway's rules answer; null: as a gateway without them (an old one, or none there).
+  List<FixRule>? rulesList;
+
+  @override
+  Future<RulesReply?> rules(LlmEndpoint e, {String? etag}) async =>
+      rulesList == null ? null : RulesReply(unchanged: false, etag: 'e1', rules: rulesList!);
+
+  @override
+  Future<List<String>> hotwords(LlmEndpoint e) async => const [];
 
   @override
   LlmCall run(LlmEndpoint e, String app, String input,
@@ -208,6 +219,74 @@ void main() {
     expect(port.calls.last.$1, 'picture_focus');
     expect(port.calls.last.$2['sid'], 1);
     expect(port.calls.any((c) => c.$1 == 'voice_end' && c.$2['sid'] == 1), isTrue);
+  });
+
+  // 拍森 → Python from the gateway, applied on this device.
+  Future<void> withRules(WidgetTester tester) => tester.runAsync(() async {
+        api.rulesList = const [FixRule.replace('拍森', 'Python', FixSource.learned)];
+        es.setLlm(const LlmEndpoint(url: 'localhost:28001', key: 'k'));
+        for (var i = 0; i < 200 && es.voiceRules.isEmpty; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 5));
+        }
+        expect(es.voiceRules.isEmpty, isFalse);
+      });
+
+  macTest('the bubble shows the fixed words while holding, and the release sends them', (tester) async {
+    await view(tester);
+    await goLive(tester);
+    await withRules(tester);
+    await tester.pumpWidget(layer());
+    final g = await press(tester);
+    voice.partial('打开拍森');
+    await tester.pump();
+    expect(find.textContaining('Python', findRichText: true), findsOneWidget);
+    expect(find.textContaining('拍森', findRichText: true), findsNothing);
+    voice.stopResult = '打开拍森';
+    await g.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(sends(), [
+      [
+        {'text': '打开Python'}
+      ]
+    ]);
+  });
+
+  macTest('a desktop 编辑 keeps the fixed words with what was heard', (tester) async {
+    await view(tester);
+    await goLive(tester);
+    await withRules(tester);
+    await tester.pumpWidget(layer());
+    final g = await press(tester);
+    await g.moveTo(tester.getCenter(find.byKey(const Key('voice-edit'))));
+    await tester.pump();
+    voice.stopResult = '打开拍森';
+    await g.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(rs.composer.open, isTrue);
+    expect(rs.composer.draft, endsWith('打开Python'));
+    expect(rs.composer.pendingHeard?.heard, '打开拍森');
+    expect(rs.composer.pendingHeard?.fixed, '打开Python');
+  });
+
+  macTest('a desktop 编辑 into a password field keeps the words, not what was heard (D7)', (tester) async {
+    await view(tester);
+    await goLive(tester);
+    await withRules(tester);
+    rs.composer.pendingHeard = const VoiceHeard(heard: '早先', fixed: '早先');
+    rs.secureFocus = true;
+    es.currentRemote!.secureFocus = true; // the state's copy, which voiceFix reads
+    await tester.pumpWidget(layer());
+    final g = await press(tester);
+    await g.moveTo(tester.getCenter(find.byKey(const Key('voice-edit'))));
+    await tester.pump();
+    voice.stopResult = '打开拍森';
+    await g.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(rs.composer.draft, endsWith('打开拍森')); // and no fixing either
+    expect(rs.composer.pendingHeard, isNull);
   });
 
   macTest('drag onto 取消 then release sends nothing', (tester) async {

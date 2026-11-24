@@ -54,7 +54,12 @@ void main() {
   var mode = TidyMode.prompt;
   late List<TidyMode> setModes;
 
+  bool Function(String heard, String observed)? fromVocabulary;
+  late List<(Object, String?)> helds;
+
   VoiceTidy make({bool learn = true}) => VoiceTidy(
+        fromVocabulary: fromVocabulary,
+        held: (sid, o) => helds.add((sid, o)),
         mode: (_) => mode,
         setMode: (sid, m) {
           mode = m;
@@ -85,6 +90,184 @@ void main() {
     sendHint = null;
     mode = TidyMode.prompt;
     setModes = [];
+    fromVocabulary = null;
+    helds = [];
+  });
+
+  group('heard and fixed words (本机纠词, spec D6/D9)', () {
+    const heard = '打开拍森跑一下这个测试脚本吧';
+    const fixed = '打开Python跑一下这个测试脚本吧';
+
+    test('the heard words are the original line and the diff base', () {
+      fakeAsync((a) {
+        final t = make();
+        t.begin(fixed, VoicePick.send, heard: heard);
+        expect(api.runs.single.$2, fixed); // the AI tidies the fixed words
+        expect(t.original, fixed);
+        expect(t.heard, heard);
+        api.calls.single.complete(const LlmDone(fixed));
+        out(a, t);
+        expect(t.changes.map((c) => (c.before, c.after)), [('拍森', 'Python')]);
+        expect(t.text, fixed);
+        a.elapse(const Duration(milliseconds: 1500));
+        expect(sent.single.$2, fixed);
+        expect(sent.single.$3.ai!.original, heard);
+        expect(sent.single.$3.ai!.result, fixed);
+        t.dispose();
+      });
+    });
+
+    test('tidy failure sends the fixed text', () {
+      fakeAsync((a) {
+        final t = make();
+        t.begin(fixed, VoicePick.send, heard: heard);
+        api.calls.single.complete(const LlmFailed('连不上 LLM 接入点', log: 'Connection refused'));
+        a.flushMicrotasks();
+        expect(sent.single.$2, fixed);
+        expect(sent.single.$3.ai, isNull);
+        expect(sent.single.$3.heard!.heard, heard);
+        expect(sent.single.$3.heard!.fixed, fixed);
+        t.dispose();
+      });
+    });
+
+    test('a timeout sends the fixed text too; an edit pick puts it in the panel', () {
+      fakeAsync((a) {
+        final t = make();
+        t.begin(fixed, VoicePick.send, heard: heard);
+        a.elapse(const Duration(seconds: 31));
+        expect(sent.single.$2, fixed);
+        expect(sent.single.$3.heard!.heard, heard);
+        t.begin(fixed, VoicePick.edit, heard: heard);
+        api.calls.last.complete(const LlmFailed('LLM 出错'));
+        a.flushMicrotasks();
+        expect(edited.single, (1, fixed, null));
+        t.dispose();
+      });
+    });
+
+    test('sendNow and restore send the fixed text', () {
+      fakeAsync((a) {
+        final t = make();
+        t.begin(fixed, VoicePick.send, heard: heard);
+        t.sendNow();
+        expect(sent.single.$2, fixed);
+        expect(sent.single.$3.ai, isNull);
+        expect(sent.single.$3.heard!.heard, heard);
+        expect(sent.single.$3.heard!.fixed, fixed);
+        t.begin(fixed, VoicePick.send, heard: heard);
+        api.calls.last.complete(const LlmDone('打开Python跑一下这个测试脚本。'));
+        a.flushMicrotasks();
+        t.restore();
+        expect(sent, hasLength(2));
+        expect(sent.last.$2, fixed);
+        expect(sent.last.$3.ai, isNull);
+        expect(sent.last.$3.heard!.heard, heard);
+        t.dispose();
+      });
+    });
+
+    test('edit, close, end and held keep the fixed text', () {
+      fakeAsync((a) {
+        final t = make();
+        t.begin(fixed, VoicePick.send, heard: heard);
+        expect(helds.last, (1, fixed));
+        t.editNow();
+        expect(edited.single, (1, fixed, null));
+        t.begin(fixed, VoicePick.send, heard: heard);
+        t.closed();
+        expect(kept.single, (1, fixed));
+        t.begin(fixed, VoicePick.send, heard: heard);
+        expect(t.end(), fixed);
+        t.dispose();
+      });
+    });
+
+    test('without heard, the original is both', () {
+      fakeAsync((a) {
+        final t = make();
+        t.begin(fixed, VoicePick.send);
+        expect(t.heard, fixed);
+        api.calls.single.complete(const LlmDone(fixed));
+        out(a, t);
+        expect(t.changes, isEmpty);
+        t.dispose();
+      });
+    });
+
+    test('prefetch keyed by the fixed text hits', () {
+      fakeAsync((a) {
+        final t = make();
+        t.prefetch(fixed);
+        expect(api.runs, hasLength(1));
+        t.begin(fixed, VoicePick.send, heard: heard);
+        expect(api.runs, hasLength(1));
+        t.dispose();
+      });
+    });
+
+    test('flipping a learned fix offers preserve', () {
+      fakeAsync((a) {
+        fromVocabulary = (h, o) => false;
+        final t = make();
+        t.begin(fixed, VoicePick.send, heard: heard);
+        api.calls.single.complete(const LlmDone(fixed));
+        out(a, t);
+        t.flip(0);
+        expect(t.text, heard);
+        expect(t.offer!.items.single, LearnItem.preserve(observed: '拍森', avoid: 'Python', excerpt: heard));
+        expect(t.flipHint, isNull);
+        t.dispose();
+      });
+    });
+
+    test('flipping a vocabulary fix only hints', () {
+      fakeAsync((a) {
+        final asked = <(String, String)>[];
+        fromVocabulary = (h, o) {
+          asked.add((h, o));
+          return true;
+        };
+        final t = make();
+        t.begin(fixed, VoicePick.send, heard: heard);
+        api.calls.single.complete(const LlmDone(fixed));
+        out(a, t);
+        t.flip(0);
+        expect(asked, [(heard, '拍森')]);
+        expect(t.text, heard); // this once it goes as heard
+        expect(t.offer, isNull);
+        expect(t.flipHint, '这条在正式词表里，要改请去 note.md');
+        t.flip(0);
+        expect(t.flipHint, isNull);
+        t.flip(0);
+        expect(t.flipHint, isNotNull);
+        t.sendNow();
+        expect(t.flipHint, isNull);
+        expect(learned, isEmpty);
+        t.dispose();
+      });
+    });
+
+    test('a vocabulary hint gives way to a learned flip, and back', () {
+      fakeAsync((a) {
+        fromVocabulary = (h, o) => o == '拍森';
+        final t = make();
+        t.begin('打开拍森跑一下黑猫瑞这个测试', VoicePick.send);
+        api.calls.single.complete(const LlmDone('打开Python跑一下Hemory这个测试'));
+        out(a, t);
+        t.flip(1);
+        expect(t.offer!.items.single.observed, '黑猫瑞');
+        t.flip(0); // the hint takes the bubble's line
+        expect(t.offer, isNull);
+        expect(t.flipHint, isNotNull);
+        t.flip(1); // flipping another back leaves it
+        expect(t.flipHint, isNotNull);
+        t.flip(1); // a learned flip takes the line again
+        expect(t.flipHint, isNull);
+        expect(t.offer!.items.single.observed, '黑猫瑞');
+        t.dispose();
+      });
+    });
   });
 
   group('tidy mode (按用途整理)', () {

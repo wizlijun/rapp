@@ -12,21 +12,18 @@ import FlutterMacOS
 /// The `rapp/speech` channel: hold-to-talk speech recognition for the voice button.
 /// Dart calls `start` (replies `ok` / `asked` / `denied` / `unavailable` / `preparing`, or `cancelled` when a
 /// cancel, another start or an interruption overtook it while it set up), `stop` and `cancel`;
-/// this side sends `partial` / `final` {text} and `error` {code}. Everything runs on the main thread except
+/// this side sends `partial` / `final` {text} and `error` {code}, and `timing` {first_partial_ms, final_ms}
+/// (milliseconds, or null) just before each `final`. Everything runs on the main thread except
 /// the audio tap, which only hands buffers to the recogniser. On iOS this plugin owns the app's AVAudioSession; macOS has no shared session, so it only owns its audio engine.
-/// iOS 26+ uses SpeechAnalyzer + SpeechTranscriber; older systems (or no transcriber for the locale) use
+/// iOS 26+ uses SpeechAnalyzer + DictationTranscriber; older systems (or no transcriber for the locale) use
 /// SFSpeechRecognizer.
 final class SpeechPlugin: NSObject, FlutterPlugin {
   /// How long after `stop` this side gives up on the recogniser and sends `final` with what it has.
   /// Dart waits 1 s, so this lands just before.
   private static let finalGrace: TimeInterval = 0.9
-  /// The language to recognise: the system's first preferred language (not `Locale.current`, which is English
-  /// here); on iOS a Chinese entry anywhere in the list comes first.
-  #if os(iOS)
+  /// The language to recognise, from the system's preferred languages (not `Locale.current`, which is English
+  /// here): a Chinese entry anywhere in the list comes first, on iOS and macOS alike (user, 2026-11-25).
   private static var locale: Locale { speechLocale(preferred: Locale.preferredLanguages, chineseFirst: true) }
-  #else
-  private static var locale: Locale { speechLocale(preferred: Locale.preferredLanguages) }
-  #endif
 
   private let channel: FlutterMethodChannel
   /// The recording in progress: live, or stopped and waiting for its final text.
@@ -37,6 +34,9 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
   private var sessionActive = false
   /// A speech model download is under way (iOS 26+); starts reply `preparing` until it ends.
   private var assetsInstalling = false
+  /// What the last analyzer start learned about `key` (a `Self.locale.identifier`), so the next press skips
+  /// those lookups (iOS 26+). Replaced when the language changes; dropped when the assets turn out missing.
+  private var analyzerCache: AnalyzerCache?
 
   init(channel: FlutterMethodChannel) {
     self.channel = channel
@@ -102,6 +102,7 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
   // MARK: - Start, stop, end
 
   private func start(_ result: @escaping FlutterResult, hotwords: [String]) {
+    let pressedAt = Self.now()
     generation += 1
     let gen = generation
     end()  // A second start cancels the first, silently: Dart has already moved on.
@@ -117,12 +118,12 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
     if #available(iOS 26, macOS 26, *) {
       Task { @MainActor [weak self] in
         guard let self else { return result("cancelled") }
-        if let reply = await self.startAnalyzer(gen, hotwords: hotwords) { return result(reply) }
+        if let reply = await self.startAnalyzer(gen, hotwords: hotwords, pressedAt: pressedAt) { return result(reply) }
         // No transcriber for this device or locale: the older recogniser may still work.
-        result(gen == self.generation ? self.startRecognizer(hotwords: hotwords) : "cancelled")
+        result(gen == self.generation ? self.startRecognizer(hotwords: hotwords, pressedAt: pressedAt) : "cancelled")
       }
     } else {
-      result(startRecognizer(hotwords: hotwords))
+      result(startRecognizer(hotwords: hotwords, pressedAt: pressedAt))
     }
   }
 
@@ -133,6 +134,7 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
       return
     }
     run.stopped = true
+    run.stoppedAt = Self.now()
     stopAudio()
     run.finish()
     DispatchQueue.main.asyncAfter(deadline: .now() + Self.finalGrace) { [weak self, weak run] in
@@ -154,13 +156,28 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
   private func partial(_ run: Run, _ text: String) {
     guard run === self.run else { return }
     run.text = text
+    if run.firstPartialAt == nil, !text.isEmpty { run.firstPartialAt = Self.now() }
     channel.invokeMethod("partial", arguments: ["text": text])
   }
 
   private func final(_ run: Run, _ text: String) {
     guard run === self.run else { return }
+    let at = Self.now()
     end()
+    channel.invokeMethod("timing", arguments: [
+      "first_partial_ms": Self.ms(from: run.startedAt, to: run.firstPartialAt),
+      "final_ms": Self.ms(from: run.stoppedAt, to: at),
+    ])
     channel.invokeMethod("final", arguments: ["text": text])
+  }
+
+  /// Monotonic seconds, for the timing event.
+  private static func now() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
+
+  /// Whole milliseconds from `start` to `end`, or NSNull (null in Dart) when either is missing.
+  private static func ms(from start: TimeInterval?, to end: TimeInterval?) -> Any {
+    guard let start, let end else { return NSNull() }
+    return max(0, Int(((end - start) * 1000).rounded()))
   }
 
   /// A recogniser error. After `stop` it only means no more text is coming (for example, no speech).
@@ -319,34 +336,58 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
   /// The reply for Dart, or nil when the transcriber cannot serve this device or locale.
   @available(iOS 26, macOS 26, *)
   @MainActor
-  private func startAnalyzer(_ gen: Int, hotwords: [String]) async -> String? {
-    guard SpeechTranscriber.isAvailable else { return nil }
-    guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Self.locale) else { return nil }
-    // .fastResults: words show while being said instead of after the transcriber gathers more context (user
-    // 2026-11-18: 「实时显示不太即时……确保说完立即显示」); the finalised text still corrects them.
-    let transcriber = SpeechTranscriber(
-      locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults, .fastResults],
-      attributeOptions: [])
+  private func startAnalyzer(_ gen: Int, hotwords: [String], pressedAt: TimeInterval) async -> String? {
+    let key = Self.locale.identifier
+    if analyzerCache?.key != key { analyzerCache = nil }
+    let supported: Locale?
+    if let cache = analyzerCache {
+      supported = cache.locale
+    } else {
+      supported = await DictationTranscriber.supportedLocale(equivalentTo: Self.locale)
+      analyzerCache = AnalyzerCache(key: key, locale: supported)
+    }
+    guard let locale = supported else { return nil }
+    // DictationTranscriber, not SpeechTranscriber: with the hotwords it got the names and products right in
+    // 17 of 30 probe clips against 4, at a lower error rate and no later first word (voice local fix spec §8,
+    // D13). The progressive preset shows words while they are being said; the finalised text still corrects them.
+    let preset = DictationTranscriber.Preset.progressiveLongDictation
+    let transcriber = DictationTranscriber(
+      locale: locale, contentHints: preset.contentHints, transcriptionOptions: preset.transcriptionOptions,
+      reportingOptions: preset.reportingOptions, attributeOptions: preset.attributeOptions)
 
     if assetsInstalling { return "preparing" }
-    do {
-      if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
-        assetsInstalling = true
-        let download = Task.detached { try? await request.downloadAndInstall() }
-        Task { @MainActor [weak self] in
-          await download.value
-          self?.assetsInstalling = false
+    if analyzerCache?.key == key, analyzerCache?.assetsInstalled == true {
+      // Installed at an earlier press for this language: no need to ask again.
+    } else {
+      do {
+        if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+          analyzerCache = nil
+          assetsInstalling = true
+          let download = Task.detached { try? await request.downloadAndInstall() }
+          Task { @MainActor [weak self] in
+            await download.value
+            self?.assetsInstalling = false
+          }
+          return "preparing"
         }
-        return "preparing"
+        if analyzerCache?.key == key { analyzerCache?.assetsInstalled = true }
+      } catch {
+        analyzerCache = nil
+        return nil
       }
-    } catch {
-      return nil
     }
-    guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
-      return nil
+    let format: AVAudioFormat
+    if analyzerCache?.key == key, let cached = analyzerCache?.format {
+      format = cached
+    } else {
+      guard let found = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
+        return nil
+      }
+      format = found
+      if analyzerCache?.key == key { analyzerCache?.format = found }
     }
 
-    let run = Run()
+    let run = Run(startedAt: pressedAt)
     let analyzer = SpeechAnalyzer(modules: [transcriber])
     let (stream, input) = AsyncStream.makeStream(of: AnalyzerInput.self)
     run.finish = {
@@ -368,10 +409,14 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
         }
         self?.final(run, done)
       } catch {
+        // A live run failing (not one cancelled or replaced): maybe the cached assets went away, so look
+        // them up again next time.
+        if let self, run === self.run { self.analyzerCache = nil }
         self?.failed(run)
       }
     }
-    // The hotwords as the analysis context: the transcriber leans toward them. Without them it still runs.
+    // The hotwords as the analysis context: DictationTranscriber leans toward them (probe P1/P2, voice local fix
+    // spec §8: SpeechTranscriber ignored them, 4/30 clips right either way). Without them it still runs.
     if !hotwords.isEmpty {
       let context = AnalysisContext()
       context.contextualStrings[.general] = hotwords
@@ -380,6 +425,7 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
     do {
       try await analyzer.start(inputSequence: stream)
     } catch {
+      analyzerCache = nil
       run.abort()
       return nil
     }
@@ -425,7 +471,7 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
 
   // MARK: - Below iOS 26: SFSpeechRecognizer
 
-  private func startRecognizer(hotwords: [String]) -> String {
+  private func startRecognizer(hotwords: [String], pressedAt: TimeInterval) -> String {
     guard let recognizer = SFSpeechRecognizer(locale: Self.locale), recognizer.isAvailable else { return "unavailable" }
     let request = SFSpeechAudioBufferRecognitionRequest()
     request.shouldReportPartialResults = true
@@ -435,7 +481,7 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
     request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
     guard startAudio({ _ in { request.append($0) } }) else { return "unavailable" }
 
-    let run = Run()
+    let run = Run(startedAt: pressedAt)
     let task = recognizer.recognitionTask(with: request) { [weak self, weak run] result, error in
       let text = result?.bestTranscription.formattedString
       let isFinal = result?.isFinal ?? false
@@ -462,8 +508,26 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
   }
 }
 
+/// The analyzer lookups for one language (`key`, a `Locale.identifier`); main thread only.
+private struct AnalyzerCache {
+  let key: String
+  /// `DictationTranscriber.supportedLocale(equivalentTo:)`; nil = no transcriber for this language.
+  let locale: Locale?
+  /// `assetInstallationRequest` said nothing needs installing.
+  var assetsInstalled = false
+  /// `SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith:)`.
+  var format: AVAudioFormat?
+}
+
 /// One recording: how to end its recogniser, and what Dart has seen of it. Main thread only.
 private final class Run {
+  init(startedAt: TimeInterval) { self.startedAt = startedAt }
+
+  /// When `start` was called (`SpeechPlugin.now()`), and when the first non-empty partial and `stop` came.
+  let startedAt: TimeInterval
+  var firstPartialAt: TimeInterval?
+  var stoppedAt: TimeInterval?
+
   /// The audio has ended: the recogniser should deliver its final text.
   var finish: () -> Void = {}
   /// Drop the recogniser without a result. Safe to call more than once, and after it finished.
