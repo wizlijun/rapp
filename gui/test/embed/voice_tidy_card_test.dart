@@ -396,9 +396,10 @@ void main() {
       await tester.pump(const Duration(milliseconds: 700));
     }
 
-    void tidyTest(String name, Future<void> Function(WidgetTester) body, {TargetPlatform p = TargetPlatform.macOS}) =>
-        testWidgets(name, (tester) async {
-          debugDefaultTargetPlatformOverride = p;
+    void tidyTest(String name, Future<void> Function(WidgetTester) body, {TargetPlatform? p}) {
+      for (final platform in p == null ? [TargetPlatform.macOS, TargetPlatform.linux] : [p]) {
+        testWidgets('$name (${platform.name})', (tester) async {
+          debugDefaultTargetPlatformOverride = platform;
           try {
             await body(tester);
             tidy.dispose();
@@ -407,6 +408,8 @@ void main() {
             debugDefaultTargetPlatformOverride = null;
           }
         });
+      }
+    }
 
     List<String> dashed(WidgetTester tester) {
       final span = tester.widget<Text>(find.byKey(const Key('tidy-body'))).textSpan! as TextSpan;

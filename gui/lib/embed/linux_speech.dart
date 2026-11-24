@@ -238,7 +238,7 @@ class LinuxSpeechChannel extends MethodChannel
     }
   }
 
-  Future<String> _start() async {
+  Future<String> _start(dynamic arguments) async {
     if (_disposed || _process != null || _ready != null) return 'unavailable';
     if (!_observing) {
       WidgetsBinding.instance.addObserver(this);
@@ -286,7 +286,19 @@ class LinuxSpeechChannel extends MethodChannel
         }),
       );
       process.stdin.writeln(
-        jsonEncode({'model': model.file.path, 'language': language()}),
+        jsonEncode({
+          'model': model.file.path,
+          'language': language(),
+          // Bound the startup line and take a fresh snapshot for every recording.
+          if (arguments is Map && arguments['hotwords'] is List)
+            'hotwords': (arguments['hotwords'] as List)
+                .whereType<String>()
+                .map((w) => w.trim())
+                .where((w) => w.isNotEmpty && !w.contains(RegExp(r'[\x00-\x1f\x7f]')))
+                .take(100)
+                .map((w) => String.fromCharCodes(w.runes.take(64)))
+                .toList(),
+        }),
       );
       return await ready.future.timeout(
         startWait,
@@ -331,7 +343,7 @@ class LinuxSpeechChannel extends MethodChannel
   Future<T?> invokeMethod<T>(String method, [dynamic arguments]) async {
     switch (method) {
       case 'start':
-        return await _start() as T;
+        return await _start(arguments) as T;
       case 'stop':
         final epoch = _epoch;
         _process?.stdin.writeln('{"cmd":"stop"}');

@@ -77,6 +77,8 @@ local recognition can take up to five minutes to finish on slower CPUs.
 Recognition runs locally in the system language; audio stays in memory and is
 never saved or uploaded. Requires a PulseAudio-compatible server and libpulse.
 Esc cancels; Tab edits before sending. Change the shortcut in the sidebar.
+AI correction learning and prompt/chat modes use the shared LLM endpoint.
+Gateway hotwords now provide spelling context to local recognition on each recording.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and

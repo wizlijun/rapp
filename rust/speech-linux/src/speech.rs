@@ -28,7 +28,30 @@ fn rms(audio: &[f32]) -> f32 {
     (audio.iter().map(|v| v * v).sum::<f32>() / audio.len() as f32).sqrt()
 }
 
-fn decode(ctx: &WhisperContext, language: &str, audio: &[f32]) -> Result<String> {
+// Whisper treats this as spelling context, not text to insert. Bound both work and
+// context size, and reject controls (notably NUL, which its C API cannot accept).
+fn hotword_prompt(start: &Value) -> String {
+    let Some(words) = start["hotwords"].as_array() else {
+        return String::new();
+    };
+    let mut prompt = String::new();
+    for word in words.iter().filter_map(Value::as_str).take(100) {
+        let word = word.trim();
+        if word.is_empty() || word.chars().any(char::is_control) {
+            continue;
+        }
+        let word: String = word.chars().take(64).collect();
+        let separator = if prompt.is_empty() { "" } else { ", " };
+        if prompt.len() + separator.len() + word.len() > 1024 {
+            break;
+        }
+        prompt.push_str(separator);
+        prompt.push_str(&word);
+    }
+    prompt
+}
+
+fn decode(ctx: &WhisperContext, language: &str, prompt: &str, audio: &[f32]) -> Result<String> {
     if !audible(audio) {
         return Ok(String::new());
     }
@@ -40,6 +63,9 @@ fn decode(ctx: &WhisperContext, language: &str, audio: &[f32]) -> Result<String>
     p.set_language(Some(language));
     p.set_translate(false);
     p.set_no_context(true);
+    if !prompt.is_empty() {
+        p.set_initial_prompt(prompt);
+    }
     p.set_no_timestamps(true);
     p.set_print_special(false);
     p.set_print_progress(false);
@@ -101,11 +127,12 @@ pub fn run() -> Result<()> {
         emit(json!({"version":env!("CARGO_PKG_VERSION"),"backend":"whisper.cpp","local":true}));
         return Ok(());
     }
-    // A bounded startup message. The GUI supplies only a model path and its system language.
+    // A bounded startup message: model, system language, and optional spelling hints.
     let mut line = String::new();
     std::io::stdin().lock().take(65_536).read_line(&mut line)?;
     ensure!(line.len() < 65_536, "startup message too long");
     let start: Value = serde_json::from_str(&line)?;
+    let prompt = hotword_prompt(&start);
     let model = start["model"].as_str().context("missing model")?;
     let language = start["language"]
         .as_str()
@@ -124,7 +151,7 @@ pub fn run() -> Result<()> {
     std::thread::spawn(move || {
         for audio in work {
             let size = audio.len();
-            let result = decode(&ctx, &language, &audio);
+            let result = decode(&ctx, &language, &prompt, &audio);
             if results.send(Event::Decoded(size, result)).is_err() {
                 break;
             }
@@ -261,6 +288,29 @@ pub fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hotwords_are_optional_and_reject_invalid_entries() {
+        assert_eq!(hotword_prompt(&json!({})), "");
+        assert_eq!(hotword_prompt(&json!({"hotwords": "Python"})), "");
+        assert_eq!(
+            hotword_prompt(
+                &json!({"hotwords": [null, 4, "", "  Python  ", "黑猫瑞", "bad\u{0}word", "bad\nword"]})
+            ),
+            "Python, 黑猫瑞"
+        );
+    }
+    #[test]
+    fn hotword_context_is_bounded_without_splitting_unicode() {
+        let prompt = hotword_prompt(&json!({"hotwords": vec!["词".repeat(100); 200]}));
+        assert!(prompt.len() <= 1024);
+        assert!(prompt.split(", ").all(|w| w.chars().count() == 64));
+        assert_eq!(
+            hotword_prompt(&json!({"hotwords": vec!["a"; 200]}))
+                .split(", ")
+                .count(),
+            100
+        );
+    }
     #[test]
     fn silence_and_clicks_do_not_trigger_recognition() {
         assert!(!audible(&vec![0.; RATE]));

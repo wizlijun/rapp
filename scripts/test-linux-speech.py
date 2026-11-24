@@ -71,13 +71,14 @@ with tempfile.TemporaryDirectory(prefix='rapp-voice-fixture-') as directory:
     assert len(sample) < 16000 * 2 * 60
     (tmp / 'long.pcm').write_bytes(bytes(16000 * 2 * 299 - len(sample)) + sample)
     (tmp / 'over-cap.pcm').write_bytes(bytes(16000 * 2 * 300) + sample)
-    for name, pcm, word in [
-        ('speech', args.pcm.resolve(), 'country'),
-        ('silence', tmp / 'silent.pcm', ''),
-        ('speech near five minutes', tmp / 'long.pcm', 'country'),
-        ('speech beyond five minutes is excluded', tmp / 'over-cap.pcm', ''),
+    for name, pcm, word, hotwords in [
+        ('speech', args.pcm.resolve(), 'country', []),
+        ('speech with spelling context', args.pcm.resolve(), 'country', ['Americans', 'country']),
+        ('silence with spelling context', tmp / 'silent.pcm', '', ['Python', '黑猫瑞']),
+        ('speech near five minutes', tmp / 'long.pcm', 'country', []),
+        ('speech beyond five minutes is excluded', tmp / 'over-cap.pcm', '', []),
     ]:
-        p = start({'pcm_path': str(pcm)})
+        p = start({'pcm_path': str(pcm), 'hotwords': hotwords})
         try:
             event(p, 'ready')
             text = event(p, 'final')['text']

@@ -8,6 +8,11 @@ void main() {
     expect(defaultTidyMode('term:abc', 'zsh'), TidyMode.prompt);
     expect(defaultTidyMode('desktop:', '桌面'), TidyMode.prompt);
     expect(defaultTidyMode('com.apple.Terminal', '终端'), TidyMode.prompt);
+    expect(defaultTidyMode('org.telegram.desktop', 'Telegram Desktop'), TidyMode.chat);
+    expect(defaultTidyMode('com.tencent.WeChat', '微信'), TidyMode.chat);
+    expect(defaultTidyMode('Slack', 'Slack'), TidyMode.chat);
+    expect(defaultTidyMode('Alacritty', 'Alacritty'), TidyMode.prompt);
+    expect(defaultTidyMode('com.mitchellh.ghostty', 'Ghostty'), TidyMode.prompt);
   });
   test('tidyModeKey', () {
     expect(tidyModeKey('term:abc', 'd1'), 'term');

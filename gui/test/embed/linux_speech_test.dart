@@ -98,7 +98,7 @@ void main() {
     await m.file.writeAsBytes(data);
     final file = File('${tmp.path}/worker.py');
     await file.writeAsString(
-      'import sys,json,time\njson.loads(sys.stdin.readline())\n$script',
+      'import sys,json,time\nstart=json.loads(sys.stdin.readline())\n$script',
     );
     return LinuxSpeechChannel(
       isFocused: () async => true,
@@ -109,6 +109,46 @@ void main() {
       spawn: (exe, _) => Process.start('python3', ['-u', exe]),
     );
   }
+
+  test('each Linux recording receives the current learned hotwords', () async {
+    final c = await channel('''
+print(json.dumps({'event':'ready'}),flush=True)
+json.loads(sys.stdin.readline())
+print(json.dumps({'event':'final','text':json.dumps(start.get('hotwords',[]))}),flush=True)
+''');
+    var words = <String>['Dify'];
+    final voice = VoiceInput(channel: c)..hotwords = () => words;
+    try {
+      for (final next in [<String>['Dify'], <String>['Python', '黑猫瑞'], <String>[]]) {
+        words = next;
+        expect(await voice.start(), VoiceStart.ok);
+        expect(jsonDecode(await voice.stop()), next);
+        await c.invokeMethod<void>('cancel');
+      }
+    } finally {
+      voice.dispose();
+    }
+  });
+
+  test('Linux bounds hotwords and drops malformed or control entries', () async {
+    final c = await channel('''
+print(json.dumps({'event':'ready'}),flush=True)
+json.loads(sys.stdin.readline())
+print(json.dumps({'event':'final','text':json.dumps(start['hotwords'])}),flush=True)
+''');
+    final voice = VoiceInput(channel: c)..hotwords = () => [
+      '', '  Python  ', 'bad\u0000word', 'bad\nword', '词' * 100,
+      ...List.filled(150, 'Hemory'),
+    ];
+    try {
+      expect(await voice.start(), VoiceStart.ok);
+      final words = jsonDecode(await voice.stop()) as List;
+      expect(words, hasLength(100));
+      expect(words.take(2), ['Python', '词' * 64]);
+    } finally {
+      voice.dispose();
+    }
+  });
 
   test(
     'real subprocess delivers partial, meter and final through VoiceInput',
