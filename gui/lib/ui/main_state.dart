@@ -737,13 +737,13 @@ class MainState extends ChangeNotifier {
   /// What the runner was last told about [pictureFocused]'s voice.
   bool _voiceSent = false;
 
-  /// Hold-to-talk on [sid]'s picture (macOS): an app window on the stage, with no writing panel open to take the
-  /// voice (and the keys) itself.
+  /// Hold-to-talk on [sid]'s picture (macOS, Linux): an app window on the stage. The text area open or not, as a
+  /// mouse hold on 语音 (and iOS): its editor taking the keys blurs the picture, which keeps the gate off them.
   bool _voiceFor(Object sid) {
     if ((defaultTargetPlatform != TargetPlatform.macOS && defaultTargetPlatform != TargetPlatform.linux) || voice == null) return false;
     final rs = remote[sid];
     if (rs == null || rs.detached || termPort?.owns(sid) == true) return false;
-    return rs.composerAllowed && !rs.composer.open;
+    return rs.composerAllowed;
   }
 
   void _sendFocus(Object sid) {

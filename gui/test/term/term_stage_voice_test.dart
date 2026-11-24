@@ -216,7 +216,8 @@ void main() {
       expect(bubbled, isEmpty);
     }, variant: const TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
 
-    testWidgets('not ready with the panel open', (t) async {
+    // Final review: the text area open, the stage that has the keys still holds to talk (as the mouse does).
+    testWidgets('ready with the panel open too', (t) async {
       await show(t);
       session.composer.open = true;
       await t.pump();
@@ -224,7 +225,8 @@ void main() {
       await t.pump(const Duration(milliseconds: 400));
       await up(t, LogicalKeyboardKey.altRight);
       await t.pump();
-      expect(voiceKeys, isEmpty);
+      expect(voiceKeys, [(1, VoiceKeyPhase.start), (1, VoiceKeyPhase.release)]);
+      expect(sent(), isEmpty);
     }, variant: const TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
 
     testWidgets('changing the hotkey while recording cancels and leaves no key swallowed', (t) async {

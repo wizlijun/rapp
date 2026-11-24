@@ -200,13 +200,12 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   int _gateArmedAt = 0;
   StreamSubscription<Object>? _voiceEnds;
 
-  /// A hotkey press may start voice now: macOS, a voice engine, the panel allowed and not open (it takes the
-  /// voice and the keys itself), and the stage has the keyboard.
+  /// A hotkey press may start voice now: macOS or Linux, a voice engine, the panel allowed (open or not), and the
+  /// stage has the keyboard.
   bool get _voiceReady =>
       (_mac || defaultTargetPlatform == TargetPlatform.linux) &&
       widget.state.voice != null &&
       widget.session.composerAllowed &&
-      !widget.session.composer.open &&
       _focus.hasFocus;
 
   bool get _gateOn => (_mac || defaultTargetPlatform == TargetPlatform.linux) && widget.state.voice != null;
