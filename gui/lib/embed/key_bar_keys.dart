@@ -2,7 +2,7 @@
 // Pure data and layout: the widget draws what keyBarRows says and sends what barKeys says.
 import 'modifier_latch.dart';
 
-enum BarKind { send, mod, copy, paste, more, hide }
+enum BarKind { send, mod, copy, paste, more }
 
 /// One key. [wire] is the terminal wire name; [code] and [mods] the macOS key code and modifier bits for app sessions;
 /// [bit] the latch bit of a mod key; [alt] the id of the swipe-up key.
@@ -54,12 +54,11 @@ const barKeys = <String, BarKey>{
   'copy': (id: 'copy', label: '复制', spoken: '复制', kind: BarKind.copy, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
   'paste': (id: 'paste', label: '粘贴', spoken: '粘贴', kind: BarKind.paste, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
   'more': (id: 'more', label: '⋯', spoken: '更多按键', kind: BarKind.more, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
-  'hide': (id: 'hide', label: '⊙', spoken: '收起快捷区', kind: BarKind.hide, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
 };
 
 /// The rows of the bar, each a list of key ids: one row of eleven, ⊙ last, and [more] adds the second row.
 List<List<String>> keyBarRows({required bool app, required bool more}) {
-  const first = ['esc', 'stab', 'tab', 'cc', 'left', 'up', 'down', 'right', 'enter', 'more', 'hide'];
+  const first = ['esc', 'stab', 'tab', 'cc', 'left', 'up', 'down', 'right', 'enter', 'more'];
   if (!more) return [first];
   return [
     first,

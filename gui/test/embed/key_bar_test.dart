@@ -510,28 +510,11 @@ void main() {
       expect(File('${tmp.path}/devices/123456789/gui.json').readAsStringSync(), contains('"key_bar_more":false'));
     });
 
-    iosTest('⊙ is always the last key of the first row', (tester) async {
+    iosTest('⋯ is the last key of the first row; no ⊙', (tester) async {
       await tester.pumpWidget(bar(tsess));
-      expect(k('hide'), findsOneWidget);
+      expect(k('hide'), findsNothing);
       expect(k('more'), findsOneWidget);
-      expect(find.bySemanticsLabel('收起快捷区'), findsOneWidget);
-    });
-
-    iosTest('⊙ hides the quick area of its kind: a terminal sets quick_hidden_term, Safari quick_hidden_app', (tester) async {
-      await tester.pumpWidget(bar(tsess));
-      expect(s.prefs.quickHiddenTerm, isFalse);
-      await tap(tester, 'hide');
-      expect(s.prefs.quickHiddenTerm, isTrue);
-      expect(s.prefs.quickHiddenApp, isTrue);
-      s.setQuickHidden(term: false, hidden: false);
-      await tester.pumpWidget(bar(app));
-      await tap(tester, 'hide');
-      expect(s.prefs.quickHiddenApp, isTrue);
-      expect(s.prefs.quickHiddenTerm, isTrue);
-      await tester.pumpWidget(bar(tsess));
-      await tap(tester, 'hide'); // ⊙ toggles: the terminal kind is shown again
-      expect(s.prefs.quickHiddenTerm, isFalse);
-      expect(s.prefs.quickHiddenApp, isTrue);
+      expect(find.descendant(of: find.byType(KeyBar), matching: find.bySemanticsLabel('收起快捷区')), findsNothing);
     });
 
     iosTest('the bar is as high as keyBarHeightOf says, even at zoom 1.75 widths', (tester) async {
@@ -671,7 +654,8 @@ void main() {
       await tester.pump();
       expect(quickHidden(s, tapp), isTrue);
       expect(s.prefs.quickHiddenApp, isTrue, reason: 'the other kind is untouched');
-      await tap(tester, 'hide');
+      s.setQuickHidden(term: termKind(s, tapp), hidden: false);
+      await tester.pump();
       expect(quickHidden(s, tapp), isFalse);
       tapp.composer.editorFocused = true;
       await tester.sendKeyEvent(LogicalKeyboardKey.keyA);

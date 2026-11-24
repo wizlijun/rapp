@@ -224,7 +224,7 @@ class _KeyBarState extends State<KeyBar> {
   void initState() {
     super.initState();
     _bind();
-    // A key typed into the picture folds the 快捷区 (打字后自动收起); ⊙ or the handle shows it again.
+    // A key typed into the picture folds the 快捷区 (打字后自动收起); the toggle in the box, or beside 输入, shows it again.
     HardwareKeyboard.instance.addHandler(_onKey);
   }
 
@@ -320,9 +320,6 @@ class _KeyBarState extends State<KeyBar> {
         _paste();
       case BarKind.more:
         widget.state.setKeyBarMore(!widget.state.prefs.keyBarMore);
-      case BarKind.hide:
-        final term = termKind(widget.state, widget.session);
-        widget.state.setQuickHidden(term: term, hidden: !quickHidden(widget.state, widget.session));
     }
     return null;
   }

@@ -238,11 +238,11 @@ void main() {
       expect(tester.getRect(panel).bottom, text - barH(app) - 8);
     });
 
-    dockTest(p, '⊙ folds the quick area; the handle comes back; the open text area falls to the anchor',
+    dockTest(p, 'folding the quick area: the handle comes back; the open text area falls to the anchor',
         (tester) async {
       await openOn(tester, tsess);
       expect(bottomOf(tester, panel), anchor() + barH(tsess) + 8);
-      await tester.tap(find.byKey(const Key('bar-hide')));
+      s.setQuickHidden(term: true, hidden: true);
       await settle(tester);
       expect(s.prefs.quickHiddenTerm, isTrue);
       expect(bar, findsNothing);
