@@ -325,7 +325,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     final keyboard = HardwareKeyboard.instance;
     // Super belongs to the Linux desktop. Ctrl maps to the remote Mac's Command.
     if (keyboard.isMetaPressed) return false;
-    // Ctrl+Enter is rapp's (the writing panel), whatever the remote Command would have done.
+    // Ctrl+Enter is rApp's (the writing panel), whatever the remote Command would have done.
     if ((event.logicalKey == LogicalKeyboardKey.enter || event.logicalKey == LogicalKeyboardKey.numpadEnter) &&
         keyboard.isControlPressed &&
         !keyboard.isShiftPressed &&

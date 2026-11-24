@@ -23,7 +23,7 @@ pub struct Config {
     /// Where `latest.json` is fetched from; `rapp_update::DEFAULT_URL` when unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_url: Option<String>,
-    /// Install by itself when nobody is using rapp (default true).
+    /// Install by itself when nobody is using rApp (default true).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_update: Option<bool>,
     /// The scheduled checks (default true); the 检查更新 button works either way.

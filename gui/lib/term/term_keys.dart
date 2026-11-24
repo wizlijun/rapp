@@ -22,7 +22,7 @@ class TermAction extends TermInput {
   final TermShortcut action;
 }
 
-/// Kept for rapp (find, font size): swallowed, not sent.
+/// Kept for rApp (find, font size): swallowed, not sent.
 class TermReserved extends TermInput {}
 
 /// US-layout base and shifted characters per physical key.

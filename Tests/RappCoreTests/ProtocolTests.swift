@@ -587,7 +587,7 @@ final class ProtocolTests: XCTestCase {
 
     func testWindowTitleRule() {
         XCTAssertEqual(windowTitle("", appName: "Calculator"), "Calculator")
-        XCTAssertEqual(windowTitle(nil, appName: nil), "rapp")
+        XCTAssertEqual(windowTitle(nil, appName: nil), "rApp")
         XCTAssertEqual(windowTitle("Untitled 2", appName: "TextEdit"), "Untitled 2")
         XCTAssertEqual(windowTitle(String(repeating: "字", count: 300), appName: "x").count, 200)
     }

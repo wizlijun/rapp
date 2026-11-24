@@ -15,7 +15,7 @@ const linuxSpeechModelBytes = 147951465;
 const linuxSpeechModelSha256 =
     '60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe';
 
-/// A verified model in the user's cache, separate from the git-backed rapp data directory.
+/// A verified model in the user's cache, separate from the git-backed rApp data directory.
 class LinuxSpeechModel {
   LinuxSpeechModel({
     File? file,

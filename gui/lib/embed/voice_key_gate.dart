@@ -23,7 +23,7 @@ const modifierCodes = {54, 55, 56, 57, 58, 59, 60, 61, 62, 63};
 const _holdModifierCodes = {54, 55, 56, 58, 59, 60, 61, 62, 63};
 
 /// Whether `code` held with `mods` may be a `hold_combo` hotkey: a non-modifier key other than
-/// Esc (53) and Tab (48), with at least one of ⌃ ⌥ ⌘, and not one of rapp's own shortcuts
+/// Esc (53) and Tab (48), with at least one of ⌃ ⌥ ⌘, and not one of rApp's own shortcuts
 /// (⌃⌘ anything, ⌘Q, ⌃↩).
 bool acceptsCombo(int code, int mods) {
   if (modifierCodes.contains(code) || code == 53 || code == 48) return false;

@@ -15,7 +15,7 @@ void main() {
 
   test('missing permissions from an open error', () {
     const e = 'rapp-host exited: missing permission: Screen Recording, Accessibility\n'
-        'Allow rapp (or the terminal running rapp-host) under System Settings > Privacy & Security, then connect again.';
+        'Allow rApp (or the terminal running rapp-host) under System Settings > Privacy & Security, then connect again.';
     expect(missingFromError(e), [Permission.screenRecording, Permission.accessibility]);
     expect(missingFromError('rapp-host exited: missing permission: Accessibility'), [Permission.accessibility]);
     expect(missingFromError('bad password'), isNull);
@@ -34,6 +34,6 @@ void main() {
 
   test('remote hint says what is missing and where to fix it', () {
     expect(remoteHint('mac-a', [Permission.screenRecording, Permission.accessibility]),
-        '「mac-a」缺少 屏幕录制、辅助功能 权限。请在那台电脑上打开 rapp，在 本机 › 权限 里点「打开系统设置」。');
+        '「mac-a」缺少 屏幕录制、辅助功能 权限。请在那台电脑上打开 rApp，在 本机 › 权限 里点「打开系统设置」。');
   });
 }

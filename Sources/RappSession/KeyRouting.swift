@@ -24,14 +24,14 @@ extension KeyFlags {
 }
 #endif
 
-/// Where a key event from the embedded picture goes: to rapp itself (Flutter) or to A.
+/// Where a key event from the embedded picture goes: to rApp itself (Flutter) or to A.
 public enum KeyRoute: Equatable {
     case local
     case remote
 }
 
-/// While the picture has focus every key goes to A except ⌃⌘ chords (rapp's own shortcuts),
-/// ⌃↩ (the writing panel's) and plain ⌘Q (quit rapp); without focus every key stays with rapp.
+/// While the picture has focus every key goes to A except ⌃⌘ chords (rApp's own shortcuts),
+/// ⌃↩ (the writing panel's) and plain ⌘Q (quit rApp); without focus every key stays with rApp.
 public func routeKey(keyCode: UInt16, flags: KeyFlags, pictureFocused: Bool) -> KeyRoute {
     let mods = flags.intersection([.command, .control, .option, .shift])
     if mods.contains([.control, .command]) { return .local }
@@ -104,7 +104,7 @@ public struct KeyTracker {
     }
 
     /// Routes one press or release and keeps track of what A holds. A release goes to A exactly
-    /// when A got the press, so both A and rapp always see matched pairs. A press that stays
+    /// when A got the press, so both A and rApp always see matched pairs. A press that stays
     /// local while the picture has focus is a reserved chord (⌃⌘…, ⌘Q): whatever A holds (the
     /// chord's first modifiers) is released on A first, so nothing stays held there.
     public mutating func route(keyCode: UInt16, down isDown: Bool, flags: KeyFlags,

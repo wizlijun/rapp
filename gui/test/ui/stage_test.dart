@@ -144,7 +144,7 @@ void main() {
       await flush();
     });
     await tester.pump();
-    expect(find.text('rapp-hub 已退出 — 重启 rapp 以恢复'), findsOneWidget);
+    expect(find.text('rapp-hub 已退出 — 重启 rApp 以恢复'), findsOneWidget);
     expect(find.byKey(const Key('focus-button')), findsNothing);
   });
 

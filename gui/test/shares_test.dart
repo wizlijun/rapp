@@ -75,12 +75,12 @@ void main() {
     for (final s in ['offline', 'no key', 'unknown name']) {
       expect(t(s), '离线，读不到它的端口');
     }
-    expect(t('old version'), '对方的 rapp 还不支持分享端口');
+    expect(t('old version'), '对方的 rApp 还不支持分享端口');
     expect(t('policy'), '对方的策略不允许远程设置');
     expect(t('limit'), '最多分享 64 个端口');
     expect(t('bad port'), '端口号是 1 到 65535 的数字');
-    expect(t('service not running'), '本机的 rapp 服务没有在运行');
-    expect(t('service connection closed'), '本机的 rapp 服务没有在运行');
+    expect(t('service not running'), '本机的 rApp 服务没有在运行');
+    expect(t('service connection closed'), '本机的 rApp 服务没有在运行');
     expect(t('whatever'), '出错了：whatever');
     bool h(String s) => shareErrorHidesInput(ServiceException(s));
     for (final s in ['offline', 'old version', 'policy', 'service not running']) {

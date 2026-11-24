@@ -1,4 +1,4 @@
-# rapp relay (Docker)
+# rApp relay (Docker)
 
 One Alpine image holding one program, `/usr/local/bin/rapp-relay` (the `rapp-relay` crate). Runs as uid
 10001, read-only root, all capabilities dropped. Spec: `docs/superpowers/specs/2026-11-13-rapp-relay-design.md` §12.
@@ -59,8 +59,8 @@ key`. If not, upgrade the image first (see "Install in one line" or "Start with 
    怀疑 key 泄露了，或者丢了设备，就换。
 
 2. **A lost device: revoke it first / 丢了设备：先吊销.** Find its ID in the list (the device's ID is also shown
-   under 本机 in rapp on that device), then revoke it:
-   在列表里找到它的 ID（rapp 的 本机 一节里也显示这台设备的 ID），然后吊销：
+   under 本机 in rApp on that device), then revoke it:
+   在列表里找到它的 ID（rApp 的 本机 一节里也显示这台设备的 ID），然后吊销：
 
        docker exec rapp-relay rapp-relay devices
        docker exec rapp-relay rapp-relay revoke <ID>
@@ -83,7 +83,7 @@ key`. If not, upgrade the image first (see "Install in one line" or "Start with 
    then `已连接`; the device keeps its ID. On the controlling side, a window that went through the relay closes;
    until the new key is entered on that device too, opening it again fails with
    `中继换了 key，请到 本机 → 输入新 key`. After that, open it again.
-   在 rapp 里：侧栏 设备 → 本机。状态一行显示 `⚠ 安全变更：中继换了 key`。点 `输入新 key`，粘贴新 key，
+   在 rApp 里：侧栏 设备 → 本机。状态一行显示 `⚠ 安全变更：中继换了 key`。点 `输入新 key`，粘贴新 key，
    点 `保存`。预期：先显示 `连接中`，再显示 `已连接`；设备的 ID 不变。操作的一侧，经中继打开的窗口会关掉；
    那台设备也输入新 key 之前，再打开会提示 `中继换了 key，请到 本机 → 输入新 key`。输入以后，重新打开窗口就行。
 
@@ -111,10 +111,10 @@ key`. If not, upgrade the image first (see "Install in one line" or "Start with 
 
 Notes / 说明:
 
-- **Old app versions / 老版本的 app.** A device still on rapp 0.6.0 does not understand "key changed": it keeps
+- **Old app versions / 老版本的 app.** A device still on rApp 0.6.0 does not understand "key changed": it keeps
   retrying with the old key, every try is a wrong key, and its address gets locked again and again (up to 300 s
   each time), which also holds back the other devices behind that address. Upgrade those devices.
-  还是 rapp 0.6.0 的设备不认识"换了 key"：它会一直拿旧 key 重试，每一次都算错的 key，它的地址会被一次次锁住（每次最长
+  还是 rApp 0.6.0 的设备不认识"换了 key"：它会一直拿旧 key 重试，每一次都算错的 key，它的地址会被一次次锁住（每次最长
   300 秒），同一地址后面的其他设备也会被挡住。把这些设备升级。
 - **Offline devices / 换 key 时离线的设备.** A machine that was off during `rotate-key` tries the old key when it
   comes back, then shows `⚠ 安全变更：中继换了 key` like the others. Its service and its hub share one identity and

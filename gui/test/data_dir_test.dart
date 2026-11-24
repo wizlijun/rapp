@@ -174,7 +174,7 @@ void main() {
     expect(read('$root/local/service.json'), read('$legacy/service.json'));
   });
 
-  test('rapp home flat layout migrates into local', () {
+  test('rApp home flat layout migrates into local', () {
     final home = '${tmp.path}/home';
     oldConfig(home);
     expect(prepareDataDir(home, home), isTrue);

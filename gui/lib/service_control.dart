@@ -41,7 +41,7 @@ String _unitQuote(String s) =>
 /// Both installed and portable bundles use the executable the GUI is running beside.
 /// Do not bake the resolved data root into the unit: a restart must reread data-root.
 String linuxServiceUnit(String serviceExe, Map<String, String> env) {
-  final b = StringBuffer('[Unit]\nDescription=rapp data and connection service\n\n[Service]\nType=simple\n')
+  final b = StringBuffer('[Unit]\nDescription=rApp data and connection service\n\n[Service]\nType=simple\n')
     // ':' disables $ expansion. env execs the binary without a shell, allowing
     // characters systemd rejects in the executable field (e.g. quoted paths).
     ..writeln('ExecStart=:/usr/bin/env -- ${_unitQuote(serviceExe)}')

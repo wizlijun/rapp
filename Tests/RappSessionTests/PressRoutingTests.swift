@@ -84,7 +84,7 @@ final class PressRoutingTests: XCTestCase {
         var r = focused()
         XCTAssertEqual(r.press(hidUsage: 0xE0, uiModifiers: control, down: true, characters: nil, composeOn: false,
                                remoteSecure: false), .send([KeyOut(59, 0x40000, true)], latchUsed: false))
-        // ⌃⌘… is rapp's: as ⌘ joins, A first lets go of the ⌃ it holds, and ⌘ stays local.
+        // ⌃⌘… is rApp's: as ⌘ joins, A first lets go of the ⌃ it holds, and ⌘ stays local.
         XCTAssertEqual(r.press(hidUsage: 0xE3, uiModifiers: control | command, down: true, characters: nil,
                                composeOn: false, remoteSecure: false), .localAfterRelease([KeyOut(59, 0, false)]))
         XCTAssertEqual(r.press(hidUsage: 0x09, uiModifiers: control | command, down: true, characters: "f",

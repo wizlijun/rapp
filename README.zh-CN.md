@@ -1,9 +1,9 @@
-# rapp
+# rApp
 
 **更多 Agent。一个 Pad。**
 
 Agent 分布在不同机器，你的注意力，留在一处。
-rapp 将远程 Mac 上的应用汇入一个工作台，让你在眼前这台电脑上查看、回复、指挥 Agent。
+rApp 将远程 Mac 上的应用汇入一个工作台，让你在眼前这台电脑上查看、回复、指挥 Agent。
 
 推荐使用 Omarchy 平板电脑。
 
@@ -17,17 +17,17 @@ rapp 将远程 Mac 上的应用汇入一个工作台，让你在眼前这台电�
 | Omarchy / Arch · x86_64 | 下载 `.pkg.tar.zst`，运行 `sudo pacman -U ./rapp-omarchy-*.pkg.tar.zst`。可控制 Mac 应用和桌面，也可提供文本终端及端口共享。 |
 | iPhone Duo · iOS / iPadOS | 已适配 iPhone Duo；iOS、iPadOS 版即将推出。 |
 
-在被控 Mac 和控制端电脑上安装 rapp。为被控端授予屏幕录制、辅助功能权限，并保持不睡眠。远程 app 全部关闭后，被控 Mac 会自动锁屏，下次打开 app 时在控制端输入被控 Mac 的系统密码解锁（可在「本机」里关掉）；开机后的登录窗口和睡眠仍不支持。在 rapp 中添加该设备，即可打开应用。
+在被控 Mac 和控制端电脑上安装 rApp。为被控端授予屏幕录制、辅助功能权限，并保持不睡眠。远程 app 全部关闭后，被控 Mac 会自动锁屏，下次打开 app 时在控制端输入被控 Mac 的系统密码解锁（可在「本机」里关掉）；开机后的登录窗口和睡眠仍不支持。在 rApp 中添加该设备，即可打开应用。
 
 中文等需要输入法的文字在控制端输入：输入板在本机组字后整段发送，被控端始终保持英文输入。想要最流畅的输入体验，推荐使用 [Fcitx5](https://github.com/fcitx/fcitx5) 输入法；在 macOS 上，候选词会直接显示在输入板下方，字体与正文一致。详见[输入板设计说明](docs/writing-panel.md)。
 
 macOS Apple 芯片用户可下载配套的 [Fcitx5 for Sumi 0.5.0.15 安装包（.pkg）](https://github.com/wizlijun/rapp/releases/download/v0.10.7/Fcitx5-for-Sumi-0.5.0.15-arm64.pkg)。
 
-跨网络连接可参考[自建中继说明](docker/relay/README.md)。E2E 中继要求两端均为 rapp 0.6+；Linux v0.5.2 使用旧连接方式。各平台分别选择对应的下载版本。
+跨网络连接可参考[自建中继说明](docker/relay/README.md)。E2E 中继要求两端均为 rApp 0.6+；Linux v0.5.2 使用旧连接方式。各平台分别选择对应的下载版本。
 
 Linux v0.5.2 无法连接 macOS 0.8+ 被控端。当前 Linux 与 macOS 共用工作区版本号和应用协议 v14，请同步升级两端。若发布页还没有对应版本的 Linux 安装包，可从当前源码构建。
 
-Linux 支持内嵌会话、拆分及合回原生窗口、独立 GTK 客户端，以及文本、图片和文件传输。Linux 现在可以作为整桌面被控端：其他同协议版本的 client 可通过现有局域网、直连或中继连接“桌面”，支持多屏、鼠标键盘和文本输入。支持 Omarchy/Hyprland、提供 wlr screencopy 与虚拟输入协议的 Wayland 合成器，以及 X11（文本输入需安装 `xdotool`）。GNOME/KDE Wayland 的 portal 后端、单应用共享、Linux host 的剪贴板/文件传输及自动输入解锁密码尚未实现；锁屏阻止采集时需在本机解锁。安装新版 Linux 包或运行 `scripts/build-linux.sh` 会包含 `rapp-host`；原有安装升级后需重启服务。运行 `rapp-host check --json` 可检查桌面是否可用。文本终端需要已安装的受支持终端、图形登录会话和 systemd 用户管理器。终端独立运行，重启 rapp 服务不会结束它。Linux 更新通过包管理器安装，或替换完整便携包。
+Linux 支持内嵌会话、拆分及合回原生窗口、独立 GTK 客户端，以及文本、图片和文件传输。Linux 现在可以作为整桌面被控端：其他同协议版本的 client 可通过现有局域网、直连或中继连接“桌面”，支持多屏、鼠标键盘和文本输入。支持 Omarchy/Hyprland、提供 wlr screencopy 与虚拟输入协议的 Wayland 合成器，以及 X11（文本输入需安装 `xdotool`）。GNOME/KDE Wayland 的 portal 后端、单应用共享、Linux host 的剪贴板/文件传输及自动输入解锁密码尚未实现；锁屏阻止采集时需在本机解锁。安装新版 Linux 包或运行 `scripts/build-linux.sh` 会包含 `rapp-host`；原有安装升级后需重启服务。运行 `rapp-host check --json` 可检查桌面是否可用。文本终端需要已安装的受支持终端、图形登录会话和 systemd 用户管理器。终端独立运行，重启 rApp 服务不会结束它。Linux 更新通过包管理器安装，或替换完整便携包。
 
 ## 编译
 
@@ -63,7 +63,7 @@ Linux 0.14.13 在应用画面和文字终端支持本地按住说话：长按右
 
 ## 致谢
 
-感谢为 rapp 提供设计参考或技术支持的开源项目：
+感谢为 rApp 提供设计参考或技术支持的开源项目：
 
 - [RustDesk](https://github.com/rustdesk/rustdesk)：设备连接与自建中继的设计参考。
 - [Sunshine](https://github.com/SunshineStream/Sunshine)：串流技术研究参考。

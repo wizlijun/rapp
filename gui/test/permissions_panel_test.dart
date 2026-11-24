@@ -15,7 +15,7 @@ import 'service_client_test.dart' show FakeService, until;
 import 'ui/helpers.dart';
 
 const resetLabel = '设置里已经打开了还是 ✗？重置授权记录';
-const manualSteps = '辅助功能的旧记录要在系统设置里删：选中 rapp，点「−」，再重新添加。';
+const manualSteps = '辅助功能的旧记录要在系统设置里删：选中 rApp，点「−」，再重新添加。';
 
 void main() {
   testWidgets('each permission shows its purpose; missing ones get a settings button', (tester) async {

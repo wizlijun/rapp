@@ -1147,7 +1147,7 @@ async fn the_cli_shares_and_pipes() {
     let empty = tempfile::tempdir().unwrap();
     let out = cli(empty.path(), &["share"], b"").await;
     assert_eq!(out.status.code(), Some(1));
-    assert_eq!(String::from_utf8_lossy(&out.stderr), "本机的 rapp 服务没有在运行\n");
+    assert_eq!(String::from_utf8_lossy(&out.stderr), "本机的 rApp 服务没有在运行\n");
 }
 
 // ---- the forward measurement (Task 10) ----

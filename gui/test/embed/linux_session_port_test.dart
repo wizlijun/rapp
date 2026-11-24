@@ -113,7 +113,7 @@ void main() {
     expect(linuxMacKeyCode(PhysicalKeyboardKey.metaLeft), isNull);
   });
 
-  testWidgets("Ctrl+Enter is rapp's: not sent to A", (tester) async {
+  testWidgets("Ctrl+Enter is rApp's: not sent to A", (tester) async {
     final port = LinuxSessionPort('unused', framePresented: () async {});
     final proc = await tester.runAsync(() => Process.start('cat', const []));
     port.seedSessionForTest(3, proc!);
@@ -136,7 +136,7 @@ void main() {
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-    expect(port.handleKeyEvent(3, enter), true); // Ctrl+Shift+Enter is not rapp's
+    expect(port.handleKeyEvent(3, enter), true); // Ctrl+Shift+Enter is not rApp's
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
 

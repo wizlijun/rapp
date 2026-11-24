@@ -12,7 +12,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
 const DEFAULT_IPC_PORT: u16 = 22029;
-const NOT_RUNNING: &str = "本机的 rapp 服务没有在运行";
+const NOT_RUNNING: &str = "本机的 rApp 服务没有在运行";
 
 fn local_dir() -> PathBuf {
     match std::env::var_os("RAPP_LOCAL").filter(|v| !v.is_empty()) {

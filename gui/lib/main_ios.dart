@@ -169,7 +169,7 @@ class _IosApp extends StatelessWidget {
   final MainState? state;
 
   MaterialApp _app(RappTheme theme) => MaterialApp(
-        title: 'rapp',
+        title: 'rApp',
         debugShowCheckedModeBanner: false,
         theme: themeDataFor(theme, textSize: fallbackTextSize),
         themeMode: ThemeMode.dark,

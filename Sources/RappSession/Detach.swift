@@ -97,7 +97,7 @@ public enum KeyWindowRoute: Equatable {
     case main
     /// A detached window of session `sid`.
     case detached(Int64)
-    /// Any other window (panels, sheets), or none: rapp's own.
+    /// Any other window (panels, sheets), or none: rApp's own.
     case local
 }
 
@@ -120,7 +120,7 @@ public enum DetachedKeyRoute: Equatable {
     case remote
 }
 
-/// In a detached window only ⌃⌘D (attach) and ⌘Q (quit) are rapp's; every other key is A's.
+/// In a detached window only ⌃⌘D (attach) and ⌘Q (quit) are rApp's; every other key is A's.
 public func routeDetachedKey(keyCode: UInt16, flags: NSEvent.ModifierFlags) -> DetachedKeyRoute {
     let mods = KeyFlags(flags).intersection([.command, .control, .option, .shift])
     if keyCode == 2 && mods == [.control, .command] { return .attach }

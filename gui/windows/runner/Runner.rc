@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.rapp" "\0"
-            VALUE "FileDescription", "rapp" "\0"
+            VALUE "FileDescription", "rApp" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "rapp" "\0"
+            VALUE "InternalName", "rApp" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.rapp. All rights reserved." "\0"
             VALUE "OriginalFilename", "rapp.exe" "\0"
-            VALUE "ProductName", "rapp" "\0"
+            VALUE "ProductName", "rApp" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

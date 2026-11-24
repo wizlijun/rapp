@@ -24,7 +24,7 @@ class PermissionsPanel extends StatelessWidget {
   /// The nearby button that restarts rapp-service, named in the footnote.
   final String restartLabel;
 
-  /// Clears rapp's own records (K29); null hides the button.
+  /// Clears rApp's own records (K29); null hides the button.
   final Future<void> Function()? onReset;
 
   /// The last reset could not clear accessibility: say how to do it by hand.
@@ -63,7 +63,7 @@ class PermissionsPanel extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: Row(children: [
-            const Expanded(child: Text('辅助功能的旧记录要在系统设置里删：选中 rapp，点「−」，再重新添加。')),
+            const Expanded(child: Text('辅助功能的旧记录要在系统设置里删：选中 rApp，点「−」，再重新添加。')),
             const SizedBox(width: 8),
             RappButton.secondary(
               key: const Key('reset-open-accessibility'),
@@ -124,14 +124,14 @@ class PermissionGuideDialog extends StatelessWidget {
   }
 }
 
-/// Asks macOS (through the service) first so rapp is already listed, but never holds the pane up
+/// Asks macOS (through the service) first so rApp is already listed, but never holds the pane up
 /// for more than [wait]: a slow or failed prompt still opens System Settings.
 Future<void> promptThenOpen(Future<void> Function() prompt, Future<void> Function() open,
     {Duration wait = const Duration(seconds: 2)}) async {
   try {
     await prompt().timeout(wait);
   } catch (_) {
-    // The pane still lets the user add rapp by hand.
+    // The pane still lets the user add rApp by hand.
   }
   await open();
 }

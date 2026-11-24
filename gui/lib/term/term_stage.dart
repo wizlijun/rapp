@@ -828,7 +828,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       case TermAction():
         _paste();
       case TermReserved():
-        break; // rapp's (find, font size); not the terminal's either
+        break; // rApp's (find, font size); not the terminal's either
     }
     // A key the live terminal would take is never the window's.
     return KeyEventResult.handled;

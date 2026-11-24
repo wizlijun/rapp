@@ -394,7 +394,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
     connection.append(&token);
     connection.append(&button);
     root.append(&connection);
-    let info = gtk::Label::new(Some("输入主机地址与口令，或从 rapp 管理界面打开远程应用"));
+    let info = gtk::Label::new(Some("输入主机地址与口令，或从 rApp 管理界面打开远程应用"));
     info.set_wrap(true);
     root.append(&info);
     let dismiss = gtk::Button::with_label("关掉遮挡窗口");

@@ -42,7 +42,7 @@ class DeviceColumn {
   final String path;
   final List<SessionEntry> entries;
 
-  /// The device's rapp version, shown under the column; null when unknown.
+  /// The device's rApp version, shown under the column; null when unknown.
   final String? version;
 
   bool get offline => lamp == Lamp.offline;

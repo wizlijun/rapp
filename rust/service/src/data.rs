@@ -123,7 +123,7 @@ impl DataGit {
         }
         self.missing_at = None;
         if !is_rapp_root(&self.root) {
-            return Err(Fail("readme", Some("这个文件夹不是 rapp 的数据目录".into())));
+            return Err(Fail("readme", Some("这个文件夹不是 rApp 的数据目录".into())));
         }
         if !self.root.join(".git").exists() {
             self.run(&["init", "-b", "main"]).await.ok_or("init")?;
@@ -339,7 +339,7 @@ fn is_shim(git: &Path, path: &std::ffi::OsStr) -> bool {
     resolved.as_deref() == Some(Path::new("/usr/bin/git"))
 }
 
-/// `README.md` starts with rapp's marker; anything else is someone else's folder and git stays away.
+/// `README.md` starts with rApp's marker; anything else is someone else's folder and git stays away.
 fn is_rapp_root(root: &Path) -> bool {
     std::fs::read_to_string(root.join("README.md"))
         .is_ok_and(|t| t.lines().next().is_some_and(|l| l.trim_end() == README_MARKER))
@@ -495,7 +495,7 @@ mod tests {
         std::fs::write(root.join("local/service.json"), "{}").unwrap();
         std::fs::write(root.join("local/hosts.json"), "[]").unwrap();
         let s = DataGit::new(&opts(&root), "test-a", log(&t)).tick().await;
-        assert_eq!((s.git.as_str(), s.error.as_deref()), ("error", Some("这个文件夹不是 rapp 的数据目录")));
+        assert_eq!((s.git.as_str(), s.error.as_deref()), ("error", Some("这个文件夹不是 rApp 的数据目录")));
         assert_eq!(git(&root, &["log", "--format=%s"]).trim(), "mine");
         assert!(!git(&root, &["ls-files"]).contains("local/"));
         let logged = std::fs::read_to_string(t.path().join("logs/service.log")).unwrap_or_default();
@@ -504,7 +504,7 @@ mod tests {
         prepare(&bare_dir, &t.path().join("no-legacy")).unwrap();
         std::fs::write(bare_dir.join("README.md"), "# notes\n").unwrap();
         assert_eq!(DataGit::new(&opts(&bare_dir), "test-a", log(&t)).tick().await.git, "error");
-        assert!(!bare_dir.join(".git").exists(), "no git init in a folder that is not rapp's");
+        assert!(!bare_dir.join(".git").exists(), "no git init in a folder that is not rApp's");
     }
 
     #[tokio::test]

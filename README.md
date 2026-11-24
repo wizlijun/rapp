@@ -1,9 +1,9 @@
-# rapp
+# rApp
 
 **More agents. One Pad.**
 
 Your agents work across machines. Keep your attention in one place.
-rapp brings remote Mac apps into one workspace, so you can read, reply, and direct your agents from the computer in front of you.
+rApp brings remote Mac apps into one workspace, so you can read, reply, and direct your agents from the computer in front of you.
 
 Recommended: an Omarchy tablet.
 
@@ -17,13 +17,13 @@ Recommended: an Omarchy tablet.
 | Omarchy / Arch · x86_64 | Install the matching `.pkg.tar.zst` with `sudo pacman -U ./rapp-omarchy-*.pkg.tar.zst`. Controls Mac apps and desktops; also serves text terminals and shared ports. |
 | iPhone Duo · iOS / iPadOS | Works on iPhone Duo. The iOS and iPadOS app is coming soon. |
 
-Install rapp on your Mac host and controlling computer. On the host, allow Screen Recording and Accessibility, and keep it awake. When the last remote app closes, the host locks itself; the next time you open an app, the controlling computer asks for the host's system password (or types the remembered one). Turn this off under This Mac (本机). The login window after a restart and sleep are still not supported. Add the host in rapp, then open an app.
+Install rApp on your Mac host and controlling computer. On the host, allow Screen Recording and Accessibility, and keep it awake. When the last remote app closes, the host locks itself; the next time you open an app, the controlling computer asks for the host's system password (or types the remembered one). Turn this off under This Mac (本机). The login window after a restart and sleep are still not supported. Add the host in rApp, then open an app.
 
 Type Chinese and other IME text on the controlling computer: the writing panel composes it locally and sends it whole, while the host stays in English. For the smoothest input, use the [Fcitx5](https://github.com/fcitx/fcitx5) input method; on macOS its candidates appear right under the writing panel, in the panel's own font. See [writing panel design](docs/writing-panel.md) (Chinese).
 
 For macOS on Apple silicon, download the companion [Fcitx5 for Sumi 0.5.0.15 installer (.pkg)](https://github.com/wizlijun/rapp/releases/download/v0.10.7/Fcitx5-for-Sumi-0.5.0.15-arm64.pkg).
 
-For access across networks, see [self-hosted relay setup](docker/relay/README.md). E2E relay connections require rapp 0.6+ on both ends; Linux v0.5.2 uses the legacy connection path. Downloads are selected separately for each platform.
+For access across networks, see [self-hosted relay setup](docker/relay/README.md). E2E relay connections require rApp 0.6+ on both ends; Linux v0.5.2 uses the legacy connection path. Downloads are selected separately for each platform.
 
 Linux v0.5.2 cannot connect to macOS hosts running 0.8+. Linux and macOS now share the workspace release version and app protocol 14; update both ends together. Build and package this source if the release page does not yet offer the matching Linux assets. Older explicit `protocol=4/5/6` addresses are rejected.
 
@@ -33,7 +33,7 @@ Linux can host full desktops over the existing LAN/direct/relay connections on O
 
 Native support depends on the compositor and application: Hyprland's toplevel export clips popups to the parent surface; X11 can include separate popup surfaces. Menus/focus hints require AT-SPI metadata. Password entry requires confirmed Hyprland lock notifications and a same-session hyprlock/swaylock; other lockers require local unlock. GNOME/KDE Wayland portal hosting remains unavailable. Text-terminal windows require a supported terminal, a graphical login and a systemd user manager, and survive service restarts. `rapp` opens the GUI; `rapp hosts`, `rapp share`, `rapp unshare` and `rapp pipe` run the CLI. Linux updates use the package manager or replacement portable bundle.
 
-For direct connections, allow inbound **UDP 22028** (or the service's configured UDP port) from the intended peers. Do not open an entire `2202x` range: TCP 22029 is localhost-only IPC; TCP 28000–28999 are localhost-only port mappings carried over the existing rapp connection. Neither needs a LAN firewall exception. UDP 22026 belongs to a separately deployed relay, not a normal rapp device. The Linux Local page shows the actual UDP listener, offers a read-only check of recent UFW block logs, and provides a command restricted to one peer IP. A timeout or an empty log alone does not establish whether a firewall blocked the connection.
+For direct connections, allow inbound **UDP 22028** (or the service's configured UDP port) from the intended peers. Do not open an entire `2202x` range: TCP 22029 is localhost-only IPC; TCP 28000–28999 are localhost-only port mappings carried over the existing rApp connection. Neither needs a LAN firewall exception. UDP 22026 belongs to a separately deployed relay, not a normal rApp device. The Linux Local page shows the actual UDP listener, offers a read-only check of recent UFW block logs, and provides a command restricted to one peer IP. A timeout or an empty log alone does not establish whether a firewall blocked the connection.
 
 Upgrades preserve the data directory and saved hosts. The legacy relay configuration from 0.5.x is retired by the mainline migration; enter a current relay key to use the new relay. This is separate from preserving local data.
 
@@ -75,11 +75,11 @@ Linux 0.15.4 includes the macOS 0.15.3 single-row input history, with actions in
 
 ## Acknowledgments
 
-Thanks to the open-source projects that informed or support rapp:
+Thanks to the open-source projects that informed or support rApp:
 
 - [RustDesk](https://github.com/rustdesk/rustdesk) — device connection and self-hosted relay design references.
 - [Sunshine](https://github.com/SunshineStream/Sunshine) — a reference for streaming research.
 - [hurryvc](https://github.com/swigger/hurryvc) — the design reference for text terminals on macOS and Windows (pseudo-terminal plus screen-state sync).
-- [Fcitx5](https://github.com/fcitx/fcitx5) — the input method behind rapp's smooth writing-panel input.
+- [Fcitx5](https://github.com/fcitx/fcitx5) — the input method behind rApp's smooth writing-panel input.
 - [Flutter](https://github.com/flutter/flutter) and [GTK](https://www.gtk.org/) — user interfaces.
 - [Tokio](https://github.com/tokio-rs/tokio), [Quinn](https://github.com/quinn-rs/quinn), and [rustls](https://github.com/rustls/rustls) — networking foundations.

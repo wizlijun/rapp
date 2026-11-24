@@ -568,7 +568,7 @@ void main() {
     appsPermissions = {'screen_recording': false, 'accessibility': true};
     await pumpTab(tester);
     await selectMini(tester);
-    expect(find.text('「mini」缺少 屏幕录制 权限。请在那台电脑上打开 rapp，在 本机 › 权限 里点「打开系统设置」。'),
+    expect(find.text('「mini」缺少 屏幕录制 权限。请在那台电脑上打开 rApp，在 本机 › 权限 里点「打开系统设置」。'),
         findsOneWidget);
   });
 
@@ -580,12 +580,12 @@ void main() {
   });
 
   testWidgets('an open that fails for permissions explains it in Chinese', (tester) async {
-    openError = 'rapp-host exited: missing permission: Accessibility\nAllow rapp under System Settings.';
+    openError = 'rapp-host exited: missing permission: Accessibility\nAllow rApp under System Settings.';
     await pumpTab(tester);
     await selectMini(tester);
     await tester.tap(find.byKey(const Key('open-com.apple.Safari')));
     await tester.pumpAndSettle();
-    expect(s.hint, '「mini」缺少 辅助功能 权限。请在那台电脑上打开 rapp，在 本机 › 权限 里点「打开系统设置」。');
+    expect(s.hint, '「mini」缺少 辅助功能 权限。请在那台电脑上打开 rApp，在 本机 › 权限 里点「打开系统设置」。');
   });
 
   testWidgets('app row is 68 tall', (tester) async {

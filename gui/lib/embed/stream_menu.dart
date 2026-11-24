@@ -221,7 +221,7 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
 }
 
 /// ⋯ 本机 / ≡ 远程, icons only, 48 wide, no box until open; the remote icon is in the accent colour
-/// so it never passes for rapp's own.
+/// so it never passes for rApp's own.
 class MenuCornerButton extends StatelessWidget {
   const MenuCornerButton(
       {super.key, required this.remote, required this.open, required this.onTap});

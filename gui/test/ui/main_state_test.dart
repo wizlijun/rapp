@@ -258,7 +258,7 @@ void main() {
     await t.die();
     await pump();
     expect(s.hubUsable, isFalse);
-    expect(s.hubProblem, 'rapp-hub 已退出 — 重启 rapp 以恢复');
+    expect(s.hubProblem, 'rapp-hub 已退出 — 重启 rApp 以恢复');
     final hint = s.hint;
     final before = t.sent.length;
     await s.openOrSwitch('111', 'x', 'X');

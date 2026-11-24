@@ -62,7 +62,7 @@ class MainWindow extends StatefulWidget {
   final DataRelocator? relocator;
   final FullscreenControl fullscreen;
 
-  /// How the update buttons quit rapp (K28).
+  /// How the update buttons quit rApp (K28).
   final UpdateHooks? hooks;
 
   /// The built-in input method's settings (iOS only); null elsewhere.
@@ -290,7 +290,7 @@ class _MainWindowState extends State<MainWindow> {
     final stagePad = _full
         ? EdgeInsets.zero
         : sides.copyWith(bottom: math.max(pad.bottom, MediaQuery.viewPaddingOf(context).bottom));
-    // On macOS only ⌃⌘ chords are rapp's: ⌘[ ⌘] belong to A while the picture has focus.
+    // On macOS only ⌃⌘ chords are rApp's: ⌘[ ⌘] belong to A while the picture has focus.
     final prefixOf = mac
         ? (LogicalKeyboardKey k) => SingleActivator(k, control: true, meta: true)
         : (LogicalKeyboardKey k) => SingleActivator(k, control: true);
@@ -314,7 +314,7 @@ class _MainWindowState extends State<MainWindow> {
         else
           const SingleActivator(LogicalKeyboardKey.keyO, control: true, includeRepeats: false):
               state.toggleOverview,
-        // Picture focused or not, ⌃⌘ chords are rapp's, so ⌃⌘D arrives here too.
+        // Picture focused or not, ⌃⌘ chords are rApp's, so ⌃⌘D arrives here too.
         // A held chord toggles once, not back and forth with the key repeat.
         if (mac)
           const SingleActivator(LogicalKeyboardKey.keyD, control: true, meta: true, includeRepeats: false):

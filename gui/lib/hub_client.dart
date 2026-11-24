@@ -110,7 +110,7 @@ class AppList {
   const AppList(this.id, this.path, this.apps, {this.permissions, this.capabilities, this.version});
   final Map<String, dynamic>? capabilities;
 
-  /// A's rapp version; null from a host older than version labels.
+  /// A's rApp version; null from a host older than version labels.
   final String? version;
   final String id;
   final String path;
@@ -273,7 +273,7 @@ class HubClient extends ChangeNotifier {
   List<HubHost> hosts = const [];
   bool alive = true;
 
-  /// The hub's rapp version (the same install as this GUI), from its `hosts` events; null until
+  /// The hub's rApp version (the same install as this GUI), from its `hosts` events; null until
   /// one carries it.
   String? version;
 

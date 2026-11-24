@@ -629,7 +629,7 @@ abstract class SessionPort {
   /// The voice input for [sid]'s picture is over: native may go back to passing keys through.
   void voiceEnd(Object sid) => _send('voice_end', {'sid': sid});
 
-  /// The held compose letter goes back into rapp's window, now that the editor has the caret.
+  /// The held compose letter goes back into rApp's window, now that the editor has the caret.
   void composeReplay(Object sid) => _send('compose_replay', {'sid': sid});
 
   void resize(Object sid, int window, int w, int h) =>

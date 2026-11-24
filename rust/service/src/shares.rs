@@ -79,7 +79,7 @@ pub type Pick<'a> = &'a dyn Fn(&[u16]) -> Option<u16>;
 
 /// A field this does not know is ignored (and dropped on the next write), so that rolling back
 /// from a later version that added one keeps the shares instead of reading the whole file as
-/// broken. The file is written by rapp; a field misspelt by hand is not caught.
+/// broken. The file is written by rApp; a field misspelt by hand is not caught.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Share {
     pub port: u16,

@@ -61,7 +61,7 @@ private let notOpenedApps: Set<String> = [
 ]
 
 /// Whether an activation is worth an `appOpened` (protocol v13): another regular app (not the session's,
-/// not rapp's own process, not a system agent) came to the front within `appOpenedWindow` of this
+/// not rApp's own process, not a system agent) came to the front within `appOpenedWindow` of this
 /// session's last input (`sinceInput`, nil when there was none).
 public func appOpenedWorthTelling(bundleID: String?, pid: Int32, regular: Bool, sessionPID: Int32, ownPID: Int32,
                                   sinceInput: TimeInterval?) -> Bool {

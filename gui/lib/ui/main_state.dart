@@ -727,7 +727,7 @@ class MainState extends ChangeNotifier {
 
   /// A letter on [sid]'s picture opens the writing panel: an app window on the stage whose panel is
   /// allowed (no `noComposer` rule) and whose app has `typeToCompose` on, until a letter-opened panel is closed unused
-  /// ([RemoteSession.composeArmed]). Never rapp's own terminal.
+  /// ([RemoteSession.composeArmed]). Never rApp's own terminal.
   bool _composeFor(Object sid) {
     final rs = remote[sid];
     if (rs == null || rs.detached || termPort?.owns(sid) == true) return false;
@@ -969,7 +969,7 @@ class MainState extends ChangeNotifier {
 
   String? get hubProblem {
     if (hub == null) return hubError ?? 'rapp-hub 不可用';
-    if (!hub!.alive) return 'rapp-hub 已退出 — 重启 rapp 以恢复';
+    if (!hub!.alive) return 'rapp-hub 已退出 — 重启 rApp 以恢复';
     return null;
   }
 
@@ -3126,7 +3126,7 @@ class MainState extends ChangeNotifier {
   /// Remote devices whose last probe found them up.
   int get remoteOnline => probes.values.where((p) => p.lamp == Lamp.active).length;
 
-  /// Devices online, 本机 included: this rapp runs on it, so it is always up.
+  /// Devices online, 本机 included: this rApp runs on it, so it is always up.
   int get onlineDevices => 1 + remoteOnline;
 
   /// Every device, 本机 and the added ones: as many as the overview's device wall has columns.
@@ -4092,7 +4092,7 @@ class _Start {
   final Object sid;
 }
 
-/// "stdin closed" (ended from rapp) and "quit" (its window was closed) are
+/// "stdin closed" (ended from rApp) and "quit" (its window was closed) are
 /// the user's own doing; any other client exit reason is unexpected.
 String endedHint(String appName, String? reason) {
   const prefix = 'rapp-client: ';

@@ -118,7 +118,7 @@ String shareErrorText(Object e) {
     case 'offline' || 'no key' || 'unknown name':
       return '离线，读不到它的端口';
     case 'old version':
-      return '对方的 rapp 还不支持分享端口';
+      return '对方的 rApp 还不支持分享端口';
     case 'policy':
       return '对方的策略不允许远程设置';
     case 'limit':
@@ -126,7 +126,7 @@ String shareErrorText(Object e) {
     case 'bad port':
       return '端口号是 1 到 65535 的数字';
     case 'service not running' || 'service connection closed':
-      return '本机的 rapp 服务没有在运行';
+      return '本机的 rApp 服务没有在运行';
   }
   return '出错了：$s';
 }

@@ -36,4 +36,4 @@ List<Permission>? missingFromError(String error) {
 
 /// For B: what A lacks and where to fix it (only someone at A can).
 String remoteHint(String host, List<Permission> missing) =>
-    '「$host」缺少 ${missing.map((p) => p.label).join('、')} 权限。请在那台电脑上打开 rapp，在 本机 › 权限 里点「打开系统设置」。';
+    '「$host」缺少 ${missing.map((p) => p.label).join('、')} 权限。请在那台电脑上打开 rApp，在 本机 › 权限 里点「打开系统设置」。';

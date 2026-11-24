@@ -48,7 +48,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         super.init()
         placeholder.isReleasedWhenClosed = false
         placeholder.delegate = self
-        placeholder.title = "rapp"
+        placeholder.title = "rApp"
         placeholderText.stringValue = "Connecting to \(host)…"
         placeholderText.alignment = .center
         placeholderText.textColor = .secondaryLabelColor

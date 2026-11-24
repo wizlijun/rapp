@@ -21,7 +21,7 @@ final class KeyRoutingTests: XCTestCase {
     }
 
     func testRouteKeyIgnoresNonModifierBits() {
-        // Caps lock and the numeric-pad bit do not stop ⌘Q being rapp's.
+        // Caps lock and the numeric-pad bit do not stop ⌘Q being rApp's.
         XCTAssertEqual(routeKey(keyCode: 12, flags: [.command, .capsLock, .numericPad], pictureFocused: true), .local)
         XCTAssertEqual(routeKey(keyCode: 3, flags: [.control, .command, .shift], pictureFocused: true), .local)
     }

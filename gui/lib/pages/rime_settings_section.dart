@@ -6,7 +6,7 @@ import '../embed/rime_glue.dart';
 import '../ui/controls.dart';
 import '../ui/tokens.dart';
 
-const rimeFolderHint = '把 Rime 目录放进「文件」→ rapp → Rime 后可选';
+const rimeFolderHint = '把 Rime 目录放进「文件」→ rApp → Rime 后可选';
 
 class RimeSettingsSection extends StatelessWidget {
   const RimeSettingsSection({super.key, required this.glue});

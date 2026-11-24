@@ -1,4 +1,4 @@
-// Where rapp keeps its config (§3) and where it finds its sibling binaries.
+// Where rApp keeps its config (§3) and where it finds its sibling binaries.
 import 'dart:convert';
 import 'dart:io';
 
@@ -97,7 +97,7 @@ class DataDir {
   }
 }
 
-/// Where the rapp logs go: the same rules as `rapp_net::log::log_dir` (observability spec §3).
+/// Where the rApp logs go: the same rules as `rapp_net::log::log_dir` (observability spec §3).
 String logDir(Map<String, String> env, String os) {
   String? v(String k) => (env[k] == null || env[k]!.isEmpty) ? null : env[k];
   final dir = v('RAPP_LOG_DIR');

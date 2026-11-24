@@ -71,5 +71,5 @@ Edit `ICE_COMMIT` and `ICE_SHA` (sha256 of the codeload tarball: `curl -L <url> 
 
 ## 雾凇与公开分发
 
-雾凇是 GPL-3.0，而 rapp 公开分发的二进制包含它的数据，二者的许可证存在冲突，需要在发布前处理。详见设计文档 §3：
+雾凇是 GPL-3.0，而 rApp 公开分发的二进制包含它的数据，二者的许可证存在冲突，需要在发布前处理。详见设计文档 §3：
 `docs/superpowers/specs/2026-11-20-rapp-ios-rime-ime-design.md`。

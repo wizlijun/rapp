@@ -36,7 +36,7 @@ final class RimeEngine {
   // MARK: folders
 
   static var documents: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0] }
-  /// 「我的目录」: Files app → rapp → Rime. Both the shared and the user dir, so no bundled `default.custom.yaml`
+  /// 「我的目录」: Files app → rApp → Rime. Both the shared and the user dir, so no bundled `default.custom.yaml`
   /// can patch the user's `schema_list`.
   static var userFolder: URL { documents.appendingPathComponent("Rime", isDirectory: true) }
   static var userFolderReady: Bool {
@@ -77,7 +77,7 @@ final class RimeEngine {
     loaded = d
     let (shared, user) = Self.dirs(d)
     if d == .user, !Self.userFolderReady {
-      state = .error("「文件」→ rapp → Rime 里没有 default.yaml")
+      state = .error("「文件」→ rApp → Rime 里没有 default.yaml")
       done()
       return
     }

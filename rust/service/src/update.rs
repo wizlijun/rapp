@@ -1,5 +1,5 @@
 //! The updater (online-update spec §4.3, plan Task 4): a timer that checks and downloads, the
-//! "nobody is using rapp" test, the install, the restart request, and what the next service
+//! "nobody is using rApp" test, the install, the restart request, and what the next service
 //! does with the marker. External programs go through `state.runner`, always in `spawn_blocking`.
 //!
 //! "Nobody is using it" (K17) reads `ps -axo pid=,ppid=,comm=`. Checked read-only on this Mac
@@ -23,7 +23,7 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
 const LEFTOVER: &str = "上次升级没收拾干净：请手动删除 rapp.app 同目录的 .rapp-new.app，或 previous/.rapp-old.app";
-const STILL_OPEN: &str = "rapp 还开着";
+const STILL_OPEN: &str = "rApp 还开着";
 const NOT_LAUNCHD: &str = "服务不是由系统启动的，请从 release 页面手动装 pkg";
 const NEEDS_ADMIN: &str = "这次需要管理员密码";
 const BAD_URL: &str = "更新地址不对";
@@ -32,7 +32,7 @@ const NO_PREVIOUS: &str = "没有上一版";
 const BUSY: &str = "正在忙，请稍后再试";
 /// The reply to a B that opens a session while the new version goes in.
 pub const UPGRADING: &str = "远端正在升级，请稍后再连";
-/// How often a manual install looks again for nobody using rapp (K20).
+/// How often a manual install looks again for nobody using rApp (K20).
 const MANUAL_POLL: Duration = Duration::from_millis(500);
 
 /// The updater's state machine (K18). `busy`: a pipeline or an install is running.
@@ -491,9 +491,9 @@ fn ps_fields(line: &str) -> Option<(u32, u32, &str)> {
     Some((pid.parse().ok()?, ppid.parse().ok()?, comm.trim()))
 }
 
-/// Why rapp counts as in use, or None when nobody is using it (K17): a remote session, or a
+/// Why rApp counts as in use, or None when nobody is using it (K17): a remote session, or a
 /// process from the bundle other than this service and its own children. Only an auto install
-/// waits for remote sessions; a manual one cuts them off (people upgrade A from B through rapp).
+/// waits for remote sessions; a manual one cuts them off (people upgrade A from B through rApp).
 pub async fn in_use(state: &State) -> Option<String> {
     if let Some(why) = sessions_in_use(state) {
         return Some(why);
@@ -544,7 +544,7 @@ fn still_offered(state: &State) -> bool {
     latest.is_some() && up::offer(&up::load_cache(&cache_file(state)), &current) == latest
 }
 
-/// Everything an auto install needs except "nobody is using rapp" (U-4c). Checked again after
+/// Everything an auto install needs except "nobody is using rApp" (U-4c). Checked again after
 /// every await. A ready version that was dismissed meanwhile goes back to idle.
 fn auto_allowed(state: &State, o: &UpdateOpts, want: &str) -> bool {
     if !still_offered(state) {
@@ -706,7 +706,7 @@ async fn put_in_place(state: &Arc<State>, busy: Busy, mode: Mode) {
     }
 }
 
-/// K20: after the GUI's connection closes (at most `gui_wait`), look for no other rapp process
+/// K20: after the GUI's connection closes (at most `gui_wait`), look for no other rApp process
 /// for at most `gui_wait` more; remote sessions don't count. Still open: open the GUI again and
 /// fail.
 async fn wait_for_nobody(state: &Arc<State>, o: &UpdateOpts, mut closed: watch::Receiver<()>) -> bool {

@@ -124,7 +124,7 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
             until(lambda: sum(p.poll() is None for p in processes) == 1)
             primary = next(p for p in processes if p.poll() is None)
             assert all(p.poll() == 0 for p in processes if p is not primary)
-            main = window(primary, "rapp")
+            main = window(primary, "rApp")
             assert len(windows(primary)) == 1
             until(lambda: len(hubs(primary)) == 1)
             original_hubs = hubs(primary)
@@ -140,7 +140,7 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
             close(main["address"])
             until(lambda: not windows(primary))
             launch()
-            main = window(primary, "rapp")
+            main = window(primary, "rApp")
             until(lambda: hypr("activewindow").get("address") == main["address"])
             print("PASS launch restores and focuses the hidden main window", flush=True)
 
@@ -152,16 +152,16 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
             print("PASS launch focuses the main window from another workspace", flush=True)
 
             launch(["--cm"])
-            cm = window(primary, "rapp 连接管理")
+            cm = window(primary, "rApp 连接管理")
             launch(["--cm"])
             assert len(windows(primary)) == 2, [(w["address"], w["title"]) for w in windows(primary)]
             launch()
             until(lambda: hypr("activewindow").get("address") == main["address"])
             close(cm["address"])
-            until(lambda: len(windows(primary)) == 1 and windows(primary)[0]["title"] == "rapp")
+            until(lambda: len(windows(primary)) == 1 and windows(primary)[0]["title"] == "rApp")
             assert primary.poll() is None
             launch(["--cm"])
-            cm = window(primary, "rapp 连接管理")
+            cm = window(primary, "rApp 连接管理")
             assert len(windows(primary)) == 2, [(w["address"], w["title"]) for w in windows(primary)]
             assert hubs(primary) == original_hubs
             focus(cm["address"])
@@ -169,7 +169,7 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
             launch(["--cm", "--background"])
             assert hypr("activewindow").get("address") == cm["address"]
             close(cm["address"])
-            until(lambda: len(windows(primary)) == 1 and windows(primary)[0]["title"] == "rapp")
+            until(lambda: len(windows(primary)) == 1 and windows(primary)[0]["title"] == "rApp")
             assert primary.poll() is None
             print("PASS connection manager reuses the process and can close/reopen independently", flush=True)
             if args.stress_cycles:
@@ -178,7 +178,7 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
                 for cycle in range(args.stress_cycles):
                     launch(["--cm"])
                     until(lambda: len(windows(primary)) == 2)
-                    cm = next(w for w in windows(primary) if w["title"] == "rapp 连接管理")
+                    cm = next(w for w in windows(primary) if w["title"] == "rApp 连接管理")
                     selector = json.dumps("address:" + main["address"])
                     for width, height in [(640, 480), (1000, 700), (800, 540)]:
                         dispatch(f"hl.dsp.window.resize({{x={width},y={height},relative=false,window={selector}}})")
@@ -196,7 +196,7 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
                     until(lambda: len(windows(primary)) == 1)
                     assert primary.poll() is None, f"GUI exited in cycle {cycle}"
                     main = windows(primary)[0]
-                    assert main["title"] == "rapp"
+                    assert main["title"] == "rApp"
                     assert hubs(primary) == original_hubs
                 time.sleep(1)
                 assert primary.poll() is None
@@ -207,17 +207,17 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
             # Starting the connection manager first must not capture normal
             # launches or prevent the main window (and its hub) from opening.
             primary = start(["--cm"])
-            cm = window(primary, "rapp 连接管理")
+            cm = window(primary, "rApp 连接管理")
             launch()
-            window(primary, "rapp")
+            window(primary, "rApp")
             close(cm["address"])
-            until(lambda: len(windows(primary)) == 1 and windows(primary)[0]["title"] == "rapp")
+            until(lambda: len(windows(primary)) == 1 and windows(primary)[0]["title"] == "rApp")
             assert primary.poll() is None
             print("PASS --cm-first startup still opens a unique main window", flush=True)
             primary.terminate()
             primary.wait(timeout=10)
             primary = start(["--cm"])
-            cm = window(primary, "rapp 连接管理")
+            cm = window(primary, "rApp 连接管理")
             close(cm["address"])
             assert primary.wait(timeout=10) == 0
             print("PASS closing a standalone manager exits without a background engine", flush=True)

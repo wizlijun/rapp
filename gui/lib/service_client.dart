@@ -217,7 +217,7 @@ class ServiceConnection {
       request({'cmd': 'set_update', 'auto_update': ?autoUpdate, 'check_updates': ?checkUpdates});
   Future<Map<String, Object?>> setAutoLock(bool on) => request({'cmd': 'set_auto_lock', 'on': on});
 
-  /// Clears rapp's own screen recording and accessibility records; the reply says which took.
+  /// Clears rApp's own screen recording and accessibility records; the reply says which took.
   Future<Map<String, Object?>> permissionsReset() => request({'cmd': 'permissions_reset'});
 
   void _onLine(String line) {
