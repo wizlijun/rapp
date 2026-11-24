@@ -710,6 +710,21 @@ void main() {
         await tester.pump();
       }
 
+      testWidgets('on a 320 phone the menu stays inside the stage, 8 from either edge', (tester) async {
+        tester.view.physicalSize = const Size(320, 700);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        await tester.pumpWidget(wrap(SizedBox(
+            width: 320,
+            height: 700,
+            child: Stack(children: composerLayer(state: es, session: rs, port: port, editor: FlutterEditor.new)))));
+        await tester.pump();
+        await openMenu(tester);
+        final r = tester.getRect(menu);
+        expect(r.left, greaterThanOrEqualTo(8 - 1e-6));
+        expect(r.right, lessThanOrEqualTo(312 + 1e-6));
+      });
+
       testWidgets('「大小」 slides the zoom; the menu keeps its own size at the top step', (tester) async {
         big(tester);
         es.setComposerZoom(composerZoomMax);

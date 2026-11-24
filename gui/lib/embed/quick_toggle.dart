@@ -64,11 +64,36 @@ class QuickToggle extends StatelessWidget {
           onPressed: tap,
         ),
       };
-      // Pressing it keeps the keys with the panel, as ＋ does: the picture must not take them back.
-      return Tooltip(
-        message: label,
-        child: Listener(onPointerDown: (_) => state.holdForPanel(session), child: button),
+      // Pressing it keeps the keys with the panel, as ＋ does: the picture must not take them back. Part of the
+      // text field for taps, so a mouse click (Linux, macOS) does not take the caret out of the text. The button
+      // names itself; the tooltip is for the eye only.
+      final Widget held = TextFieldTapRegion(
+        child: Tooltip(
+          message: label,
+          excludeFromSemantics: true,
+          child: Listener(onPointerDown: (_) => state.holdForPanel(session), child: button),
+        ),
       );
+      // Beside 输入 it comes as the box folds away over its own animation: a short fade, not a pop.
+      return look == QuickToggleLook.box ? held : _FadeIn(child: held);
     },
+  );
+}
+
+/// Fades [child] in once, when it enters the tree; at once under reduced motion.
+class _FadeIn extends StatelessWidget {
+  const _FadeIn({required this.child});
+
+  final Widget child;
+
+  static const _duration = Duration(milliseconds: 200);
+
+  @override
+  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
+    tween: Tween(begin: MediaQuery.disableAnimationsOf(context) ? 1 : 0, end: 1),
+    duration: _duration,
+    curve: Curves.easeOut,
+    builder: (context, t, child) => Opacity(key: const Key('quick-toggle-fade'), opacity: t, child: child),
+    child: child,
   );
 }

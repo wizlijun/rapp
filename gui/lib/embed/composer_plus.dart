@@ -1,6 +1,8 @@
 // The 「＋」 button of the writing panel and the menu above it (spec W13, input dock §5.3): 附件…, 在远端复制,
 // 输入历史, 直接回车且隐藏, 大小, the 快捷区 settings, 收起. The same on every platform.
 // A terminal's menu: 附件… greyed, no 在远端复制.
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -125,6 +127,13 @@ class _ComposerPlusState extends State<ComposerPlus> {
   /// The card's tallest height: the room on the side it opens into, less the 8 gap and an 8 margin. Taller content scrolls.
   double _maxHeight = double.infinity;
 
+  /// The card's width ([_menuWidth], or the overlay less 8 on either side if that is narrower) and how far it moves
+  /// left of 「＋」's left edge so it ends 8 inside the overlay's right edge (a phone under 325 wide).
+  double _width = _menuWidth;
+  double _dx = 0;
+
+  static const _menuWidth = 300.0;
+
   void _toggle() {
     if (_portal.isShowing) return _close();
     final box = context.findRenderObject();
@@ -134,6 +143,10 @@ class _ComposerPlusState extends State<ComposerPlus> {
       _down = top < overlay.size.height / 2;
       final room = _down ? overlay.size.height - (top + box.size.height) : top;
       _maxHeight = (room - 16).clamp(0.0, double.infinity);
+      final left = box.localToGlobal(Offset.zero, ancestor: overlay).dx;
+      final w = overlay.size.width;
+      _width = (w - 16).clamp(0.0, _menuWidth);
+      _dx = math.max(8 - left, math.min(0.0, w - 8 - (left + _width)));
     }
     _portal.show();
   }
@@ -299,7 +312,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
         link: _link,
         targetAnchor: _down ? Alignment.bottomLeft : Alignment.topLeft,
         followerAnchor: _down ? Alignment.topLeft : Alignment.bottomLeft,
-        offset: Offset(0, _down ? 8 : -8),
+        offset: Offset(_dx, _down ? 8 : -8),
         child: TapRegion(
           groupId: _group,
           child: Listener(
@@ -308,7 +321,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
               type: MaterialType.transparency,
               child: Container(
                 key: const Key('composer-plus-menu'),
-                width: 300,
+                width: _width,
                 decoration: t.floatBox(),
                 padding: const EdgeInsets.all(8),
                 constraints: BoxConstraints(maxHeight: _maxHeight),
