@@ -1,6 +1,6 @@
 # 语音纠词在本机按词表完成，LLM 只整理长句（设计）
 
-2026-11-24。状态（2026-11-25）：第 2 阶段已上线（rapp-llm 672e022，`GET /v1/vocabulary/rules`）；第 3、4 阶段和第 5 阶段的 D14 第一步已在分支 feat/voice-fix 实现（计划 `docs/superpowers/plans/2026-11-25-rapp-voice-local-fix.md`，提交 aa44c288、0f9dc075、015116e6、56196989、2d9399a1、d3e91d6a），三个阶段并在一条分支里交给 rapp-49；实机验收见 `tasks/todo.md`。D12、D13、D14 第二步等第 8 节探针录音。L2 推迟，用一周后再定。第 12 节 5 件事用户都已定（2026-11-24、2026-11-25）。依据：用户 2026-11-24 的要求；主干代码（提交 02db2d43）；网关代码（rapp-llm 0f3e5c1）；`vocabulary.md` 的现状；现有 5 份语音规格；对开源语音输入法和 Apple Speech、Foundation Models 接口的调研。来源见文末脚注。
+2026-11-24。状态（2026-11-25）：第 2 阶段已上线（rapp-llm 672e022，`GET /v1/vocabulary/rules`）；第 3、4 阶段和第 5 阶段的 D14 第一步已在分支 feat/voice-fix 实现（计划 `docs/superpowers/plans/2026-11-25-rapp-voice-local-fix.md`，提交 aa44c288、0f9dc075、015116e6、56196989、2d9399a1、d3e91d6a），三个阶段并在一条分支里交给 rapp-49；实机验收见 `tasks/todo.md`。第 8 节探针已跑（2026-11-25）：按 D13 换成 `DictationTranscriber` + 热词；D12 的 `setContext` 随之留在新模块上；D14 第二步不做。L2 推迟，用一周后再定。第 12 节 5 件事用户都已定（2026-11-24、2026-11-25）。依据：用户 2026-11-24 的要求；主干代码（提交 02db2d43）；网关代码（rapp-llm 0f3e5c1）；`vocabulary.md` 的现状；现有 5 份语音规格；对开源语音输入法和 Apple Speech、Foundation Models 接口的调研。来源见文末脚注。
 
 修订（2026-11-24，审查后）：补 F7 词表现状；D3 加下限并写明第一天能下发几条；D6 拆成两个字段；D9 改收编规则、区分规则来源；D2、D4、D5、D8、D10、D18 和 7.2 文件表按代码补齐；验收补网关不通的长句、正式词表规则的撤回、编辑路改回原话。
 
@@ -419,6 +419,33 @@ Dart 一侧：`_release()` 里和 `voice.stop()` 同时发 `pick`，用按住时
 | P4 | 端侧模型几选一 | 30 个近音句子，看选对几句和耗时 | 是否满足 D17 的上线条件 |
 
 P1 到 P3 用 `analyzer.analyzeSequence(from: 音频文件)` 离线跑，结果可以重复，录音和朗读清单见第 14 节。P4 在本机用 Foundation Models 跑，和 L2 一起推迟（第 12 节第 3 件），这次不做。P1 到 P3 的结果写回本节。
+
+**结果（2026-11-25）**
+
+用户录了 30 段（第 14 节清单）。在本机 macOS 27.0.1 上离线跑，语言 zh-CN，热词用网关当时的 99 个（清单里的专有词全在里面）。探针程序和逐句结果在 `~/voice-probe/probe/`，不进仓库。「全对」指这一段里加粗的词全部写对；错字率按字算，去掉空格和标点，不分大小写。
+
+| 配置 | 专有词全对 | 错字率 |
+|---|---|---|
+| `SpeechTranscriber`（现在的配置） | 4/30 | 16.5% |
+| `SpeechTranscriber` + 热词 | 4/30，30 段输出逐字相同 | 16.5% |
+| `DictationTranscriber`（`progressiveLongDictation`） | 6/30 | 44.4%，第 1 段首次运行报 RecogFailed，算全错 |
+| `DictationTranscriber` + 热词 | 17/30 | 14.6% |
+| `DictationTranscriber` + 热词 + 自定义语言模型 | 17/30 | 13.5%，模型构建 0.45 到 0.54 秒 |
+
+第一个字的时间：10 段，按真实时长逐块送音频，从「按下」量到第一段非空的临时结果。数字里含每段开头的静音，所以只看同一段内的差。
+
+| 配置 | 中位数 |
+|---|---|
+| `SpeechTranscriber` + 热词，不预热 | 1967 毫秒 |
+| `SpeechTranscriber` + 热词，提前 `prepareToAnalyze` | 1984 毫秒，逐段差 −26 到 +18 毫秒 |
+| `DictationTranscriber` + 热词 | 1593 毫秒，逐段差的中位数约 −8 毫秒（−708 到 +756） |
+
+结论：
+
+- **P1：**`SpeechTranscriber` 不理会热词。按 D12，这条路径不再调 `setContext`；因为换了模块（下一条），`setContext` 改由 `DictationTranscriber` 用，它是生效的。
+- **P2：**`DictationTranscriber` + 热词满足 D13 的 3 个条件：专有词多对 13 段（要求 5 段）；错字率 14.6%，低于 16.5%；第一个字不慢。所以换模块。自定义语言模型没有多对一段，只降了 1.1 个点的错字率，却要多一次构建和缓存，这次不加。
+- **P3：**预热没有快，反而略慢。按 D14，第二步（备用分析器）不做。
+- 还没验证的：探针只在 macOS 上跑；iPad、Duo 上的效果靠实机检查。第 1 段 `DictationTranscriber` 首次运行报过一次 RecogFailed，第二次就好了；真机上如果第一次按住报错，会走现有的失败提示。
 
 ## 9. 阶段
 
