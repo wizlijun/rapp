@@ -145,7 +145,7 @@ void main() {
       expect(p.size, const Size(720, 56 + 2)); // one line as tall as ＋/发送 and their 8s, inside a 1 px border
       expect(p.center.dx - host.left, 500);
       // 8 above the key bar, which an open panel brings along.
-      expect(p.bottom - host.top, 700 - keyBarHeightOf(es, rs, host.width) - 8);
+      expect(p.bottom - host.top, 700 - keyBarHeightOf(es, rs) - 8);
       // W2: 15 on 22, no MATRIX glow in the editor.
       final style = field(tester).style!;
       expect(style.fontSize, 15);
@@ -1195,7 +1195,7 @@ void main() {
         );
 
     // The key bar an open panel brings along: panels stand on it.
-    double bar() => keyBarHeightOf(es, es.currentRemote!, 800);
+    double bar() => keyBarHeightOf(es, es.currentRemote!);
 
     Future<void> openEmbedded(WidgetTester tester, {int sid = 1, String app = 'Safari'}) async {
       await tester.runAsync(() async {

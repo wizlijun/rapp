@@ -108,9 +108,6 @@ class _ComposerPanelState extends State<ComposerPanel> {
         (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS
             ? NativeEditor(
                 onToggleFocus: widget.state.composerKey,
-                onTyped: () {
-                  foldKeyBar(widget.state, widget.session);
-                },
                 onShortcut: (key) {
                   switch (key) {
                     case '[': widget.state.step(-1);
@@ -535,7 +532,7 @@ List<Widget> composerLayer(
   // What `both` and the bar's own modes decide: the bar's height at the stage's [width] while it shows, else 0.
   final bars = Listenable.merge([both, state]);
   double bar(double width) =>
-      keyBarWhenClosed(session, port) || open() ? keyBarHeightOf(state, session, width) : 0;
+      keyBarWhenClosed(session, port) || open() ? keyBarHeightOf(state, session) : 0;
   return [
     // The key bar along the stage's bottom; always in the list, so its coming and going moves nothing else.
     Positioned.fill(
@@ -922,7 +919,7 @@ class _TidyLayer extends StatelessWidget {
       final h = openStackHeight(stage.height > stage.width, state.voice != null);
       bottom = math.max(0.0, math.min(stage.height - p.top + 8, stage.height - 8 - h)) + h + 12;
     } else {
-      final base = closedStackBottom(keyboard, closedBar ? keyBarHeightOf(state, session, stage.width) : 0);
+      final base = closedStackBottom(keyboard, closedBar ? keyBarHeightOf(state, session) : 0);
       final button = session.composerAllowed;
       final n = (button && state.voice != null ? 1 : 0) + (button ? 1 : 0) + (session.currentZoomed ? 1 : 0);
       final upright = stage.height > stage.width;

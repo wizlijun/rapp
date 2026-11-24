@@ -398,6 +398,7 @@ void main() {
         ..apply(TermScreen(
             pane: '%3', rev: 1, cols: 40, rows: 8, cx: 0, cy: 0, cursor: true, alt: false, full: true, more: false,
             lines: [for (var i = 0; i < 8; i++) (i, 'abcdef')]));
+      s.prefs.keyBarMore = true; // 复制 is on the second row
       await openTerm(tester);
       final grid = tester.getTopLeft(find.byKey(const Key('term-grid')));
       final g = await tester.startGesture(grid + const Offset(2, 200), kind: PointerDeviceKind.mouse);
@@ -427,7 +428,7 @@ void main() {
           .y;
       final size = tester.getSize(find.byType(TermStage));
       expect(find.byType(KeyBar), findsOneWidget);
-      expect(keyBarHeightOf(s, s.currentRemote!, tester.getSize(find.byType(Stage)).width), 54);
+      expect(keyBarHeightOf(s, s.currentRemote!), 54);
       expect(lift(), 54);
       await openPanel(tester);
       await tester.pump(const Duration(milliseconds: 200));

@@ -211,7 +211,7 @@ class Stage extends StatelessWidget {
             return Stack(
               children: [
                 Positioned.fill(
-                  child: _lifted(state, rs, stage, bar: () => keyBarHeightOf(state, rs, c.maxWidth)),
+                  child: _lifted(state, rs, stage, bar: () => keyBarHeightOf(state, rs)),
                 ),
                 if (bar != null) Positioned(top: 0, left: 0, right: 0, child: bar),
                 ...composerLayer(state: state, session: rs, port: state.portOf(rs.sid)!,
@@ -226,7 +226,7 @@ class Stage extends StatelessWidget {
           final layer = !full && (picture || (rs != null && rs.detached)) && rs != null && port != null;
           // A terminal app keeps the key bar with the panel closed, so its picture goes up by the bar height (never the open lift).
           if (layer && keyBarWhenClosed(rs, port)) {
-            stage = _lifted(state, rs, stage, bar: () => keyBarHeightOf(state, rs, c.maxWidth), appBar: true);
+            stage = _lifted(state, rs, stage, bar: () => keyBarHeightOf(state, rs), appBar: true);
           }
           return Stack(
             children: [

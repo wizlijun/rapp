@@ -107,7 +107,7 @@ void main() {
   // Up off the stage's bottom.
   double bottomOf(WidgetTester tester, Finder f) => stage.height - tester.getRect(f).bottom;
   double topOf(WidgetTester tester, Finder f) => stage.height - tester.getRect(f).top;
-  double barH(RemoteSession rs) => keyBarHeightOf(s, rs, stage.width);
+  double barH(RemoteSession rs) => keyBarHeightOf(s, rs);
   // An app's panel floats with its grip on top: the stack clears the grip.
   double grip(RemoteSession rs) => rs == tsess ? 0 : gripSize.height;
   double fade(WidgetTester tester) => tester.widget<Opacity>(find.byKey(const Key('dock-panel-fade'))).opacity;

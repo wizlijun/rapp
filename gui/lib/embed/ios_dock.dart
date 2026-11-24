@@ -175,7 +175,7 @@ class IosDockState extends State<IosDock> with SingleTickerProviderStateMixin {
           final stays = keyBarWhenClosed(s, widget.port);
           // A terminal's 复制 copies its stage's selection here; an app's sends ⌘C.
           final copy = widget.port is TermSessionPort ? () => s.termCopy?.call() : null;
-          final barH = keyBarHeightOf(widget.state, s, c.maxWidth);
+          final barH = keyBarHeightOf(widget.state, s);
           _bar = shown || stays ? barH : 0;
           _stage = c.maxHeight;
           final fade = _opacity(v);

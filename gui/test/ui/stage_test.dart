@@ -225,7 +225,7 @@ void main() {
               ? 0
               : -tester.widget<Transform>(lifts.first).transform.getTranslation().y;
           final rs = es.remote[1]!;
-          final bar = keyBarHeightOf(es, rs, 800);
+          final bar = keyBarHeightOf(es, rs);
           expect(lift(), app == 'Safari' ? 0 : bar);
           rs.composer.open = true;
           await tester.pump();

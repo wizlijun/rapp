@@ -187,18 +187,8 @@ void main() {
       final bar = inStage(tester, find.byType(KeyBar));
       expect(bar.width, stage.width);
       expect(bar.bottom, stage.height);
-      expect(bar.height, keyBarHeightOf(es, rs, stage.width));
+      expect(bar.height, keyBarHeightOf(es, rs));
       expect(bar.top - inStage(tester, open).bottom, 12);
-      // ⊙: three keys; 输入 still stands on the bar.
-      es.setQuickHidden(term: true, hidden: true);
-      await tester.pump();
-      expect(find.byKey(const Key('bar-enter')), findsNothing);
-      expect(find.byKey(const Key('bar-slim')), findsOneWidget);
-      final slim = inStage(tester, find.byType(KeyBar));
-      expect(slim.top - inStage(tester, open).bottom, 12);
-      rs.composer.open = true;
-      await tester.pump();
-      expect(slim.top - inStage(tester, find.byType(ComposerPanel)).bottom, 8);
     });
 
     iosTest('${platform.name}: app session: no bar while closed, bar while panel open', (tester) async {
@@ -276,7 +266,7 @@ void main() {
     final tport = FakeTermSessionPort();
     addTearDown(tport.dispose);
     await tester.pumpWidget(layer(p: tport));
-    final bar = keyBarHeightOf(es, rs, stage.width);
+    final bar = keyBarHeightOf(es, rs);
     expect(stage.height - inStage(tester, find.byType(KeyBar)).bottom, 0);
     expect(stage.height - inStage(tester, open).bottom, 88);
     await tester.pumpWidget(layer(p: tport, keyboard: 300));

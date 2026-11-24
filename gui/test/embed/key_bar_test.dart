@@ -103,6 +103,7 @@ void main() {
   }
 
   group('terminal', () {
+    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌃ ⌥ ⌘ and copy / paste
     iosTest('tap Esc twice sends [Esc] twice', (tester) async {
       await tester.pumpWidget(bar(tsess));
       await tap(tester, 'esc');
@@ -175,6 +176,7 @@ void main() {
   });
 
   group('app', () {
+    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌃ ⌥ ⌘ and copy / paste
     iosTest('⇧Tab sends key(48, latchShift); ⌃ then ↑ sends key(126, latchCtrl) after keyEvent(59, down)', (tester) async {
       await tester.pumpWidget(bar(app, width: 900));
       await tap(tester, 'stab');
@@ -311,6 +313,7 @@ void main() {
   });
 
   group('repeat and swipe', () {
+    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌃ ⌥ ⌘ and copy / paste
     iosTest('hold ← 400 ms then 160 ms: three Left', (tester) async {
       await tester.pumpWidget(bar(tsess));
       final g = await tester.startGesture(tester.getCenter(k('left')));
@@ -417,6 +420,7 @@ void main() {
   });
 
   group('paste', () {
+    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌃ ⌥ ⌘ and copy / paste
     iosTest('粘贴 sends the clipboard and leaves composer draft unchanged', (tester) async {
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (c) async {
         if (c.method == 'Clipboard.getData') return {'text': 'hello'};
@@ -498,37 +502,42 @@ void main() {
       expect(s.prefs.keyBarMore, isTrue);
       await tester.pump();
       expect(k('bksp'), findsOneWidget);
-      expect(tester.getSize(find.byType(KeyBar)).height, keyBarHeightOf(s, tsess, 700));
-      expect(keyBarHeightOf(s, tsess, 700), 100 + phraseStripHeight);
+      expect(tester.getSize(find.byType(KeyBar)).height, keyBarHeightOf(s, tsess));
+      expect(keyBarHeightOf(s, tsess), 100 + phraseStripHeight);
       await tap(tester, 'more');
       expect(s.prefs.keyBarMore, isFalse);
       expect(File('${tmp.path}/devices/123456789/gui.json').readAsStringSync(), contains('"key_bar_more":false'));
     });
 
-    iosTest('⊙ only with hardwareKeyboard; tapping it leaves esc, stab, slim', (tester) async {
+    iosTest('⊙ is always the last key of the first row', (tester) async {
       await tester.pumpWidget(bar(tsess));
-      expect(k('slim'), findsNothing);
-      lastHardwareKey = DateTime.now();
-      await tester.pumpWidget(bar(tsess, width: 701));
-      expect(k('slim'), findsOneWidget);
-      await tap(tester, 'slim');
+      expect(k('hide'), findsOneWidget);
+      expect(k('more'), findsOneWidget);
+      expect(find.bySemanticsLabel('收起快捷区'), findsOneWidget);
+    });
+
+    iosTest('⊙ hides the quick area of its kind: a terminal sets quick_hidden_term, Safari quick_hidden_app', (tester) async {
+      await tester.pumpWidget(bar(tsess));
+      expect(s.prefs.quickHiddenTerm, isFalse);
+      await tap(tester, 'hide');
       expect(s.prefs.quickHiddenTerm, isTrue);
-      await tester.pump();
-      expect([for (final id in barKeys.keys) if (k(id).evaluate().isNotEmpty) id], ['esc', 'stab', 'slim']);
-      expect(tester.getSize(find.byType(KeyBar)).height, 54);
-    });
-
-    iosTest('⊙ stays once a hardware key was seen, after the 10 s window', (tester) async {
-      lastHardwareKey = DateTime.now().subtract(const Duration(seconds: 30));
-      expect(hardwareKeyboard(), isFalse);
+      expect(s.prefs.quickHiddenApp, isTrue);
+      s.setQuickHidden(term: false, hidden: false);
+      await tester.pumpWidget(bar(app));
+      await tap(tester, 'hide');
+      expect(s.prefs.quickHiddenApp, isTrue);
+      expect(s.prefs.quickHiddenTerm, isTrue);
       await tester.pumpWidget(bar(tsess));
-      expect(k('slim'), findsOneWidget);
+      await tap(tester, 'hide'); // ⊙ toggles: the terminal kind is shown again
+      expect(s.prefs.quickHiddenTerm, isFalse);
+      expect(s.prefs.quickHiddenApp, isTrue);
     });
 
-    iosTest('the bar is as high as keyBarHeightOf says, one row wide and two narrow', (tester) async {
-      await tester.pumpWidget(bar(tsess, width: 900));
+    iosTest('the bar is as high as keyBarHeightOf says, even at zoom 1.75 widths', (tester) async {
+      await tester.pumpWidget(bar(tsess, width: 1260));
       expect(tester.getSize(find.byType(KeyBar)).height, 54 + phraseStripHeight);
-      expect(keyBarHeightOf(s, tsess, 900), 54 + phraseStripHeight);
+      expect(keyBarHeightOf(s, tsess), 54 + phraseStripHeight);
+      expect(k('more'), findsOneWidget);
     });
 
     iosTest('an arrow shows its swipe-up label in the corner', (tester) async {
@@ -561,30 +570,27 @@ void main() {
       expect(ph('phrase-0'), findsOneWidget);
     });
 
-    iosTest('⊙ slim or no phrases: no strip', (tester) async {
-      s.prefs.quickHiddenTerm = true;
-      expect(phraseStripShown(s, tsess), isFalse);
-      s.prefs.quickHiddenTerm = false;
+    iosTest('no phrases: no strip', (tester) async {
       s.setPhrases(const []);
       expect(phraseStripShown(s, tsess), isFalse);
       s.setPhrases(defaultPhrases);
       expect(phraseStripShown(s, tsess), isTrue);
     });
 
-    testWidgets('the desktop too, and it stays while slim (iOS hides it while slim)', (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      try {
-        expect(phraseStripShown(s, tsess), isTrue);
-        s.prefs.quickHiddenTerm = true;
-        expect(phraseStripShown(s, tsess), isTrue);
-        debugDefaultTargetPlatformOverride = TargetPlatform.linux;
-        expect(phraseStripShown(s, tsess), isTrue);
-        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
-        expect(phraseStripShown(s, tsess), isFalse);
-      } finally {
-        debugDefaultTargetPlatformOverride = null;
-      }
-    });
+    for (final platform in [TargetPlatform.iOS, TargetPlatform.macOS, TargetPlatform.linux]) {
+      testWidgets('${platform.name}: the 常用语条 shows whatever the quick state was (no slim rule) and the bar height adds phraseStripHeight', (tester) async {
+        debugDefaultTargetPlatformOverride = platform;
+        try {
+          for (final hidden in [false, true]) {
+            s.prefs.quickHiddenTerm = hidden;
+            expect(phraseStripShown(s, tsess), isTrue);
+            expect(keyBarHeightOf(s, tsess), keyBarHeight(1) + phraseStripHeight);
+          }
+        } finally {
+          debugDefaultTargetPlatformOverride = null;
+        }
+      });
+    }
 
     iosTest('a tap sends the text, ✓ and a light tap', (tester) async {
       app.setProfile(const ResolvedProfile(phrases: true));
@@ -634,7 +640,7 @@ void main() {
     });
   });
 
-  group('desktop: a hardware key cuts the bar to ⊙', () {
+  group('a key typed into the picture folds the quick area', () {
     void deskTest(String name, Future<void> Function(WidgetTester) body, {bool macOnly = false}) {
       for (final platform in [TargetPlatform.macOS, if (!macOnly) TargetPlatform.linux]) {
         testWidgets('${platform.name}: $name', (tester) async {
@@ -648,31 +654,54 @@ void main() {
       }
     }
 
-    deskTest('a letter key collapses the bar to ⊙; ⊙ expands; ⌘ alone and ⌘-held keys do not', (tester) async {
+    deskTest('a letter typed into the focused picture folds; typed with the editor focused it does not', (tester) async {
       await tester.pumpWidget(bar(tsess));
-      expect(k('slim'), findsOneWidget);
-      expect(k('enter'), findsOneWidget);
+      s.pictureFocused = tsess.sid;
       await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.shiftLeft);
       await tester.pump();
-      expect(s.prefs.quickHiddenTerm, isFalse);
-      expect(k('enter'), findsOneWidget);
+      expect(quickHidden(s, tsess), isFalse);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
       await tester.pump();
-      expect(s.prefs.quickHiddenTerm, isTrue);
-      expect([for (final id in barKeys.keys) if (k(id).evaluate().isNotEmpty) id], ['esc', 'stab', 'slim']);
-      await tap(tester, 'slim');
-      expect(s.prefs.quickHiddenTerm, isFalse);
-      expect(k('enter'), findsOneWidget);
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+      expect(quickHidden(s, tsess), isTrue);
+      expect(s.prefs.quickHiddenApp, isTrue, reason: 'the other kind is untouched');
+      await tap(tester, 'hide');
+      expect(quickHidden(s, tsess), isFalse);
+      tsess.composer.editorFocused = true;
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
       await tester.pump();
-      expect(s.prefs.quickHiddenTerm, isTrue);
+      expect(quickHidden(s, tsess), isFalse, reason: 'the editor has the key');
+      tsess.composer.editorFocused = false;
+      s.pictureFocused = null;
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+      await tester.pump();
+      expect(quickHidden(s, tsess), isFalse, reason: 'the picture has no focus');
     });
 
-    deskTest('a repeat does not collapse; no bar, no listening', (tester) async {
+    deskTest('an app folds quick_hidden_app, not the terminal pref', (tester) async {
+      s.setQuickHidden(term: false, hidden: false);
+      await tester.pumpWidget(bar(app));
+      s.pictureFocused = app.sid;
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+      await tester.pump();
+      expect(s.prefs.quickHiddenApp, isTrue);
+      expect(s.prefs.quickHiddenTerm, isFalse);
+    });
+
+    deskTest('quick_auto_hide off: a picture key does not fold', (tester) async {
+      s.setQuickAutoHide(false);
       await tester.pumpWidget(bar(tsess));
+      s.pictureFocused = tsess.sid;
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+      await tester.pump();
+      expect(quickHidden(s, tsess), isFalse);
+    });
+
+    deskTest('a repeat does not fold; no bar, no listening', (tester) async {
+      await tester.pumpWidget(bar(tsess));
+      s.pictureFocused = tsess.sid;
       await tester.sendKeyDownEvent(LogicalKeyboardKey.keyA);
       await tester.pump();
       expect(s.prefs.quickHiddenTerm, isTrue);
@@ -688,30 +717,57 @@ void main() {
 
     deskTest('macOS: key_typed from the picture folds its own session\'s bar; not while ⌘ on the bar is lit', (tester) async {
       expect(parseSessionEvent('key_typed', {'sid': 1}), isA<KeyTypedEvent>().having((e) => e.sid, 'sid', 1));
+      s.setQuickHidden(term: false, hidden: false);
+      s.prefs.keyBarMore = true;
       tester.view.physicalSize = const Size(1000, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(bar(app, width: 900));
       port.emit(const KeyTypedEvent(3)); // another session's
       await tester.pump();
-      expect(s.prefs.quickHiddenTerm, isFalse);
+      expect(quickHidden(s, app), isFalse);
       await tap(tester, 'cmd');
       port.emit(const KeyTypedEvent(1));
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
       await tester.pump();
-      expect(s.prefs.quickHiddenTerm, isFalse, reason: 'a lit ⌘ stays in sight');
+      expect(quickHidden(s, app), isFalse, reason: 'a lit ⌘ stays in sight');
       await tap(tester, 'cmd');
       await tap(tester, 'cmd'); // locked, then off
       expect(keyLatchOf(s, app).flags, 0);
       port.emit(const KeyTypedEvent(1));
       await tester.pump();
-      expect(s.prefs.quickHiddenTerm, isTrue);
+      expect(quickHidden(s, app), isTrue);
     }, macOnly: true);
+
+    testWidgets('iOS with quick_auto_hide turned on: a hardware key into the picture folds', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        s.setQuickAutoHide(true);
+        await tester.pumpWidget(bar(tsess));
+        s.pictureFocused = tsess.sid;
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+        await tester.pump();
+        expect(quickHidden(s, tsess), isTrue);
+        s.setQuickHidden(term: true, hidden: false);
+        tsess.composer.editorFocused = true;
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+        await tester.pump();
+        expect(quickHidden(s, tsess), isFalse, reason: 'the iOS editor has the key');
+        tsess.composer.editorFocused = false;
+        s.setQuickAutoHide(false);
+        s.pictureFocused = tsess.sid;
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+        await tester.pump();
+        expect(quickHidden(s, tsess), isFalse);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
 
     testWidgets('Linux: Ctrl-held keys (the app shortcuts) do not fold', (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.linux;
       try {
         await tester.pumpWidget(bar(tsess));
+        s.pictureFocused = tsess.sid;
         await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
         await tester.sendKeyEvent(LogicalKeyboardKey.bracketRight);
         await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
