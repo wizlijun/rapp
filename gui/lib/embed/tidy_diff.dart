@@ -140,11 +140,24 @@ _Align? _align(List<int> a, List<int> b) {
   return _Align(aToB, bToA, hunks, t[0]);
 }
 
-/// The switchable changes between a and b, as a range in each.
-List<_Hunk> _changes(List<int> a, List<int> b) {
+/// Whether [al] is one edit inside kept words: a single hunk, with at least 2 unchanged runes of a that are not
+/// space or punctuation around it. Then the alignment can only mean "these words became those", however much of a
+/// short text they are. A rewrite keeps no words (or one by chance) or changes in several places.
+bool _oneEdit(List<int> a, _Align al) {
+  if (al.hunks.length != 1) return false;
+  var kept = 0;
+  for (var i = 0; i < a.length; i++) {
+    if (al.aToB[i] >= 0 && !_isSpaceOrPunct(a[i])) kept++;
+  }
+  return kept >= 2;
+}
+
+/// The switchable changes between a and b, as a range in each. Nothing when b keeps under half of a (a rewrite,
+/// not changes), unless [oneEdit] lets through [_oneEdit]: a short text where one word is most of it.
+List<_Hunk> _changes(List<int> a, List<int> b, {bool oneEdit = false}) {
   if (a.isEmpty) return const [];
   final al = _align(a, b);
-  if (al == null || al.lcs * 2 < a.length) return const [];
+  if (al == null || (al.lcs * 2 < a.length && !(oneEdit && _oneEdit(a, al)))) return const [];
   final out = <_Hunk>[];
   for (final h in al.hunks) {
     final before = _str(a, h.i0, h.i1), after = _str(b, h.j0, h.j1);
@@ -208,7 +221,8 @@ List<LearnItem> editLearns(String original, String result, String sent) {
   final oa = _align(o, r), rs = _align(r, s);
   if (oa == null || rs == null) return const [];
   final out = <LearnItem>[];
-  for (final c in _changes(r, s)) {
+  // Short texts never reach the tidy, so the edit is their only teacher: one edit in kept words counts (D8).
+  for (final c in _changes(r, s, oneEdit: true)) {
     // c: r [i0,i1) ↔ s [j0,j1)
     var rFrom = c.i0, rTo = c.i1, sFrom = c.j0, sTo = c.j1;
     final overlapping = [

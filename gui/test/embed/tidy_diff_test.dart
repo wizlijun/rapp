@@ -31,8 +31,25 @@ void main() {
         [const LearnItem.replace(observed: '拍森', output: 'Python', excerpt: '明天用拍森跑')]);
   });
   test('editLearns: a fix on words the AI added is dropped', () => expect(editLearns('明天开会', '明天下午开会', '明天晚上开会'), isEmpty));
-  // Empty because so short a text is mostly rewritten (`_changes`' guard); a longer revert teaches preserve (below).
-  test('editLearns: flipping the AI back to the heard words learns nothing', () => expect(editLearns('用拍森跑', '用Python跑', '用拍森跑'), isEmpty));
+  // Short texts are the edit path's main case (they never reach the tidy), so one edit inside kept words is
+  // learned even when it changes most of the text; spec §10 item 7 wants the short 「打开拍森」 revert to teach.
+  test('editLearns: flipping a short fix back to the heard words teaches preserve', () => expect(editLearns('用拍森跑', '用Python跑', '用拍森跑'),
+      [const LearnItem.preserve(observed: '拍森', avoid: 'Python', excerpt: '用拍森跑')]));
+  test('editLearns: a short revert teaches preserve', () => expect(editLearns('打开拍森', '打开Python', '打开拍森'),
+      [const LearnItem.preserve(observed: '拍森', avoid: 'Python', excerpt: '打开拍森')]));
+  test('editLearns: a short edit teaches replace', () => expect(editLearns('打开黑猫瑞', '打开黑猫瑞', '打开Hemory'),
+      [const LearnItem.replace(observed: '黑猫瑞', output: 'Hemory', excerpt: '打开黑猫瑞')]));
+  test('editLearns: a short revert in the middle teaches preserve', () => expect(editLearns('用拍森跑一下', '用Python跑一下', '用拍森跑一下'),
+      [const LearnItem.preserve(observed: '拍森', avoid: 'Python', excerpt: '用拍森跑一下')]));
+  test('editLearns: a total rewrite of a short text teaches nothing', () {
+    expect(editLearns('打开拍森', '打开Python', '今天天气不错'), isEmpty);
+    expect(editLearns('打开拍森', '打开拍森', '今天天气不错'), isEmpty);
+  });
+  test('editLearns: wholesale different text teaches nothing', () {
+    expect(editLearns('我们明天开会讨论预算', '我们明天开会讨论预算', '他们后天吃饭聊天气'), isEmpty);
+    expect(editLearns('我们打开拍森', '我们打开拍森', '他们吃饭了吗'), isEmpty); // one kept rune is not context
+    expect(editLearns('打开拍森看', '打开拍森看', '关掉拍森吧'), isEmpty); // two edits, most of it changed
+  });
   test('editLearns: reverting a fix teaches preserve', () => expect(editLearns('我们现在打开拍森看看', '我们现在打开Python看看', '我们现在打开拍森看看'),
       [const LearnItem.preserve(observed: '拍森', avoid: 'Python', excerpt: '我们现在打开拍森看看')]));
   test('editLearns: no fix, an edit teaches replace', () => expect(editLearns('我们现在打开黑猫瑞看看', '我们现在打开黑猫瑞看看', '我们现在打开Hemory看看'),
