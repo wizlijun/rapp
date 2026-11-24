@@ -555,8 +555,8 @@ List<Widget> composerLayer(
             port: port,
             maxHeight: maxHeight,
           ),
-          stack: (context, bottom, stage) => ios
-              ? _iosStack(context, state, session, port, hold, bottom, stage)
+          stack: (context, bottom, stage, upright) => ios
+              ? _iosStack(context, state, session, port, hold, bottom, stage, upright)
               : _cornerRow(context, state, session, port, keyboard, rowRight, stage),
         ),
       ),
@@ -654,10 +654,10 @@ Widget _cornerRow(BuildContext context, MainState state, RemoteSession session, 
 }
 
 /// iOS's stage stack, its bottom [bottom] up off the [stage]'s bottom: 语音 and 输入 (收起 while the panel is open)
-/// one element either way, so the toggle's icon turns over; closed, 还原 and the upload strip too. [upright] by the
-/// stage itself, not what the keyboard leaves of it.
+/// one element either way, so the toggle's icon turns over; closed, 还原 and the upload strip too. [upright] as
+/// [stackUprightOf] has it: a portrait stage, or a column with no room above the block.
 Widget _iosStack(BuildContext context, MainState state, RemoteSession session, SessionPort port, VoiceHold? hold,
-    double bottom, Size stage) {
+    double bottom, Size stage, bool upright) {
   final transfer = session.transferStatus;
   final button = session.composerAllowed;
   final open = session.composer.open && button;
@@ -678,7 +678,7 @@ Widget _iosStack(BuildContext context, MainState state, RemoteSession session, S
         onSide: state.setStageSide,
         voice: hold != null && button ? voiceButton(hold) : null,
         hidden: hold?.active ?? false,
-        upright: stage.height > stage.width,
+        upright: upright,
         input: button ? _openToggle(session) : null,
         // Folded, the 快捷区 toggle stands above 输入 (quick-toggle spec §6); open, it is in the box.
         quick: button && !open ? QuickToggle(state: state, session: session, look: QuickToggleLook.stage) : null,
@@ -780,11 +780,16 @@ class _TidyLayer extends StatelessWidget {
     final left = state.stageSide.value == StageSide.left;
     final x = left ? stageButtonsIn : stage.width - stageButtonsIn - card.width;
     // The stack's top, as InputDock puts it.
-    final upright = stage.height > stage.width;
     final voice = state.voice != null;
+    final buttons = stackButtonCount(session, voice: voice);
+    final upright = stackUprightOf(
+        stage: stage,
+        block: panelPlaceOf(session).value,
+        keyboard: keyboard,
+        columnHeight: stackColumnHeight(open: _open, buttons: buttons, voice: voice));
     final h = _open
         ? openStackHeight(upright, voice)
-        : closedStackHeight(buttons: stackButtonCount(session, voice: voice), upright: upright);
+        : closedStackHeight(buttons: buttons, upright: upright);
     final bottom =
         stackBottomOf(stage: stage, block: panelPlaceOf(session).value, keyboard: keyboard, stackHeight: h) + h + 12;
     return Offset(x, stage.height - bottom - card.height);
