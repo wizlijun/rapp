@@ -569,6 +569,7 @@ List<Widget> composerLayer(
                         // Per session: a switch mid-drag drops that drag instead of saving it into the new app.
                         key: ValueKey(session.sid),
                         session: session,
+                        at: state.composerAtOf(session),
                         scale: state.composerScale,
                         keyboard: keyboard + bar(c.maxWidth),
                         place: panelPlaceOf(session),
@@ -754,6 +755,7 @@ List<Widget> _iosLayer(
                     // Per session: a switch mid-drag drops that drag instead of saving it into the new app.
                     key: ValueKey(session.sid),
                     session: session,
+                    at: state.composerAtOf(session),
                     scale: state.composerScale,
                     keyboard: rest,
                     place: panelPlaceOf(session),

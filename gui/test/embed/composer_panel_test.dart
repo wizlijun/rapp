@@ -20,7 +20,6 @@ import 'package:rapp/history/history_list.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/pages/phrases_page.dart';
 import 'package:rapp/ui/controls.dart';
-import '../ui/platform_helpers.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/stage.dart';
@@ -1413,65 +1412,14 @@ void main() {
       await tester.pump(kDoubleTapTimeout);
     });
 
-    testWidgets('a touch on the panel shows the bar and the × (no hover to show them)', (tester) async {
+    testWidgets('a touch on the panel shows the bar (no hover to show it)', (tester) async {
       await showPicture(tester);
       await openPanel(tester);
-      final close = find.byKey(const Key('composer-grip-close'));
-      double shown() => tester.widget<AnimatedOpacity>(
-          find.ancestor(of: close, matching: find.byType(AnimatedOpacity)).first).opacity;
-      expect(shown(), 0);
+      double bar() => tester.widget<AnimatedOpacity>(find.byKey(const Key('composer-grip-bar'))).opacity;
+      expect(bar(), 0);
       await tester.tapAt(tester.getCenter(fieldFinder));
       await tester.pump();
-      expect(shown(), 1);
-      await tester.tap(close);
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('composer-panel')), findsNothing);
-    });
-
-    // iOS has no × (a pull down collapses there, G4/G6).
-    testWidgets('the grip × is at least 40 square on macOS', (tester) async {
-      await onPlatform(TargetPlatform.macOS, () async {
-        await showPicture(tester);
-        await openPanel(tester);
-        final s = tester.getSize(find.byKey(const Key('composer-grip-close')));
-        expect(s.width, greaterThanOrEqualTo(40));
-        expect(s.height, greaterThanOrEqualTo(40));
-      });
-    });
-
-    testWidgets('a small × right beside the grip shows with the bar and collapses the panel', (tester) async {
-      await showPicture(tester);
-      await openPanel(tester);
-      final close = find.byKey(const Key('composer-grip-close'));
-      double shown() => tester.widget<AnimatedOpacity>(
-          find.ancestor(of: close, matching: find.byType(AnimatedOpacity)).first).opacity;
-      expect(shown(), 0);
-      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      await mouse.addPointer(location: const Offset(400, 20));
-      await mouse.moveTo(panelRect(tester).center);
-      await tester.pump();
-      expect(shown(), 1);
-      final x = tester.getRect(close), p = panelRect(tester), g = tester.getRect(grip);
-      // The grip row is as tall as the grip: the panel starts right under it, as before the hit area grew.
-      expect(g.height, 20);
-      expect(p.top, g.bottom);
-      // The hit area is control-height square, hangs from the grip row's top and reaches down into the body
-      // (it has to stay inside the panel's own bounds); the drawn × is level with the grip, centred across it.
-      expect(x.size, Size.square(controlHeightOf(tester.element(close))));
-      expect(x.top, g.top);
-      final mark = tester.getCenter(find.descendant(of: close, matching: find.byIcon(Icons.close)));
-      expect(mark.dy, g.center.dy);
-      expect(mark.dx, x.center.dx);
-      expect(mark.dx - g.right, 14);
-      expect(g.center.dx, p.center.dx);
-      await mouse.moveTo(x.center);
-      await tester.pump();
-      expect(shown(), 1);
-      await mouse.down(x.center);
-      await mouse.up();
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('composer-panel')), findsNothing);
-      await mouse.removePointer();
+      expect(bar(), 1);
     });
 
     testWidgets('dragging the grip moves the panel and saves once on release', (tester) async {

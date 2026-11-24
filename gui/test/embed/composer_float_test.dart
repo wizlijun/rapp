@@ -67,15 +67,18 @@ void main() {
       debugDefaultTargetPlatformOverride = platform;
       tester.view.physicalSize = const Size(800, 600);
       tester.view.devicePixelRatio = 1;
-      rs.setProfile(ResolvedProfile(composerAt: at));
+      final cur = ValueNotifier<InputPoint?>(at);
       await tester.pumpWidget(MaterialApp(
         theme: themeDataFor(RappTheme.matrix),
         home: Material(
-          child: FloatingComposer(
+          child: ValueListenableBuilder<InputPoint?>(
+            valueListenable: cur,
+            builder: (_, at, _) => FloatingComposer(
             session: rs,
+            at: at,
             onPlace: (p) {
               placed.add(p);
-              rs.setProfile(ResolvedProfile(composerAt: p));
+              cur.value = p;
             },
             keyboard: keyboard,
             onPullClose: pull ? () => closed++ : null,
@@ -90,6 +93,7 @@ void main() {
                 ),
               ]),
             ),
+          ),
           ),
         ),
       ));
@@ -229,13 +233,173 @@ void main() {
       expect(tester.getCenter(grip).dx, 400);
     });
 
-    pullTest('macOS: composer-grip-close still there, and no pull', (tester) async {
+    pullTest('macOS: no composer-grip-close, and no pull', (tester) async {
       await show(tester, TargetPlatform.macOS, pull: false);
-      expect(find.byKey(const Key('composer-grip-close')), findsOneWidget);
+      expect(find.byKey(const Key('composer-grip-close')), findsNothing);
       final y = top(tester);
       await drag(tester, tester.getCenter(grip), [40, 40]);
       expect(top(tester), closeTo(y, 0.5));
       expect(closed, 0);
+    });
+  });
+
+  group('a generic block (Task 4)', () {
+    late RemoteSession rs;
+    final placed = <InputPoint?>[];
+    final block = find.byKey(const Key('blk'));
+    final grip = find.byKey(const Key('composer-grip'));
+
+    setUp(() {
+      rs = RemoteSession(1, 'Safari');
+      placed.clear();
+    });
+    tearDown(() => rs.dispose());
+
+    Future<void> pump(WidgetTester tester,
+        {InputPoint? at, bool grip = true, Widget? handle, double childH = 60, double childW = 0, Widget? inner}) async {
+      tester.view.physicalSize = const Size(800, 600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final cur = ValueNotifier<InputPoint?>(at);
+      await tester.pumpWidget(MaterialApp(
+        theme: themeDataFor(RappTheme.matrix),
+        home: Material(
+          child: ValueListenableBuilder<InputPoint?>(
+            valueListenable: cur,
+            builder: (_, at, _) => FloatingComposer(
+              session: rs,
+              at: at,
+              grip: grip,
+              handle: handle,
+              onPlace: (p) {
+                placed.add(p);
+                cur.value = p;
+              },
+              child: inner ?? ColoredBox(key: const Key('blk'), color: Colors.red, child: SizedBox(height: childH)),
+            ),
+          ),
+        ),
+      ));
+      await tester.pump();
+    }
+
+    testWidgets('no × on any platform: composer-grip-close is never built', (tester) async {
+      for (final p in [TargetPlatform.macOS, TargetPlatform.linux, TargetPlatform.iOS]) {
+        debugDefaultTargetPlatformOverride = p;
+        await pump(tester);
+        expect(find.byKey(const Key('composer-grip-close')), findsNothing, reason: '$p');
+        expect(tester.getCenter(grip).dx, 400);
+      }
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    testWidgets('at null uses defaultAt; a drag saves through onPlace; double-tap gives null', (tester) async {
+      await pump(tester);
+      final y = tester.getBottomLeft(block).dy;
+      expect(y, 592); // defaultComposerAt: 8 up
+      await tester.dragFrom(tester.getCenter(grip), const Offset(-100, -200));
+      await tester.pump(kDoubleTapTimeout);
+      expect(placed, hasLength(1));
+      expect(placed.single, isNotNull);
+      expect(tester.getBottomLeft(block).dy, closeTo(y - 200, 1));
+      await tester.tap(grip);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(grip);
+      await tester.pump();
+      expect(placed.last, isNull);
+      await tester.pump(kDoubleTapTimeout);
+    });
+
+    testWidgets('at given wins over defaultAt', (tester) async {
+      await pump(tester, at: const InputPoint(0.5, 100, fromBottom: true));
+      expect(tester.getBottomLeft(block).dy, 500);
+    });
+
+    testWidgets('grip false: no composer-grip, the block is only the child', (tester) async {
+      await pump(tester, grip: false);
+      expect(grip, findsNothing);
+      expect(tester.getRect(block), const Rect.fromLTWH(40, 532, 720, 60));
+    });
+
+    testWidgets('handle sits 8 right of the block, bottoms level', (tester) async {
+      await pump(tester, at: const InputPoint(0.3, 100, fromBottom: true), childW: 0,
+          handle: const SizedBox(key: Key('hd'), width: quickHandleSize, height: quickHandleSize));
+      final b = tester.getRect(block);
+      final h = tester.getRect(find.byKey(const Key('hd')));
+      expect(h.size, const Size.square(quickHandleSize));
+      expect(b.left, 8); // 0.3*800-360 < 8
+      // 800 - 8 - 728 = 64 > 28 + 8: the handle goes right
+      expect(h.left, b.right + 8);
+      expect(h.bottom, tester.getBottomLeft(block).dy);
+    });
+
+    testWidgets('block at the right edge: the handle flips to 8 left of it, inside the stage', (tester) async {
+      tester.view.physicalSize = const Size(800, 600);
+      await pump(tester, at: const InputPoint(1, 100, fromBottom: true),
+          handle: const SizedBox(key: Key('hd'), width: quickHandleSize, height: quickHandleSize));
+      final h = tester.getRect(find.byKey(const Key('hd')));
+      final b = tester.getRect(block);
+      expect(b.right, 792);
+      expect(h.right, b.left - 8);
+      expect(h.left, greaterThanOrEqualTo(0));
+      expect(h.bottom, b.bottom);
+    });
+
+    testWidgets('a drag starting inside composerNoDrag does not move the block', (tester) async {
+      await pump(tester,
+          inner: Column(mainAxisSize: MainAxisSize.min, children: [
+            ColoredBox(key: const Key('blk'), color: Colors.red, child: const SizedBox(height: 30, width: double.infinity)),
+            MetaData(
+              metaData: composerNoDrag,
+              behavior: HitTestBehavior.translucent,
+              child: const SizedBox(key: Key('nd'), height: 40, width: double.infinity),
+            ),
+          ]));
+      final y = tester.getTopLeft(block).dy;
+      await tester.dragFrom(tester.getCenter(find.byKey(const Key('nd'))), const Offset(0, -150));
+      await tester.pump(kDoubleTapTimeout);
+      expect(placed, isEmpty);
+      expect(tester.getTopLeft(block).dy, y);
+      // outside the marker a drag still moves it
+      await tester.dragFrom(tester.getCenter(block), const Offset(0, -150));
+      await tester.pump(kDoubleTapTimeout);
+      expect(placed, hasLength(1));
+    });
+
+    testWidgets('a held touch inside composerNoDrag does not move the block either', (tester) async {
+      await pump(tester,
+          inner: MetaData(
+            metaData: composerNoDrag,
+            behavior: HitTestBehavior.translucent,
+            child: MetaData(
+              metaData: composerTextArea,
+              behavior: HitTestBehavior.translucent,
+              child: const ColoredBox(key: Key('blk'), color: Colors.red, child: SizedBox(height: 40, width: double.infinity)),
+            ),
+          ));
+      final g = await tester.startGesture(tester.getCenter(block));
+      await tester.pump(const Duration(milliseconds: 400));
+      await g.moveBy(const Offset(0, -150));
+      await g.up();
+      await tester.pump(kDoubleTapTimeout);
+      expect(placed, isEmpty);
+    });
+
+    testWidgets('a tap on the handle reaches the handle', (tester) async {
+      var taps = 0;
+      await pump(tester,
+          handle: GestureDetector(
+              key: const Key('hd'), behavior: HitTestBehavior.opaque, onTap: () => taps++, child: const SizedBox.square(dimension: quickHandleSize)));
+      await tester.tap(find.byKey(const Key('hd')));
+      await tester.pump(kDoubleTapTimeout);
+      expect(taps, 1);
+    });
+
+    testWidgets('a growing child keeps the bottom centre where it was', (tester) async {
+      await pump(tester, childH: 60);
+      final before = tester.getRect(block).bottomCenter;
+      await pump(tester, childH: 200);
+      expect(tester.getRect(block).bottomCenter, before);
     });
   });
 }
