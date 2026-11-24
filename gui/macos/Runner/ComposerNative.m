@@ -364,7 +364,9 @@ static NSColor *ComposerColor(NSNumber *argb) {
             if(self.candidates.contentHeight>0)self.reserveRow=YES;
         }else{[self.bridge releaseLease];self.reserveRow=NO;}
     }else if(!self.text.string.length)self.reserveRow=NO;
-    if(self.reserveRow)gap=self.lineHeight+inset;
+    // Whole points only: a zoomed line (22 × 1.15 = 25.3) left fractions that the view's pixel-snapped frame
+    // rounded away, so the text came out a hair taller than its box and scrolled (and showed a scroller).
+    if(self.reserveRow)gap=ceil(self.lineHeight+inset);
     self.text.frame=NSMakeRect(0,0,width,MAX(48,self.text.frame.size.height));
     self.text.textContainer.containerSize=NSMakeSize(width,CGFLOAT_MAX);
     NSTextContainer *container=self.text.textContainer;
@@ -372,10 +374,12 @@ static NSColor *ComposerColor(NSNumber *argb) {
     [self.text.layoutManager ensureLayoutForTextContainer:container];
     CGFloat textHeight=ceil([self.text.layoutManager usedRectForTextContainer:container].size.height);
     if(self.text.layoutManager.extraLineFragmentTextContainer)textHeight=MAX(textHeight,NSMaxY(self.text.layoutManager.extraLineFragmentRect));
-    CGFloat desired=MIN(self.maxHeight,MAX(48,textHeight+26)+gap);
+    CGFloat desired=ceil(MIN(self.maxHeight,MAX(48,textHeight+26)+gap));
     CGFloat visible=MAX(0,self.bounds.size.height-gap);
     self.scroll.frame=NSMakeRect(0,0,width,visible);
-    self.text.frame=NSMakeRect(0,0,width,MAX(visible,textHeight+26));
+    // Less than a point over is rounding, not text: no scrolling for it.
+    CGFloat content=textHeight+26;if(content-visible<1)content=visible;
+    self.text.frame=NSMakeRect(0,0,width,content);
     self.candidates.frame=NSMakeRect(0,visible,width,gap);
     self.candidates.hidden=!self.presented || gap<=0;
     self.updating=NO;

@@ -141,5 +141,22 @@ int main(void) {@autoreleasepool {
         check(!u.text.undoManager.canUndo,@"set leaves nothing to undo before it");
         [u close];[w close];
     }
+    {   // Zoomed (+1 is 22 × 1.15 = 25.3 per line): whole-point heights, and a pixel-snapped frame never scrolls.
+        for(NSNumber *kn in @[@1.15,@1.3,@1.75])for(int reserve=0;reserve<2;reserve++){
+            double k=kn.doubleValue;
+            RappComposerView *z=[[RappComposerView alloc]initWithFrame:NSMakeRect(0,0,500,48)];
+            NSMutableDictionary *s=[style(@0xffffffff)mutableCopy];s[@"size"]=@(15*k);s[@"lineHeight"]=@(22*k);s[@"maxHeight"]=@300;
+            [z configure:s];[z perform:@"set" text:@"一\n二" reply:^(id _){}];
+            z.reserveRow=reserve;[z measure];
+            CGFloat h=z.reportedHeight;
+            check(h==floor(h),@"zoomed height is whole points");
+            for(int m=0;m<2;m++){
+                [z setFrameSize:NSMakeSize(500,m?floor(h):floor(h*2)/2)];
+                check(z.scroll.documentView.frame.size.height<=z.scroll.contentSize.height+.001,
+                      @"a zoomed box snapped to pixels does not scroll");
+            }
+            [z close];
+        }
+    }
     printf("PASS: native composition/FIFO, theme inheritance, bridge handoff, stale/duplicate rejection, timeout, detach (%d changes)\n",changed);
 }return 0;}
