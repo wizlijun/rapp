@@ -521,7 +521,8 @@ void main() {
     await view(tester);
     await goLive(tester);
     await tester.pumpWidget(layer());
-    expect(find.byType(Tooltip), findsOneWidget);
+    // The voice button's own: the 快捷区 toggle beside 输入 carries one too.
+    expect(find.ancestor(of: find.byKey(const Key('voice-hold')), matching: find.byType(Tooltip)), findsOneWidget);
     await press(tester);
     expect(find.descendant(of: find.byKey(const Key('voice-edit')), matching: find.byIcon(Icons.edit_outlined)), findsOneWidget);
     expect(find.descendant(of: find.byKey(const Key('voice-cancel')), matching: find.byIcon(Icons.close)), findsOneWidget);

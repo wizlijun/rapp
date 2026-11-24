@@ -612,6 +612,11 @@ Widget _cornerRow(BuildContext context, MainState state, RemoteSession session, 
       ),
       if (button) const SizedBox(width: 8),
     ],
+    // With the text area folded the 快捷区 toggle stands left of 输入 (quick-toggle spec §6); open, it is in the box.
+    if (button && !open) ...[
+      QuickToggle(state: state, session: session, look: QuickToggleLook.corner),
+      const SizedBox(width: 8),
+    ],
     // 输入 and 收起 are one button, always in its corner: it folds the text area only.
     if (button)
       RappButton.secondary(
@@ -675,6 +680,8 @@ Widget _iosStack(BuildContext context, MainState state, RemoteSession session, S
         hidden: hold?.active ?? false,
         upright: stage.height > stage.width,
         input: button ? _openToggle(session) : null,
+        // Folded, the 快捷区 toggle stands above 输入 (quick-toggle spec §6); open, it is in the box.
+        quick: button && !open ? QuickToggle(state: state, session: session, look: QuickToggleLook.stage) : null,
         restore: zoomed
             ? RappButton.stage(
                 key: const Key('zoom-reset'),

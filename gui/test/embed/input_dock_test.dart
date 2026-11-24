@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rapp/embed/app_profile.dart' show InputPoint, defaultComposerAt;
+import 'package:rapp/embed/app_profile.dart' show InputPoint, ResolvedProfile, defaultComposerAt;
 import 'package:rapp/embed/composer_float.dart' show quickHandleSize;
 import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/flutter_editor.dart';
@@ -19,6 +19,7 @@ import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/stage_buttons.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
+import 'package:rapp/ui/controls.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/stage.dart' show keyboardLift;
@@ -196,7 +197,8 @@ void main() {
       expect(h.left, (stage.width + panelWidth(stage.width)) / 2 + 8);
       expect(bottomOf(tester, handle), anchor());
       expect(find.descendant(of: handle, matching: find.byIcon(Icons.adjust)), findsOneWidget);
-      expect(find.bySemanticsLabel('显示快捷区'), findsOneWidget);
+      // The corner toggle beside 输入 carries the same label now; Task 4 takes the handle out.
+      expect(find.bySemanticsLabel('显示快捷区'), findsNWidgets(2));
       await tester.tap(handle);
       await settle(tester);
       expect(s.prefs.quickHiddenApp, isFalse);
@@ -560,4 +562,58 @@ void main() {
     await tester.pump();
     expect(tsess.composer.open, isFalse);
   });
+
+  final stackToggle = find.byKey(const Key('quick-toggle-stack'));
+  final boxToggle = find.byKey(const Key('quick-toggle'));
+  bool lit(WidgetTester tester, Finder f) => tester.widget<RappButton>(f).active;
+
+  iosTest('text folded — the toggle stands in the stack, 56 square, lit while the 快捷区 shows', (tester) async {
+    await tester.pumpWidget(layer(tsess));
+    await settle(tester);
+    expect(boxToggle, findsNothing);
+    expect(tester.getSize(stackToggle), const Size.square(stageButtonSize));
+    expect(tester.getRect(stackToggle).bottom, tester.getRect(toggle).top - 12);
+    expect(lit(tester, stackToggle), isTrue);
+    await tester.tap(stackToggle);
+    await settle(tester);
+    expect(s.prefs.quickHiddenTerm, isTrue);
+    expect(bar, findsNothing);
+    expect(lit(tester, stackToggle), isFalse);
+    await tester.tap(stackToggle);
+    await settle(tester);
+    expect(bar, findsOneWidget);
+  });
+
+  dockTest(TargetPlatform.macOS, 'text folded — the toggle stands left of 输入 in the corner row, 8 apart',
+      (tester) async {
+    await tester.pumpWidget(layer(app));
+    await settle(tester);
+    expect(boxToggle, findsNothing);
+    final q = tester.getRect(stackToggle), o = tester.getRect(toggle);
+    expect(o.left - q.right, 8);
+    expect(q.size, o.size);
+    expect(q.center.dy, o.center.dy);
+    expect(lit(tester, stackToggle), isFalse, reason: 'an app hides its 快捷区 by default');
+    await tester.tap(stackToggle);
+    await settle(tester);
+    expect(s.prefs.quickHiddenApp, isFalse);
+    expect(bar, findsOneWidget);
+    expect(lit(tester, stackToggle), isTrue);
+  });
+
+  for (final p in [TargetPlatform.iOS, TargetPlatform.macOS]) {
+    dockTest(p, 'text open — no stack toggle, the box one only', (tester) async {
+      await openOn(tester, tsess);
+      expect(stackToggle, findsNothing);
+      expect(boxToggle, findsOneWidget);
+    });
+
+    dockTest(p, 'no toggle where the composer is not allowed', (tester) async {
+      app.setProfile(const ResolvedProfile(name: 'X', composer: false));
+      await tester.pumpWidget(layer(app));
+      await settle(tester);
+      expect(stackToggle, findsNothing);
+      expect(boxToggle, findsNothing);
+    });
+  }
 }

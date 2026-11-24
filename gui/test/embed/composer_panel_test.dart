@@ -2235,9 +2235,10 @@ void main() {
     platformTest(TargetPlatform.iOS, 'tidy card stands 12 above the stack, which stands above the block', (tester) async {
       await show(tester, quick: true);
       await tidy(tester);
-      final stack = tester.getRect(toggle);
-      expect(stack.bottom, block().top - 8);
-      expect(cardRect(tester).bottom, stack.top - 12);
+      // Folded, the stack is 语音, 输入 and the 快捷区 toggle on top.
+      expect(tester.getRect(toggle).bottom, block().top - 8);
+      final top = tester.getRect(find.byKey(const Key('quick-toggle-stack')));
+      expect(cardRect(tester).bottom, top.top - 12);
       s.composer.open = true;
       await tester.pumpAndSettle();
       expect(tester.getRect(toggle).bottom, block().top - 8);

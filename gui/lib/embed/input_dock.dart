@@ -50,10 +50,11 @@ double openStackHeight(bool upright, bool voice) => upright || !voice ? stageBut
 double closedStackHeight({required int buttons, required bool upright}) =>
     buttons == 0 ? 0 : upright ? stageButtonSize : buttons * stageButtonSize + (buttons - 1) * 12;
 
-/// How many buttons the stack holds with the text area closed: 语音 (when [voice]) and 输入, and 还原 while zoomed.
+/// How many buttons the stack holds with the text area closed: 语音 (when [voice]), 输入 and the 快捷区 toggle, and
+/// 还原 while zoomed.
 int stackButtonCount(RemoteSession s, {required bool voice}) {
   final button = s.composerAllowed;
-  return (button && voice ? 1 : 0) + (button ? 1 : 0) + (s.currentZoomed ? 1 : 0);
+  return (button && voice ? 1 : 0) + (button ? 2 : 0) + (s.currentZoomed ? 1 : 0);
 }
 
 /// Lays out a session's input dock over the whole stage: the block in a [FloatingComposer] at the session's place
