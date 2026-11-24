@@ -158,13 +158,25 @@ final _modifierKeys = <LogicalKeyboardKey>{
   LogicalKeyboardKey.controlRight, LogicalKeyboardKey.altLeft, LogicalKeyboardKey.altRight,
   LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.metaRight, LogicalKeyboardKey.capsLock, LogicalKeyboardKey.fn,
   LogicalKeyboardKey.fnLock, LogicalKeyboardKey.shift, LogicalKeyboardKey.control, LogicalKeyboardKey.alt,
-  LogicalKeyboardKey.meta, LogicalKeyboardKey.superKey, LogicalKeyboardKey.hyper,
+  LogicalKeyboardKey.meta, LogicalKeyboardKey.superKey, LogicalKeyboardKey.hyper, LogicalKeyboardKey.altGraph,
+  LogicalKeyboardKey.numLock, LogicalKeyboardKey.scrollLock,
 };
 
 /// The desktop's "used the keyboard" (pc-key-bar spec §3): a key going down that is not a modifier, with ⌘ / Super not
-/// held (⌘Tab and the app's shortcuts leave the bar as it is). A repeat or a release is not one.
+/// held (⌘Tab and the app's shortcuts leave the bar as it is), nor Ctrl on Linux, whose app shortcuts are Ctrl ones.
+/// A repeat or a release is not one.
 bool collapsesKeyBar(KeyEvent e) =>
-    e is KeyDownEvent && !_modifierKeys.contains(e.logicalKey) && !HardwareKeyboard.instance.isMetaPressed;
+    e is KeyDownEvent &&
+    !_modifierKeys.contains(e.logicalKey) &&
+    !HardwareKeyboard.instance.isMetaPressed &&
+    !(defaultTargetPlatform == TargetPlatform.linux && HardwareKeyboard.instance.isControlPressed);
+
+/// Folds the bar to ⊙ for [session]: the keyboard was used. Not while a ⌃ ⌥ ⌘ ⇧ on the bar is lit: folding would
+/// hide a modifier A may still hold down; the next key after it goes folds.
+void foldKeyBar(MainState state, RemoteSession session) {
+  if (state.prefs.keyBarSlim || keyLatchOf(state, session).flags != 0) return;
+  state.setKeyBarSlim(true);
+}
 
 class KeyBar extends StatefulWidget {
   const KeyBar(
@@ -187,6 +199,7 @@ class KeyBar extends StatefulWidget {
 
 class _KeyBarState extends State<KeyBar> {
   AppKeySender? _sender;
+  StreamSubscription<SessionEvent>? _typed;
 
   bool get _term => _isTerm(widget.state, widget.session);
   ModifierLatch get _latch => keyLatchOf(widget.state, widget.session);
@@ -204,17 +217,25 @@ class _KeyBarState extends State<KeyBar> {
   }
 
   bool _onKey(KeyEvent e) {
-    if (collapsesKeyBar(e) && !widget.state.prefs.keyBarSlim) widget.state.setKeyBarSlim(true);
+    if (collapsesKeyBar(e)) foldKeyBar(widget.state, widget.session);
     return false; // only watching: the key goes on
   }
 
+  /// macOS: a key typed into the picture goes to A without passing Flutter; the runner says so (`key_typed`).
+  void _onTyped(SessionEvent e) {
+    if (e is KeyTypedEvent && e.sid == _sid) foldKeyBar(widget.state, widget.session);
+  }
+
   void _bind() {
+    if (defaultTargetPlatform == TargetPlatform.macOS) _typed = widget.port.events.listen(_onTyped);
     if (_term) return;
     final sid = _sid, p = widget.port;
     _sender = AppKeySender(sid: sid, latch: _latch, port: () => p)..start();
   }
 
   void _unbind() {
+    _typed?.cancel();
+    _typed = null;
     _sender?.stop();
     _sender = null;
   }

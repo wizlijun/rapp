@@ -680,6 +680,45 @@ void main() {
       expect(s.prefs.keyBarSlim, isFalse);
     });
 
+    deskTest('macOS: key_typed from the picture folds its own session\'s bar; not while ⌘ on the bar is lit', (tester) async {
+      expect(parseSessionEvent('key_typed', {'sid': 1}), isA<KeyTypedEvent>().having((e) => e.sid, 'sid', 1));
+      tester.view.physicalSize = const Size(1000, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(bar(app, width: 900));
+      port.emit(const KeyTypedEvent(3)); // another session's
+      await tester.pump();
+      expect(s.prefs.keyBarSlim, isFalse);
+      await tap(tester, 'cmd');
+      port.emit(const KeyTypedEvent(1));
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+      await tester.pump();
+      expect(s.prefs.keyBarSlim, isFalse, reason: 'a lit ⌘ stays in sight');
+      await tap(tester, 'cmd');
+      await tap(tester, 'cmd'); // locked, then off
+      expect(keyLatchOf(s, app).flags, 0);
+      port.emit(const KeyTypedEvent(1));
+      await tester.pump();
+      expect(s.prefs.keyBarSlim, isTrue);
+    });
+
+    testWidgets('Linux: Ctrl-held keys (the app shortcuts) do not fold', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      try {
+        await tester.pumpWidget(bar(tsess));
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.bracketRight);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+        await tester.pump();
+        expect(s.prefs.keyBarSlim, isFalse);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+        await tester.pump();
+        expect(s.prefs.keyBarSlim, isTrue);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+
     test('collapsesKeyBar: downs of non-modifier keys without ⌘', () {
       KeyDownEvent down(LogicalKeyboardKey l) =>
           KeyDownEvent(physicalKey: PhysicalKeyboardKey.keyA, logicalKey: l, timeStamp: Duration.zero);
@@ -687,7 +726,8 @@ void main() {
       expect(collapsesKeyBar(down(LogicalKeyboardKey.enter)), isTrue);
       for (final m in [
         LogicalKeyboardKey.shiftLeft, LogicalKeyboardKey.controlRight, LogicalKeyboardKey.altLeft,
-        LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.capsLock, LogicalKeyboardKey.fn,
+        LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.capsLock, LogicalKeyboardKey.fn, LogicalKeyboardKey.altGraph,
+        LogicalKeyboardKey.numLock,
       ]) {
         expect(collapsesKeyBar(down(m)), isFalse, reason: '$m');
       }
