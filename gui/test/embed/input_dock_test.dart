@@ -438,6 +438,26 @@ void main() {
     expect(h.bottom, b.top - 8);
   });
 
+  iosTest('a narrow stage, the block at its top: no room above, so the handle stands below it', (tester) async {
+    stage = const Size(390, 700);
+    tester.view.physicalSize = stage;
+    // A session with an app id: [app] has none, so it keeps no place.
+    final notes = RemoteSession(4, 'Notes', appId: 'com.apple.Notes');
+    addTearDown(notes.dispose);
+    s.placeComposer(notes, const InputPoint(0.5, 0)); // dragged up to the stage's top
+    notes.setProfile(s.profiles.resolve(notes.appId));
+    await openOn(tester, notes);
+    expect(bar, findsNothing);
+    final h = tester.getRect(handle);
+    final b = block(notes);
+    expect(b.top, lessThan(h.height + 8)); // the room above the block is too short for the handle
+    expect(h.overlaps(b), isFalse);
+    expect((Offset.zero & stage).contains(h.topLeft) && (Offset.zero & stage).contains(h.bottomRight - const Offset(0.01, 0.01)),
+        isTrue);
+    expect(h.right, b.right);
+    expect(h.top, b.bottom + 8);
+  });
+
   iosTest('close then open in its last 100 ms: the text area fades back in from where it was, no snap to opaque',
       (tester) async {
     await openOn(tester, tsess);

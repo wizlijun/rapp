@@ -133,8 +133,8 @@ class FloatingComposer extends StatefulWidget {
   final bool grip;
 
   /// A widget beside the block, bottoms level, 8 off its right edge (its left edge when that would leave the
-  /// stage; 8 above the block, right edges level, when neither side has room). Not part of [place]'s rect, and
-  /// outside the drag.
+  /// stage; 8 above the block, right edges level, when neither side has room, or 8 below it when the block is too
+  /// near the stage's top for that). Never over the block. Not part of [place]'s rect, and outside the drag.
   final Widget? handle;
 
   final ValueChanged<InputPoint?> onPlace;
@@ -394,9 +394,11 @@ class _Place extends MultiChildLayoutDelegate {
     var top = at.dy + block.height - h.height;
     if (left + h.width > size.width - composerMargin) left = at.dx - _handleGap - h.width;
     if (left < composerMargin) {
-      // No room on either side (a block near the stage's width): above it, right edges level.
+      // No room on either side (a block near the stage's width): above it, right edges level; below it when
+      // the block stands too near the stage's top for that. Never over the block.
       left = at.dx + block.width - h.width;
       top = at.dy - _handleGap - h.height;
+      if (top < 0) top = at.dy + block.height + _handleGap;
     }
     left = math.max(0, math.min(left, size.width - h.width));
     top = math.max(0, math.min(top, size.height - h.height));

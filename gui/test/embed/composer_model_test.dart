@@ -460,6 +460,27 @@ void main() {
     expect(ed.value, 'keep');
   });
 
+  test('text kept into the editor while it folds reaches the draft (the close copy is stale)', () async {
+    m.open = true;
+    ed.value = 'A';
+    m.collapse(); // the close copy reads 'A'
+    await Future<void>.delayed(Duration.zero);
+    await m.keep('B'); // a tidy result or a voice fallback lands during the 340 ms fold
+    expect(ed.value, 'A\nB');
+    await m.detach(ed); // the fold ended
+    expect(m.draft, 'A\nB');
+  });
+
+  test('an insert during the fold reaches the draft too', () async {
+    m.open = true;
+    ed.value = 'A';
+    m.collapse();
+    await Future<void>.delayed(Duration.zero);
+    m.insert('C');
+    await m.detach(ed);
+    expect(m.draft, 'AC');
+  });
+
   test('detach reads the draft; attach puts it back', () async {
     ed.value = '草稿';
     await m.detach(ed);

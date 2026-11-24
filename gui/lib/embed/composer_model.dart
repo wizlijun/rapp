@@ -413,7 +413,8 @@ class ComposerModel extends ChangeNotifier {
     final closed = _open ? null : _closeCopy;
     _closeCopy = null;
     Future<void> copy() async {
-      // Closed: the text was read when the panel closed, and nothing could be written in since.
+      // Closed: the text was read when the panel closed. A write into the editor during the fold
+      // ([editorChanged], [insert]: typing, a [keep]) dropped that copy, so it is read again.
       final mine = await (closed ?? _readInto(e));
       if (_disposed) return;
       if (mine) _dropMissing(draft); // the editor's undo goes with it
@@ -520,6 +521,7 @@ class ComposerModel extends ChangeNotifier {
 
   /// The editor's text changed: 1 s after the last change it is copied into [draft].
   void editorChanged() {
+    _closeCopy = null; // written in during the fold: the copy taken at the collapse is stale
     _idleTimer?.cancel();
     _idleTimer = Timer(const Duration(seconds: 1), () async {
       final e = _editor;
@@ -534,6 +536,7 @@ class ComposerModel extends ChangeNotifier {
   void insert(String s) {
     final e = _editor;
     if (e != null) {
+      _closeCopy = null; // see [editorChanged]
       _showChips(e);
       e.insert(s);
     } else {
