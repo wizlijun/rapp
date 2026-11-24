@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 
 import 'composer_editor.dart';
 import 'session_port.dart';
+import 'voice_fix.dart';
 
 sealed class Submit {}
 
@@ -40,10 +41,12 @@ class VoiceAi {
   int get hashCode => Object.hash(app, original, result);
 }
 
-/// A send that came from voice input; [ai] when the text is the tidy's.
+/// A send that came from voice input; [ai] when the text is the tidy's, [heard] when the hold said what the
+/// recognizer heard (and what the device fix made of it).
 class VoiceOrigin {
-  const VoiceOrigin({this.ai});
+  const VoiceOrigin({this.ai, this.heard});
   final VoiceAi? ai;
+  final VoiceHeard? heard;
 }
 
 /// One send: what was taken out of the editor, in the editor's order: text runs ([String], never empty)
@@ -139,6 +142,10 @@ class ComposerModel extends ChangeNotifier {
   /// The tidy's text was put in the draft (the edit pick, or a voice send that could not go): the next panel
   /// send is marked AI with this. Goes when the draft empties, when ↑/↓ brings in another text, and on a send.
   VoiceAi? pendingAi;
+
+  /// A voice hold's words put in the draft without the AI (the edit pick, or a voice send that could not go):
+  /// what the recognizer heard and what the device fix made of it.
+  VoiceHeard? pendingHeard;
 
   /// What one undo in the next editor gives back ([keep] with `undo` while no editor was there): the next
   /// [_start] puts it in first and the draft over it in one undoable step. Goes when the draft changes.

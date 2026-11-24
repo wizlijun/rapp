@@ -276,7 +276,7 @@ class _VoiceOverlayState extends State<VoiceOverlay> with SingleTickerProviderSt
     };
     final style = TextStyle(color: ink, fontSize: 17, height: 1.35);
     // Holding: the live words. Releasing: the last of them, kept (a native error has already cleared the text).
-    final said = _releasing ? _said : (_said = widget.voice.text);
+    final said = _releasing ? _said : (_said = widget.hold.fixedText);
     final words = said.isEmpty ? '正在听…' : _tailOf(said, style, width - 32, MediaQuery.textScalerOf(context));
     return CustomPaint(
       key: _bubbleBox,

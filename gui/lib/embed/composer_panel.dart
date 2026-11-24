@@ -832,14 +832,19 @@ class _InputStageState extends State<_InputStage> {
       _hold = VoiceHold(
         voice: voice,
         // The widget, not the first one: a rebuild may bring a new port for the same session.
-        send: (text) => sendVoice(state: widget.state, session: widget.session, port: widget.port, text: text),
-        edit: (text) {
+        send: (text, heard) => sendVoice(
+            state: widget.state, session: widget.session, port: widget.port, text: text, voice: VoiceOrigin(heard: heard)),
+        edit: (text, heard) {
           final c = widget.session.composer;
           unawaited(c.keep(text));
+          c.pendingHeard = heard;
           c.open = true;
         },
         composer: () => widget.session.composer,
-        tidy: (text, pick, at) => widget.state.tidyOf(widget.session.sid).begin(text, pick, at: at),
+        tidy: (text, pick, at, heard) =>
+            widget.state.tidyOf(widget.session.sid).begin(text, pick, at: at, heard: heard.heard),
+        fix: (t) => widget.state.voiceFix(widget.session.sid, t),
+        log: widget.state.voiceLog,
         wouldTidy: (text) => widget.state.tidyOf(widget.session.sid).would(text),
         onPress: () => widget.state.tidyIfAny(widget.session.sid)?.interrupt(),
         prefetch: (t) => t == null

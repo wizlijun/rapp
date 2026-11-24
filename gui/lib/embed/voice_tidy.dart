@@ -124,6 +124,11 @@ class VoiceTidy extends ChangeNotifier {
   String get original => _original;
   String _original = '';
 
+  /// What the recognizer heard for [original] (before the device fix); [original] when [begin] was not told.
+  /// Kept for comparing and learning (spec D6); not used yet.
+  String get heard => _heard;
+  String _heard = '';
+
   /// The AI's text so far; empty until its first chunk.
   String get shown => _shown;
   String _shown = '';
@@ -353,7 +358,7 @@ class VoiceTidy extends ChangeNotifier {
     return call;
   }
 
-  bool begin(String text, VoicePick pick, {Rect? at}) {
+  bool begin(String text, VoicePick pick, {Rect? at, String? heard}) {
     if (_disposed || !long(text) || !allowed(sid)) {
       _dropAhead();
       return false;
@@ -361,6 +366,7 @@ class VoiceTidy extends ChangeNotifier {
     if (_phase != TidyPhase.idle) interrupt();
     _clearNote();
     _original = text.trim();
+    _heard = (heard ?? text).trim();
     _shown = '';
     _result = null;
     _clearChanges();

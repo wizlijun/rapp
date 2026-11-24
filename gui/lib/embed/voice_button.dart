@@ -15,6 +15,7 @@ import 'composer_model.dart';
 import 'remote_session.dart';
 import 'session_port.dart';
 import 'stage_buttons.dart';
+import 'voice_fix.dart';
 import 'voice_input.dart';
 import 'voice_ring.dart';
 
@@ -74,6 +75,7 @@ String? sendVoice({
   String keep(String hint) {
     unawaited(c.keep(t));
     if (voice.ai != null) c.pendingAi = voice.ai; // sent from the panel later, it is still the AI's text
+    if (voice.ai == null && voice.heard != null) c.pendingHeard = voice.heard; // and still what was heard
     return hint;
   }
 
@@ -117,8 +119,19 @@ class VoiceHold extends ChangeNotifier {
     this.wouldTidy,
     this.onPress,
     this.prefetch,
+    this.fix,
+    this.log,
     this.pauseFor = const Duration(milliseconds: 800),
   });
+
+  /// On-device fixing (spec D5): every word this hold shows or hands on goes through it — the bubble
+  /// ([fixedText]), [prefetch], [wouldTidy], [tidy], [send], [edit] and a draft kept after a session switch.
+  /// Null: the words as heard.
+  final FixResult Function(String text)? fix;
+
+  /// One line per release that was not a cancel (D14 first step, D20): native's timing, the fix's count and
+  /// time, and the release to the hand-off. Counts and milliseconds only, never words.
+  final void Function(String line)? log;
 
   /// 边说边整理 (user 2026-11-21): the words so far, for the tidy to start on unseen while they are still being
   /// said — after each [pauseFor] without new words while holding, and at once at a release (松手立刻发), before
@@ -127,12 +140,12 @@ class VoiceHold extends ChangeNotifier {
   final void Function(String? text)? prefetch;
   final Duration pauseFor;
 
-  /// Offered each non-blank text a release gives (send or edit pick) and where the bubble stood ([bubbleAt]);
-  /// true means it took the text (the AI tidy runs and ends the send or edit itself), and nothing else happens
-  /// here.
-  final bool Function(String text, VoicePick pick, Rect? at)? tidy;
+  /// Offered each non-blank text a release gives (send or edit pick, the fixed words) and where the bubble stood
+  /// ([bubbleAt]), with what was heard; true means it took the text (the AI tidy runs and ends the send or edit
+  /// itself), and nothing else happens here.
+  final bool Function(String text, VoicePick pick, Rect? at, VoiceHeard heard)? tidy;
 
-  /// At the release, on the words heard so far: true when [tidy] is likely to take them. The bubble then stays
+  /// At the release, on the words so far as [fixedText] has them: true when [tidy] is likely to take them. The bubble then stays
   /// up as it is ([handingOver]) until the stop is back, so the tidy card takes its place without a gap.
   final bool Function(String text)? wouldTidy;
 
@@ -154,11 +167,11 @@ class VoiceHold extends ChangeNotifier {
   /// switch while the stop is out) still go to the draft they were said for.
   final ComposerModel Function() composer;
 
-  /// Sends the text; returns a hint to show, or null.
-  final String? Function(String text) send;
+  /// Sends the text (the fixed words; [VoiceHeard] says what was heard); returns a hint to show, or null.
+  final String? Function(String text, VoiceHeard heard) send;
 
-  /// Puts the text in the draft and opens the panel.
-  final void Function(String text) edit;
+  /// Puts the text (the fixed words) in the draft and opens the panel.
+  final void Function(String text, VoiceHeard heard) edit;
 
   /// The overlay's root: the stage the ring is laid out in.
   final stageKey = GlobalKey();
@@ -193,8 +206,24 @@ class VoiceHold extends ChangeNotifier {
   int? _pointer;
   Timer? _hintTimer;
   Timer? _pauseTimer;
-  String _heard = '';
+  String _said = ''; // the fixed words a pause last saw
   ComposerModel? _pressedFor;
+  String? _fixIn;
+  FixResult? _fixOut;
+
+  /// The words so far ([VoiceInput.text]) through [fix]; the words themselves without one. What the bubble shows.
+  String get fixedText => _fixed(voice.text).text;
+
+  // [fix] on [text], kept for the next ask of the same text (the bubble asks at each frame).
+  FixResult _fixed(String text) {
+    final f = fix;
+    if (f == null) return FixResult(text, const []);
+    if (text != _fixIn || _fixOut == null) {
+      _fixOut = f(text);
+      _fixIn = text;
+    }
+    return _fixOut!;
+  }
 
   /// The overlay is up or still animating.
   bool get showing => _showing;
@@ -223,6 +252,7 @@ class VoiceHold extends ChangeNotifier {
     onPress?.call();
     _open = true;
     _pressedFor = composer();
+    _fixIn = _fixOut = null; // the rules may have changed since the last hold (a lesson applies at once)
     pick = VoicePick.send;
     _setHint(null);
     final r = await voice.start();
@@ -237,7 +267,7 @@ class VoiceHold extends ChangeNotifier {
         holding = true;
         voice.onMaxLength = _release;
         voice.onError = _interrupted;
-        _heard = voice.text;
+        _said = fixedText;
         if (prefetch != null) voice.addListener(_onWords);
         if (_ios) unawaited(HapticFeedback.mediumImpact());
         notifyListeners();
@@ -331,12 +361,14 @@ class VoiceHold extends ChangeNotifier {
 
   // New words while holding: the prefetch waits for the next pause.
   void _onWords() {
-    if (!holding || voice.text == _heard) return;
-    _heard = voice.text;
+    if (!holding) return;
+    final said = fixedText;
+    if (said == _said) return;
+    _said = said;
     _pauseTimer?.cancel();
     _pauseTimer = Timer(pauseFor, () {
       _pauseTimer = null;
-      if (holding && _heard.trim().isNotEmpty) prefetch?.call(_heard);
+      if (holding && _said.trim().isNotEmpty) prefetch?.call(_said);
     });
   }
 
@@ -348,34 +380,49 @@ class VoiceHold extends ChangeNotifier {
 
   Future<void> _release() async {
     if (!holding) return;
+    final released = Stopwatch()..start();
     holding = false;
     _pressed = false;
     voice.onMaxLength = null;
     voice.onError = null;
     _stopListening();
     final which = pick;
+    final said = fixedText;
     if (which == VoicePick.cancel) {
       prefetch?.call(null);
-    } else if (voice.text.trim().isNotEmpty) {
-      prefetch?.call(voice.text);
+    } else if (said.trim().isNotEmpty) {
+      prefetch?.call(said);
     }
     final draft = _pressedFor;
     _handedOver = false;
-    _handingOver = which != VoicePick.cancel && tidy != null && (wouldTidy?.call(voice.text) ?? false);
+    _handingOver = which != VoicePick.cancel && tidy != null && (wouldTidy?.call(said) ?? false);
     notifyListeners();
     switch (which) {
       case VoicePick.cancel:
         await voice.cancel();
       case VoicePick.send || VoicePick.edit:
-        final text = await voice.stop();
+        final words = await voice.stop();
+        // Run once more on the final words, timed for the log (the last partial's result is not reused).
+        final fixing = Stopwatch()..start();
+        final r = fix?.call(words) ?? FixResult(words, const []);
+        fixing.stop();
+        if (fix != null) {
+          _fixIn = words;
+          _fixOut = r;
+        }
+        final text = r.text;
+        final heard = VoiceHeard(heard: words, fixed: text);
+        // The words are handed on from here: the release to now is the log's `out`.
+        final out = released.elapsedMilliseconds;
         if (_disposed) {
           // The session switched meanwhile: keep the words in its draft rather than lose them.
           prefetch?.call(null);
           if (draft != null) unawaited(draft.keep(text));
+          _logRelease(r, fixing, out);
           return;
         }
         // Taken by the tidy: it sends or edits when it is done, and no language hint shows over its card.
-        final taken = text.trim().isNotEmpty && (tidy?.call(text, which, bubbleAt) ?? false);
+        final taken = text.trim().isNotEmpty && (tidy?.call(text, which, bubbleAt, heard) ?? false);
         if (!taken) prefetch?.call(null);
         _handedOver = taken;
         if (_handingOver) {
@@ -384,12 +431,13 @@ class VoiceHold extends ChangeNotifier {
         }
         if (taken) {
         } else if (which == VoicePick.send) {
-          _setHint(send(text));
+          _setHint(send(text, heard));
         } else if (text.trim().isEmpty) {
           _setHint(voiceBlank);
         } else {
-          edit(text);
+          edit(text, heard);
         }
+        _logRelease(r, fixing, out);
         // R14, narrowed on macOS: an 编辑 opens the panel, which takes the stage row in the same frame, so the
         // hint could never paint there; it stays due for the next send.
         if (!taken && hint == null && (which == VoicePick.send || _ios) && (languageHintDue?.call() ?? false)) {
@@ -398,6 +446,16 @@ class VoiceHold extends ChangeNotifier {
         }
     }
     if (!_disposed) _end(which);
+  }
+
+  // [out]: the release to the hand-off (the call to [tidy], [send] or [edit], the draft, or 没听清), in ms.
+  void _logRelease(FixResult r, Stopwatch fixing, int out) {
+    final l = log;
+    if (l == null) return;
+    final t = voice.lastTiming;
+    final fixMs = (fixing.elapsedMicroseconds / 1000).toStringAsFixed(2);
+    l('voice: first ${t?.firstPartialMs ?? '-'}ms, final ${t?.finalMs ?? '-'}ms, '
+        'fix ${r.changes.length} in ${fixMs}ms, out ${out}ms');
   }
 
   /// While the stack is hidden (a hold, its release) the hint waits; its time starts when it shows.
