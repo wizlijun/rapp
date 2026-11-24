@@ -254,21 +254,17 @@ void main() {
     expect(callsOf('paste'), isEmpty);
   });
 
-  testWidgets('「＋」 has the 15 terminal keys, 附件… greyed, no 在远端复制', (tester) async {
+  testWidgets('terminal ＋ menu: 附件… grey, no 在远端复制, the 快捷区 group present', (tester) async {
     await openTerm(tester);
     await openPanel(tester);
     await tester.tap(find.byKey(const Key('composer-plus')));
     await tester.pump();
     expect(find.byKey(const Key('composer-plus-menu')), findsOneWidget);
-    const labels = ['Esc', 'Tab', '⇧Tab', '删除', '回车', '←', '↓', '↑', '→', '⌃C', '⌃D', '⌃L', '⌃R', 'PgUp', 'PgDn'];
-    for (final l in labels) {
-      // 收起 also shows Esc, as its shortcut: the key is the first.
-      expect(find.descendant(of: find.byKey(const Key('composer-plus-menu')), matching: find.text(l)),
-          l == 'Esc' ? findsNWidgets(2) : findsOneWidget,
-          reason: l);
+    expect(find.text('按键 · 直接发给远端'), findsNothing);
+    expect(find.byKey(const Key('composer-plus-quick')), findsOneWidget);
+    for (final k in ['quick-auto-hide', 'quick-phrase-strip', 'quick-more', 'quick-edit-phrases']) {
+      expect(find.byKey(Key(k)), findsOneWidget, reason: k);
     }
-    expect(find.byKey(const ValueKey('sticky-⌘')), findsNothing);
-    expect(find.byKey(const ValueKey('sticky-⌥')), findsNothing);
     expect(find.text('在远端复制'), findsNothing);
     expect(find.text('终端会话不支持'), findsOneWidget);
     expect(find.text('输入历史'), findsOneWidget);
@@ -277,15 +273,6 @@ void main() {
     await tester.pump();
     expect(term.calls, isEmpty);
     expect(find.byKey(const Key('composer-plus-menu')), findsOneWidget);
-    const names = ['Esc', 'Tab', 'Shift-Tab', 'Backspace', 'Enter', 'Left', 'Down', 'Up', 'Right', 'Ctrl-C', 'Ctrl-D',
-        'Ctrl-L', 'Ctrl-R', 'PageUp', 'PageDown'];
-    for (final l in labels) {
-      await tester.tap(find.descendant(of: find.byKey(const Key('composer-plus-menu')), matching: find.text(l)).first);
-      await tester.pump();
-    }
-    expect(keys(), [
-      for (final n in names) [n],
-    ]);
   });
 
   testWidgets('W14: a short paste goes into the text; 12 lines become a block, spliced in at send', (tester) async {

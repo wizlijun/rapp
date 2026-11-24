@@ -753,6 +753,10 @@ void main() {
       });
 
       testWidgets('a frozen panel still pastes and attaches locally', (tester) async {
+        // The ＋ menu now carries the 快捷区 group and is taller than the default test window.
+        tester.view.physicalSize = const Size(800, 1200);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
         await dropWithDraft(tester);
         await tester.showKeyboard(field);
         port.calls.clear();
@@ -794,12 +798,11 @@ void main() {
         await tester.pump(const Duration(seconds: 5));
       });
 
-      testWidgets('the frozen keys grid and copy send nothing', (tester) async {
+      testWidgets('the frozen copy sends nothing', (tester) async {
         await dropWithDraft(tester);
         await tester.tap(find.byKey(const Key('composer-plus')));
         await tester.pumpAndSettle();
         port.calls.clear();
-        await tester.tap(find.text('回车'));
         await tester.tap(find.text('在远端复制'));
         await tester.pump();
         expect(sends(), isEmpty);

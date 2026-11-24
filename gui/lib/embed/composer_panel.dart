@@ -466,12 +466,13 @@ class _ComposerPanelState extends State<ComposerPanel> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           ComposerPlus(
+                            state: widget.state,
                             session: _s,
                             port: widget.port,
                             onAttach: _attach,
                             history: widget.state.history,
                             historyKey: widget.state.historyKeyOf(_s),
-                            onAddPhrase: defaultTargetPlatform == TargetPlatform.iOS ? widget.state.addPhrase : null,
+                            onAddPhrase: widget.state.addPhrase,
                             onPress: () => widget.state.holdForPanel(_s),
                             onReturnAfter: _s.appId.isEmpty
                                 ? null

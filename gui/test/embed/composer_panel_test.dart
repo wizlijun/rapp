@@ -18,6 +18,7 @@ import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/history/history_list.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/pages/phrases_page.dart';
 import 'package:rapp/ui/controls.dart';
 import '../ui/platform_helpers.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -675,66 +676,110 @@ void main() {
         es.setComposerZoom(0);
       });
 
-      testWidgets('plus opens a menu above it: 附件…, 在远端复制, the keys, 收起', (tester) async {
+      for (final platform in [TargetPlatform.macOS, TargetPlatform.linux, TargetPlatform.iOS]) {
+        testWidgets('${platform.name} ＋ menu: 附件, 在远端复制, 输入历史, 直接回车且隐藏, 大小, 快捷区 group, 收起; no key grid',
+            (tester) async {
+          big(tester);
+          final x = RemoteSession(3, 'Notes', appId: 'com.x')..composer.open = true;
+          addTearDown(x.dispose);
+          await tester.pumpWidget(layer(s: x));
+          await tester.pump();
+          expect(menu, findsNothing);
+          expect(find.bySemanticsLabel('更多'), findsOneWidget);
+          await openMenu(tester);
+          final m = tester.getRect(menu);
+          final plus = rect(tester, 'composer-plus');
+          expect(m.width, 300);
+          expect(m.bottom, plus.top - 8);
+          expect(m.right, plus.right);
+          expect(find.text('按键 · 直接发给远端'), findsNothing);
+          for (final l in ['Tab', '⌘', '⌥', '删除', '←', '↓', '↑', '→', '回车']) {
+            expect(find.descendant(of: menu, matching: find.text(l)), findsNothing, reason: l);
+          }
+          expect(find.text('附件…'), findsOneWidget);
+          expect(find.text('也可以直接粘贴'), findsOneWidget);
+          expect(find.text('在远端复制'), findsOneWidget);
+          expect(find.text(platform == TargetPlatform.macOS ? '⌘C' : 'Ctrl+C'), findsOneWidget);
+          expect(find.text('输入历史'), findsOneWidget);
+          expect(find.byKey(const Key('composer-plus-quick')), findsOneWidget);
+          expect(find.text('收起'), findsOneWidget);
+          // Vertical order.
+          double y(Finder f) => tester.getCenter(f).dy;
+          final order = [
+            find.text('附件…'),
+            find.text('在远端复制'),
+            find.text('输入历史'),
+            find.text('直接回车且隐藏'),
+            find.text('大小'),
+            find.byKey(const Key('composer-plus-quick')),
+            find.text('打字后自动收起'),
+            find.text('显示常用语条'),
+            find.text('更多按键'),
+            find.text('编辑常用语…'),
+            find.byKey(const Key('composer-plus-collapse')),
+          ];
+          for (var i = 1; i < order.length; i++) {
+            expect(y(order[i]), greaterThan(y(order[i - 1])), reason: 'row $i');
+          }
+        }, variant: TargetPlatformVariant.only(platform));
+      }
+
+      testWidgets('快捷区 switches flip quickAutoHide, phraseStrip, keyBarMore and the menu stays open', (tester) async {
         big(tester);
         await tester.pumpWidget(layer());
         await tester.pump();
-        expect(menu, findsNothing);
-        expect(find.bySemanticsLabel('更多'), findsOneWidget);
         await openMenu(tester);
-        final m = tester.getRect(menu);
-        final plus = rect(tester, 'composer-plus');
-        expect(m.width, 300);
-        expect(m.bottom, plus.top - 8);
-        expect(m.right, plus.right);
-        expect(find.text('附件…'), findsOneWidget);
-        expect(find.text('也可以直接粘贴'), findsOneWidget);
-        expect(find.text('在远端复制'), findsOneWidget);
-        expect(find.text('Ctrl+C'), findsOneWidget);
-        expect(find.text('按键 · 直接发给远端'), findsOneWidget);
-        expect(find.text('收起'), findsOneWidget);
-        // W9 order, reading left to right, row by row.
-        final labels = ['Esc', 'Tab', '⌘', '⌥', '删除', '←', '↓', '↑', '→', '回车'];
-        final pos = [for (final l in labels) tester.getCenter(find.descendant(of: menu, matching: find.text(l)).first)];
-        for (var i = 1; i < pos.length; i++) {
-          final sameRow = (pos[i].dy - pos[i - 1].dy).abs() < 1;
-          expect(sameRow ? pos[i].dx > pos[i - 1].dx : pos[i].dy > pos[i - 1].dy, isTrue, reason: labels[i]);
-        }
-      }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+        bool on(String k) => tester.widget<Switch>(find.descendant(of: find.byKey(Key(k)), matching: find.byType(Switch))).value;
+        final auto0 = es.quickAutoHide;
+        final strip0 = es.prefs.phraseStrip;
+        final more0 = es.prefs.keyBarMore;
+        expect(on('quick-auto-hide'), auto0);
+        expect(on('quick-phrase-strip'), strip0);
+        expect(on('quick-more'), more0);
+        await tester.tap(find.byKey(const Key('quick-auto-hide')));
+        await tester.pump();
+        expect(es.quickAutoHide, !auto0);
+        expect(on('quick-auto-hide'), !auto0);
+        await tester.tap(find.byKey(const Key('quick-phrase-strip')));
+        await tester.pump();
+        expect(es.prefs.phraseStrip, !strip0);
+        expect(on('quick-phrase-strip'), !strip0);
+        await tester.tap(find.byKey(const Key('quick-more')));
+        await tester.pump();
+        expect(es.prefs.keyBarMore, !more0);
+        expect(on('quick-more'), !more0);
+        expect(menu, findsOneWidget);
+      });
 
-      testWidgets('iOS ＋ menu: no 按键 grid, 附件/在远端复制/输入历史/直接回车/缩放/收起 present', (tester) async {
+      testWidgets('打字后自动收起 shows on for macOS by default', (tester) async {
         big(tester);
-        final x = RemoteSession(3, 'Notes', appId: 'com.x')..composer.open = true;
-        addTearDown(x.dispose);
-        await tester.pumpWidget(layer(s: x));
+        await tester.pumpWidget(layer());
         await tester.pump();
         await openMenu(tester);
-        expect(find.text('按键 · 直接发给远端'), findsNothing);
-        for (final l in ['Tab', '⌘', '⌥', '删除', '←', '↓', '↑', '→', '回车']) {
-          expect(find.descendant(of: menu, matching: find.text(l)), findsNothing, reason: l);
-        }
-        expect(find.text('附件…'), findsOneWidget);
-        expect(find.text('在远端复制'), findsOneWidget);
-        expect(find.text('输入历史'), findsOneWidget);
-        expect(find.byKey(const Key('composer-plus-return')), findsOneWidget);
-        expect(find.text('大小'), findsOneWidget);
-        expect(find.byType(Slider), findsOneWidget);
-        expect(find.byKey(const Key('composer-plus-collapse')), findsOneWidget);
-        expect(find.text('收起'), findsOneWidget);
+        final sw = find.descendant(of: find.byKey(const Key('quick-auto-hide')), matching: find.byType(Switch));
+        expect(tester.widget<Switch>(sw).value, isTrue);
+      }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+      testWidgets('打字后自动收起 shows off for iOS by default', (tester) async {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        final sw = find.descendant(of: find.byKey(const Key('quick-auto-hide')), matching: find.byType(Switch));
+        expect(tester.widget<Switch>(sw).value, isFalse);
       }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
-      testWidgets('macOS ＋ menu unchanged: the 按键 grid stays', (tester) async {
+      testWidgets('编辑常用语… closes the menu and pushes PhrasesPage', (tester) async {
         big(tester);
         await tester.pumpWidget(layer());
         await tester.pump();
         await openMenu(tester);
-        expect(find.text('按键 · 直接发给远端'), findsOneWidget);
-        expect(find.text('⌘C'), findsOneWidget);
-        for (final l in ['Tab', '⌘', '⌥', '删除', '←', '↓', '↑', '→', '回车']) {
-          expect(find.descendant(of: menu, matching: find.text(l)), findsOneWidget, reason: l);
-        }
-        expect(find.text('收起'), findsOneWidget);
-      }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+        await tester.tap(find.byKey(const Key('quick-edit-phrases')));
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        expect(menu, findsNothing);
+        expect(find.byType(PhrasesPage), findsOneWidget);
+      });
 
       testWidgets('plus menu opens up from a panel at the bottom', (tester) async {
         big(tester);
@@ -767,52 +812,6 @@ void main() {
         await openMenu(tester);
         expect(find.text('⌘C'), findsOneWidget);
       }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
-
-      testWidgets('keys go to A in W9 order; ⌘ sticks for one key; the menu stays open', (tester) async {
-        big(tester);
-        await tester.pumpWidget(layer());
-        await tester.pump();
-        await openMenu(tester);
-        await tester.tap(find.descendant(of: menu, matching: find.text('⌘')));
-        await tester.pump();
-        await tester.tap(find.descendant(of: menu, matching: find.text('Tab')));
-        await tester.pump();
-        await tester.tap(find.descendant(of: menu, matching: find.text('Tab')));
-        await tester.pump();
-        expect(callsOf('key'), [
-          equals({'sid': 1, 'keyCode': 48, 'modifiers': 1048576}),
-          equals({'sid': 1, 'keyCode': 48, 'modifiers': 0}),
-        ]);
-        expect(menu, findsOneWidget);
-        await tester.tap(find.descendant(of: menu, matching: find.text('→')));
-        await tester.pump();
-        expect(callsOf('key').last, equals({'sid': 1, 'keyCode': 124, 'modifiers': 0}));
-      });
-
-      testWidgets('closing the menu lets go of an armed ⌘ (m1)', (tester) async {
-        big(tester);
-        await tester.pumpWidget(layer());
-        await tester.pump();
-        for (final close in ['outside', 'plus']) {
-          await openMenu(tester);
-          await tester.tap(find.descendant(of: menu, matching: find.text('⌘')));
-          await tester.pump();
-          if (close == 'outside') {
-            await tester.tapAt(const Offset(5, 5));
-          } else {
-            await tester.tap(find.byKey(const Key('composer-plus')));
-          }
-          await tester.pump();
-          expect(menu, findsNothing, reason: close);
-          await openMenu(tester);
-          port.calls.clear();
-          await tester.tap(find.descendant(of: menu, matching: find.text('Tab')));
-          await tester.pump();
-          expect(callsOf('key').single, equals({'sid': 1, 'keyCode': 48, 'modifiers': 0}), reason: close);
-          await tester.tapAt(const Offset(5, 5));
-          await tester.pump();
-        }
-      });
 
       testWidgets('在远端复制 sends ⌘C and the hint line says 已复制', (tester) async {
         big(tester);
@@ -900,27 +899,7 @@ void main() {
         expect(find.byKey(const Key('composer-plus-return')), findsNothing);
       });
 
-      testWidgets('a latched sticky key is a raise box with a 2 px accent border, not a text fill', (tester) async {
-        big(tester);
-        await tester.pumpWidget(layer());
-        await tester.pump();
-        await openMenu(tester);
-        final key = find.byKey(const ValueKey('sticky-⌘'));
-        BoxDecoration look() =>
-            tester.widget<Container>(find.descendant(of: key, matching: find.byType(Container)).first).decoration! as BoxDecoration;
-        final t = RappTokens.of(tester.element(key));
-        expect((look().border! as Border).top.color, t.line);
-        await tester.tap(key);
-        await tester.pump();
-        final on = look();
-        expect((on.border! as Border).top.color, t.accent);
-        expect((on.border! as Border).top.width, 2);
-        expect(on.color, isNot(t.text));
-        expect(on.gradient, t.raiseBox().gradient);
-        expect(tester.getSize(key).height, controlHeightOf(tester.element(key)));
-      });
-
-      testWidgets('the sticky keys and the menu never carry over to another session', (tester) async {
+      testWidgets('the menu never carries over to another session', (tester) async {
         big(tester);
         final rs2 = RemoteSession(2, 'Notes');
         addTearDown(rs2.dispose);
@@ -928,15 +907,9 @@ void main() {
         await tester.pumpWidget(layer());
         await tester.pump();
         await openMenu(tester);
-        await tester.tap(find.descendant(of: menu, matching: find.text('⌘')));
-        await tester.pump();
         await tester.pumpWidget(layer(s: rs2));
         await tester.pump();
         expect(menu, findsNothing);
-        await openMenu(tester);
-        await tester.tap(find.descendant(of: menu, matching: find.text('←')));
-        await tester.pump();
-        expect(callsOf('key').single, equals({'sid': 2, 'keyCode': 123, 'modifiers': 0}));
       });
 
       testWidgets('hint line: A on an input method, accent, a tap switches to English', (tester) async {
@@ -1839,6 +1812,30 @@ void main() {
       expect(es.currentRemote!.composer.open, isTrue);
       expect(text(tester), contains('回头再看这段'));
     });
+
+    testWidgets('macOS 输入历史 has 加到常用语', (tester) async {
+      await showPicture(tester);
+      es.history.add({
+        'id': '01B',
+        'ts': '2026-11-15T09:00:00+09:00',
+        'kind': 'sent',
+        'from': {'id': 'dev1', 'name': 'x'},
+        'host': {'id': '111', 'name': 'mini'},
+        'app': {'id': 'Safari', 'name': 'Safari'},
+        'session': '111/Safari',
+        'text': '常用的一句',
+      });
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pump();
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('composer-plus')));
+      await tester.pump();
+      await tester.tap(find.text('输入历史'));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('more-01B')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('add-phrase-01B')), findsOneWidget);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
     testWidgets('Esc with the plus menu open closes the panel and the menu', (tester) async {
       await showPicture(tester);
