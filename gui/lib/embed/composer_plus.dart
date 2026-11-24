@@ -297,8 +297,8 @@ class _ComposerPlusState extends State<ComposerPlus> {
       alignment: Alignment.topLeft,
       child: CompositedTransformFollower(
         link: _link,
-        targetAnchor: _down ? Alignment.bottomRight : Alignment.topRight,
-        followerAnchor: _down ? Alignment.topRight : Alignment.bottomRight,
+        targetAnchor: _down ? Alignment.bottomLeft : Alignment.topLeft,
+        followerAnchor: _down ? Alignment.topLeft : Alignment.bottomLeft,
         offset: Offset(0, _down ? 8 : -8),
         child: TapRegion(
           groupId: _group,
@@ -331,7 +331,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
                     if (widget.zoom != null && widget.onZoom != null) ...[_zoomRow(t), rowGap],
                     _quickGroup(t),
                     rowGap,
-                    // On the right, next to ＋, so collapsing is a short move; Esc in the editor does the same.
+                    // The last row, so collapsing is a short move down from the menu; Esc in the editor does the same.
                     InkWell(
                       key: const Key('composer-plus-collapse'),
                       onTap: () {
