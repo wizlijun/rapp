@@ -424,6 +424,19 @@ void main() {
     st.dispose();
   });
 
+  test('the undo under the AI text is the fixed words, as 还原 (spec D6)', () async {
+    final (st, _) = await start();
+    final rs = st.currentRemote!;
+    st.tidyOf(sid).begin('打开Python跑一下这个测试脚本吧', VoicePick.edit, heard: '打开拍森跑一下这个测试脚本吧');
+    api.calls.single.complete(const LlmDone('打开Python跑一下这个测试脚本。'));
+    await pump();
+    final e = FakeEditor();
+    await rs.composer.attach(e);
+    expect(e.undoTo, '打开Python跑一下这个测试脚本吧');
+    expect(rs.composer.pendingAi!.original, '打开拍森跑一下这个测试脚本吧');
+    st.dispose();
+  });
+
   // The edit pick, then the user fixes a word in the panel and sends.
   Future<(MainState, FakeSessionPort)> edited({bool secure = false}) async {
     final (st, port) = await start();

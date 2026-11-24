@@ -405,6 +405,8 @@ class MainState extends ChangeNotifier {
           if (remote[s]?.secureFocus ?? true) return;
           unawaited(_learnItems(items));
         },
+        // The rules as they are now, not as they were when the tidy was made (spec D9).
+        fromVocabulary: (observed, avoid) => voiceRules.fromVocabulary(observed, avoid),
         send: (s, text, voice) {
           final rs = remote[s], p = portOf(s);
           if (rs == null || p == null) {
@@ -421,8 +423,9 @@ class MainState extends ChangeNotifier {
         edit: (s, text, ai) {
           final c = remote[s]?.composer;
           if (c == null) return;
-          // The AI's text over the original: one ⌘Z gives the original back (§8.2).
-          unawaited(c.keep(text, undo: ai?.original));
+          // The AI's text over the original: one ⌘Z gives the original back (§8.2) — the fixed words, as 还原
+          // does, not the heard ones [VoiceAi.original] keeps for learning (spec D6).
+          unawaited(c.keep(text, undo: ai == null ? null : (tidyIfAny(s)?.original ?? ai.original)));
           if (ai != null) c.pendingAi = ai;
           c.open = true;
           if (ai != null) _tidyAside(s, 'AI 整理好了，放在写作面板里');
