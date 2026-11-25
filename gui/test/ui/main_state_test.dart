@@ -647,8 +647,9 @@ void main() {
     AppProfileStore store(String? setting) => AppProfileStore('${tmp.path}/shared',
         mine: [if (setting != null) AppProfile(ids: [codex], stateRules: setting)], builtin: []);
     List<(String, Map<String, Object?>)> sent(FakeSessionPort p) => [for (final c in p.calls) if (c.$1 == 'state_rules') c];
-    String report(String state, {bool sure = false, String? kind, String health = 'ok', Map<String, int> counts = const {}}) =>
-        jsonEncode({'state': state, 'sure': sure, 'kind': kind, 'health': health, 'counts': counts, 'by': <String>[]});
+    String report(String state,
+            {bool sure = false, String? kind, String health = 'ok', Map<String, int> counts = const {}, String pack = 'chatgpt-desktop', int rev = 1}) =>
+        jsonEncode({'state': state, 'sure': sure, 'kind': kind, 'health': health, 'counts': counts, 'by': <String>[], 'pack': pack, 'rev': rev});
 
     test('rules go out on every ready of an app session, not for terminals or the desktop', () {
       final sid = codex.length;
@@ -745,7 +746,7 @@ void main() {
         expect(e().lamp, Lamp.idle);
         // unfit: no state, so the lamp is what it is without rules
         final without = st.currentRemote!.idle ? Lamp.idle : Lamp.active;
-        port.emit(AppStateEvent(sid, jsonEncode({'state': null, 'health': 'unfit'})));
+        port.emit(AppStateEvent(sid, jsonEncode({'state': null, 'health': 'unfit', 'pack': 'chatgpt-desktop', 'rev': 1})));
         expect(e().lamp, without);
         expect(e().ps, isNull);
         expect(e().inferred, isFalse);
@@ -781,6 +782,68 @@ void main() {
       }, app: codex, stateRulesJson: rulesJson);
     });
 
+    test('turning the rules off clears the inferred state, the lamp and 需要你; a late report is ignored', () {
+      final sid = codex.length;
+      final profiles = store(null);
+      env((a, t, port, st, hints) {
+        port.emit(ReadyEvent(sid, 'ChatGPT'));
+        port.emit(TrafficEvent(sid, 100, 1));
+        final without = st.entries.single.lamp;
+        port.emit(AppStateEvent(sid, report('blocked', sure: true, kind: 'permission')));
+        expect(st.entries.single.lamp, Lamp.waiting);
+        expect(st.needs.where((n) => n.kind == NeedKind.app), hasLength(1));
+        profiles.setStateRules(codex, 'App', 'off');
+        expect(st.currentRemote!.appState, isNull);
+        expect(st.entries.single.inferred, isFalse);
+        expect(st.entries.single.lamp, without);
+        expect(st.needs.where((n) => n.kind == NeedKind.app), isEmpty);
+        port.emit(AppStateEvent(sid, report('blocked', sure: true, kind: 'permission'))); // in flight when it went off
+        expect(st.currentRemote!.appState, isNull);
+        expect(st.needs.where((n) => n.kind == NeedKind.app), isEmpty);
+        // an invalid report is no exception when no rules were sent
+        port.emit(AppStateEvent(sid, jsonEncode({'state': null, 'health': 'invalid', 'error': 'x'})));
+        expect(st.currentRemote!.appState, isNull);
+      }, app: codex, stateRulesJson: rulesJson, profiles: profiles);
+    });
+
+    test('a report from the old pack after a pack change is ignored; the new pack starts clean', () {
+      final sid = codex.length;
+      final profiles = store(null);
+      env((a, t, port, st, hints) {
+        port.emit(ReadyEvent(sid, 'ChatGPT'));
+        port.emit(AppStateEvent(sid, report('working')));
+        expect(st.currentRemote!.appState!.state, 'working');
+        profiles.setStateRules(codex, 'App', 'claude-desktop');
+        expect(st.currentRemote!.appState, isNull);
+        expect(st.rulesOf(sid)!.id, 'claude-desktop');
+        port.emit(AppStateEvent(sid, report('done'))); // still the old pack
+        expect(st.currentRemote!.appState, isNull);
+        port.emit(AppStateEvent(sid, report('done', pack: 'claude-desktop', rev: 99))); // not the rev that was sent
+        expect(st.currentRemote!.appState, isNull);
+        port.emit(AppStateEvent(sid, report('working', pack: 'claude-desktop')));
+        expect(st.currentRemote!.appState!.state, 'working');
+        // the new pack's first report is a starting point again, not a change
+        expect(st.hintHistory.where((h) => h.inferred), isEmpty);
+        // invalid with no pack is accepted while rules are on
+        port.emit(AppStateEvent(sid, jsonEncode({'state': null, 'health': 'invalid', 'error': 'x'})));
+        expect(st.currentRemote!.appState!.health, 'invalid');
+      }, app: codex, stateRulesJson: rulesJson, profiles: profiles);
+    });
+
+    test('the rules bookkeeping of a session goes when the session ends', () {
+      final sid = codex.length;
+      env((a, t, port, st, hints) {
+        port.emit(ReadyEvent(sid, 'ChatGPT'));
+        port.emit(AppStateEvent(sid, report('working')));
+        expect(st.rulesOf(sid), isNotNull);
+        expect(st.debugRulesBookkeeping(sid), (true, true, true));
+        port.emit(ClosedEvent(sid, 'bye'));
+        a.flushMicrotasks();
+        expect(st.rulesOf(sid), isNull);
+        expect(st.debugRulesBookkeeping(sid), (false, false, false));
+      }, app: codex, stateRulesJson: rulesJson);
+    });
+
     test('inferred changes enter the status queue with inferred: true', () {
       final sid = codex.length;
       env((a, t, port, st, hints) {
@@ -797,7 +860,7 @@ void main() {
         final n = st.hintHistory.length;
         port.emit(AppStateEvent(sid, report('done', counts: {'rowDot': 2}))); // only counts changed
         expect(st.hintHistory, hasLength(n));
-        port.emit(AppStateEvent(sid, jsonEncode({'state': null, 'health': 'unfit'}))); // null is not a change
+        port.emit(AppStateEvent(sid, jsonEncode({'state': null, 'health': 'unfit', 'pack': 'chatgpt-desktop', 'rev': 1}))); // null is not a change
         expect(st.hintHistory, hasLength(n));
       }, app: codex, stateRulesJson: rulesJson);
     });

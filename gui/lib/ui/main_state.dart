@@ -25,6 +25,7 @@ import '../history/input_recorder.dart';
 import '../hub_client.dart';
 import '../permissions.dart';
 import '../embed/app_profile.dart';
+import '../embed/app_state.dart';
 import '../embed/state_rules.dart';
 import '../embed/composer_model.dart';
 import '../embed/modifier_latch.dart';
@@ -1595,6 +1596,7 @@ class MainState extends ChangeNotifier {
       }
       return;
     }
+    if (e is AppStateEvent && !_appReportWanted(e)) return; // not from the rules now on this link
     final wasLocked = rs.screenLocked;
     _applyPortEvent(rs, e);
     if (e is ReadyEvent) _sendRules(r, rs, e.sid);
@@ -1668,6 +1670,30 @@ class MainState extends ChangeNotifier {
   /// What was sent to the host on [sid]'s link: null for none (a terminal, the desktop, `stateRules: off`, no pack).
   ChosenRules? rulesOf(Object sid) => _rulesBySid[sid];
 
+  /// Test seam: whether [sid] is still in the rules maps (rules sent, ready, state seen).
+  @visibleForTesting
+  (bool, bool, bool) debugRulesBookkeeping(Object sid) =>
+      (_rulesBySid.containsKey(sid), _rulesReady.contains(sid), _appSeen.containsKey(sid));
+
+  /// [sid]'s link is gone for good: its rules bookkeeping goes with it.
+  void _forgetAppRules(Object sid) {
+    _rulesBySid.remove(sid);
+    _rulesReady.remove(sid);
+    _appSeen.remove(sid);
+  }
+
+  /// A report counts only while rules are on for the link and it says it came from them: the pack and rev that
+  /// were sent. (A report in flight when the rules went off or changed is late.) An unreadable-pack report has
+  /// no pack to name; it counts when rules were sent.
+  bool _appReportWanted(AppStateEvent e) {
+    final chosen = _rulesBySid[e.sid];
+    if (chosen == null) return false;
+    final a = AppState.parse(e.json);
+    if (a == null) return false;
+    if (a.health == 'invalid' && a.pack == null) return true;
+    return a.pack == chosen.id && a.rev == chosen.rev;
+  }
+
   /// An app session is ready: the host gets the rules for it (again on every new link; a text terminal and the
   /// whole desktop have none). The library is read now, not cached: a relocate reloads it.
   void _sendRules(SessionRecord r, RemoteSession rs, Object sid) {
@@ -1703,6 +1729,10 @@ class MainState extends ChangeNotifier {
       } else {
         _rulesBySid[sid] = chosen;
       }
+      // What was inferred under the old rules is not true of the new: clear it (a late report is dropped by
+      // [_appReportWanted]), so the lamp, the word and 需要你 fall back to what they are without rules.
+      rs.clearAppState();
+      _appSeen.remove(sid);
       port.stateRules(sid, chosen?.json ?? '');
     }
   }
@@ -1879,6 +1909,7 @@ class MainState extends ChangeNotifier {
         if (start != null) resources.linkDown(start);
         _keepIn(r.lastSid, _endTidy(fresh));
         remote.remove(fresh)?.dispose();
+        _forgetAppRules(fresh);
         _sentFps.remove(fresh);
         _waiting.remove(fresh)?.timer.cancel();
         portOf(fresh)?.close(fresh);
@@ -2118,6 +2149,7 @@ class MainState extends ChangeNotifier {
     for (final sid in [r.sid, old]) {
       if (sid == null) continue;
       remote.remove(sid)?.dispose();
+      _forgetAppRules(sid);
       _unlockSeen.remove(sid);
       _lockEpoch.remove(sid);
       _sentFps.remove(sid);
@@ -2140,6 +2172,7 @@ class MainState extends ChangeNotifier {
   /// what was written in the old composer carries over (text only).
   void _dropOld(Object old, Object? fresh) {
     final gone = remote.remove(old);
+    _forgetAppRules(old);
     if (gone == null) return;
     final to = fresh == null ? null : remote[fresh];
     final tidy = _tidies.remove(old);
@@ -2334,6 +2367,7 @@ class MainState extends ChangeNotifier {
       final original = _endTidy(s.sid);
       if (original != null) remote[s.sid]?.composer.keepNow(original); // the record's draft keeps it
       remote.remove(s.sid)?.dispose();
+      _forgetAppRules(s.sid);
       _starts.remove(s.sid);
       _quiet.add(s.sid);
       hub!.close(s.sid);
@@ -2605,6 +2639,7 @@ class MainState extends ChangeNotifier {
       if (start != null) resources.linkDown(start);
       _keepIn(old, _endTidy(fresh));
       remote.remove(fresh)?.dispose();
+      _forgetAppRules(fresh);
       _sentFps.remove(fresh);
       _waiting.remove(fresh)?.timer.cancel();
       _quiet.add(fresh);

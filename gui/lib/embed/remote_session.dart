@@ -491,6 +491,13 @@ class RemoteSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The rules changed or went off: what was inferred under them no longer stands.
+  void clearAppState() {
+    if (appState == null) return;
+    appState = null;
+    notifyListeners();
+  }
+
   /// The link is gone: no transfer or send round is running any more.
   void linkDown() {
     appState = null; // a new link's host says it again
