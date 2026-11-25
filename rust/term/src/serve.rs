@@ -39,6 +39,8 @@ pub const BAD_TOKEN: &str = "bad token";
 pub const BAD_REQUEST: &str = "bad request";
 const BAD_ID: &str = "invalid term id";
 const NO_TEXT_TERMINAL: &str = "no such text terminal";
+/// The session's holder is there but did not answer in time: worth trying again, unlike [`NO_TEXT_TERMINAL`].
+const TERM_BUSY: &str = "text terminal busy";
 const OLD_RUN_END: &str = "this window was opened by an older version and cannot be ended";
 const OLD_RUN: &str = "this window was opened by an older version and cannot be renamed";
 const INVALID_NAME: &str = "invalid name";
@@ -114,7 +116,13 @@ pub struct Worker {
     opening: tokio::sync::Mutex<()>,
     /// Bumped when a rename is done, so every watch hears it and a watch does not wait out its `poll` to show the new name.
     rescan: tokio::sync::watch::Sender<u64>,
+    /// The holder pid of each session id seen in a scan, kept while its socket file is there: a session missing
+    /// from a later scan is gone only when its holder is.
+    seen: Seen,
 }
+
+/// Session id (its key, or its name) to holder pid.
+type Seen = Arc<Mutex<std::collections::HashMap<String, u32>>>;
 
 /// Accept connections on `listener` until `stop` completes; then end every connection and return.
 pub async fn serve(
@@ -154,6 +162,7 @@ impl Worker {
             launchers: if cfg!(target_os = "linux") { Vec::new() } else { launch::launchers() },
             opening: Default::default(),
             rescan: tokio::sync::watch::channel(0).0,
+            seen: Default::default(),
         };
         // Tabs whose holder ended while no worker ran.
         if w.sweeps() {
@@ -167,7 +176,35 @@ impl Worker {
 
     /// The live `run` sessions of this machine; none when the token cannot be had.
     async fn pty_statuses(&self) -> Vec<Status> {
-        scan_pty(&self.opts.pty_dir).await
+        scan_pty(&self.opts.pty_dir, &self.seen).await.0
+    }
+
+    /// The live session whose id ends in `name`; when there is none, [`NO_TEXT_TERMINAL`] only if its holder is
+    /// gone for sure, else [`TERM_BUSY`] (a holder too slow to answer, a token that could not be read just now).
+    async fn find_pty(&self, name: &str) -> Result<Status, &'static str> {
+        let dir = &self.opts.pty_dir;
+        let (statuses, busy) = scan_pty(dir, &self.seen).await;
+        if let Some(st) = statuses.iter().find(|s| is_session(s, name)) {
+            return Ok(st.clone());
+        }
+        let known = lock(&self.seen).get(name).copied();
+        let alive = match known {
+            // Its socket is still there (a scan removes a dead one), no other session answered from it, and its
+            // process lives.
+            Some(pid) => {
+                local::socket_path(dir, pid).is_ok_and(|p| p.exists())
+                    && !statuses.iter().any(|s| s.pid == pid)
+                    && pid_alive(pid)
+            }
+            // Never seen by this worker: it may be the socket that did not answer.
+            None => busy,
+        };
+        if alive {
+            Err(TERM_BUSY)
+        } else {
+            lock(&self.seen).remove(name);
+            Err(NO_TEXT_TERMINAL)
+        }
     }
 
     async fn conn(&self, s: TcpStream) {
@@ -291,6 +328,7 @@ impl Worker {
             changed.clone(),
             self.rescan.subscribe(),
             self.sweeps(),
+            self.seen.clone(),
         ));
         let mut sent: Option<TermList> = None;
         let mut tick = tokio::time::interval(self.opts.poll);
@@ -327,15 +365,12 @@ impl Worker {
             _ => return Err(BAD_ID.into()),
         };
         let name = clean_name(name).ok_or(INVALID_NAME)?;
-        let statuses = self.pty_statuses().await;
-        let Some(st) = statuses.iter().find(|s| is_session(s, &id.name)) else {
-            return Err(NO_TEXT_TERMINAL.into());
-        };
+        let st = self.find_pty(&id.name).await?;
         if st.key.is_none() {
             return Err(OLD_RUN.into());
         }
         let path = local::socket_path(&self.opts.pty_dir, st.pid).map_err(|_| NO_TEXT_TERMINAL)?;
-        let token = local::token(&self.opts.pty_dir).map_err(|_| NO_TEXT_TERMINAL)?;
+        let token = local::token(&self.opts.pty_dir).map_err(|_| TERM_BUSY)?;
         match local::rename(&path, &token, &name).await {
             Ok(()) => {
                 self.rescan.send_modify(|g| *g += 1);
@@ -343,6 +378,7 @@ impl Worker {
             }
             Err(local::Probe::Refused(e)) if e == "unsupported" => Err(OLD_RUN.into()),
             Err(local::Probe::Refused(e)) if e == INVALID_NAME => Err(INVALID_NAME.into()),
+            Err(local::Probe::Busy) => Err(TERM_BUSY.into()),
             Err(_) => Err(NO_TEXT_TERMINAL.into()),
         }
     }
@@ -353,21 +389,19 @@ impl Worker {
             Ok(id) if id.backend == PTY && id.host.is_none() => id,
             _ => return Err(BAD_ID.into()),
         };
-        let statuses = self.pty_statuses().await;
-        let Some(st) = statuses.iter().find(|s| is_session(s, &id.name)) else {
-            return Err(NO_TEXT_TERMINAL.into());
-        };
+        let st = self.find_pty(&id.name).await?;
         if st.key.is_none() {
             return Err(OLD_RUN_END.into());
         }
         let path = local::socket_path(&self.opts.pty_dir, st.pid).map_err(|_| NO_TEXT_TERMINAL)?;
-        let token = local::token(&self.opts.pty_dir).map_err(|_| NO_TEXT_TERMINAL)?;
+        let token = local::token(&self.opts.pty_dir).map_err(|_| TERM_BUSY)?;
         match local::end(&path, &token).await {
             Ok(()) => {
                 self.rescan.send_modify(|g| *g += 1);
                 Ok(())
             }
             Err(local::Probe::Refused(e)) if e == "unsupported" => Err(OLD_RUN_END.into()),
+            Err(local::Probe::Busy) => Err(TERM_BUSY.into()),
             Err(_) => Err(NO_TEXT_TERMINAL.into()),
         }
     }
@@ -492,21 +526,23 @@ impl Worker {
         R: AsyncBufRead + Unpin,
         W: AsyncWrite + Unpin,
     {
-        let statuses = self.pty_statuses().await;
-        let Some(st) = statuses.iter().find(|s| is_session(s, &id.name)) else {
-            return put(w, &Out::Error { error: NO_TEXT_TERMINAL.into() }).await;
+        let st = match self.find_pty(&id.name).await {
+            Ok(st) => st,
+            Err(e) => return put(w, &Out::Error { error: e.into() }).await,
         };
         let (path, key) = match (local::socket_path(&self.opts.pty_dir, st.pid), format!("{PTY}:{}", st.pid)) {
             (Ok(p), k) => (p, k),
             _ => return put(w, &Out::Error { error: NO_TEXT_TERMINAL.into() }).await,
         };
-        let token = local::token(&self.opts.pty_dir);
-        let stream = match token {
-            Ok(t) => local::connect(&path, "view", &t).await,
-            Err(_) => Err(std::io::ErrorKind::NotFound.into()),
+        let stream = match local::token(&self.opts.pty_dir) {
+            Ok(t) => local::connect(&path, "view", &t)
+                .await
+                .map_err(|e| if local::gone(&e) { NO_TEXT_TERMINAL } else { TERM_BUSY }),
+            Err(_) => Err(TERM_BUSY),
         };
-        let Ok(stream) = stream else {
-            return put(w, &Out::Error { error: NO_TEXT_TERMINAL.into() }).await;
+        let stream = match stream {
+            Ok(s) => s,
+            Err(e) => return put(w, &Out::Error { error: e.into() }).await,
         };
         let inputs = Arc::new(AtomicU64::new(0));
         let _ended = sid.map(|sid| Ended { events: &self.events, sid, term: id.to_string(), inputs: inputs.clone() });
@@ -589,12 +625,32 @@ impl Drop for Ended<'_> {
     }
 }
 
-/// The live `run` sessions in `dir`, none when its token cannot be had.
-async fn scan_pty(dir: &std::path::Path) -> Vec<Status> {
-    match local::token(dir) {
-        Ok(t) => local::scan(dir, &t).await,
-        Err(_) => Vec::new(),
+/// The live `run` sessions in `dir`, none when its token cannot be had; and whether a socket did not answer in
+/// time (with no token, whether there is any socket). Each one's holder pid goes in `seen`, which keeps only the
+/// pids whose socket file is still there.
+async fn scan_pty(dir: &std::path::Path, seen: &Seen) -> (Vec<Status>, bool) {
+    let got = match local::token(dir) {
+        Ok(t) => local::scan_all(dir, &t).await,
+        Err(_) => {
+            let any = std::fs::read_dir(dir.join("pty"))
+                .is_ok_and(|d| d.flatten().any(|e| e.path().extension().is_some_and(|x| x == "sock")));
+            (Vec::new(), any)
+        }
+    };
+    let mut seen = lock(seen);
+    seen.retain(|_, pid| local::socket_path(dir, *pid).is_ok_and(|p| p.exists()));
+    for s in &got.0 {
+        seen.insert(s.key.clone().unwrap_or_else(|| s.name.clone()), s.pid);
     }
+    got
+}
+
+/// Whether process `pid` is alive (one of another user counts).
+fn pid_alive(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else { return false };
+    // SAFETY: signal 0 only checks that the process exists.
+    let ok = unsafe { libc::kill(pid, 0) == 0 };
+    ok || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 /// The id of a `run` session: its key, or its name when it was started by a version that has no key.
@@ -701,13 +757,14 @@ async fn ask_pty(
     changed: Arc<Notify>,
     mut rescan: tokio::sync::watch::Receiver<u64>,
     sweeps: bool,
+    seen: Seen,
 ) {
     loop {
         if sweeps {
             let d = dir.clone();
             tokio::task::spawn_blocking(move || sweep::sweep(&d, sweep::close_tabs));
         }
-        let got = pty_rows(&unread, &scan_pty(&dir).await, unix_now());
+        let got = pty_rows(&unread, &scan_pty(&dir, &seen).await.0, unix_now());
         {
             let mut last = lock(&rows);
             if last.as_ref() != Some(&got) {

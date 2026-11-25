@@ -707,6 +707,55 @@ async fn an_old_run_is_listed_by_name_and_refuses_rename() {
 }
 
 #[tokio::test]
+async fn a_holder_that_does_not_answer_is_busy_not_gone() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    let w = Worker::start(None).await;
+    let dir = w.pty_dir();
+    let token = rapp_term::pty::local::token(&dir).unwrap();
+    // A holder of this test's own pid (alive), which answers its status until `hang` is set and then never again.
+    let pid = std::process::id();
+    let sock = dir.join(format!("pty/{pid}.sock"));
+    let l = tokio::net::UnixListener::bind(&sock).unwrap();
+    let hang = Arc::new(AtomicBool::new(false));
+    let h = hang.clone();
+    let holder = tokio::spawn(async move {
+        let mut held = Vec::new();
+        loop {
+            let (mut s, _) = l.accept().await.unwrap();
+            if h.load(Ordering::SeqCst) {
+                held.push(s);
+                continue;
+            }
+            let token = token.clone();
+            tokio::spawn(async move {
+                let (r, mut w) = s.split();
+                let _ = rapp_term::pty::local::read_head(&mut BufReader::new(r), &token).await;
+                let reply = json!({"v": 2, "name": "slow", "command": "sh", "cols": 80, "rows": 24, "activity": 5,
+                    "viewers": 0, "pid": pid, "key": "0123456789abcdef"});
+                let _ = w.write_all(format!("{reply}\n").as_bytes()).await;
+            });
+        }
+    });
+    let id = "term:pty:0123456789abcdef";
+    let v = w.ask(json!({"op": "list"})).await;
+    assert_eq!(terms_of(&v), [id], "{v:?}");
+    hang.store(true, Ordering::SeqCst);
+    let busy = json!({"t": "error", "error": "text terminal busy"});
+    assert_eq!(w.ask(json!({"op": "view", "term": id})).await, [busy.clone()]);
+    assert_eq!(w.ask(json!({"op": "end", "term": id})).await, [json!({"error": "text terminal busy"})]);
+    // One this worker never saw may be the one that did not answer.
+    assert_eq!(w.ask(json!({"op": "view", "term": "term:pty:fedcba9876543210"})).await, [busy]);
+    // Its socket gone: the holder is, and so is the session.
+    holder.abort();
+    let _ = holder.await;
+    std::fs::remove_file(&sock).unwrap();
+    let gone = json!({"t": "error", "error": "no such text terminal"});
+    assert_eq!(w.ask(json!({"op": "view", "term": id})).await, [gone]);
+    w.stop().await;
+}
+
+#[tokio::test]
 async fn end_unknown_term_is_no_such() {
     let w = Worker::start(None).await;
     let r = w.ask(json!({"op": "end", "term": "term:pty:0123456789abcdef"})).await;

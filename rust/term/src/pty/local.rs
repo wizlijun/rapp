@@ -164,7 +164,7 @@ pub fn new_key() -> String {
 
 /// Whether a failed connect means nobody listens. Any other error (too many files, a full backlog, no access)
 /// says nothing about the process behind the socket, so its file must stay.
-fn gone(e: &std::io::Error) -> bool {
+pub fn gone(e: &std::io::Error) -> bool {
     matches!(e.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound)
 }
 
@@ -229,8 +229,14 @@ pub async fn end(path: &Path, token: &str) -> Result<(), Probe> {
 /// The statuses of the live sockets in `pty/`, by name. A leftover socket file is removed; a busy or refusing
 /// socket is skipped.
 pub async fn scan(term_dir: &Path, token: &str) -> Vec<Status> {
+    scan_all(term_dir, token).await.0
+}
+
+/// [`scan`], and whether some socket was there but gave no status in time (busy, or not reachable just now): a
+/// session missing from the statuses may be that one.
+pub async fn scan_all(term_dir: &Path, token: &str) -> (Vec<Status>, bool) {
     let Ok(dir) = std::fs::read_dir(term_dir.join("pty")) else {
-        return Vec::new();
+        return (Vec::new(), false);
     };
     let mut probes = tokio::task::JoinSet::new();
     for path in dir.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "sock")) {
@@ -238,17 +244,19 @@ pub async fn scan(term_dir: &Path, token: &str) -> Vec<Status> {
         probes.spawn(async move { (status(&path, &token).await, path) });
     }
     let mut out = Vec::new();
+    let mut busy = false;
     while let Some(Ok((probe, path))) = probes.join_next().await {
         match probe {
             Ok(s) => out.push(s),
             Err(Probe::Gone) => {
                 let _ = std::fs::remove_file(&path);
             }
-            Err(_) => {}
+            Err(Probe::Busy) => busy = true,
+            Err(Probe::Refused(_)) => {}
         }
     }
     out.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.key.cmp(&b.key)).then(a.pid.cmp(&b.pid)));
-    out
+    (out, busy)
 }
 
 /// A request head.
