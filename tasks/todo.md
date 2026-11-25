@@ -1054,3 +1054,11 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] [Linux v0.15.26](https://github.com/wizlijun/rapp/releases/tag/v0.15.26) 已发布（源码 `ca1805fe`，`--latest=false`）；两包 40 文件一致、14 ELF 依赖完整，隔离命名空间服务/CLI/端口共享验证通过，三个远端附件大小与 SHA256 一致，macOS Latest 保留 `v0.15.25`。
 - [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-25-linux-01526-parity.md`。
 - [ ] 实机验收：物理输入法、触屏、真实锁屏跨设备解锁及与 macOS 真机对端联调。
+
+## Linux 0.15.28 总览「打开应用」下拉菜单对齐与发布（2026-11-25）
+
+- [x] 对齐 macOS 0.15.27 总览设备列底部「打开应用 ▾」下拉菜单（共享 Dart 实现，Linux 桌面复用行高 32、自动聚焦筛选、悬停提示、键盘导航与能力感知分组）；补充 Linux 桌面与仅桌面宿主（`applications: false`）回归用例。
+- [x] Flutter 全量 3134 项通过（3 跳过），analyze 无 error/warning；Rust 套件与构建脚本测试通过。
+- [x] [Linux v0.15.28](https://github.com/wizlijun/rapp/releases/tag/v0.15.28) 已发布（源码 `cc9583a6`，`--latest=false`）；两包 40 文件一致、14 ELF 依赖完整，隔离网络命名空间服务/CLI/端口共享测试通过；三个远端附件 SHA256 与匿名校验清单一致，macOS Latest 保留 `v0.15.27`。
+- [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-25-linux-01528-parity.md`。
+- [ ] 实机验收：Linux / Omarchy 下连接远端设备的总览「打开应用」菜单交互与中文输入法筛选。
