@@ -5,7 +5,7 @@ import Foundation
 public func resolveRegions(_ pack: RulePack, in image: RuleImage) -> [String: [RuleRect]] {
     let resolver = RegionResolver(pack: pack, image: image)
     var out: [String: [RuleRect]] = [:]
-    for name in pack.regions.keys {
+    for name in pack.regions.keys.sorted() {
         if let rects = resolver.named(name), !rects.isEmpty { out[name] = rects }
     }
     return out
@@ -14,7 +14,8 @@ public func resolveRegions(_ pack: RulePack, in image: RuleImage) -> [String: [R
 private final class RegionResolver {
     let pack: RulePack, image: RuleImage
     var cache: [String: [RuleRect]?] = [:]
-    var visiting: Set<String> = []
+    var stack: [String] = []          // names being resolved, outermost first
+    var cyclic: Set<String> = []      // every region on a reference cycle; always resolves to nil
     let blobLimit = 512
 
     init(pack: RulePack, image: RuleImage) { self.pack = pack; self.image = image }
@@ -22,11 +23,18 @@ private final class RegionResolver {
     var whole: RuleRect { RuleRect(x: 0, y: 0, w: image.width, h: image.height) }
 
     func named(_ name: String) -> [RuleRect]? {
+        if cyclic.contains(name) { return nil }
         if let hit = cache[name] { return hit }
-        guard let spec = pack.regions[name], !visiting.contains(name) else { return nil }
-        visiting.insert(name)
+        guard let spec = pack.regions[name] else { return nil }
+        if let at = stack.firstIndex(of: name) {
+            // Reached again while resolving: everything from there up is on the cycle.
+            cyclic.formUnion(stack[at...])
+            return nil
+        }
+        stack.append(name)
         let r = resolve(spec)
-        visiting.remove(name)
+        stack.removeLast()
+        if cyclic.contains(name) { return nil }
         cache[name] = .some(r)
         return r
     }
@@ -65,10 +73,18 @@ private final class RegionResolver {
         var minX = Double(c.x), maxX = Double(c.maxX), minY = Double(c.y), maxY = Double(c.maxY)
         var hugX = Hug.low, hugY = Hug.low
         // A constraint pointing at a region that cannot be found does not count (spec §6.1).
-        if let n = b.rightOf, let r = named(n)?.first { minX = max(minX, Double(r.maxX)); hugX = .low }
-        if let n = b.leftOf, let r = named(n)?.first { maxX = min(maxX, Double(r.x)); hugX = .high }
-        if let n = b.below, let r = named(n)?.first { minY = max(minY, Double(r.maxY)); hugY = .low }
-        if let n = b.above, let r = named(n)?.first { maxY = min(maxY, Double(r.y)); hugY = .high }
+        // A target on a cycle poisons this region too (not found, but not ignorable).
+        func target(_ n: String?) -> (RuleRect?, poisoned: Bool) {
+            guard let n else { return (nil, false) }
+            let r = named(n)?.first
+            return (r, cyclic.contains(n))
+        }
+        let rel = [target(b.rightOf), target(b.leftOf), target(b.below), target(b.above)]
+        if rel.contains(where: { $0.poisoned }) { return nil }
+        if let r = rel[0].0 { minX = max(minX, Double(r.maxX)); hugX = .low }
+        if let r = rel[1].0 { maxX = min(maxX, Double(r.x)); hugX = .high }
+        if let r = rel[2].0 { minY = max(minY, Double(r.maxY)); hugY = .low }
+        if let r = rel[3].0 { maxY = min(maxY, Double(r.y)); hugY = .high }
         guard maxX > minX, maxY > minY else { return nil }
         guard let xs = solve(lo: minX, hi: maxX, near: b.left, far: b.right, size: b.width, hug: hugX),
               let ys = solve(lo: minY, hi: maxY, near: b.top, far: b.bottom, size: b.height, hug: hugY)

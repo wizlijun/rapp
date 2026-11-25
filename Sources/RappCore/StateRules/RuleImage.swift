@@ -31,8 +31,10 @@ public struct RuleImage {
               crop.x <= width - crop.w, crop.y <= height - crop.h,
               bgra.count >= (height - 1) * bytesPerRow + width * 4,
               let base = bgra.baseAddress else { return nil }
-        let dw = max(1, Int((Double(crop.w) / scale).rounded(.down)))
-        let dh = max(1, Int((Double(crop.h) / scale).rounded(.down)))
+        // A tiny scale makes the quotient overflow; clamp before converting.
+        let cap = Double(maxSamplePixels)
+        let dw = max(1, Int(min(cap, (Double(crop.w) / scale).rounded(.down))))
+        let dh = max(1, Int(min(cap, (Double(crop.h) / scale).rounded(.down))))
         guard dw <= maxSamplePixels / dh else { return nil }
         let src = base.assumingMemoryBound(to: UInt8.self)
         var out = [UInt8](repeating: 0, count: dw * dh * 4)

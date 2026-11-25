@@ -60,7 +60,7 @@ final class RuleRegionTests: XCTestCase {
         XCTAssertEqual(img?.rgb(0, 0).b, 1); XCTAssertEqual(img?.rgb(1, 0).b, 3)
         XCTAssertNil(src.withUnsafeBytes { RuleImage.sample(bgra: $0, width: 4, height: 2, bytesPerRow: 16,
                                                             crop: RuleRect(x: 3, y: 0, w: 4, h: 2), scale: 2) })
-        for bad in [0.0, -1, .nan, .infinity] {
+        for bad in [0.0, -1, .nan, .infinity, 1e-320] {
             XCTAssertNil(src.withUnsafeBytes { RuleImage.sample(bgra: $0, width: 4, height: 2, bytesPerRow: 16,
                                                                 crop: RuleRect(x: 0, y: 0, w: 4, h: 2), scale: bad) })
         }
@@ -150,6 +150,24 @@ final class RuleRegionTests: XCTestCase {
         XCTAssertNil(r["c"])   // -1e308 + 1e308 ends at the top edge: empty
         XCTAssertEqual(r["i"], [RuleRect(x: 0, y: 0, w: 100, h: 100)])
         XCTAssertNil(r["g"])   // solid image: no edge anywhere
+    }
+
+    func testRelationCyclesAreNilInEveryOrder() throws {
+        // resolveRegions walks the names sorted, so each pack below enters its cycle from a different
+        // member (or from a region that only depends on the cycle); all must give the same answer.
+        let packs = [
+            #"{"a":{"box":{"rightOf":"b"}},"b":{"box":{"rightOf":"a"}}}"#,
+            #"{"b":{"box":{"rightOf":"a"}},"a":{"box":{"rightOf":"b"}},"0dep":{"box":{"rightOf":"a"}}}"#,
+            #"{"x":{"box":{"rightOf":"z"}},"y":{"box":{"below":"x"}},"z":{"box":{"leftOf":"y"}}}"#,
+            #"{"z":{"box":{"rightOf":"y"}},"y":{"box":{"below":"x"}},"x":{"box":{"leftOf":"z"}},"0in":{"box":{"in":"y"}}}"#,
+        ]
+        let img = Canvas.solid(width: 100, height: 100)
+        for json in packs {
+            let withOk = String(json.dropLast()) + #","ok":{"box":{"left":10,"width":20}}}"#
+            let r = resolveRegions(try pack(withOk), in: img)
+            XCTAssertEqual(Set(r.keys), ["ok"], json)
+            XCTAssertEqual(r["ok"], [RuleRect(x: 10, y: 0, w: 20, h: 100)])
+        }
     }
 
     func testHslAndDistance() {
