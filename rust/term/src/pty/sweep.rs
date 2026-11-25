@@ -2,6 +2,7 @@
 //! this reads those markers, deletes them, and hands the fresh ones' ttys to `close`.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 /// A marker younger than this is left for a later sweep: its holder may still be exiting.
@@ -33,6 +34,22 @@ pub fn sweep(dir: &Path, close: impl Fn(&[String])) {
     if !fresh.is_empty() {
         close(&fresh);
     }
+}
+
+/// [`sweep`], unless one that shares `running` is under way: then nothing (that one closes the tabs, and a later one
+/// gets the markers it left), so overlapping sweeps never run two osascripts at once.
+pub fn sweep_once(dir: &Path, running: &AtomicBool, close: impl Fn(&[String])) {
+    if running.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    struct Done<'a>(&'a AtomicBool);
+    impl Drop for Done<'_> {
+        fn drop(&mut self) {
+            self.0.store(false, Ordering::Release);
+        }
+    }
+    let _done = Done(running);
+    sweep(dir, close);
 }
 
 /// Closes the Terminal tabs on these ttys that have nothing running in them any more. Blocks up to 5 s.
@@ -111,6 +128,29 @@ mod tests {
             .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::inherit()).status().unwrap();
         let _ = std::fs::remove_file(&out);
         assert!(status.success());
+    }
+
+    #[test]
+    fn a_sweep_while_another_runs_does_nothing() {
+        let d = tempfile::tempdir().unwrap();
+        let ended = d.path().join("ended");
+        std::fs::create_dir(&ended).unwrap();
+        let f = std::fs::File::create(ended.join("ttys004")).unwrap();
+        f.set_modified(SystemTime::now() - Duration::from_secs(5)).unwrap();
+        let running = AtomicBool::new(false);
+        let calls = RefCell::new(0);
+        sweep_once(d.path(), &running, |_| {
+            // A second sweep starting meanwhile leaves it to this one.
+            sweep_once(d.path(), &running, |_| *calls.borrow_mut() += 10);
+            *calls.borrow_mut() += 1;
+        });
+        assert_eq!(*calls.borrow(), 1);
+        assert!(!running.load(Ordering::Acquire));
+        // Done: the next one runs.
+        let f = std::fs::File::create(ended.join("ttys005")).unwrap();
+        f.set_modified(SystemTime::now() - Duration::from_secs(5)).unwrap();
+        sweep_once(d.path(), &running, |_| *calls.borrow_mut() += 1);
+        assert_eq!(*calls.borrow(), 2);
     }
 
     #[test]

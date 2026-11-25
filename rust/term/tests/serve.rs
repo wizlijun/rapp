@@ -742,7 +742,7 @@ async fn a_holder_that_does_not_answer_is_busy_not_gone() {
     assert_eq!(terms_of(&v), [id], "{v:?}");
     hang.store(true, Ordering::SeqCst);
     let busy = json!({"t": "error", "error": "text terminal busy"});
-    assert_eq!(w.ask(json!({"op": "view", "term": id})).await, [busy.clone()]);
+    assert_eq!(w.ask(json!({"op": "view", "term": id})).await, std::slice::from_ref(&busy));
     assert_eq!(w.ask(json!({"op": "end", "term": id})).await, [json!({"error": "text terminal busy"})]);
     // One this worker never saw may be the one that did not answer.
     assert_eq!(w.ask(json!({"op": "view", "term": "term:pty:fedcba9876543210"})).await, [busy]);

@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
@@ -119,6 +119,8 @@ pub struct Worker {
     /// The holder pid of each session id seen in a scan, kept while its socket file is there: a session missing
     /// from a later scan is gone only when its holder is.
     seen: Seen,
+    /// True while an ended-tab sweep runs: one at a time.
+    sweeping: Arc<AtomicBool>,
 }
 
 /// Session id (its key, or its name) to holder pid.
@@ -163,12 +165,13 @@ impl Worker {
             opening: Default::default(),
             rescan: tokio::sync::watch::channel(0).0,
             seen: Default::default(),
+            sweeping: Default::default(),
         };
         // Tabs whose holder ended while no worker ran.
         if w.sweeps() {
             if let Ok(h) = tokio::runtime::Handle::try_current() {
-                let dir = w.opts.pty_dir.clone();
-                h.spawn_blocking(move || sweep::sweep(&dir, sweep::close_tabs));
+                let (dir, running) = (w.opts.pty_dir.clone(), w.sweeping.clone());
+                h.spawn_blocking(move || sweep::sweep_once(&dir, &running, sweep::close_tabs));
             }
         }
         w
@@ -327,7 +330,7 @@ impl Worker {
             pty.clone(),
             changed.clone(),
             self.rescan.subscribe(),
-            self.sweeps(),
+            self.sweeps().then(|| self.sweeping.clone()),
             self.seen.clone(),
         ));
         let mut sent: Option<TermList> = None;
@@ -411,15 +414,20 @@ impl Worker {
         cfg!(target_os = "macos") && self.opts.launch_with.is_none()
     }
 
-    /// A sweep 1.5 s from now, when the holder that was just told to end has left its marker.
+    /// Sweeps 1.5 s, 3.5 s and 6 s from now: the holder just told to end leaves its marker only after its own
+    /// waits (each up to a second), and a marker must be a second old to be taken.
     fn sweep_later(&self) {
         if !self.sweeps() {
             return;
         }
-        let dir = self.opts.pty_dir.clone();
+        let (dir, running) = (self.opts.pty_dir.clone(), self.sweeping.clone());
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(1500)).await;
-            let _ = tokio::task::spawn_blocking(move || sweep::sweep(&dir, sweep::close_tabs)).await;
+            let start = tokio::time::Instant::now();
+            for at in SWEEP_AFTER_END {
+                tokio::time::sleep_until(start + at).await;
+                let (dir, running) = (dir.clone(), running.clone());
+                let _ = tokio::task::spawn_blocking(move || sweep::sweep_once(&dir, &running, sweep::close_tabs)).await;
+            }
         });
     }
 
@@ -748,7 +756,8 @@ fn status_rows(unread: &Mutex<Unread>, statuses: &[Status], now: u64) -> Vec<Ter
 }
 
 /// Scan for `run` sessions every `poll`, or at once when `rescan` changes; each answer goes in `rows`, and `changed`
-/// hears when it differs.
+/// hears when it differs. With `sweeping` (where sweeps run), each pass sweeps the ended tabs too, one at a time.
+#[allow(clippy::too_many_arguments)]
 async fn ask_pty(
     dir: PathBuf,
     unread: Arc<Mutex<Unread>>,
@@ -756,13 +765,13 @@ async fn ask_pty(
     rows: Arc<Mutex<Option<Vec<TermRow>>>>,
     changed: Arc<Notify>,
     mut rescan: tokio::sync::watch::Receiver<u64>,
-    sweeps: bool,
+    sweeping: Option<Arc<AtomicBool>>,
     seen: Seen,
 ) {
     loop {
-        if sweeps {
+        if let Some(running) = sweeping.clone() {
             let d = dir.clone();
-            tokio::task::spawn_blocking(move || sweep::sweep(&d, sweep::close_tabs));
+            tokio::task::spawn_blocking(move || sweep::sweep_once(&d, &running, sweep::close_tabs));
         }
         let got = pty_rows(&unread, &scan_pty(&dir, &seen).await.0, unix_now());
         {
@@ -778,6 +787,10 @@ async fn ask_pty(
         }
     }
 }
+
+/// When the sweeps after an `end` run, from the end's answer.
+const SWEEP_AFTER_END: [Duration; 3] =
+    [Duration::from_millis(1500), Duration::from_millis(3500), Duration::from_millis(6000)];
 
 /// How long `open` waits for the window's `run` to appear.
 const OPEN_WAIT: Duration = Duration::from_secs(10);
