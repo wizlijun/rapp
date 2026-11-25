@@ -308,6 +308,10 @@ final class Session {
     private var requestedFocus = false
     private var focusSession: FocusSession?
 
+    /// The state rules engine (app sessions, from capture ready), and rules that arrived before it.
+    private var appState: AppStateWatcher?
+    private var pendingRules: String?
+
     /// A desktop session (`desktop:` or `desktop:<id>`): the whole display, no app.
     private var desktop = false
     /// The `covered` notices sent (v13): throttled per owner, and what `dismissCover` may close.
@@ -524,8 +528,10 @@ final class Session {
         case let .setView(window, rect):
             view = viewFor(window: window, rect: rect)
             applyRegion(table)
-        case .stateRules:
-            break  // Task 8: hand the pack to the state engine
+        case let .stateRules(json):
+            // Not an input, so no `admit`. Desktop sessions have no app to read.
+            guard !desktop else { break }
+            if let appState { appState.setRules(json) } else { pendingRules = json }
         case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked, .weak,
              .inputSource, .pong, .saving, .screenLocked, .focusRegion, .covered, .appOpened, .secureFocus, .changed, .appState:
             fail("unexpected message from client")
@@ -754,6 +760,14 @@ final class Session {
                         width: UInt16(clamping: Int(display.width.rounded())),
                         height: UInt16(clamping: Int(display.height.rounded()))))
         }
+        if !desktop {
+            let watcher = AppStateWatcher(app: app, text: nil,
+                                          send: { [weak self] m in self?.queue.async { self?.send(m) } },
+                                          log: { [output] in output.log($0) })
+            appState = watcher
+            if let rules = pendingRules { watcher.setRules(rules) }
+            pendingRules = nil
+        }
         tableChanged(table)
         syncFocus()
         scheduleMenuRead(after: 0)
@@ -933,6 +947,8 @@ final class Session {
             // size must arrive after it.
             send(.windows(next))
             focusSession?.windows(next)
+            appState?.setWindow(next.filter { $0.kind == .normal }
+                .max(by: { $0.rect.w * $0.rect.h < $1.rect.w * $1.rect.h })?.rect)
             let focused = next.first(where: \.focused)?.id
             if focused != focusedWindow {
                 focusedWindow = focused
@@ -962,6 +978,7 @@ final class Session {
             latest = (pixelBuffer, region)
             return (sampleMode, latestSeq)
         }
+        appState?.offer(pixelBuffer, region: region)
         quantizeAndSubmit(pixelBuffer, region: region, mode: mode, seq: seq, captured: captured, fresh: true)
     }
 
@@ -1268,6 +1285,9 @@ final class Session {
         paster = nil
         focusSession?.stop()
         focusSession = nil
+        appState?.stop()
+        appState = nil
+        pendingRules = nil
         clipWatcher?.stop()
         clipWatcher = nil
         inputWatcher?.stop()
