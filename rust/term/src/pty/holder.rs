@@ -154,7 +154,12 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
     };
 
     let (drained_tx, drained) = oneshot::channel();
-    let window = Arc::new(Mutex::new(Window::new(std::io::stdout()).tty(unsafe { libc::isatty(1) } == 1)));
+    let is_tty = unsafe { libc::isatty(1) } == 1;
+    let mut win_obj = Window::new(std::io::stdout()).tty(is_tty);
+    if is_tty {
+        win_obj = win_obj.titles(std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default());
+    }
+    let window = Arc::new(Mutex::new(win_obj));
     let (sh, win) = (shared.clone(), window.clone());
     let tracker = opts.program_status.then(Tracker::default);
     std::thread::spawn(move || pump_output(from_pty, &win, &sh, drained_tx, Emu::feed, tracker));
@@ -183,6 +188,7 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
             _ = tick.tick() => {
                 tick_sync(&shared, Emu::tick);
                 resize_window(&window, &shared);
+                refresh_title(&window, &shared);
             }
         }
     };
@@ -292,6 +298,17 @@ fn resize_window<W: Write>(window: &Mutex<Window<W>>, shared: &Shared) {
     let _ = w.resize_if_idle(&shared.fit);
 }
 
+/// Writes the window's title if it is due. Never waits for the window, like `resize_window`.
+fn refresh_title<W: Write>(window: &Mutex<Window<W>>, shared: &Shared) {
+    let mut w = match window.try_lock() {
+        Ok(w) => w,
+        Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return,
+    };
+    let fg = shared.fg.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let _ = w.refresh_title(&fg, Instant::now());
+}
+
 /// The program's output: to the window first, with any resize a viewer asked for once it is between sequences, then
 /// to the emulator through `feed`. Says so on `drained` when the pty is done.
 fn pump_output<W: Write>(
@@ -343,6 +360,9 @@ fn pump_output<W: Write>(
             let mut w = window.lock().unwrap_or_else(|e| e.into_inner());
             let _ = w.output(&b[..n]);
             let _ = w.resize_if_idle(&shared.fit);
+            // A new title from the program shows at once, not at the next tick.
+            let fg = shared.fg.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            let _ = w.refresh_title(&fg, Instant::now());
         }
         guarded(shared, None, |emu| feed(emu, &b[..n]));
         shared.activity.store(now(), Ordering::Relaxed);

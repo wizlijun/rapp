@@ -7,6 +7,7 @@ pub mod local;
 pub mod ps;
 pub mod title;
 pub mod view;
+pub mod wintitle;
 
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Mutex;
