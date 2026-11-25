@@ -583,7 +583,8 @@ void main() {
 
     /// The hub answers end_term with [endError] (or term_ended), terms with [list], and open_term with the next
     /// `term:pty:n<k>` once [gate] lets it (none: right away).
-    void hubAnswers({String? endError, Map<String, dynamic>? list, List<Completer<void>>? gates}) {
+    void hubAnswers({String? endError, Map<String, dynamic>? list, List<Completer<void>>? gates,
+        Map<String, dynamic> Function()? lists}) {
       final ok = t.onSend;
       var made = 0;
       t.onSend = (m) {
@@ -594,7 +595,7 @@ void main() {
                 ? {'event': 'term_ended', 'id': m['id'], 'term': m['term'], 'req': m['req']}
                 : {'event': 'error', 'req': m['req'], 'error': endError});
           case 'terms':
-            t.emit({...(list ?? listOf()), 'req': m['req']});
+            t.emit({...(lists?.call() ?? list ?? listOf()), 'req': m['req']});
           case 'open_term':
             final n = ++made;
             final reply = {'event': 'term_created', 'id': m['id'], 'term': 'term:pty:n$n', 'req': m['req']};
@@ -731,6 +732,8 @@ void main() {
         t.emit(listOf(shell: true));
         await tester.pumpWidget(wrap(window()));
         await openTerm(tester, two);
+        // The device's list no longer has it.
+        hubAnswers(list: {...listOf(), 'terms': []});
         term.play(DisconnectedEvent(1, reason));
         await settle(tester);
         expect(s.entryFor(key), isNull);
@@ -741,6 +744,37 @@ void main() {
         expect(opens(), 1);
       });
     }
+
+    testWidgets('a view answered no such text terminal while the list still has it: 已断开, and it tries again',
+        (tester) async {
+      t.emit(listOf(shell: true));
+      await tester.pumpWidget(wrap(window()));
+      await openTerm(tester, two);
+      hubAnswers(list: listOf(shell: true));
+      term.play(const DisconnectedEvent(1, 'no such text terminal'));
+      await settle(tester);
+      expect(t.sent.where((m) => m['cmd'] == 'terms'), isNotEmpty);
+      expect(s.currentKey, key);
+      expect(s.currentRecord!.phase, Phase.disconnected);
+      expect(s.currentRecord!.retry, isNotNull);
+      expect(s.hintHistory.where((h) => h.text == '已结束 work'), isEmpty);
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 1500)));
+      await tester.pump();
+      expect(opens(), 2);
+    });
+
+    testWidgets('a view answered no such text terminal and no list in time: 已断开, and it tries again', (tester) async {
+      t.emit(listOf(shell: true));
+      await tester.pumpWidget(wrap(window()));
+      await openTerm(tester, two);
+      s.termListTimeout = const Duration(milliseconds: 50); // the hub never answers `terms`
+      term.play(const DisconnectedEvent(1, 'no such text terminal'));
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await settle(tester);
+      expect(s.currentKey, key);
+      expect(s.currentRecord!.phase, Phase.disconnected);
+      expect(s.currentRecord!.retry, isNotNull);
+    });
 
     testWidgets('network_drop_still_reconnects: a dropped link stays 已断开 and tries again', (tester) async {
       t.emit(listOf(shell: true));
@@ -758,7 +792,9 @@ void main() {
         (tester) async {
       await tester.pumpWidget(wrap(window()));
       await openTerm(tester, two);
-      hubAnswers(endError: 'device offline'); // the record stays, so each case starts from the same one
+      var now = listOf();
+      // The record stays, so each case starts from the same one; a fresh `terms` says what the last list said.
+      hubAnswers(endError: 'device offline', lists: () => now);
       final asked = <String?>[];
       Future<bool> no(String? fg) async {
         asked.add(fg);
@@ -766,27 +802,63 @@ void main() {
       }
 
       int ends() => t.sent.where((m) => m['cmd'] == 'end_term').length;
-      t.emit(listOf());
+      t.emit(now = listOf());
       await settle(tester);
       expect(s.canEndTerm(key), isFalse);
       await tester.runAsync(() => s.endTermAsk(key, confirm: no));
       expect(asked, isEmpty);
       expect(ends(), 0);
 
-      t.emit(listOf(shell: true, fg: 'zsh'));
+      t.emit(now = listOf(shell: true, fg: 'zsh'));
       await settle(tester);
       expect(s.canEndTerm(key), isTrue);
       await tester.runAsync(() => s.endTermAsk(key, confirm: no));
       expect(asked, isEmpty);
       expect(ends(), 1);
 
-      t.emit(listOf(shell: false, fg: 'vim'));
+      t.emit(now = listOf(shell: false, fg: 'vim'));
       await settle(tester);
       await tester.runAsync(() => s.endTermAsk(key, confirm: no));
       expect(asked, ['vim']);
       expect(ends(), 1);
       await tester.runAsync(() => s.endTermAsk(key, confirm: (fg) async => true));
       expect(ends(), 2);
+    });
+
+    testWidgets('endTermAsk asks the device again: a program started since the last list is asked about',
+        (tester) async {
+      await tester.pumpWidget(wrap(window()));
+      await openTerm(tester, two);
+      t.emit(listOf(shell: true, fg: 'zsh'));
+      await settle(tester);
+      // The cached row says the shell is in front; the device now says claude is.
+      hubAnswers(endError: 'device offline', list: listOf(shell: false, fg: 'claude'));
+      final asked = <String?>[];
+      await tester.runAsync(() => s.endTermAsk(key, confirm: (fg) async {
+            asked.add(fg);
+            return false;
+          }));
+      expect(t.sent.where((m) => m['cmd'] == 'terms'), isNotEmpty);
+      expect(asked, ['claude']);
+      expect(t.sent.where((m) => m['cmd'] == 'end_term'), isEmpty);
+    });
+
+    testWidgets('endTermAsk with no fresh list goes by the cached row', (tester) async {
+      await tester.pumpWidget(wrap(window()));
+      await openTerm(tester, two);
+      t.emit(listOf(shell: true, fg: 'zsh'));
+      await settle(tester);
+      s.termListTimeout = const Duration(milliseconds: 50); // `terms` is never answered
+      hubAnswers(endError: 'device offline');
+      final ok = t.onSend;
+      t.onSend = (m) => m['cmd'] == 'terms' ? null : ok?.call(m);
+      final asked = <String?>[];
+      await tester.runAsync(() => s.endTermAsk(key, confirm: (fg) async {
+            asked.add(fg);
+            return false;
+          }));
+      expect(asked, isEmpty);
+      expect(t.sent.where((m) => m['cmd'] == 'end_term'), hasLength(1));
     });
 
     testWidgets('menu_shows_end_term_only_with_shell: 关闭 for a terminal, 结束终端 only on a new device', (tester) async {

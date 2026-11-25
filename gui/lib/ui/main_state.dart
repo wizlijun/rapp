@@ -1642,6 +1642,11 @@ class MainState extends ChangeNotifier {
     if (e is DisconnectedEvent && r.phase != Phase.disconnected) {
       if (r.ending) {
         _finishEnding(r);
+      } else if (isTermApp(r.app) && e.reason == noSuchTextTerminal) {
+        // A view the device found no terminal for: gone while the link was down, or a holder too busy to be found
+        // just now. Its list says which; until then it is down without a retry.
+        _disconnect(r, 'connection closed', retry: false);
+        unawaited(_checkTermGone(r));
       } else if (isTermApp(r.app) && termEnded(e.reason)) {
         _termEnded(r);
       } else {
@@ -2884,9 +2889,18 @@ class MainState extends ChangeNotifier {
   /// 结束终端 with a question first when a program other than the shell is in front ([confirm] is shown its name,
   /// and says whether to go on). Nothing on a device that cannot end it.
   Future<void> endTermAsk(String key, {required Future<bool> Function(String? fg) confirm}) async {
-    final row = termRowOf(key);
-    if (row?.shell == null) return;
-    if (row!.shell == false && !await confirm(row.fg)) return;
+    final cached = termRowOf(key);
+    final r = _records[key];
+    if (cached?.shell == null || r == null) return;
+    // The list can be seconds old: a program started just now must still be asked about. No answer: the cached
+    // row, and a question when in doubt.
+    var row = cached!;
+    try {
+      final list = await hub!.terms(r.id).timeout(termListTimeout);
+      row = list.terms.where((t) => t.id == r.app).firstOrNull ?? cached;
+    } catch (_) {}
+    if (_disposed) return;
+    if (row.shell != true && !await confirm(row.fg)) return;
     await endTerm(key);
   }
 
@@ -2916,6 +2930,28 @@ class MainState extends ChangeNotifier {
     }
     if (_disposed || _records[key] != r) return; // the view's `session ended` took it off already
     _termEnded(r);
+    notifyListeners();
+  }
+
+  /// How long [_checkTermGone] and [endTermAsk] wait for the device's list.
+  @visibleForTesting
+  Duration termListTimeout = const Duration(seconds: 3);
+
+  /// After a view of text terminal [r] was answered `no such text terminal`: the device's list decides. Not listed:
+  /// it is over (「已结束」). Listed, or no list in time: an ordinary drop that tries again. Notifies.
+  Future<void> _checkTermGone(SessionRecord r) async {
+    bool? listed;
+    try {
+      final list = await hub!.terms(r.id).timeout(termListTimeout);
+      listed = list.terms.any((t) => t.id == r.app);
+    } catch (_) {}
+    // Reconnected, ended or closed meanwhile: that stands.
+    if (_disposed || _records[r.key] != r || r.phase != Phase.disconnected || r.ending) return;
+    if (listed == false) {
+      _termEnded(r);
+    } else {
+      _planRetry(r);
+    }
     notifyListeners();
   }
 
