@@ -29,7 +29,7 @@ pub fn default_dir() -> PathBuf {
 
 /// Creates `term/`, `pty/` and `launch/`, all 0700 (also when they exist already).
 pub fn ensure_dirs(term_dir: &Path) -> anyhow::Result<()> {
-    for d in [term_dir.to_path_buf(), term_dir.join("pty"), term_dir.join("launch")] {
+    for d in [term_dir.to_path_buf(), term_dir.join("pty"), term_dir.join("launch"), term_dir.join("ended")] {
         std::fs::create_dir_all(&d).with_context(|| format!("cannot create {}", d.display()))?;
         std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700))
             .with_context(|| format!("cannot protect {}", d.display()))?;
@@ -191,6 +191,26 @@ pub async fn rename(path: &Path, token: &str, name: &str) -> Result<(), Probe> {
     let ask = async {
         let mut s = UnixStream::connect(path).await.map_err(|e| if gone(&e) { Probe::Gone } else { Probe::Busy })?;
         let req = serde_json::json!({ "op": "rename", "v": LOCAL_V, "name": name });
+        send_head_with(&mut s, req, token).await.map_err(|_| Probe::Busy)?;
+        let got = Lines::new(BufReader::new(s), MAX_IN_LINE).next().await;
+        let Ok(Got::Line(line)) = got else {
+            return Err(Probe::Refused("bad reply".into()));
+        };
+        let v: serde_json::Value = serde_json::from_slice(&line).map_err(|_| Probe::Refused("bad reply".into()))?;
+        match (v.get("ok"), v.get("error")) {
+            (Some(serde_json::Value::Bool(true)), _) => Ok(()),
+            (_, Some(e)) => Err(Probe::Refused(e.as_str().unwrap_or("error").to_string())),
+            _ => Err(Probe::Refused("bad reply".into())),
+        }
+    };
+    tokio::time::timeout(STATUS_WAIT, ask).await.unwrap_or(Err(Probe::Busy))
+}
+
+/// Asks the run at `path` to end: it answers first, then ends as if its window were closed. An old run refuses with `unsupported`.
+pub async fn end(path: &Path, token: &str) -> Result<(), Probe> {
+    let ask = async {
+        let mut s = UnixStream::connect(path).await.map_err(|e| if gone(&e) { Probe::Gone } else { Probe::Busy })?;
+        let req = serde_json::json!({ "op": "end", "v": LOCAL_V });
         send_head_with(&mut s, req, token).await.map_err(|_| Probe::Busy)?;
         let got = Lines::new(BufReader::new(s), MAX_IN_LINE).next().await;
         let Ok(Got::Line(line)) = got else {

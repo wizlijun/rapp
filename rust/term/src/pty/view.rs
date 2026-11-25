@@ -345,6 +345,7 @@ mod tests {
             fg: Mutex::default(),
             fg_rev: watch::channel(0).0,
             tty: None,
+            end: tokio::sync::Notify::new(),
         };
         (Arc::new(sh), rx)
     }

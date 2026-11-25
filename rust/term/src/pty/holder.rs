@@ -111,6 +111,7 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
         fg: Mutex::default(),
         fg_rev: watch::channel(0).0,
         tty: tty_name(),
+        end: tokio::sync::Notify::new(),
     });
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path).with_context(|| format!("cannot listen on {}", path.display()))?;
@@ -180,6 +181,7 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
         tokio::select! {
             status = &mut exited => break End::Exited(exit_code(status)),
             _ = hup.recv() => break End::Signal(libc::SIGHUP),
+            _ = shared.end.notified() => break End::Signal(libc::SIGHUP),
             _ = term.recv() => break End::Signal(libc::SIGTERM),
             _ = int.recv() => break End::Signal(libc::SIGINT),
             _ = quit.recv() => break End::Signal(libc::SIGQUIT),
@@ -214,11 +216,24 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
     }
     drop(bound);
     drop(raw);
+    // Last: the marker tells `serve` the window is left empty and can be closed.
+    if opts.ticket.is_some() && unsafe { libc::isatty(1) } == 1 {
+        if let Some(name) = shared.tty.as_deref().and_then(marker_name) {
+            let secs = now();
+            let _ = std::fs::write(opts.dir.join("ended").join(name), secs.to_string());
+        }
+    }
     Ok(code)
 }
 
 /// How often the foreground program is looked up.
 const FG_EVERY: Duration = Duration::from_secs(1);
+
+/// The marker's file name for a tty path: its basename (`/dev/ttys012` gives `ttys012`).
+fn marker_name(tty: &str) -> Option<String> {
+    let base = tty.rsplit('/').next()?;
+    (!base.is_empty()).then(|| base.to_string())
+}
 
 /// The holder's own window tty, read once.
 fn tty_name() -> Option<String> {
@@ -475,6 +490,12 @@ async fn client(s: UnixStream, shared: Arc<Shared>, token: Arc<str>) {
             };
             let _ = w.write_all(format!("{reply}\n").as_bytes()).await;
         }
+        "end" => {
+            // The answer goes first; only then does the run begin to end.
+            let _ = w.write_all(b"{\"ok\":true}\n").await;
+            let _ = w.flush().await;
+            shared.end.notify_one();
+        }
         _ => {
             let reply = serde_json::json!({ "error": "unsupported", "v": local::LOCAL_V });
             let _ = w.write_all(format!("{reply}\n").as_bytes()).await;
@@ -532,6 +553,13 @@ mod tests {
         }
     }
 
+    #[test]
+    fn marker_name_is_the_tty_basename() {
+        assert_eq!(marker_name("/dev/ttys012").as_deref(), Some("ttys012"));
+        assert_eq!(marker_name("/dev/"), None);
+        assert_eq!(marker_name(""), None);
+    }
+
     fn shared(cols: u16, rows: u16) -> Shared {
         shared_with_input(cols, rows).0
     }
@@ -552,6 +580,7 @@ mod tests {
             fg: Mutex::default(),
             fg_rev: watch::channel(0).0,
             tty: None,
+            end: tokio::sync::Notify::new(),
         };
         (sh, rx)
     }

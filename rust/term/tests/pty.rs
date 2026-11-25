@@ -334,3 +334,63 @@ async fn two_runs_with_the_same_name_after_a_rename_stay_apart() {
         local::Probe::Refused("invalid name".into())
     );
 }
+
+#[tokio::test]
+async fn end_op_answers_then_exits() {
+    let d = short_dir();
+    let mut w = Window::start(d.path(), &["--name", "t", "--", "/bin/cat"]);
+    let mut v = Viewer::connect(d.path(), "t").await;
+    v.open().await;
+    let token = local::token(d.path()).unwrap();
+    let kids = w.children();
+    local::end(&socket_of(d.path(), w.pid()), &token).await.unwrap();
+    let seen = v.until(|_, m| m["t"] == "error").await;
+    assert_eq!(seen.last().unwrap()["error"], "session ended");
+    // 128 + SIGHUP, like a closed window.
+    assert_eq!(w.wait_exit(), 129);
+    assert!(!kids.is_empty() && !process_exists(kids[0]));
+}
+
+#[tokio::test]
+async fn end_op_kills_stubborn_child() {
+    let d = short_dir();
+    let mut w = Window::start(d.path(), &["--name", "t", "--", "/bin/sh", "-c", "trap '' HUP; sleep 100"]);
+    wait_status(d.path(), "t").await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let token = local::token(d.path()).unwrap();
+    let kids = w.children();
+    assert_eq!(kids.len(), 1, "{kids:?}");
+    local::end(&socket_of(d.path(), w.pid()), &token).await.unwrap();
+    assert_eq!(w.wait_exit(), 129);
+    let end = Instant::now() + WAIT;
+    while process_exists(kids[0]) {
+        assert!(Instant::now() < end, "the stubborn child outlived run");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test]
+async fn no_marker_without_a_ticket() {
+    let d = short_dir();
+    let mut w = Window::start(d.path(), &["--name", "t", "--", "/bin/cat"]);
+    wait_status(d.path(), "t").await;
+    let token = local::token(d.path()).unwrap();
+    local::end(&socket_of(d.path(), w.pid()), &token).await.unwrap();
+    w.wait_exit();
+    assert!(std::fs::read_dir(d.path().join("ended")).map(|mut r| r.next().is_none()).unwrap_or(true));
+}
+
+#[tokio::test]
+async fn a_ticketed_run_leaves_a_marker_named_for_its_tty() {
+    let d = short_dir();
+    let mut w = Window::start(d.path(), &["--name", "t", "--ticket", "abc", "--", "/bin/cat"]);
+    let s = wait_status(d.path(), "t").await;
+    let tty = s.tty.clone().expect("a tty");
+    let before = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let token = local::token(d.path()).unwrap();
+    local::end(&socket_of(d.path(), w.pid()), &token).await.unwrap();
+    w.wait_exit();
+    let name = tty.rsplit('/').next().unwrap();
+    let text = std::fs::read_to_string(d.path().join("ended").join(name)).expect("the marker");
+    assert!(text.trim().parse::<u64>().unwrap() >= before, "{text}");
+}

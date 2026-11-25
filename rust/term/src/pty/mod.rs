@@ -51,6 +51,8 @@ pub struct Shared {
     pub fg_rev: watch::Sender<u64>,
     /// The holder's own window tty (`ttyname(0)`, read once at start); none when not a tty.
     pub tty: Option<String>,
+    /// Notified by the `end` op; the run loop then ends like a closed window.
+    pub end: tokio::sync::Notify,
 }
 
 impl Meta {
