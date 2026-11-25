@@ -763,6 +763,7 @@ final class Session {
         }
         if !desktop {
             let watcher = AppStateWatcher(app: app, text: VisionText(),
+                                          latest: { [weak self] in self?.sampleLock.withLock { self?.latest.map { ($0.buffer, $0.region) } } ?? nil },
                                           send: { [weak self] m in self?.queue.async { guard let self, !self.ended else { return }; self.send(m) } },
                                           log: { [output] in output.log($0) })
             sampleLock.withLock { appState = watcher }

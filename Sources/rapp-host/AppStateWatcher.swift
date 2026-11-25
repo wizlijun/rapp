@@ -20,6 +20,10 @@ final class AppStateWatcher {
     private let text: TextReader?
     private let send: (Message) -> Void
     private let log: (String) -> Void
+    /// The session's latest captured frame and its region. Capture sends changed frames only, so a still window
+    /// gives `offer` nothing after rules arrive or the window moves; this seeds `newest` then. It takes the
+    /// session's `sampleLock`, so it is only ever called here without `lock` held (never both at once).
+    private let latest: () -> (CVPixelBuffer, CanvasRect)?
     private let queue = DispatchQueue(label: "rapp.state", qos: .utility)
 
     /// Guards `active`, `window` and `newest`, which the capture queue touches.
@@ -36,8 +40,10 @@ final class AppStateWatcher {
 
     private static let interval: TimeInterval = 0.5
 
-    init(app: NSRunningApplication, text: TextReader?, send: @escaping (Message) -> Void, log: @escaping (String) -> Void) {
+    init(app: NSRunningApplication, text: TextReader?, latest: @escaping () -> (CVPixelBuffer, CanvasRect)? = { nil },
+         send: @escaping (Message) -> Void, log: @escaping (String) -> Void) {
         self.app = app
+        self.latest = latest
         self.text = text
         self.send = send
         self.log = log
@@ -70,6 +76,7 @@ final class AppStateWatcher {
                 return
             }
             lock.withLock { active = true }
+            seed()
             let t = DispatchSource.makeTimerSource(queue: queue)
             t.schedule(deadline: .now() + Self.interval, repeating: Self.interval)
             t.setEventHandler { [weak self] in self?.tick() }
@@ -80,10 +87,21 @@ final class AppStateWatcher {
 
     /// The app's main window in canvas points; nil when there is none. A change drops the pending frame.
     func setWindow(_ rect: CanvasRect?) {
-        lock.withLock {
-            if rect != window { newest = nil }
+        let changed: Bool = lock.withLock {
+            let c = rect != window
+            if c { newest = nil }
             window = rect
+            return c
         }
+        if changed { queue.async { [self] in seed() } }
+    }
+
+    /// Queue only. Puts the session's latest frame in `newest` when nothing newer came in, so a still window
+    /// is read once after the rules arrive or the window moves. A frame offered meanwhile wins (the lock is
+    /// not held across `latest()`, which takes the session's sampleLock).
+    private func seed() {
+        guard !stopped, engine != nil, lock.withLock({ active }), let l = latest() else { return }
+        lock.withLock { if active, newest == nil { newest = (l.0, l.1) } }
     }
 
     /// Capture queue. Keeps only the newest frame; the sampling is done on the watcher queue.
