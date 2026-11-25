@@ -705,3 +705,91 @@ async fn an_old_run_is_listed_by_name_and_refuses_rename() {
     assert_eq!(w.ask(rename_req("term:pty:old", "new")).await, [json!({"error": old})]);
     w.stop().await;
 }
+
+#[tokio::test]
+async fn end_unknown_term_is_no_such() {
+    let w = Worker::start(None).await;
+    let r = w.ask(json!({"op": "end", "term": "term:pty:0123456789abcdef"})).await;
+    assert_eq!(r, [json!({"error": "no such text terminal"})]);
+    let r = w.ask(json!({"op": "end", "term": "nonsense"})).await;
+    assert_eq!(r, [json!({"error": "invalid term id"})]);
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn end_reaches_holder() {
+    let w = Worker::start(None).await;
+    let _win = Window::start(&w.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
+    pty::wait_status(&w.pty_dir(), "t").await;
+    let id = only_id(&w).await;
+    assert_eq!(w.ask(json!({"op": "end", "term": id})).await, [json!({"ok": true})]);
+    let end = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let v = w.ask(json!({"op": "list"})).await;
+        if v[0]["terms"].as_array().unwrap().is_empty() {
+            break;
+        }
+        assert!(std::time::Instant::now() < end, "the session stayed: {v:?}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    w.stop().await;
+}
+
+/// A launcher that keeps a copy of the `.command` file it was given and starts nothing.
+async fn recording_worker() -> (Worker, std::path::PathBuf) {
+    let dir = short_dir();
+    let script = dir.path().join("rec.sh");
+    let copy = dir.path().join("body.txt");
+    std::fs::write(&script, format!("#!/bin/sh\ncp \"$2\" '{}'\n", copy.display())).unwrap();
+    std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+    (Worker::start_with(dir, None, None, Some(&script)).await, copy)
+}
+
+/// Opens beside the session `t` started with `cwd`; the `.command` body the launcher got.
+async fn body_of_open_from(cwd: &Path, remove_after_start: bool) -> String {
+    let (w, copy) = recording_worker().await;
+    let _win = Window::start(&w.pty_dir(), &["--name", "t", "--cwd", &cwd.to_string_lossy(), "--", "/bin/cat"]);
+    pty::wait_status(&w.pty_dir(), "t").await;
+    let id = only_id(&w).await;
+    // The foreground program's directory shows a moment after the start.
+    let end = std::time::Instant::now() + Duration::from_secs(10);
+    while pty::wait_status(&w.pty_dir(), "t").await.cwd.is_none() && std::time::Instant::now() < end {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    if remove_after_start {
+        std::fs::remove_dir_all(cwd).unwrap();
+    }
+    let r = w.ask(json!({"op": "open", "app": "Terminal", "from": id})).await;
+    // The recording launcher starts nothing, so the open ends unstarted: that is not what is tested here.
+    assert!(r[0].get("error").is_some(), "{r:?}");
+    let body = std::fs::read_to_string(&copy).unwrap();
+    w.stop().await;
+    body
+}
+
+#[tokio::test]
+async fn open_passes_cwd_from_source() {
+    let d = short_dir();
+    let real = d.path().canonicalize().unwrap();
+    let body = body_of_open_from(&real, false).await;
+    assert!(body.contains(&format!("--cwd '{}'", real.display())), "{body}");
+}
+
+#[tokio::test]
+async fn open_from_missing_cwd_still_opens_without_cwd() {
+    let d = short_dir();
+    let real = d.path().canonicalize().unwrap();
+    let body = body_of_open_from(&real, true).await;
+    assert!(!body.contains("--cwd"), "{body}");
+    assert!(body.contains(" run --dir "), "{body}");
+}
+
+#[tokio::test]
+async fn open_from_an_unknown_session_opens_normally() {
+    let (w, copy) = recording_worker().await;
+    let r = w.ask(json!({"op": "open", "app": "Terminal", "from": "term:pty:0123456789abcdef"})).await;
+    assert!(r[0].get("error").is_some());
+    let body = std::fs::read_to_string(&copy).unwrap();
+    assert!(!body.contains("--cwd"), "{body}");
+    w.stop().await;
+}

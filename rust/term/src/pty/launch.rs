@@ -21,9 +21,11 @@ pub fn quote(s: &str) -> String {
 }
 
 /// The content of a `.command` file that runs `bin run` in `dir` for `ticket`, with `shell` as a login shell.
-pub fn command_file(bin: &Path, dir: &Path, ticket: &str, shell: &str) -> String {
+/// With `cwd`, the shell starts in that directory.
+pub fn command_file(bin: &Path, dir: &Path, ticket: &str, shell: &str, cwd: Option<&Path>) -> String {
+    let cwd = cwd.map(|c| format!(" --cwd {}", quote(&c.to_string_lossy()))).unwrap_or_default();
     format!(
-        "#!/bin/sh\nexec {} run --dir {} --ticket {} -- {} -l\n",
+        "#!/bin/sh\nexec {} run --dir {} --ticket {}{cwd} -- {} -l\n",
         quote(&bin.to_string_lossy()), quote(&dir.to_string_lossy()), quote(ticket), quote(shell)
     )
 }
@@ -77,13 +79,13 @@ pub fn desktop_env() -> BTreeMap<String, String> {
 /// An unavailable user bus must not hang terminal lists or watches. Read stdout
 /// without blocking so descendants holding stdout open cannot outlive the deadline.
 #[derive(Debug, PartialEq)]
-enum CommandFailure { Failed, TimedOut }
+pub(crate) enum CommandFailure { Failed, TimedOut }
 
 fn bounded_output(cmd: &mut Command, limit: Duration) -> Option<Vec<u8>> {
     bounded_command(cmd, limit).ok()
 }
 
-fn bounded_command(cmd: &mut Command, limit: Duration) -> Result<Vec<u8>, CommandFailure> {
+pub(crate) fn bounded_command(cmd: &mut Command, limit: Duration) -> Result<Vec<u8>, CommandFailure> {
     let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()
         .map_err(|_| CommandFailure::Failed)?;
     let mut stdout = child.stdout.take().expect("piped stdout");
@@ -179,15 +181,31 @@ fn linux_command(app: &str, file: &Path, env: &BTreeMap<String, String>) -> anyh
 }
 
 /// Terminal's AppleScript has no new-tab command, and `open -a` always makes a new window. So: raise the frontmost
-/// window that already holds a `marker` process (a terminal rapp opened), press ⌘T there, and run `file` in the tab
+/// window that holds the tab on the source tty (item 3, when it is not empty) or else already holds a `marker`
+/// process (a terminal rapp opened), press ⌘T there, and run `file` in the tab
 /// that appears. Terminal reports each native tab as a window of its own, so the new tab is the window whose id was
 /// not there before ⌘T. Answers `tab` once `file` runs; anything else means it did not run.
 const TERMINAL_TAB: &str = r#"on run argv
 	set f to item 1 of argv
 	set marker to item 2 of argv
+	set srcTty to item 3 of argv
 	if not (application "Terminal" is running) then return "none"
 	tell application "Terminal"
 		set target to missing value
+		if srcTty is not "" then
+			repeat with w in windows
+				repeat with t in tabs of w
+					try
+						if (tty of t) is srcTty then
+							set target to contents of w
+							exit repeat
+						end if
+					end try
+				end repeat
+				if target is not missing value then exit repeat
+			end repeat
+		end if
+		if target is missing value then
 		repeat with w in windows
 			repeat with t in tabs of w
 				try
@@ -199,6 +217,7 @@ const TERMINAL_TAB: &str = r#"on run argv
 			end repeat
 			if target is not missing value then exit repeat
 		end repeat
+		end if
 		if target is missing value then return "none"
 		set known to id of every window
 		try
@@ -252,18 +271,19 @@ fn tab_outcome(r: Result<Vec<u8>, CommandFailure>) -> TabOutcome {
     }
 }
 
-fn terminal_tab(file: &Path) -> TabOutcome {
+fn terminal_tab(file: &Path, source_tty: Option<&str>) -> TabOutcome {
     let mut c = Command::new("osascript");
-    c.arg("-e").arg(TERMINAL_TAB).arg(file).arg(HOLDER);
+    c.arg("-e").arg(TERMINAL_TAB).arg(file).arg(HOLDER).arg(source_tty.unwrap_or(""));
     tab_outcome(bounded_command(&mut c, Duration::from_secs(10)))
 }
 
 /// Open `file`; a test launcher is synchronous and has no platform dependencies.
-pub fn open(app: &str, file: &Path, launch_with: Option<&Path>) -> anyhow::Result<()> {
+/// With `source_tty`, the new tab goes beside the tab on that tty.
+pub fn open(app: &str, file: &Path, launch_with: Option<&Path>, source_tty: Option<&str>) -> anyhow::Result<()> {
     // A new terminal goes in a tab beside the ones rapp already opened; the first one gets a window.
     // Unsure leaves the holder's own start-up wait to tell whether it started.
     if cfg!(target_os = "macos") && launch_with.is_none() && app == "Terminal"
-        && terminal_tab(file) != TabOutcome::NotOpened
+        && terminal_tab(file, source_tty) != TabOutcome::NotOpened
     {
         return Ok(());
     }
@@ -299,8 +319,14 @@ mod tests {
 
     #[test]
     fn the_command_file_runs_the_shell_as_a_login_shell() {
-        let f = command_file(Path::new("/A pp/rapp-term"), Path::new("/r/local/term"), "t1", "/opt/my shells/fish");
+        let f = command_file(Path::new("/A pp/rapp-term"), Path::new("/r/local/term"), "t1", "/opt/my shells/fish", None);
         assert_eq!(f, "#!/bin/sh\nexec '/A pp/rapp-term' run --dir '/r/local/term' --ticket 't1' -- '/opt/my shells/fish' -l\n");
+    }
+
+    #[test]
+    fn command_file_with_cwd() {
+        let f = command_file(Path::new("/b"), Path::new("/d"), "t", "/bin/zsh", Some(Path::new("/w x/it's")));
+        assert_eq!(f, "#!/bin/sh\nexec '/b' run --dir '/d' --ticket 't' --cwd '/w x/it'\\''s' -- '/bin/zsh' -l\n");
     }
 
     #[test]
@@ -321,7 +347,7 @@ mod tests {
 
     #[test]
     fn launch_script_quotes_every_argument() {
-        let f = command_file(Path::new("/x'y"), Path::new("/a b"), "t;$USER", "/shell's/bash");
+        let f = command_file(Path::new("/x'y"), Path::new("/a b"), "t;$USER", "/shell's/bash", None);
         assert_eq!(f, "#!/bin/sh\nexec '/x'\\''y' run --dir '/a b' --ticket 't;$USER' -- '/shell'\\''s/bash' -l\n");
     }
 

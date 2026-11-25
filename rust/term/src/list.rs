@@ -20,4 +20,10 @@ pub struct TermRow {
     /// The title the program set (OSC 0/1/2); none when it set none or the session was named by hand.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// The foreground program's name; none when unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fg: Option<String>,
+    /// Whether the foreground program is the shell the holder started; none when unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell: Option<bool>,
 }

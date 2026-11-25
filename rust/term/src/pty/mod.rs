@@ -5,6 +5,7 @@ pub mod holder;
 pub mod launch;
 pub mod local;
 pub mod ps;
+pub mod sweep;
 pub mod title;
 pub mod view;
 pub mod wintitle;

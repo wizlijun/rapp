@@ -12,6 +12,7 @@ use crate::list::TermRow;
 use crate::proto::{self, Out, MAX_LINE};
 use crate::pty::launch;
 use crate::pty::local::{self, Status};
+use crate::pty::sweep;
 use crate::shells::{self, Shell};
 use crate::unread::Unread;
 use crate::wire::{Got, Lines, MAX_IN_LINE};
@@ -69,7 +70,14 @@ enum Req {
     List,
     Watch,
     View { term: String, sid: Option<u64> },
-    Open { shell: Option<String>, app: String },
+    Open {
+        shell: Option<String>,
+        app: String,
+        /// A session to open beside: its directory, its shell and its window are the new one's.
+        #[serde(default)]
+        from: Option<String>,
+    },
+    End { term: String },
     Rename { term: String, name: String },
 }
 
@@ -137,7 +145,7 @@ pub async fn serve(
 
 impl Worker {
     pub fn new(token: String, opts: ServeOpts, events: UnboundedSender<Value>) -> Worker {
-        Worker {
+        let w = Worker {
             opts,
             token,
             unread: Arc::new(Mutex::new(Unread::new(unix_now()))),
@@ -145,7 +153,15 @@ impl Worker {
             launchers: if cfg!(target_os = "linux") { Vec::new() } else { launch::launchers() },
             opening: Default::default(),
             rescan: tokio::sync::watch::channel(0).0,
+        };
+        // Tabs whose holder ended while no worker ran.
+        if w.sweeps() {
+            if let Ok(h) = tokio::runtime::Handle::try_current() {
+                let dir = w.opts.pty_dir.clone();
+                h.spawn_blocking(move || sweep::sweep(&dir, sweep::close_tabs));
+            }
         }
+        w
     }
 
     /// The live `run` sessions of this machine; none when the token cannot be had.
@@ -200,8 +216,22 @@ impl Worker {
                 };
                 reply(&mut w, &v).await
             }
-            Req::Open { shell, app } => {
-                let v = match self.open(shell.as_deref(), &app).await {
+            Req::End { term } => {
+                let v = match cfg {
+                    Ok(_) => match self.end(&term).await {
+                        Ok(()) => json!({ "ok": true }),
+                        Err(e) => json!({ "error": e }),
+                    },
+                    Err(e) => json!({ "error": e }),
+                };
+                let sent = reply(&mut w, &v).await;
+                if v.get("ok").is_some() {
+                    self.sweep_later();
+                }
+                sent
+            }
+            Req::Open { shell, app, from } => {
+                let v = match self.open(shell.as_deref(), &app, from.as_deref()).await {
                     Ok(id) => json!({ "id": id }),
                     Err(e) => json!({ "error": e }),
                 };
@@ -259,6 +289,7 @@ impl Worker {
             pty.clone(),
             changed.clone(),
             self.rescan.subscribe(),
+            self.sweeps(),
         ));
         let mut sent: Option<TermList> = None;
         let mut tick = tokio::time::interval(self.opts.poll);
@@ -315,16 +346,66 @@ impl Worker {
         }
     }
 
+    /// End the session `term`: its program is hung up and its window's holder exits.
+    async fn end(&self, term: &str) -> Result<(), String> {
+        let id = match TermId::parse(term) {
+            Ok(id) if id.backend == PTY && id.host.is_none() => id,
+            _ => return Err(BAD_ID.into()),
+        };
+        let statuses = self.pty_statuses().await;
+        let Some(st) = statuses.iter().find(|s| is_session(s, &id.name)) else {
+            return Err(NO_TEXT_TERMINAL.into());
+        };
+        if st.key.is_none() {
+            return Err(OLD_RUN.into());
+        }
+        let path = local::socket_path(&self.opts.pty_dir, st.pid).map_err(|_| NO_TEXT_TERMINAL)?;
+        let token = local::token(&self.opts.pty_dir).map_err(|_| NO_TEXT_TERMINAL)?;
+        match local::end(&path, &token).await {
+            Ok(()) => {
+                self.rescan.send_modify(|g| *g += 1);
+                Ok(())
+            }
+            Err(local::Probe::Refused(e)) if e == "unsupported" => Err(OLD_RUN.into()),
+            Err(_) => Err(NO_TEXT_TERMINAL.into()),
+        }
+    }
+
+    /// Whether the ended-tab sweep runs here: on macOS, and never with a test launcher.
+    fn sweeps(&self) -> bool {
+        cfg!(target_os = "macos") && self.opts.launch_with.is_none()
+    }
+
+    /// A sweep 1.5 s from now, when the holder that was just told to end has left its marker.
+    fn sweep_later(&self) {
+        if !self.sweeps() {
+            return;
+        }
+        let dir = self.opts.pty_dir.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            let _ = tokio::task::spawn_blocking(move || sweep::sweep(&dir, sweep::close_tabs)).await;
+        });
+    }
+
     /// Open a window of `app` that runs `rapp-term run` with `shell` (the default one when none is named) as a login
     /// shell, and wait for that `run` to show itself: the id of its session. One at a time, so each wait has only its
     /// own ticket to look for.
-    async fn open(&self, shell: Option<&str>, app: &str) -> Result<String, String> {
+    async fn open(&self, shell: Option<&str>, app: &str, from: Option<&str>) -> Result<String, String> {
         let known = launch::known(app) || (self.opts.launch_with.is_some() && ["Terminal", "iTerm"].contains(&app));
         if !known { return Err(UNKNOWN_APP.into()); }
         if self.opts.launch_with.is_none() && !self.available_launchers().await.iter().any(|l| l == app) {
             return Err("terminal app unavailable: a graphical desktop and installed terminal are required".into());
         }
         let shells = self.opts.shells_with.as_ref().map_or_else(installed_shells, |f| f());
+        let source = match from.and_then(|f| TermId::parse(f).ok()).filter(|id| id.backend == PTY && id.host.is_none()) {
+            Some(id) => {
+                let statuses = self.pty_statuses().await;
+                source_of(statuses.iter().find(|s| is_session(s, &id.name)), &shells)
+            }
+            None => Source::default(),
+        };
+        let shell = shell.or(source.shell.as_deref());
         let found = match shell {
             Some(p) => shells.iter().find(|s| s.path == p),
             None => shells.iter().find(|s| s.default),
@@ -343,10 +424,11 @@ impl Worker {
             dir,
             &ticket,
             &shell,
+            source.cwd.as_deref(),
         );
         let file = dir.join("launch").join(format!("{ticket}.command"));
         write_private(&file, &body).map_err(|_| FAILED)?;
-        let res = self.wait_for(&file, app, &ticket, dir, &token).await;
+        let res = self.wait_for(&file, app, &ticket, dir, &token, source.tty.as_deref()).await;
         // A window that is slow to start may still read it after the wait: that one is left for the sweep.
         if !matches!(&res, Err(e) if e == NOT_STARTED || e == launch::START_TIMEOUT) {
             let _ = std::fs::remove_file(&file);
@@ -361,9 +443,12 @@ impl Worker {
         ticket: &str,
         dir: &std::path::Path,
         token: &str,
+        source_tty: Option<&str>,
     ) -> Result<String, String> {
         let (app, file, with) = (app.to_string(), file.to_path_buf(), self.opts.launch_with.clone());
-        let started = tokio::task::spawn_blocking(move || launch::open(&app, &file, with.as_deref())).await;
+        let tty = source_tty.map(str::to_string);
+        let started =
+            tokio::task::spawn_blocking(move || launch::open(&app, &file, with.as_deref(), tty.as_deref())).await;
         match started {
             Ok(Ok(())) => {}
             Ok(Err(e)) if e.to_string() == launch::NO_DESKTOP => return Err(launch::NO_DESKTOP.into()),
@@ -552,6 +637,30 @@ fn number_clashes(rows: &mut [TermRow], statuses: &[Status]) {
     }
 }
 
+/// What a new terminal takes from the session it is opened beside.
+#[derive(Default, Debug, PartialEq)]
+struct Source {
+    /// Its directory, when it still is one.
+    cwd: Option<PathBuf>,
+    /// The path of the installed shell its program is.
+    shell: Option<String>,
+    tty: Option<String>,
+}
+
+/// `Source` of the session `st`; nothing for none.
+fn source_of(st: Option<&Status>, shells: &[Shell]) -> Source {
+    let Some(st) = st else { return Source::default() };
+    let shell = shells
+        .iter()
+        .find(|s| st.command == s.path || st.command.strip_prefix(&s.path).is_some_and(|r| r.starts_with(' ')))
+        .map(|s| s.path.clone());
+    Source {
+        cwd: st.cwd.as_ref().map(PathBuf::from).filter(|p| p.is_dir()),
+        shell,
+        tty: st.tty.clone().filter(|t| !t.is_empty()),
+    }
+}
+
 /// One row per status, in the same order.
 fn status_rows(unread: &Mutex<Unread>, statuses: &[Status], now: u64) -> Vec<TermRow> {
     let u = lock(unread);
@@ -575,6 +684,8 @@ fn status_rows(unread: &Mutex<Unread>, statuses: &[Status], now: u64) -> Vec<Ter
             },
             ps: s.ps.clone(),
             title: s.title.clone(),
+            fg: s.fg.clone(),
+            shell: s.shell,
         })
         .collect()
 }
@@ -588,8 +699,13 @@ async fn ask_pty(
     rows: Arc<Mutex<Option<Vec<TermRow>>>>,
     changed: Arc<Notify>,
     mut rescan: tokio::sync::watch::Receiver<u64>,
+    sweeps: bool,
 ) {
     loop {
+        if sweeps {
+            let d = dir.clone();
+            let _ = tokio::task::spawn_blocking(move || sweep::sweep(&d, sweep::close_tabs)).await;
+        }
         let got = pty_rows(&unread, &scan_pty(&dir).await, unix_now());
         {
             let mut last = lock(&rows);
@@ -894,6 +1010,8 @@ mod tests {
             unread: false,
             ps: None,
             title: Some("t".repeat(64)),
+            fg: None,
+            shell: None,
         };
         let hosts = vec![HostRow { host: None, launchers: Vec::new(), shells: installed_shells() }];
         let list = TermList { terms: (0..1000).map(row).collect(), hosts };
@@ -903,6 +1021,58 @@ mod tests {
         assert_eq!(cut.terms[..], list.terms[..cut.terms.len()]);
         let small = TermList { terms: list.terms[..3].to_vec(), hosts: list.hosts.clone() };
         assert_eq!(fit(small.clone()), small);
+    }
+
+    fn shells_for_test() -> Vec<Shell> {
+        let sh = |path: &str, default: bool| Shell { path: path.into(), name: path.rsplit('/').next().unwrap().into(), default };
+        vec![sh("/bin/zsh", true), sh("/opt/my shells/fish", false)]
+    }
+
+    #[test]
+    fn rows_carry_fg_and_shell() {
+        let mut st = status_with(None);
+        st.fg = Some("vim".into());
+        st.shell = Some(false);
+        let u = Mutex::new(Unread::new(1000));
+        let rows = status_rows(&u, &[st, status_with(None)], 1100);
+        assert_eq!((rows[0].fg.as_deref(), rows[0].shell), (Some("vim"), Some(false)));
+        assert_eq!((rows[1].fg.as_deref(), rows[1].shell), (None, None));
+        let v = serde_json::to_value(&rows[1]).unwrap();
+        assert!(v.get("fg").is_none() && v.get("shell").is_none());
+    }
+
+    #[test]
+    fn open_from_uses_source_shell() {
+        let mut st = status_with(None);
+        st.command = "/opt/my shells/fish -l".into();
+        st.tty = Some("/dev/ttys004".into());
+        let src = source_of(Some(&st), &shells_for_test());
+        assert_eq!(src.shell.as_deref(), Some("/opt/my shells/fish"));
+        assert_eq!(src.tty.as_deref(), Some("/dev/ttys004"));
+        st.command = "/usr/bin/cat".into();
+        assert_eq!(source_of(Some(&st), &shells_for_test()).shell, None);
+        assert_eq!(source_of(None, &shells_for_test()), Source::default());
+    }
+
+    #[test]
+    fn open_from_missing_cwd_falls_back() {
+        let d = tempfile::tempdir().unwrap();
+        let mut st = status_with(None);
+        st.cwd = Some(d.path().to_string_lossy().into_owned());
+        assert_eq!(source_of(Some(&st), &[]).cwd.as_deref(), Some(d.path()));
+        let gone = d.path().to_path_buf();
+        drop(d);
+        st.cwd = Some(gone.to_string_lossy().into_owned());
+        assert_eq!(source_of(Some(&st), &[]).cwd, None);
+    }
+
+    #[test]
+    fn open_and_end_requests_parse() {
+        let r: Req = serde_json::from_str(r#"{"op":"open","app":"Terminal"}"#).unwrap();
+        assert!(matches!(r, Req::Open { from: None, .. }));
+        let r: Req = serde_json::from_str(r#"{"op":"open","app":"Terminal","from":"term:pty:ab"}"#).unwrap();
+        assert!(matches!(r, Req::Open { from: Some(_), .. }));
+        assert!(matches!(serde_json::from_str(r#"{"op":"end","term":"x"}"#).unwrap(), Req::End { .. }));
     }
 
     #[test]
