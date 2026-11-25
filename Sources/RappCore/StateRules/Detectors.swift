@@ -5,7 +5,11 @@ import Foundation
 public protocol TextReader: AnyObject {
     /// Lines recognised in `rect` of `image`. Runs on the engine's queue; may take tens of milliseconds.
     func lines(in image: RuleImage, rect: RuleRect) -> [String]
+    /// False while the reader is still loading; text signals are skipped (not cached or throttled) until true.
+    var ready: Bool { get }
 }
+
+public extension TextReader { var ready: Bool { true } }
 
 /// Text is read at most this often (seconds), and only when the region changed.
 public let textEvery: TimeInterval = 2
@@ -352,6 +356,7 @@ public final class SignalEvaluator {
                           UInt8(truncatingIfNeeded: r.h), UInt8(truncatingIfNeeded: r.h >> 8)])
             fnv(&digest, t.v)
         }
+        if text?.ready == false { return [[String]](repeating: [], count: rects.count) }
         let prev = texts[name]
         if let prev, prev.lines.count == rects.count, prev.digest == digest || now - prev.at < textEvery { return prev.lines }
         guard let text else { return [[String]](repeating: [], count: rects.count) }

@@ -13,20 +13,27 @@ final class VisionText: TextReader {
     static let minSide = 8
     static let maxPixels = 1600 * 1600
 
+    private static let readyLock = NSLock()
+    private static var isReady = false
+    var ready: Bool { Self.readyLock.withLock { Self.isReady } }
+
     private static let warmed: Void = {
         DispatchQueue.global(qos: .utility).async {
             // The first recognition loads the model (seconds); pay for it here, not on the watcher queue.
             var px = [UInt8](repeating: 255, count: 64 * 64 * 4)
             for i in stride(from: 0, to: px.count, by: 4) where (i / 4) % 64 > 20 && (i / 4) % 64 < 40 { px[i] = 0; px[i + 1] = 0; px[i + 2] = 0 }
-            _ = VisionText().lines(in: RuleImage(width: 64, height: 64, pixels: px), rect: RuleRect(x: 0, y: 0, w: 64, h: 64))
+            _ = VisionText().lines(in: RuleImage(width: 64, height: 64, pixels: px), rect: RuleRect(x: 0, y: 0, w: 64, h: 64), force: true)
+            readyLock.withLock { isReady = true }
         }
     }()
 
     /// Loads Vision once per process, off the caller's queue. Later calls do nothing.
     static func warmUp() { _ = warmed }
 
-    func lines(in image: RuleImage, rect: RuleRect) -> [String] {
-        guard let cg = Self.makeImage(image, rect: rect) else { return [] }
+    func lines(in image: RuleImage, rect: RuleRect) -> [String] { lines(in: image, rect: rect, force: false) }
+
+    private func lines(in image: RuleImage, rect: RuleRect, force: Bool) -> [String] {
+        guard force || ready, let cg = Self.makeImage(image, rect: rect) else { return [] }
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.recognitionLanguages = ["zh-Hans", "en-US"]

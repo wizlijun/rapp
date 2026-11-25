@@ -4,6 +4,7 @@ import XCTest
 final class FakeReader: TextReader {
     var lines: [String]
     var calls = 0
+    var ready = true
     init(lines: [String]) { self.lines = lines }
     func lines(in image: RuleImage, rect: RuleRect) -> [String] { calls += 1; return lines }
 }
@@ -129,6 +130,24 @@ final class RuleDetectTests: XCTestCase {
         XCTAssertEqual(r["y"]?.holds, false)
         r = ev.evaluate(p, regions: resolveRegions(p, in: img), image: img, now: 5)
         XCTAssertEqual(reader.calls, 1)      // unchanged digest: still cached per signal
+    }
+
+    func testTextSignalWaitsForReader() throws {
+        let p = try RulePack.decode(try RuleValue.parse(Data(#"""
+        {"format":"1.0","id":"t","regions":{"a":{"box":{"left":0,"top":0,"width":40,"height":40}}},
+         "signals":{"x":{"in":"a","detect":{"text":["Allow"]},"needs":["text"]}}}
+        """#.utf8)))
+        let reader = FakeReader(lines: ["Allow"])
+        reader.ready = false
+        let ev = SignalEvaluator(caps: ["pixels", "text"], text: reader)
+        let img = Canvas.solid(width: 50, height: 50)
+        var r = ev.evaluate(p, regions: resolveRegions(p, in: img), image: img, now: 0)
+        XCTAssertEqual(reader.calls, 0)
+        XCTAssertEqual(r["x"]?.holds, false)
+        reader.ready = true
+        r = ev.evaluate(p, regions: resolveRegions(p, in: img), image: img, now: 0.5)   // same digest, no throttle wait
+        XCTAssertEqual(reader.calls, 1)
+        XCTAssertEqual(r["x"]?.holds, true)
     }
 
     func testMissingRegionUnusableAndPresent() throws {
