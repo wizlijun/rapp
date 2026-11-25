@@ -39,6 +39,7 @@ pub const BAD_TOKEN: &str = "bad token";
 pub const BAD_REQUEST: &str = "bad request";
 const BAD_ID: &str = "invalid term id";
 const NO_TEXT_TERMINAL: &str = "no such text terminal";
+const OLD_RUN_END: &str = "this window was opened by an older version and cannot be ended";
 const OLD_RUN: &str = "this window was opened by an older version and cannot be renamed";
 const INVALID_NAME: &str = "invalid name";
 const UNKNOWN_APP: &str = "unknown terminal app";
@@ -357,7 +358,7 @@ impl Worker {
             return Err(NO_TEXT_TERMINAL.into());
         };
         if st.key.is_none() {
-            return Err(OLD_RUN.into());
+            return Err(OLD_RUN_END.into());
         }
         let path = local::socket_path(&self.opts.pty_dir, st.pid).map_err(|_| NO_TEXT_TERMINAL)?;
         let token = local::token(&self.opts.pty_dir).map_err(|_| NO_TEXT_TERMINAL)?;
@@ -366,7 +367,7 @@ impl Worker {
                 self.rescan.send_modify(|g| *g += 1);
                 Ok(())
             }
-            Err(local::Probe::Refused(e)) if e == "unsupported" => Err(OLD_RUN.into()),
+            Err(local::Probe::Refused(e)) if e == "unsupported" => Err(OLD_RUN_END.into()),
             Err(_) => Err(NO_TEXT_TERMINAL.into()),
         }
     }
@@ -704,7 +705,7 @@ async fn ask_pty(
     loop {
         if sweeps {
             let d = dir.clone();
-            let _ = tokio::task::spawn_blocking(move || sweep::sweep(&d, sweep::close_tabs)).await;
+            tokio::task::spawn_blocking(move || sweep::sweep(&d, sweep::close_tabs));
         }
         let got = pty_rows(&unread, &scan_pty(&dir).await, unix_now());
         {

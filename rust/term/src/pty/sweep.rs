@@ -4,6 +4,9 @@
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
+/// A marker younger than this is left for a later sweep: its holder may still be exiting.
+const SETTLE: Duration = Duration::from_secs(1);
+
 /// A marker older than this is deleted without closing anything: its tab was probably closed or reused long ago.
 const FRESH: Duration = Duration::from_secs(10 * 60);
 
@@ -17,6 +20,9 @@ pub fn sweep(dir: &Path, close: impl Fn(&[String])) {
     let mut fresh = Vec::new();
     for e in entries.flatten() {
         let age = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| now.duration_since(t).ok());
+        if age.is_some_and(|a| a < SETTLE) {
+            continue;
+        }
         let _ = std::fs::remove_file(e.path());
         let name = e.file_name().to_string_lossy().into_owned();
         let tty_like = name.starts_with("tty") && name.bytes().all(|b| b.is_ascii_alphanumeric());
@@ -34,11 +40,12 @@ const CLOSE_TABS: &str = r#"on run argv
 	if not (application "Terminal" is running) then return
 	tell application "Terminal"
 		repeat with w in windows
-			repeat with t in tabs of w
-				try
-					if (argv contains (tty of t)) and (busy of t is false) and ((count of processes of t) is 0) then close t
-				end try
-			end repeat
+			try
+				if (count of tabs of w) is 1 then
+					set t to tab 1 of w
+					if (argv contains (tty of t)) and (busy of t is false) and ((count of processes of t) is 0) then close w
+				end if
+			end try
 		end repeat
 	end tell
 end run
@@ -54,7 +61,11 @@ pub fn close_tabs(ttys: &[String]) {
     for t in ttys {
         c.arg(format!("/dev/{t}"));
     }
-    let _ = super::launch::bounded_command(&mut c, Duration::from_secs(5));
+    match super::launch::bounded_command(&mut c, Duration::from_secs(5)) {
+        Ok(_) => {}
+        Err(super::launch::CommandFailure::TimedOut) => eprintln!("rapp-term: closing the ended terminal tabs timed out"),
+        Err(super::launch::CommandFailure::Failed) => eprintln!("rapp-term: closing the ended terminal tabs failed"),
+    }
 }
 
 #[cfg(test)]
@@ -67,13 +78,29 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let ended = d.path().join("ended");
         std::fs::create_dir(&ended).unwrap();
-        std::fs::write(ended.join("ttys001"), "1").unwrap();
+        let aged = |name: &str, secs: u64| {
+            let f = std::fs::File::create(ended.join(name)).unwrap();
+            f.set_modified(SystemTime::now() - Duration::from_secs(secs)).unwrap();
+        };
+        aged("ttys001", 5);
         let old = std::fs::File::create(ended.join("ttys002")).unwrap();
         old.set_modified(SystemTime::now() - Duration::from_secs(11 * 60)).unwrap();
         let got = RefCell::new(Vec::new());
         sweep(d.path(), |t| got.borrow_mut().push(t.to_vec()));
         assert_eq!(*got.borrow(), [vec!["ttys001".to_string()]]);
         assert_eq!(std::fs::read_dir(&ended).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_marker_younger_than_a_second_waits_for_a_later_sweep() {
+        let d = tempfile::tempdir().unwrap();
+        let ended = d.path().join("ended");
+        std::fs::create_dir(&ended).unwrap();
+        std::fs::write(ended.join("ttys003"), "1").unwrap();
+        let called = RefCell::new(false);
+        sweep(d.path(), |_| *called.borrow_mut() = true);
+        assert!(!*called.borrow());
+        assert!(ended.join("ttys003").exists());
     }
 
     #[cfg(target_os = "macos")]
