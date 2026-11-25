@@ -978,6 +978,23 @@ void main() {
     expect(sent.single['name'], 'build');
   });
 
+  testWidgets('committing untouched text after the title changed mid-edit sends nothing', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    const hosts = [{'host': null, 'launchers': ['Terminal'], 'shells': shellsZshBash}];
+    await emitTerms(tester, [termRow('term:pty:work', 'work', 'claude', title: 'old title')], hosts: hosts);
+    t.sent.clear();
+    final name = find.byKey(const Key('term-name-term:pty:work'));
+    await tester.ensureVisible(name);
+    await tester.tap(name);
+    await tester.pump();
+    await emitTerms(tester, [termRow('term:pty:work', 'work', 'claude', title: 'new title')], hosts: hosts);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    await tester.pump();
+    expect(t.sent.where((m) => m['cmd'] == 'rename_term'), isEmpty);
+  });
+
   testWidgets('an invalid name is not sent and the old name stays', (tester) async {
     await showWork(tester);
     await renameTo(tester, '   ');
