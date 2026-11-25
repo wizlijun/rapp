@@ -202,4 +202,18 @@ void main() {
     s.setRime('com.x', 'X', true);
     expect(s.resolve('com.x').rime, isTrue);
   });
+
+  test('setStateRules: off, a pack id, or back to auto; saved and reloaded', () {
+    final s = AppProfileStore(dir.path);
+    expect(s.resolve('com.x').stateRules, isNull);
+    s.setStateRules('com.x', 'X', 'off');
+    expect(s.resolve('com.x').stateRules, 'off');
+    expect(s.resolve('com.y').stateRules, isNull);
+    expect((jsonDecode(f('apps.json').readAsStringSync())['apps'] as List).single['stateRules'], 'off');
+    expect(AppProfileStore.load(dir.path, null).resolve('com.x').stateRules, 'off');
+    s.setStateRules('com.x', 'X', 'generic-chat');
+    expect(s.mineFor('com.x')!.stateRules, 'generic-chat');
+    s.setStateRules('com.x', 'X', null);
+    expect(s.mineFor('com.x')!.stateRules, isNull);
+  });
 }

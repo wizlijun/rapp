@@ -133,4 +133,18 @@ void main() {
     expect(resolveProfile('z', mine: [p], builtin: [b]).composerAt, isNull);
     expect(defaultComposerAt, const InputPoint(0.5, 8, fromBottom: true));
   });
+
+  test('stateRules round-trips and resolves mine over built-in', () {
+    final p = AppProfile.fromJson({'name': 'X', 'ids': ['com.x'], 'stateRules': 'generic-chat'})!;
+    expect(p.stateRules, 'generic-chat');
+    expect(p.toJson().keys.toList(), ['name', 'ids', 'stateRules']);
+    expect(AppProfile.fromJson({'name': 'X', 'ids': ['com.x'], 'stateRules': 3})!.stateRules, isNull);
+    expect(p.copy().stateRules, 'generic-chat');
+    final tested = AppProfile(ids: ['com.x'], stateRules: 'a', tested: true);
+    expect(tested.toJson().keys.toList(), ['ids', 'stateRules', 'tested']);
+    final b = AppProfile(ids: ['com.x'], stateRules: 'off');
+    expect(resolveProfile('com.x', mine: [p], builtin: [b]).stateRules, 'generic-chat');
+    expect(resolveProfile('com.x', mine: [], builtin: [b]).stateRules, 'off');
+    expect(resolveProfile('com.y', mine: [p], builtin: [b]).stateRules, isNull);
+  });
 }

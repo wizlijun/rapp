@@ -689,6 +689,41 @@ void main() {
       }, app: codex, stateRulesJson: rulesJson, profiles: store('claude-desktop'));
     });
 
+    test('a changed stateRules is resent to live app sessions once, and only if it differs', () {
+      final sid = codex.length;
+      final profiles = store(null);
+      env((a, t, port, st, hints) {
+        port.emit(ReadyEvent(sid, 'ChatGPT'));
+        expect(sent(port), hasLength(1));
+        profiles.setStateRules(codex, 'App', 'off');
+        expect(sent(port), hasLength(2));
+        expect(sent(port).last.$2['sid'], sid);
+        expect(sent(port).last.$2['json'], '');
+        expect(st.rulesOf(sid), isNull);
+        profiles.setStateRules(codex, 'App', 'off'); // identical notify: nothing
+        expect(sent(port), hasLength(2));
+        profiles.setStateRules(codex, 'App', null);
+        expect(sent(port), hasLength(3));
+        expect(jsonDecode(sent(port).last.$2['json']! as String)['id'], 'chatgpt-desktop');
+        expect(st.rulesOf(sid)!.id, 'chatgpt-desktop');
+        profiles.setStateRules(codex, 'App', null);
+        expect(sent(port), hasLength(3));
+      }, app: codex, stateRulesJson: rulesJson, profiles: profiles);
+      // never to a terminal or the desktop
+      final termProfiles = AppProfileStore('${tmp.path}/shared', mine: [], builtin: []);
+      env((a, t, port, st, hints) {
+        port.emit(ReadyEvent('term:sh'.length, 'sh'));
+        termProfiles.setStateRules('term:sh', 'sh', 'off');
+        expect(sent(port), isEmpty);
+      }, app: 'term:sh', stateRulesJson: rulesJson, profiles: termProfiles);
+      // a session that never became ready has nothing recorded, so nothing to correct
+      final p3 = store(null);
+      env((a, t, port, st, hints) {
+        p3.setStateRules(codex, 'App', 'off');
+        expect(sent(port), isEmpty);
+      }, app: codex, stateRulesJson: rulesJson, profiles: p3);
+    });
+
     test('inferred state drives the lamp, the row word and the overview, marked 推断', () {
       final sid = codex.length;
       env((a, t, port, st, hints) {

@@ -168,6 +168,12 @@ class AppProfileStore extends ChangeNotifier {
     _commit();
   }
 
+  /// The app's state rules: null finds a pack by the app's ids, `'off'` uses none, anything else names a pack.
+  void setStateRules(String appId, String appName, String? v) {
+    _target(appId, appName).stateRules = v;
+    _commit();
+  }
+
   /// Where the app's writing panel sits ([p], its bottom centre), or back to the default (null).
   /// Clearing what is not there writes nothing.
   void setComposerAt(String appId, String appName, InputPoint? p) {

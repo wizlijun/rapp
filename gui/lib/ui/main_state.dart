@@ -256,6 +256,7 @@ class MainState extends ChangeNotifier {
     StateRulesLibrary.load(d, _builtinStateRules).then((lib) {
       if (data.root == d.root) {
         stateRules = lib;
+        _resendRules();
         notifyListeners();
       }
     });
@@ -1658,6 +1659,9 @@ class MainState extends ChangeNotifier {
   /// The rules sent on each live link (by sid); [rulesOf] reads them.
   final Map<Object, ChosenRules> _rulesBySid = {};
 
+  /// The app sessions that went ready: the ones whose rules [_resendRules] keeps current (also when none were sent).
+  final Set<Object> _rulesReady = {};
+
   /// The (state, kind) each link last reported, to queue only changes; the first report is the starting point.
   final Map<Object, (String?, String?)> _appSeen = {};
 
@@ -1669,13 +1673,38 @@ class MainState extends ChangeNotifier {
   void _sendRules(SessionRecord r, RemoteSession rs, Object sid) {
     final live = {for (final x in _records.values) ...[x.sid, x.lastSid]};
     _rulesBySid.removeWhere((k, _) => !live.contains(k));
+    _rulesReady.removeWhere((k) => !live.contains(k));
     _appSeen.removeWhere((k, _) => !live.contains(k));
     if (isTermApp(r.app) || isDesktopApp(r.app) || _rulesBySid.containsKey(sid)) return;
+    _rulesReady.add(sid);
     final chosen = stateRules.choose(r.app, rs.profile.stateRules);
     final port = portOf(sid);
     if (chosen == null || port == null) return;
     _rulesBySid[sid] = chosen;
     port.stateRules(sid, chosen.json);
+  }
+
+  /// The profile or the library changed: every live app session that was sent rules gets the new choice when it
+  /// differs from what the host holds ("" when it is now off or has no pack). Unchanged sessions get nothing.
+  void _resendRules() {
+    for (final rs in remote.values) {
+      final sid = rs.sid;
+      final old = _rulesBySid[sid];
+      if (!_rulesReady.contains(sid)) continue; // not ready yet (or a terminal, the desktop): ready sends them
+      final port = portOf(sid);
+      if (port == null || !_liveSid(sid)) continue;
+      final chosen = stateRules.choose(rs.appId, rs.profile.stateRules);
+      if (chosen?.json == old?.json) {
+        if (chosen != null) _rulesBySid[sid] = chosen; // same text, maybe a new rev or tally
+        continue;
+      }
+      if (chosen == null) {
+        _rulesBySid.remove(sid);
+      } else {
+        _rulesBySid[sid] = chosen;
+      }
+      port.stateRules(sid, chosen?.json ?? '');
+    }
   }
 
   /// Queues a change of the inferred state in the status queue (marked inferred); a state-less report is no change.
@@ -2806,6 +2835,7 @@ class MainState extends ChangeNotifier {
       rs.setProfile(profiles.resolve(rs.appId));
       _syncHidden(rs);
     }
+    _resendRules();
     _applyFps(); // focusPane may have changed
     if (profiles.problem == appsSaveProblem) hint = appsSaveProblem;
     notifyListeners();
