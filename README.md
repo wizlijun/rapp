@@ -37,6 +37,8 @@ For direct connections, allow inbound **UDP 22028** (or the service's configured
 
 Program status: in a text terminal started with `rapp-term run`, CLIs that report their state over OSC 7501 show it in the session list (working, waiting for approval, asking, error), and sessions waiting for you appear in 需要你. rApp only reads the reports and answers the CLI's probe; it never types into the CLI. This needs Claude Code ≥ 2.1.295, Codex ≥ 0.163.0 or agy ≥ 1.4.0 on the host. Set `"programStatus": false` in `local/term.json` to turn it off for new sessions.
 
+Multiple text terminals: press ⌘T (Ctrl+Shift+T on non-macOS) in a text terminal to open a new one in the same directory and shell; on the host Mac it is a new Terminal tab titled `<dir> · <prog>`. ⌘W or 结束终端 in the session menu ends the terminal (with a confirm if a program is running) and its tab closes by itself; 关闭 only stops viewing and leaves the terminal running on the host.
+
 Upgrades preserve the data directory and saved hosts. The legacy relay configuration from 0.5.x is retired by the mainline migration; enter a current relay key to use the new relay. This is separate from preserving local data.
 
 ## Build

@@ -176,6 +176,15 @@ void main() {
     expect(events.whereType<DisconnectedEvent>().single.reason, 'session ended');
   });
 
+  test('a terminal the device no longer has disconnects like session ended', () async {
+    await begin(await Worker.start((s) {
+      s.write(line({'t': 'error', 'error': 'no such text terminal'}));
+    }));
+    await pumpUntil(() => events.whereType<DisconnectedEvent>().isNotEmpty);
+    expect(events.whereType<DisconnectedEvent>().single.reason, 'no such text terminal');
+    expect(port.model(1)!.note, isNull);
+  });
+
   test('messages queued behind session ended are dropped', () async {
     await begin(await Worker.start());
     port.view(1, 3, 80, 24);

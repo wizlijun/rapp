@@ -430,7 +430,7 @@ impl Hub {
                 self.net_changed();
                 return Ok(None);
             }
-            Some(c @ ("terms" | "open_term" | "rename_term")) => {
+            Some(c @ ("terms" | "open_term" | "rename_term" | "end_term")) => {
                 terms::command(self, c, v).await?
             }
             _ => bail!("unknown cmd"),

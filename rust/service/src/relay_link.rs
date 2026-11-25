@@ -365,6 +365,7 @@ async fn serve_relayed(state: Arc<State>, stream: Pipe, from: String, prio: Prio
             prio.set(state.forward_priority);
             pipe = state.pacer.wrap(pipe);
         }
+        // EndTerm is no session: it is left out on purpose.
         Ok(Op::Open { .. } | Op::OpenTerm { .. }) => _session = Some(state.pacer.session()),
         _ => {}
     }

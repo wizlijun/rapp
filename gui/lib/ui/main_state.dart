@@ -32,7 +32,7 @@ import '../embed/composer_model.dart';
 import '../embed/modifier_latch.dart';
 import '../term/term_id.dart';
 import '../term/term_session_port.dart';
-import '../term/term_wire.dart' show TermPane;
+import '../term/term_wire.dart' show TermPane, noSuchTextTerminal;
 import 'app_profile_store.dart';
 import 'lamp.dart';
 import 'term_status.dart' show programLamp, programWord, termAskWord;
@@ -1642,6 +1642,13 @@ class MainState extends ChangeNotifier {
     if (e is DisconnectedEvent && r.phase != Phase.disconnected) {
       if (r.ending) {
         _finishEnding(r);
+      } else if (isTermApp(r.app) && e.reason == noSuchTextTerminal) {
+        // A view the device found no terminal for: gone while the link was down, or a holder too busy to be found
+        // just now. Its list says which; until then it is down without a retry.
+        _disconnect(r, 'connection closed', retry: false);
+        unawaited(_checkTermGone(r));
+      } else if (isTermApp(r.app) && termEnded(e.reason)) {
+        _termEnded(r);
       } else {
         _disconnect(r, e.reason);
       }
@@ -2822,19 +2829,140 @@ class MainState extends ChangeNotifier {
   }
 
   /// Opens a text terminal window on [id], then switches to it without waiting for the session to connect; a
-  /// refusal is thrown with the hub's words.
-  Future<void> openText(String id, {String? shell}) async {
+  /// refusal is thrown with the hub's words. [from]: the terminal it opens beside (its directory, shell and window).
+  Future<void> openText(String id, {String? shell, String? from}) async {
     if (!hubUsable) return;
     final launchers = hub?.termLists[id]?.hosts.where((h) => h.host == null).firstOrNull?.launchers ?? const <String>[];
     if (launchers.isEmpty) throw StateError('这台设备没有可用的终端窗口');
     final app = prefs.termAppFor(id, launchers);
-    final term = await hub!.openTerm(id, shell: shell, app: app);
+    final term = await hub!.openTerm(id, shell: shell, app: app, from: from);
     try {
       await hub?.terms(id);
     } catch (_) {}
     final row = hub?.termLists[id]?.terms.where((r) => r.id == term).firstOrNull;
     final shown = row == null ? '已结束' : termDisplayName(row.shown, row.host);
     unawaited(openOrSwitch(id, term, shown));
+  }
+
+  Future<void> _newTerms = Future<void>.value();
+
+  /// How long one queued ⌘T waits for its terminal before the next one goes ahead.
+  @visibleForTesting
+  Duration newTermTimeout = const Duration(seconds: 20);
+
+  /// ⌘T: a new text terminal on [device] beside [term], switched to once made. Presses queue: each opens after the
+  /// one before it is made (or failed, or waited [newTermTimeout] for). A failure is the hint, as opening one from
+  /// the overview says it.
+  Future<void> newTermFrom(String device, String term) => _newTerms = _newTerms.then((_) async {
+        if (_disposed) return;
+        try {
+          if (!hubUsable) throw StateError('这台设备没有可用的终端窗口');
+          await openText(device, from: term).timeout(newTermTimeout);
+        } catch (e) {
+          if (_disposed) return;
+          hint = switch (e) {
+            StateError(:final message) => message,
+            HubException(:final message) => message,
+            TimeoutException() => '新建终端没有回应，请稍后再试',
+            _ => '$e',
+          };
+          notifyListeners();
+        }
+      });
+
+  /// The device's list row of the text terminal on record [key]; null for any other record, or when it is not
+  /// listed.
+  TermRow? termRowOf(String key) {
+    final r = _records[key];
+    if (r == null || !isTermApp(r.app)) return null;
+    return hub?.termLists[r.id]?.terms.where((t) => t.id == r.app).firstOrNull;
+  }
+
+  /// Whether the device of text terminal [key] can end it: its row says [TermRow.shell] (a new device and holder).
+  bool canEndTerm(String key) => termRowOf(key)?.shell != null;
+
+  /// The record [rs] is the session of (or the old session of, before a reconnect swaps it).
+  SessionRecord? recordOfSession(RemoteSession rs) => _recordOfSid(rs.sid) ?? _recordOfLastSid(rs.sid);
+
+  final _endingTerms = <String>{};
+
+  /// 结束终端 with a question first when a program other than the shell is in front ([confirm] is shown its name,
+  /// and says whether to go on). Nothing on a device that cannot end it.
+  Future<void> endTermAsk(String key, {required Future<bool> Function(String? fg) confirm}) async {
+    final cached = termRowOf(key);
+    final r = _records[key];
+    if (cached?.shell == null || r == null) return;
+    // The list can be seconds old: a program started just now must still be asked about. No answer: the cached
+    // row, and a question when in doubt.
+    var row = cached!;
+    try {
+      final list = await hub!.terms(r.id).timeout(termListTimeout);
+      row = list.terms.where((t) => t.id == r.app).firstOrNull ?? cached;
+    } catch (_) {}
+    if (_disposed) return;
+    if (row.shell != true && !await confirm(row.fg)) return;
+    await endTerm(key);
+  }
+
+  /// Ends the text terminal on record [key] for good, on its device: the record goes with 「已结束 <名字>」; a
+  /// refusal keeps it and says why. The view's own `session ended` may come first; either way it goes once.
+  Future<void> endTerm(String key) async {
+    final r = _records[key];
+    if (r == null || !isTermApp(r.app) || !hubUsable || !_endingTerms.add(key)) return;
+    try {
+      await hub!.endTerm(r.id, r.app);
+    } catch (e) {
+      if (_disposed) return;
+      final words = e is HubException ? e.message : '$e';
+      if (words == noSuchTextTerminal) {
+        // Gone already: that is the end asked for.
+        if (_records[key] == r) _termEnded(r);
+        notifyListeners();
+        return;
+      }
+      // An old holder (`unsupported`, or a run that cannot be ended), or an old device (`unknown op`).
+      final old = ['cannot be ended', 'unsupported', 'unknown op'].any(words.contains);
+      hint = old ? '这台设备的 rApp 太旧，不能结束终端' : words;
+      notifyListeners();
+      return;
+    } finally {
+      _endingTerms.remove(key);
+    }
+    if (_disposed || _records[key] != r) return; // the view's `session ended` took it off already
+    _termEnded(r);
+    notifyListeners();
+  }
+
+  /// How long [_checkTermGone] and [endTermAsk] wait for the device's list.
+  @visibleForTesting
+  Duration termListTimeout = const Duration(seconds: 3);
+
+  /// After a view of text terminal [r] was answered `no such text terminal`: the device's list decides. Not listed:
+  /// it is over (「已结束」). Listed, or no list in time: an ordinary drop that tries again. Notifies.
+  Future<void> _checkTermGone(SessionRecord r) async {
+    bool? listed;
+    try {
+      final list = await hub!.terms(r.id).timeout(termListTimeout);
+      listed = list.terms.any((t) => t.id == r.app);
+    } catch (_) {}
+    // Reconnected, ended or closed meanwhile: that stands.
+    if (_disposed || _records[r.key] != r || r.phase != Phase.disconnected || r.ending) return;
+    if (listed == false) {
+      _termEnded(r);
+    } else {
+      _planRetry(r);
+    }
+    notifyListeners();
+  }
+
+  /// Text terminal [r] is over on its device: its link is closed and the record goes with 「已结束 <名字>」 instead of
+  /// 已断开 (nothing is left to reconnect to). Callers notify.
+  void _termEnded(SessionRecord r) {
+    final sid = r.sid;
+    if (sid != null && termPort?.owns(sid) == true) termPort!.close(sid);
+    // A reconnect in flight finds it ending: its new session is closed quietly, a failed one says nothing (R14).
+    r.ending = true;
+    _finishEnding(r);
   }
 
   /// Renames text terminal [term] of device [device]; an invalid name or the device's refusal is thrown.

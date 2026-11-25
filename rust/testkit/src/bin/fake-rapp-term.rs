@@ -6,7 +6,7 @@
 //! `fake_rows`; one host with the launcher `Terminal` and the shell `zsh`. `open` answers `term:pty:opened`,
 //! `rename` `{"ok":true}`. `view` says hello and echoes every line back. `term.log` next to argv[0] gets
 //! `argv <arguments>` per start, `view <term> <lines>` per view (never the lines), `open <request>`,
-//! `rename <request>` and `watch closed`.
+//! `rename <request>`, `end <request>` and `watch closed`.
 
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -153,6 +153,16 @@ fn conn(mut s: TcpStream, token: &str, config_path: &str) {
                 Err(e) => json!({"error":e}),
                 Ok(_) => {
                     log(&format!("rename {req}"));
+                    json!({"ok":true})
+                }
+            };
+            send(&mut s, &v);
+        }
+        Some("end") => {
+            let v = match cfg {
+                Err(e) => json!({"error":e}),
+                Ok(_) => {
+                    log(&format!("end {req}"));
                     json!({"ok":true})
                 }
             };

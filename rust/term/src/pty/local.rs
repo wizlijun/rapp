@@ -29,7 +29,7 @@ pub fn default_dir() -> PathBuf {
 
 /// Creates `term/`, `pty/` and `launch/`, all 0700 (also when they exist already).
 pub fn ensure_dirs(term_dir: &Path) -> anyhow::Result<()> {
-    for d in [term_dir.to_path_buf(), term_dir.join("pty"), term_dir.join("launch")] {
+    for d in [term_dir.to_path_buf(), term_dir.join("pty"), term_dir.join("launch"), term_dir.join("ended")] {
         std::fs::create_dir_all(&d).with_context(|| format!("cannot create {}", d.display()))?;
         std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700))
             .with_context(|| format!("cannot protect {}", d.display()))?;
@@ -114,6 +114,18 @@ pub struct Status {
     /// The title the program set for itself; none when it set none or the session was named by hand.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// The foreground program's name (argv[0]'s file name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fg: Option<String>,
+    /// The foreground program's current directory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    /// Whether the program the holder started is the foreground one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell: Option<bool>,
+    /// The holder's window tty, like `/dev/ttys012`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tty: Option<String>,
 }
 
 /// Why a socket gave no status.
@@ -152,7 +164,7 @@ pub fn new_key() -> String {
 
 /// Whether a failed connect means nobody listens. Any other error (too many files, a full backlog, no access)
 /// says nothing about the process behind the socket, so its file must stay.
-fn gone(e: &std::io::Error) -> bool {
+pub fn gone(e: &std::io::Error) -> bool {
     matches!(e.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound)
 }
 
@@ -194,11 +206,37 @@ pub async fn rename(path: &Path, token: &str, name: &str) -> Result<(), Probe> {
     tokio::time::timeout(STATUS_WAIT, ask).await.unwrap_or(Err(Probe::Busy))
 }
 
+/// Asks the run at `path` to end: it answers first, then ends as if its window were closed. An old run refuses with `unsupported`.
+pub async fn end(path: &Path, token: &str) -> Result<(), Probe> {
+    let ask = async {
+        let mut s = UnixStream::connect(path).await.map_err(|e| if gone(&e) { Probe::Gone } else { Probe::Busy })?;
+        let req = serde_json::json!({ "op": "end", "v": LOCAL_V });
+        send_head_with(&mut s, req, token).await.map_err(|_| Probe::Busy)?;
+        let got = Lines::new(BufReader::new(s), MAX_IN_LINE).next().await;
+        let Ok(Got::Line(line)) = got else {
+            return Err(Probe::Refused("bad reply".into()));
+        };
+        let v: serde_json::Value = serde_json::from_slice(&line).map_err(|_| Probe::Refused("bad reply".into()))?;
+        match (v.get("ok"), v.get("error")) {
+            (Some(serde_json::Value::Bool(true)), _) => Ok(()),
+            (_, Some(e)) => Err(Probe::Refused(e.as_str().unwrap_or("error").to_string())),
+            _ => Err(Probe::Refused("bad reply".into())),
+        }
+    };
+    tokio::time::timeout(STATUS_WAIT, ask).await.unwrap_or(Err(Probe::Busy))
+}
+
 /// The statuses of the live sockets in `pty/`, by name. A leftover socket file is removed; a busy or refusing
 /// socket is skipped.
 pub async fn scan(term_dir: &Path, token: &str) -> Vec<Status> {
+    scan_all(term_dir, token).await.0
+}
+
+/// [`scan`], and whether some socket was there but gave no status in time (busy, or not reachable just now): a
+/// session missing from the statuses may be that one.
+pub async fn scan_all(term_dir: &Path, token: &str) -> (Vec<Status>, bool) {
     let Ok(dir) = std::fs::read_dir(term_dir.join("pty")) else {
-        return Vec::new();
+        return (Vec::new(), false);
     };
     let mut probes = tokio::task::JoinSet::new();
     for path in dir.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "sock")) {
@@ -206,17 +244,19 @@ pub async fn scan(term_dir: &Path, token: &str) -> Vec<Status> {
         probes.spawn(async move { (status(&path, &token).await, path) });
     }
     let mut out = Vec::new();
+    let mut busy = false;
     while let Some(Ok((probe, path))) = probes.join_next().await {
         match probe {
             Ok(s) => out.push(s),
             Err(Probe::Gone) => {
                 let _ = std::fs::remove_file(&path);
             }
-            Err(_) => {}
+            Err(Probe::Busy) => busy = true,
+            Err(Probe::Refused(_)) => {}
         }
     }
     out.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.key.cmp(&b.key)).then(a.pid.cmp(&b.pid)));
-    out
+    (out, busy)
 }
 
 /// A request head.
@@ -402,6 +442,10 @@ mod tests {
                     key: None,
                     ps: None,
                     title: None,
+                    fg: None,
+                    cwd: None,
+                    shell: None,
+                    tty: None,
                 };
                 w.write_all(format!("{}\n", serde_json::to_string(&st).unwrap()).as_bytes()).await.unwrap();
             }

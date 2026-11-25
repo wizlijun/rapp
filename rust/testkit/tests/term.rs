@@ -181,8 +181,8 @@ async fn open_term_passes_the_shell() {
     let r = req(&conn, json!({"op":"open_term","app":"iTerm"})).await;
     assert_eq!(r, json!({"ok":true,"id":"term:pty:opened"}));
     let sent = term_requests(a.bins.path(), "open");
-    assert_eq!(sent[0], json!({"op":"open","shell":"zsh","app":"Terminal"}));
-    assert_eq!(sent[1], json!({"op":"open","shell":null,"app":"iTerm"}));
+    assert_eq!(sent[0], json!({"op":"open","shell":"zsh","from":null,"app":"Terminal"}));
+    assert_eq!(sent[1], json!({"op":"open","shell":null,"from":null,"app":"iTerm"}));
     wait_log(a.home.path(), "request", |v| v["op"] == "open_term" && v["app"] == "Terminal" && v["result"] == "ok").await;
 }
 
@@ -197,6 +197,23 @@ async fn rename_term_reaches_the_worker() {
     let logged = wait_log(a.home.path(), "request", |v| v["op"] == "rename_term" && v["result"] == "ok").await;
     assert!(logged.get("term").is_none() && logged.get("name").is_none(), "{logged}");
     assert!(!service_log_text(a.home.path()).contains("n-secret"));
+}
+
+#[tokio::test]
+async fn end_term_reaches_the_worker() {
+    let a = service().await;
+    let (_ep, conn) = b(&a).await;
+    let r = req(&conn, json!({"op":"end_term","term":"term:pty:k-secret"})).await;
+    assert_eq!(r, json!({"ok":true}));
+    let sent = term_requests(a.bins.path(), "end");
+    assert_eq!(sent, [json!({"op":"end","term":"term:pty:k-secret"})]);
+    let logged = wait_log(a.home.path(), "request", |v| v["op"] == "end_term" && v["result"] == "ok").await;
+    assert!(logged.get("term").is_none(), "{logged}");
+    assert!(!service_log_text(a.home.path()).contains("k-secret"));
+    let r = req(&conn, json!({"op":"open_term","app":"Terminal","from":"term:pty:k"})).await;
+    assert_eq!(r, json!({"ok":true,"id":"term:pty:opened"}));
+    let sent = term_requests(a.bins.path(), "open");
+    assert_eq!(sent[0]["from"], json!("term:pty:k"));
 }
 
 /// Opens `term` and passes the worker token through: the stream is then the worker's view (`hello` first).

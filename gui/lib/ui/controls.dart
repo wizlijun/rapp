@@ -11,7 +11,7 @@ RelativeRect menuAt(BuildContext context, Offset p) {
   return RelativeRect.fromLTRB(p.dx, p.dy, overlay.size.width - p.dx, overlay.size.height - p.dy);
 }
 
-enum _Kind { primary, secondary, accent, quiet, stage }
+enum _Kind { primary, secondary, accent, quiet, stage, danger }
 
 /// Button per design language section 8. Built on Material buttons, with a
 /// 0.97 press scale (80 ms) unless reduced motion is on.
@@ -63,6 +63,21 @@ class RappButton extends StatefulWidget {
     this.focusNode,
     this.icon,
   }) : _kind = _Kind.quiet,
+       active = false,
+       seeThrough = false,
+       onPicture = false,
+       oneLine = false,
+       size = 48;
+
+  /// An action that cannot be taken back (「结束终端」): drawn in the theme's error colour.
+  const RappButton.danger({
+    super.key,
+    required this.label,
+    this.onPressed,
+    this.semanticLabel,
+    this.focusNode,
+  }) : _kind = _Kind.danger,
+       icon = null,
        active = false,
        seeThrough = false,
        onPicture = false,
@@ -200,6 +215,20 @@ class _RappButtonState extends State<RappButton> {
           backgroundColor: widget.onPicture ? Color.alphaBlend(t.raise.first, t.float.first) : t.raise.first,
           foregroundColor: t.text,
           side: BorderSide(color: widget.active ? t.accent : t.line, width: widget.active ? 1.5 : 1),
+          minimumSize: min,
+          tapTargetSize: tap,
+          padding: pad,
+          shape: shape,
+        ),
+        child: child,
+      ),
+      _Kind.danger => OutlinedButton(
+        onPressed: widget.onPressed,
+        focusNode: widget.focusNode,
+        style: OutlinedButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          foregroundColor: Theme.of(context).colorScheme.error,
+          side: BorderSide(color: Theme.of(context).colorScheme.error),
           minimumSize: min,
           tapTargetSize: tap,
           padding: pad,

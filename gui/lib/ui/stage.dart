@@ -8,6 +8,8 @@ import '../embed/composer_editor.dart';
 import '../embed/composer_panel.dart';
 import '../embed/picture.dart';
 import '../embed/session_port.dart';
+import '../term/end_term_dialog.dart';
+import '../term/term_id.dart';
 import '../term/term_stage.dart';
 import 'controls.dart';
 import 'disconnected_stage.dart';
@@ -176,10 +178,17 @@ class Stage extends StatelessWidget {
                         key: ValueKey('end:${cur.key}'),
                         child: ConfirmButton(
                           key: const Key('end-button'),
-                          label: '结束会话',
+                          // A text terminal's 「关闭」 only stops viewing it.
+                          label: isTermApp(cur.app) ? '关闭' : '结束会话',
                           onConfirmed: state.endCurrent,
                         ),
                       ),
+                      if (state.canEndTerm(cur.key))
+                        RappButton.danger(
+                          key: const Key('end-term-button'),
+                          label: '结束终端',
+                          onPressed: () => askEndTerm(context, state, cur.key),
+                        ),
                     ],
                   ),
                 ],

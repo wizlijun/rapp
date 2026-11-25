@@ -41,6 +41,7 @@ class StreamMenuAnchor extends StatefulWidget {
     required this.onDisconnect,
     required this.onReconnect,
     required this.onEnd,
+    this.onEndTerm,
     this.onToggleDetach,
     this.onRememberStream,
     this.onOpenProfile,
@@ -127,6 +128,9 @@ class StreamMenuAnchor extends StatefulWidget {
   final VoidCallback? onMarkInput;
   final VoidCallback? onClearInput;
 
+  /// A text terminal's 「结束终端」 (for good, on its device); null leaves it out (an old device cannot).
+  final VoidCallback? onEndTerm;
+
   /// A terminal's 「本机 · 跟着我的窗口」: whether it is on, and the switch (null greys it).
   final bool termFit;
   final ValueChanged<bool>? onTermFit;
@@ -170,6 +174,7 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
         onReconnect: widget.onReconnect,
         onClose: widget.onClose,
         onEnd: widget.onEnd,
+        onEndTerm: widget.onEndTerm,
         onToggleDetach: widget.onToggleDetach,
         onRememberStream: widget.onRememberStream,
         onOpenProfile: widget.onOpenProfile,
@@ -287,6 +292,7 @@ class StreamMenu extends StatefulWidget {
     required this.onReconnect,
     required this.onClose,
     required this.onEnd,
+    this.onEndTerm,
     this.onToggleDetach,
     this.onRememberStream,
     this.onOpenProfile,
@@ -311,6 +317,7 @@ class StreamMenu extends StatefulWidget {
 
   final NetStatus? net;
   final Set<MenuPart> parts;
+  final VoidCallback? onEndTerm;
   final VoidCallback? onMarkInput;
   final VoidCallback? onClearInput;
   final bool termFit;
@@ -533,7 +540,13 @@ class _StreamMenuState extends State<StreamMenu> {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           child: Align(
             alignment: Alignment.centerLeft,
-            child: ConfirmButton(label: '结束会话', onConfirmed: () => _then(widget.onEnd)),
+            // A text terminal's 「关闭」 only stops viewing it; 「结束终端」 ends it on its device.
+            child: Wrap(spacing: 8, runSpacing: 4, children: [
+              ConfirmButton(label: term ? '关闭' : '结束会话', onConfirmed: () => _then(widget.onEnd)),
+              if (term && widget.onEndTerm != null)
+                RappButton.danger(
+                    key: const Key('end-term'), label: '结束终端', onPressed: () => _then(widget.onEndTerm!)),
+            ]),
           ),
         ),
       ];

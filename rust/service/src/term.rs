@@ -66,7 +66,10 @@ pub async fn request<S: AsyncRead + AsyncWrite + Unpin + Send>(
         Ok(_) => match op {
             Op::WatchTerms => return watch(state, s, peer, what).await,
             Op::ListTerms => answer(ask(state, &json!({"op": "list"})).await),
-            Op::OpenTerm { shell, app } => answer(ask(state, &json!({"op": "open", "shell": shell, "app": app})).await),
+            Op::OpenTerm { shell, from, app } => {
+                answer(ask(state, &json!({"op": "open", "shell": shell, "from": from, "app": app})).await)
+            }
+            Op::EndTerm { term } => answer(ask(state, &json!({"op": "end", "term": term})).await),
             Op::RenameTerm { term, name } => answer(ask(state, &json!({"op": "rename", "term": term, "name": name})).await),
             _ => err("unknown op"),
         },
@@ -80,7 +83,8 @@ fn log_fields(op: &Op) -> Value {
     match op {
         Op::ListTerms => json!({"op": "list_terms"}),
         Op::WatchTerms => json!({"op": "watch_terms"}),
-        Op::OpenTerm { app, .. } => json!({"op": "open_term", "app": app}),
+        Op::OpenTerm { app, from, .. } => json!({"op": "open_term", "app": app, "from": from.is_some()}),
+        Op::EndTerm { .. } => json!({"op": "end_term"}),
         Op::RenameTerm { .. } => json!({"op": "rename_term"}),
         _ => json!({}),
     }
@@ -406,8 +410,24 @@ mod tests {
 
     #[test]
     fn open_term_logs_only_the_app() {
-        let op = Op::OpenTerm { shell: Some("zsh".into()), app: "iTerm".into() };
-        assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm"}));
+        let op = Op::OpenTerm { shell: Some("zsh".into()), from: None, app: "iTerm".into() };
+        assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm","from":false}));
+    }
+
+    #[test]
+    fn end_term_log_has_no_term() {
+        let op = Op::EndTerm { term: "term:pty:secret".into() };
+        let f = log_fields(&op);
+        assert_eq!(f, json!({"op":"end_term"}));
+        assert!(!f.to_string().contains("secret"));
+    }
+
+    #[test]
+    fn open_term_log_from_is_bool() {
+        let op = Op::OpenTerm { shell: None, from: Some("term:pty:secret".into()), app: "iTerm".into() };
+        assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm","from":true}));
+        let op = Op::OpenTerm { shell: None, from: None, app: "iTerm".into() };
+        assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm","from":false}));
     }
 
     #[test]

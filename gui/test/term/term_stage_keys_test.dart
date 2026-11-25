@@ -536,7 +536,7 @@ void main() {
       await t.pumpWidget(wrap(window()));
       await openTerm(t, [tp(3, 'claude', active: true)]);
       expect(stageFocused(t), isTrue);
-      term.play(const DisconnectedEvent(1, 'session ended'));
+      term.play(const DisconnectedEvent(1, 'bad token')); // stays 已断开: 'session ended' takes a terminal off
       await settle(t);
       expect(find.byType(DisconnectedStage), findsOneWidget);
       term.calls.clear();

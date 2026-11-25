@@ -6,6 +6,9 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::sync::Mutex;
+use super::fg::Fg;
+use super::wintitle::{compose, OscStrip};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 pub type Conn = u64;
@@ -194,7 +197,26 @@ pub struct Window<W: Write> {
     seq: SeqTracker,
     /// False when the output is not a terminal: a resize request would only land in a file or pipe.
     tty: bool,
+    /// Present when the window's title is ours (spec §4.2): the program's own OSC 0/1/2 are taken out.
+    titles: Option<Titles>,
 }
+
+/// The title writer of a window.
+struct Titles {
+    strip: OscStrip,
+    home: PathBuf,
+    /// The program's own title, as last seen.
+    prog: Option<String>,
+    /// The foreground program the title belongs to; set at the first refresh after the title arrived.
+    owner: Option<String>,
+    /// A title arrived that no refresh has looked at yet.
+    fresh: bool,
+    written: Option<String>,
+    at: Option<Instant>,
+}
+
+/// At most one title write per this long.
+const TITLE_EVERY: Duration = Duration::from_secs(1);
 
 impl<W: Write> Window<W> {
     pub fn new(out: W) -> Self {
@@ -202,7 +224,14 @@ impl<W: Write> Window<W> {
             out,
             seq: SeqTracker::default(),
             tty: true,
+            titles: None,
         }
+    }
+
+    /// The window's title becomes `<dir> · <program>`; the program's own title is taken out of what it sees.
+    pub fn titles(mut self, home: PathBuf) -> Self {
+        self.titles = Some(Titles { strip: OscStrip::default(), home, prog: None, owner: None, fresh: false, written: None, at: None });
+        self
     }
 
     /// A window whose output is not a terminal never gets resize requests.
@@ -212,10 +241,50 @@ impl<W: Write> Window<W> {
     }
 
     pub fn output(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        let mut kept = Vec::with_capacity(bytes.len());
+        let bytes = match self.titles.as_mut() {
+            Some(t) => {
+                if let Some(p) = t.strip.feed(bytes, &mut kept) {
+                    t.prog = Some(p);
+                    t.fresh = true;
+                }
+                &kept[..]
+            }
+            None => bytes,
+        };
         self.out.write_all(bytes)?;
         self.out.flush()?;
         self.seq.feed(bytes);
         Ok(())
+    }
+
+    /// True when the program set a title that `refresh_title` has not looked at yet.
+    pub fn title_fresh(&self) -> bool {
+        self.titles.as_ref().is_some_and(|t| t.fresh)
+    }
+
+    /// Writes the title for `fg` if it changed, a second has passed since the last write and the stream is between
+    /// sequences; otherwise a later call does it.
+    pub fn refresh_title(&mut self, fg: &Fg, now: Instant) -> std::io::Result<()> {
+        let Some(t) = self.titles.as_mut() else { return Ok(()) };
+        if t.fresh {
+            t.owner = fg.prog.clone();
+            t.fresh = false;
+        } else if t.prog.is_some() && (fg.shell || fg.prog != t.owner) {
+            t.prog = None;
+        }
+        let Some(title) = compose(&t.home, fg, t.prog.as_deref()) else { return Ok(()) };
+        let title: String = title.chars().filter(|c| !c.is_control()).collect();
+        if t.written.as_deref() == Some(&title) || !self.seq.ground() {
+            return Ok(());
+        }
+        if t.at.is_some_and(|at| now.saturating_duration_since(at) < TITLE_EVERY) {
+            return Ok(());
+        }
+        t.written = Some(title.clone());
+        t.at = Some(now);
+        self.out.write_all(format!("\x1b]0;{title}\x07").as_bytes())?;
+        self.out.flush()
     }
 
     /// Writes `ESC[8;rows;colst` if the stream is idle and a size is pending.
@@ -242,6 +311,86 @@ impl<W: Write> Window<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fgd(prog: &str, shell: bool) -> Fg {
+        Fg { prog: Some(prog.into()), cwd: Some("/h/x".into()), shell, probed: true }
+    }
+
+    fn titled() -> Window<Vec<u8>> {
+        Window::new(Vec::new()).titles("/h".into())
+    }
+
+    #[test]
+    fn the_program_s_title_is_replaced_by_ours() {
+        let t0 = Instant::now();
+        let mut w = titled();
+        w.output(b"a\x1b]0;Fix bug\x07b").unwrap();
+        w.refresh_title(&fgd("claude", false), t0).unwrap();
+        assert_eq!(w.get_ref().as_slice(), "ab\x1b]0;~/x · claude — Fix bug\x07".as_bytes());
+    }
+
+    #[test]
+    fn a_program_title_goes_when_its_program_does() {
+        let t0 = Instant::now();
+        let mut w = titled();
+        w.output(b"\x1b]0;Fix bug\x07").unwrap();
+        assert!(w.title_fresh());
+        w.refresh_title(&fgd("claude", false), t0).unwrap();
+        assert!(!w.title_fresh());
+        assert!(w.get_ref().ends_with("claude — Fix bug\x07".as_bytes()));
+        w.refresh_title(&fgd("vim", false), ms(t0, 2000)).unwrap();
+        assert!(w.get_ref().ends_with("~/x · vim\x07".as_bytes()));
+        w.refresh_title(&fgd("zsh", true), ms(t0, 4000)).unwrap();
+        w.refresh_title(&fgd("claude", false), ms(t0, 6000)).unwrap();
+        assert!(w.get_ref().ends_with("~/x · claude\x07".as_bytes()));
+    }
+
+    #[test]
+    fn nothing_is_written_until_something_is_known() {
+        let mut w = titled();
+        w.refresh_title(&Fg::default(), Instant::now()).unwrap();
+        assert!(w.get_ref().is_empty());
+    }
+
+    #[test]
+    fn a_window_without_titles_is_unchanged() {
+        let mut w = Window::new(Vec::new());
+        w.output(b"\x1b]0;vim\x07").unwrap();
+        w.refresh_title(&fgd("vim", false), Instant::now()).unwrap();
+        assert_eq!(w.get_ref().as_slice(), b"\x1b]0;vim\x07");
+    }
+
+    #[test]
+    fn titles_are_written_once_and_at_most_each_second() {
+        let t0 = Instant::now();
+        let mut w = titled();
+        let a = fgd("zsh", true);
+        w.refresh_title(&a, t0).unwrap();
+        w.refresh_title(&a, ms(t0, 2000)).unwrap(); // same text: not again
+        let one = w.get_ref().len();
+        assert_eq!(w.get_ref().as_slice(), "\x1b]0;~/x · zsh\x07".as_bytes());
+        let b = fgd("vim", false);
+        w.refresh_title(&b, ms(t0, 2500)).unwrap(); // too soon after the first write? no: 2.5 s later
+        let two = w.get_ref().len();
+        assert!(two > one);
+        let c = fgd("less", false);
+        w.refresh_title(&c, ms(t0, 3000)).unwrap(); // 0.5 s after: held
+        assert_eq!(w.get_ref().len(), two);
+        w.refresh_title(&c, ms(t0, 3600)).unwrap(); // the next opportunity
+        assert!(w.get_ref().len() > two);
+    }
+
+    #[test]
+    fn a_title_waits_for_the_end_of_a_sequence() {
+        let t0 = Instant::now();
+        let mut w = titled();
+        w.output(b"\x1b[3").unwrap();
+        w.refresh_title(&fgd("zsh", true), t0).unwrap();
+        assert_eq!(w.get_ref().as_slice(), b"\x1b[3");
+        w.output(b"1m").unwrap();
+        w.refresh_title(&fgd("zsh", true), t0).unwrap();
+        assert!(w.get_ref().ends_with("\x07".as_bytes()));
+    }
 
     fn ms(t0: Instant, n: u64) -> Instant {
         t0 + Duration::from_millis(n)

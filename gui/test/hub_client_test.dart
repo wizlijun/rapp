@@ -595,6 +595,46 @@ void main() {
       await expectLater(f, throwsA(isA<HubException>()));
     });
 
+    test('a term row reads fg and shell; an old row has neither', () async {
+      t.emit({
+        'event': 'terms', 'id': 'P', 'path': 'lan', 'hosts': [],
+        'terms': [
+          {'id': 'term:pty:a', 'name': 'a', 'fg': 'vim', 'shell': false},
+          {'id': 'term:pty:b', 'name': 'b', 'fg': 'zsh', 'shell': true},
+          {'id': 'term:pty:c', 'name': 'c'},
+          {'id': 'term:pty:d', 'name': 'd', 'fg': 3, 'shell': 'yes'},
+          {'id': 'term:pty:e', 'name': 'e', 'fg': '', 'shell': true},
+        ],
+      });
+      await Future<void>.delayed(Duration.zero);
+      final r = hub.termLists['P']!.terms;
+      expect(r.map((x) => (x.fg, x.shell)), [('vim', false), ('zsh', true), (null, null), (null, null), (null, true)]);
+    });
+
+    test('openTerm with from sends it', () async {
+      final f = hub.openTerm('d1', app: 'Terminal', from: 'term:pty:a');
+      expect(t.sent.last, {'cmd': 'open_term', 'id': 'd1', 'app': 'Terminal', 'from': 'term:pty:a', 'req': anything});
+      t.emit({'event': 'term_created', 'id': 'd1', 'term': 'term:pty:b', 'req': t.sent.last['req']});
+      expect(await f, 'term:pty:b');
+    });
+
+    test('endTerm sends end_term, waits for term_ended, then asks for the list', () async {
+      final f = hub.endTerm('d1', 'term:pty:a');
+      final cmd = t.sent.last;
+      expect(cmd, {'cmd': 'end_term', 'id': 'd1', 'term': 'term:pty:a', 'req': anything});
+      t.emit({'event': 'term_ended', 'id': 'd1', 'term': 'term:pty:a', 'req': cmd['req']});
+      await Future<void>.delayed(Duration.zero);
+      expect(t.sent.last['cmd'], 'terms');
+      t.emit({'event': 'terms', 'id': 'd1', 'terms': [], 'req': t.sent.last['req']});
+      await f;
+    });
+
+    test('endTerm fails on an error reply with its words', () async {
+      final f = hub.endTerm('d1', 'term:pty:a');
+      t.emit({'event': 'error', 'req': t.sent.last['req'], 'error': 'unsupported'});
+      await expectLater(f, throwsA(isA<HubException>().having((e) => e.message, 'message', 'unsupported')));
+    });
+
     test('openTerm without a shell sends none', () async {
       final f = hub.openTerm('d1', app: 'Terminal');
       expect(t.sent.last, {'cmd': 'open_term', 'id': 'd1', 'app': 'Terminal', 'req': anything});

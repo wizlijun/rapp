@@ -106,6 +106,7 @@ pub(crate) async fn command(hub: &Arc<Hub>, cmd: &str, v: &Value) -> Result<Valu
 fn event(op: &Op, id: &str, r: &Value) -> Value {
     match op {
         Op::RenameTerm { term, .. } => json!({"event":"term_renamed","id":id,"term":term}),
+        Op::EndTerm { term } => json!({"event":"term_ended","id":id,"term":term}),
         _ => json!({"event":"term_created","id":id,"term":r["id"]}),
     }
 }
@@ -198,7 +199,7 @@ mod tests {
 
     #[test]
     fn open_term_is_answered_with_term_created() {
-        let op = Op::OpenTerm { shell: None, app: "Terminal".into() };
+        let op = Op::OpenTerm { shell: None, from: None, app: "Terminal".into() };
         let e = event(&op, "d1", &json!({"id": "term:pty:c"}));
         assert_eq!(e, json!({"event":"term_created","id":"d1","term":"term:pty:c"}));
     }
@@ -208,6 +209,13 @@ mod tests {
         let op = Op::RenameTerm { term: "term:pty:k".into(), name: "n".into() };
         let e = event(&op, "d1", &json!({"ok": true}));
         assert_eq!(e, json!({"event":"term_renamed","id":"d1","term":"term:pty:k"}));
+    }
+
+    #[test]
+    fn end_term_is_answered_with_term_ended() {
+        let op = Op::EndTerm { term: "term:pty:k".into() };
+        let e = event(&op, "d1", &json!({"ok": true}));
+        assert_eq!(e, json!({"event":"term_ended","id":"d1","term":"term:pty:k"}));
     }
 
     #[test]

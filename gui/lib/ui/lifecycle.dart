@@ -3,6 +3,7 @@ import '../embed/remote_session.dart';
 import '../embed/stream_choice.dart';
 import '../history/record_id.dart';
 import '../hub_client.dart';
+import '../term/term_wire.dart' show noSuchTextTerminal;
 import 'lamp.dart';
 import 'term_status.dart';
 
@@ -176,9 +177,12 @@ String? waitWord(SessionRecord r, {required bool relayed, NetLevel? net}) {
   return null;
 }
 
+/// A device's words for a text terminal that is over: it ended, or it went while the link was down.
+bool termEnded(String? raw) => raw == 'session ended' || raw == noSuchTextTerminal;
+
 /// A reason that ends automatic tries: the person, the app, the host or the password said no.
 bool stopsAutoReconnect(String? raw) {
-  if (raw != null && (raw.contains('bad token') || raw == 'session ended')) return true;
+  if (raw != null && (raw.contains('bad token') || termEnded(raw))) return true;
   final w = disconnectWord(raw);
   return w == '你断开了' || w == '远端关闭了 app' || w == '密码不对' || takenOver(raw);
 }

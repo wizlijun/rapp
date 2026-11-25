@@ -35,8 +35,13 @@ pub enum Op {
     OpenTerm {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         shell: Option<String>,
+        /// A terminal session id: the new one opens beside it (same directory).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<String>,
         app: String,
     },
+    /// End terminal session `term`.
+    EndTerm { term: String },
     /// Give terminal session `term` the name `name`.
     RenameTerm { term: String, name: String },
     /// The ports this device shares with the caller.
@@ -132,17 +137,33 @@ mod tests {
     fn terminal_requests() {
         assert_eq!(serde_json::to_value(Op::ListTerms).unwrap(), json!({"op":"list_terms"}));
         assert_eq!(serde_json::to_value(Op::WatchTerms).unwrap(), json!({"op":"watch_terms"}));
-        let op = Op::OpenTerm { shell: None, app: "Terminal".into() };
+        let op = Op::OpenTerm { shell: None, from: None, app: "Terminal".into() };
         assert_eq!(serde_json::to_value(&op).unwrap(), json!({"op":"open_term","app":"Terminal"}));
-        let op = Op::OpenTerm { shell: Some("zsh".into()), app: "iTerm".into() };
+        let op = Op::OpenTerm { shell: Some("zsh".into()), from: None, app: "iTerm".into() };
         assert_eq!(serde_json::to_value(&op).unwrap(), json!({"op":"open_term","shell":"zsh","app":"iTerm"}));
         assert_eq!(serde_json::from_value::<Op>(json!({"op":"open_term","shell":"zsh","app":"iTerm"})).unwrap(), op);
         // An old GUI's cwd, name and command are ignored.
         let old = json!({"op":"open_term","cwd":"/x","name":"n","command":"claude","app":"Terminal"});
-        assert_eq!(serde_json::from_value::<Op>(old).unwrap(), Op::OpenTerm { shell: None, app: "Terminal".into() });
+        assert_eq!(serde_json::from_value::<Op>(old).unwrap(), Op::OpenTerm { shell: None, from: None, app: "Terminal".into() });
         let rename = Op::RenameTerm { term: "term:pty:k".into(), name: "n".into() };
         assert_eq!(serde_json::to_value(&rename).unwrap(), json!({"op":"rename_term","term":"term:pty:k","name":"n"}));
         assert_eq!(serde_json::from_value::<Op>(serde_json::to_value(&rename).unwrap()).unwrap(), rename);
+    }
+
+    #[test]
+    fn end_term_roundtrip() {
+        let op = Op::EndTerm { term: "term:pty:k".into() };
+        assert_eq!(serde_json::to_value(&op).unwrap(), json!({"op":"end_term","term":"term:pty:k"}));
+        assert_eq!(serde_json::from_value::<Op>(json!({"op":"end_term","term":"term:pty:k"})).unwrap(), op);
+    }
+
+    #[test]
+    fn open_term_from_is_optional() {
+        let old = json!({"op":"open_term","app":"Terminal"});
+        assert_eq!(serde_json::from_value::<Op>(old).unwrap(), Op::OpenTerm { shell: None, from: None, app: "Terminal".into() });
+        let op = Op::OpenTerm { shell: None, from: Some("term:pty:k".into()), app: "Terminal".into() };
+        assert_eq!(serde_json::to_value(&op).unwrap(), json!({"op":"open_term","from":"term:pty:k","app":"Terminal"}));
+        assert_eq!(serde_json::from_value::<Op>(serde_json::to_value(&op).unwrap()).unwrap(), op);
     }
 
     #[test]

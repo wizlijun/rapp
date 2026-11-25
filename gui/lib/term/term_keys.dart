@@ -15,7 +15,8 @@ class TermText extends TermInput {
   final String text;
 }
 
-enum TermShortcut { copy, paste }
+/// [newTerm]: ⌘T, a new terminal beside this one; [closeTerm]: ⌘W, end this one.
+enum TermShortcut { copy, paste, newTerm, closeTerm }
 
 class TermAction extends TermInput {
   TermAction(this.action);
@@ -170,7 +171,7 @@ String? _logicalLetter(LogicalKeyboardKey k) {
   return RegExp(r'^[a-zA-Z]$').hasMatch(l) ? l.toLowerCase() : null;
 }
 
-/// Copy / paste / find / font size. Letters follow the keyboard layout
+/// Copy / paste / new terminal / end it / find / font size. Letters follow the keyboard layout
 /// (logical key, falling back to the US physical position); `=` and `-` use
 /// the physical key. The caller has already checked the modifiers.
 TermInput? _shortcut(KeyEvent e) {
@@ -178,6 +179,8 @@ TermInput? _shortcut(KeyEvent e) {
   final letter = _logicalLetter(e.logicalKey) ?? _us[phys]?.$1;
   if (letter == 'c') return TermAction(TermShortcut.copy);
   if (letter == 'v') return TermAction(TermShortcut.paste);
+  if (letter == 't') return TermAction(TermShortcut.newTerm);
+  if (letter == 'w') return TermAction(TermShortcut.closeTerm);
   if (letter == 'f') return TermReserved();
   if (phys == PhysicalKeyboardKey.equal || phys == PhysicalKeyboardKey.minus) return TermReserved();
   return null;

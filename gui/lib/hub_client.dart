@@ -123,7 +123,7 @@ class AppList {
 /// One terminal session of a device (`terms` event, spec §6). [host] is null on the device itself.
 class TermRow {
   const TermRow(this.id, this.name, this.command, this.host, this.panes, this.attached, this.activity, this.dead,
-      this.unread, {this.ps, this.title});
+      this.unread, {this.ps, this.title, this.fg, this.shell});
   final String id, name, command;
   final String? host;
   final int panes, attached;
@@ -137,6 +137,13 @@ class TermRow {
 
   /// The title the program set (OSC 0/2); null when it set none or the session was named by hand.
   final String? title;
+
+  /// The name of the program in front (`vim`, `zsh`); null from an old device.
+  final String? fg;
+
+  /// Whether the program in front is the shell the session started; null from an old device, which cannot end the
+  /// session either (the gate for 「结束终端」).
+  final bool? shell;
 
   /// What to show for the session: the program's title, else its name.
   String get shown => title ?? name;
@@ -216,7 +223,8 @@ TermList _termList(Map<String, dynamic> m, String fallbackId) {
         if (parseTermId('${r['id']}')?.backend == 'pty')
           TermRow('${r['id']}', '${r['name'] ?? ''}', '${r['command'] ?? ''}', _str(r['host']), _int(r['panes']),
             _int(r['attached']), _int(r['activity']), r['dead'] == true, r['unread'] == true,
-            ps: termPs(r['ps']), title: switch (r['title']) { String s when s.isNotEmpty => s, _ => null }),
+            ps: termPs(r['ps']), title: switch (r['title']) { String s when s.isNotEmpty => s, _ => null },
+            fg: switch (r['fg']) { String s when s.isNotEmpty => s, _ => null }, shell: switch (r['shell']) { bool b => b, _ => null }),
     ],
     hosts: [
       for (final h in (m['hosts'] as List? ?? const []).whereType<Map>())
@@ -408,10 +416,20 @@ class HubClient extends ChangeNotifier {
   }
 
   /// Opens a text terminal window on device [id] running [shell] (the device's default when null, and an old device
-  /// is sent none) in terminal app [app]; answers the new term id.
-  Future<String> openTerm(String id, {String? shell, required String app}) async {
-    final m = await _request({'cmd': 'open_term', 'id': id, 'shell': ?shell, 'app': app}, 'term_created');
+  /// is sent none) in terminal app [app]; answers the new term id. [from]: the terminal it is opened beside (its
+  /// directory and shell, its window); an old device ignores it.
+  Future<String> openTerm(String id, {String? shell, required String app, String? from}) async {
+    final m = await _request({'cmd': 'open_term', 'id': id, 'shell': ?shell, 'app': app, 'from': ?from}, 'term_created');
     return '${m['term']}';
+  }
+
+  /// Ends text terminal [term] of device [id] for good (its program too); the refusal is thrown with its words.
+  /// Refreshes the device's list afterwards.
+  Future<void> endTerm(String id, String term) async {
+    await _request({'cmd': 'end_term', 'id': id, 'term': term}, 'term_ended');
+    try {
+      await terms(id);
+    } catch (_) {}
   }
 
   /// Renames text terminal [term] of device [id] to [name] (already cleaned); the device's refusal is thrown with

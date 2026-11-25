@@ -12,6 +12,7 @@ use crate::list::TermRow;
 use crate::proto::{self, Out, MAX_LINE};
 use crate::pty::launch;
 use crate::pty::local::{self, Status};
+use crate::pty::sweep;
 use crate::shells::{self, Shell};
 use crate::unread::Unread;
 use crate::wire::{Got, Lines, MAX_IN_LINE};
@@ -19,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
@@ -38,6 +39,9 @@ pub const BAD_TOKEN: &str = "bad token";
 pub const BAD_REQUEST: &str = "bad request";
 const BAD_ID: &str = "invalid term id";
 const NO_TEXT_TERMINAL: &str = "no such text terminal";
+/// The session's holder is there but did not answer in time: worth trying again, unlike [`NO_TEXT_TERMINAL`].
+const TERM_BUSY: &str = "text terminal busy";
+const OLD_RUN_END: &str = "this window was opened by an older version and cannot be ended";
 const OLD_RUN: &str = "this window was opened by an older version and cannot be renamed";
 const INVALID_NAME: &str = "invalid name";
 const UNKNOWN_APP: &str = "unknown terminal app";
@@ -69,7 +73,14 @@ enum Req {
     List,
     Watch,
     View { term: String, sid: Option<u64> },
-    Open { shell: Option<String>, app: String },
+    Open {
+        shell: Option<String>,
+        app: String,
+        /// A session to open beside: its directory, its shell and its window are the new one's.
+        #[serde(default)]
+        from: Option<String>,
+    },
+    End { term: String },
     Rename { term: String, name: String },
 }
 
@@ -105,7 +116,15 @@ pub struct Worker {
     opening: tokio::sync::Mutex<()>,
     /// Bumped when a rename is done, so every watch hears it and a watch does not wait out its `poll` to show the new name.
     rescan: tokio::sync::watch::Sender<u64>,
+    /// The holder pid of each session id seen in a scan, kept while its socket file is there: a session missing
+    /// from a later scan is gone only when its holder is.
+    seen: Seen,
+    /// True while an ended-tab sweep runs: one at a time.
+    sweeping: Arc<AtomicBool>,
 }
+
+/// Session id (its key, or its name) to holder pid.
+type Seen = Arc<Mutex<std::collections::HashMap<String, u32>>>;
 
 /// Accept connections on `listener` until `stop` completes; then end every connection and return.
 pub async fn serve(
@@ -137,7 +156,7 @@ pub async fn serve(
 
 impl Worker {
     pub fn new(token: String, opts: ServeOpts, events: UnboundedSender<Value>) -> Worker {
-        Worker {
+        let w = Worker {
             opts,
             token,
             unread: Arc::new(Mutex::new(Unread::new(unix_now()))),
@@ -145,12 +164,50 @@ impl Worker {
             launchers: if cfg!(target_os = "linux") { Vec::new() } else { launch::launchers() },
             opening: Default::default(),
             rescan: tokio::sync::watch::channel(0).0,
+            seen: Default::default(),
+            sweeping: Default::default(),
+        };
+        // Tabs whose holder ended while no worker ran.
+        if w.sweeps() {
+            if let Ok(h) = tokio::runtime::Handle::try_current() {
+                let (dir, running) = (w.opts.pty_dir.clone(), w.sweeping.clone());
+                h.spawn_blocking(move || sweep::sweep_once(&dir, &running, sweep::close_tabs));
+            }
         }
+        w
     }
 
     /// The live `run` sessions of this machine; none when the token cannot be had.
     async fn pty_statuses(&self) -> Vec<Status> {
-        scan_pty(&self.opts.pty_dir).await
+        scan_pty(&self.opts.pty_dir, &self.seen).await.0
+    }
+
+    /// The live session whose id ends in `name`; when there is none, [`NO_TEXT_TERMINAL`] only if its holder is
+    /// gone for sure, else [`TERM_BUSY`] (a holder too slow to answer, a token that could not be read just now).
+    async fn find_pty(&self, name: &str) -> Result<Status, &'static str> {
+        let dir = &self.opts.pty_dir;
+        let (statuses, busy) = scan_pty(dir, &self.seen).await;
+        if let Some(st) = statuses.iter().find(|s| is_session(s, name)) {
+            return Ok(st.clone());
+        }
+        let known = lock(&self.seen).get(name).copied();
+        let alive = match known {
+            // Its socket is still there (a scan removes a dead one), no other session answered from it, and its
+            // process lives.
+            Some(pid) => {
+                local::socket_path(dir, pid).is_ok_and(|p| p.exists())
+                    && !statuses.iter().any(|s| s.pid == pid)
+                    && pid_alive(pid)
+            }
+            // Never seen by this worker: it may be the socket that did not answer.
+            None => busy,
+        };
+        if alive {
+            Err(TERM_BUSY)
+        } else {
+            lock(&self.seen).remove(name);
+            Err(NO_TEXT_TERMINAL)
+        }
     }
 
     async fn conn(&self, s: TcpStream) {
@@ -200,8 +257,22 @@ impl Worker {
                 };
                 reply(&mut w, &v).await
             }
-            Req::Open { shell, app } => {
-                let v = match self.open(shell.as_deref(), &app).await {
+            Req::End { term } => {
+                let v = match cfg {
+                    Ok(_) => match self.end(&term).await {
+                        Ok(()) => json!({ "ok": true }),
+                        Err(e) => json!({ "error": e }),
+                    },
+                    Err(e) => json!({ "error": e }),
+                };
+                let sent = reply(&mut w, &v).await;
+                if v.get("ok").is_some() {
+                    self.sweep_later();
+                }
+                sent
+            }
+            Req::Open { shell, app, from } => {
+                let v = match self.open(shell.as_deref(), &app, from.as_deref()).await {
                     Ok(id) => json!({ "id": id }),
                     Err(e) => json!({ "error": e }),
                 };
@@ -259,6 +330,8 @@ impl Worker {
             pty.clone(),
             changed.clone(),
             self.rescan.subscribe(),
+            self.sweeps().then(|| self.sweeping.clone()),
+            self.seen.clone(),
         ));
         let mut sent: Option<TermList> = None;
         let mut tick = tokio::time::interval(self.opts.poll);
@@ -295,15 +368,12 @@ impl Worker {
             _ => return Err(BAD_ID.into()),
         };
         let name = clean_name(name).ok_or(INVALID_NAME)?;
-        let statuses = self.pty_statuses().await;
-        let Some(st) = statuses.iter().find(|s| is_session(s, &id.name)) else {
-            return Err(NO_TEXT_TERMINAL.into());
-        };
+        let st = self.find_pty(&id.name).await?;
         if st.key.is_none() {
             return Err(OLD_RUN.into());
         }
         let path = local::socket_path(&self.opts.pty_dir, st.pid).map_err(|_| NO_TEXT_TERMINAL)?;
-        let token = local::token(&self.opts.pty_dir).map_err(|_| NO_TEXT_TERMINAL)?;
+        let token = local::token(&self.opts.pty_dir).map_err(|_| TERM_BUSY)?;
         match local::rename(&path, &token, &name).await {
             Ok(()) => {
                 self.rescan.send_modify(|g| *g += 1);
@@ -311,20 +381,74 @@ impl Worker {
             }
             Err(local::Probe::Refused(e)) if e == "unsupported" => Err(OLD_RUN.into()),
             Err(local::Probe::Refused(e)) if e == INVALID_NAME => Err(INVALID_NAME.into()),
+            Err(local::Probe::Busy) => Err(TERM_BUSY.into()),
             Err(_) => Err(NO_TEXT_TERMINAL.into()),
         }
+    }
+
+    /// End the session `term`: its program is hung up and its window's holder exits.
+    async fn end(&self, term: &str) -> Result<(), String> {
+        let id = match TermId::parse(term) {
+            Ok(id) if id.backend == PTY && id.host.is_none() => id,
+            _ => return Err(BAD_ID.into()),
+        };
+        let st = self.find_pty(&id.name).await?;
+        if st.key.is_none() {
+            return Err(OLD_RUN_END.into());
+        }
+        let path = local::socket_path(&self.opts.pty_dir, st.pid).map_err(|_| NO_TEXT_TERMINAL)?;
+        let token = local::token(&self.opts.pty_dir).map_err(|_| TERM_BUSY)?;
+        match local::end(&path, &token).await {
+            Ok(()) => {
+                self.rescan.send_modify(|g| *g += 1);
+                Ok(())
+            }
+            Err(local::Probe::Refused(e)) if e == "unsupported" => Err(OLD_RUN_END.into()),
+            Err(local::Probe::Busy) => Err(TERM_BUSY.into()),
+            Err(_) => Err(NO_TEXT_TERMINAL.into()),
+        }
+    }
+
+    /// Whether the ended-tab sweep runs here: on macOS, and never with a test launcher.
+    fn sweeps(&self) -> bool {
+        cfg!(target_os = "macos") && self.opts.launch_with.is_none()
+    }
+
+    /// Sweeps 1.5 s, 3.5 s and 6 s from now: the holder just told to end leaves its marker only after its own
+    /// waits (each up to a second), and a marker must be a second old to be taken.
+    fn sweep_later(&self) {
+        if !self.sweeps() {
+            return;
+        }
+        let (dir, running) = (self.opts.pty_dir.clone(), self.sweeping.clone());
+        tokio::spawn(async move {
+            let start = tokio::time::Instant::now();
+            for at in SWEEP_AFTER_END {
+                tokio::time::sleep_until(start + at).await;
+                let (dir, running) = (dir.clone(), running.clone());
+                let _ = tokio::task::spawn_blocking(move || sweep::sweep_once(&dir, &running, sweep::close_tabs)).await;
+            }
+        });
     }
 
     /// Open a window of `app` that runs `rapp-term run` with `shell` (the default one when none is named) as a login
     /// shell, and wait for that `run` to show itself: the id of its session. One at a time, so each wait has only its
     /// own ticket to look for.
-    async fn open(&self, shell: Option<&str>, app: &str) -> Result<String, String> {
+    async fn open(&self, shell: Option<&str>, app: &str, from: Option<&str>) -> Result<String, String> {
         let known = launch::known(app) || (self.opts.launch_with.is_some() && ["Terminal", "iTerm"].contains(&app));
         if !known { return Err(UNKNOWN_APP.into()); }
         if self.opts.launch_with.is_none() && !self.available_launchers().await.iter().any(|l| l == app) {
             return Err("terminal app unavailable: a graphical desktop and installed terminal are required".into());
         }
         let shells = self.opts.shells_with.as_ref().map_or_else(installed_shells, |f| f());
+        let source = match from.and_then(|f| TermId::parse(f).ok()).filter(|id| id.backend == PTY && id.host.is_none()) {
+            Some(id) => {
+                let statuses = self.pty_statuses().await;
+                source_of(statuses.iter().find(|s| is_session(s, &id.name)), &shells)
+            }
+            None => Source::default(),
+        };
+        let shell = shell.or(source.shell.as_deref());
         let found = match shell {
             Some(p) => shells.iter().find(|s| s.path == p),
             None => shells.iter().find(|s| s.default),
@@ -343,10 +467,11 @@ impl Worker {
             dir,
             &ticket,
             &shell,
+            source.cwd.as_deref(),
         );
         let file = dir.join("launch").join(format!("{ticket}.command"));
         write_private(&file, &body).map_err(|_| FAILED)?;
-        let res = self.wait_for(&file, app, &ticket, dir, &token).await;
+        let res = self.wait_for(&file, app, &ticket, dir, &token, source.tty.as_deref()).await;
         // A window that is slow to start may still read it after the wait: that one is left for the sweep.
         if !matches!(&res, Err(e) if e == NOT_STARTED || e == launch::START_TIMEOUT) {
             let _ = std::fs::remove_file(&file);
@@ -361,9 +486,12 @@ impl Worker {
         ticket: &str,
         dir: &std::path::Path,
         token: &str,
+        source_tty: Option<&str>,
     ) -> Result<String, String> {
         let (app, file, with) = (app.to_string(), file.to_path_buf(), self.opts.launch_with.clone());
-        let started = tokio::task::spawn_blocking(move || launch::open(&app, &file, with.as_deref())).await;
+        let tty = source_tty.map(str::to_string);
+        let started =
+            tokio::task::spawn_blocking(move || launch::open(&app, &file, with.as_deref(), tty.as_deref())).await;
         match started {
             Ok(Ok(())) => {}
             Ok(Err(e)) if e.to_string() == launch::NO_DESKTOP => return Err(launch::NO_DESKTOP.into()),
@@ -406,21 +534,23 @@ impl Worker {
         R: AsyncBufRead + Unpin,
         W: AsyncWrite + Unpin,
     {
-        let statuses = self.pty_statuses().await;
-        let Some(st) = statuses.iter().find(|s| is_session(s, &id.name)) else {
-            return put(w, &Out::Error { error: NO_TEXT_TERMINAL.into() }).await;
+        let st = match self.find_pty(&id.name).await {
+            Ok(st) => st,
+            Err(e) => return put(w, &Out::Error { error: e.into() }).await,
         };
         let (path, key) = match (local::socket_path(&self.opts.pty_dir, st.pid), format!("{PTY}:{}", st.pid)) {
             (Ok(p), k) => (p, k),
             _ => return put(w, &Out::Error { error: NO_TEXT_TERMINAL.into() }).await,
         };
-        let token = local::token(&self.opts.pty_dir);
-        let stream = match token {
-            Ok(t) => local::connect(&path, "view", &t).await,
-            Err(_) => Err(std::io::ErrorKind::NotFound.into()),
+        let stream = match local::token(&self.opts.pty_dir) {
+            Ok(t) => local::connect(&path, "view", &t)
+                .await
+                .map_err(|e| if local::gone(&e) { NO_TEXT_TERMINAL } else { TERM_BUSY }),
+            Err(_) => Err(TERM_BUSY),
         };
-        let Ok(stream) = stream else {
-            return put(w, &Out::Error { error: NO_TEXT_TERMINAL.into() }).await;
+        let stream = match stream {
+            Ok(s) => s,
+            Err(e) => return put(w, &Out::Error { error: e.into() }).await,
         };
         let inputs = Arc::new(AtomicU64::new(0));
         let _ended = sid.map(|sid| Ended { events: &self.events, sid, term: id.to_string(), inputs: inputs.clone() });
@@ -503,12 +633,32 @@ impl Drop for Ended<'_> {
     }
 }
 
-/// The live `run` sessions in `dir`, none when its token cannot be had.
-async fn scan_pty(dir: &std::path::Path) -> Vec<Status> {
-    match local::token(dir) {
-        Ok(t) => local::scan(dir, &t).await,
-        Err(_) => Vec::new(),
+/// The live `run` sessions in `dir`, none when its token cannot be had; and whether a socket did not answer in
+/// time (with no token, whether there is any socket). Each one's holder pid goes in `seen`, which keeps only the
+/// pids whose socket file is still there.
+async fn scan_pty(dir: &std::path::Path, seen: &Seen) -> (Vec<Status>, bool) {
+    let got = match local::token(dir) {
+        Ok(t) => local::scan_all(dir, &t).await,
+        Err(_) => {
+            let any = std::fs::read_dir(dir.join("pty"))
+                .is_ok_and(|d| d.flatten().any(|e| e.path().extension().is_some_and(|x| x == "sock")));
+            (Vec::new(), any)
+        }
+    };
+    let mut seen = lock(seen);
+    seen.retain(|_, pid| local::socket_path(dir, *pid).is_ok_and(|p| p.exists()));
+    for s in &got.0 {
+        seen.insert(s.key.clone().unwrap_or_else(|| s.name.clone()), s.pid);
     }
+    got
+}
+
+/// Whether process `pid` is alive (one of another user counts).
+fn pid_alive(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else { return false };
+    // SAFETY: signal 0 only checks that the process exists.
+    let ok = unsafe { libc::kill(pid, 0) == 0 };
+    ok || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 /// The id of a `run` session: its key, or its name when it was started by a version that has no key.
@@ -552,6 +702,30 @@ fn number_clashes(rows: &mut [TermRow], statuses: &[Status]) {
     }
 }
 
+/// What a new terminal takes from the session it is opened beside.
+#[derive(Default, Debug, PartialEq)]
+struct Source {
+    /// Its directory, when it still is one.
+    cwd: Option<PathBuf>,
+    /// The path of the installed shell its program is.
+    shell: Option<String>,
+    tty: Option<String>,
+}
+
+/// `Source` of the session `st`; nothing for none.
+fn source_of(st: Option<&Status>, shells: &[Shell]) -> Source {
+    let Some(st) = st else { return Source::default() };
+    let shell = shells
+        .iter()
+        .find(|s| st.command == s.path || st.command.strip_prefix(&s.path).is_some_and(|r| r.starts_with(' ')))
+        .map(|s| s.path.clone());
+    Source {
+        cwd: st.cwd.as_ref().map(PathBuf::from).filter(|p| p.is_dir()),
+        shell,
+        tty: st.tty.clone().filter(|t| !t.is_empty()),
+    }
+}
+
 /// One row per status, in the same order.
 fn status_rows(unread: &Mutex<Unread>, statuses: &[Status], now: u64) -> Vec<TermRow> {
     let u = lock(unread);
@@ -575,12 +749,15 @@ fn status_rows(unread: &Mutex<Unread>, statuses: &[Status], now: u64) -> Vec<Ter
             },
             ps: s.ps.clone(),
             title: s.title.clone(),
+            fg: s.fg.clone(),
+            shell: s.shell,
         })
         .collect()
 }
 
 /// Scan for `run` sessions every `poll`, or at once when `rescan` changes; each answer goes in `rows`, and `changed`
-/// hears when it differs.
+/// hears when it differs. With `sweeping` (where sweeps run), each pass sweeps the ended tabs too, one at a time.
+#[allow(clippy::too_many_arguments)]
 async fn ask_pty(
     dir: PathBuf,
     unread: Arc<Mutex<Unread>>,
@@ -588,9 +765,15 @@ async fn ask_pty(
     rows: Arc<Mutex<Option<Vec<TermRow>>>>,
     changed: Arc<Notify>,
     mut rescan: tokio::sync::watch::Receiver<u64>,
+    sweeping: Option<Arc<AtomicBool>>,
+    seen: Seen,
 ) {
     loop {
-        let got = pty_rows(&unread, &scan_pty(&dir).await, unix_now());
+        if let Some(running) = sweeping.clone() {
+            let d = dir.clone();
+            tokio::task::spawn_blocking(move || sweep::sweep_once(&d, &running, sweep::close_tabs));
+        }
+        let got = pty_rows(&unread, &scan_pty(&dir, &seen).await.0, unix_now());
         {
             let mut last = lock(&rows);
             if last.as_ref() != Some(&got) {
@@ -604,6 +787,10 @@ async fn ask_pty(
         }
     }
 }
+
+/// When the sweeps after an `end` run, from the end's answer.
+const SWEEP_AFTER_END: [Duration; 3] =
+    [Duration::from_millis(1500), Duration::from_millis(3500), Duration::from_millis(6000)];
 
 /// How long `open` waits for the window's `run` to appear.
 const OPEN_WAIT: Duration = Duration::from_secs(10);
@@ -798,6 +985,10 @@ mod tests {
             key: None,
             ps,
             title: None,
+            fg: None,
+            cwd: None,
+            shell: None,
+            tty: None,
         }
     }
 
@@ -890,6 +1081,8 @@ mod tests {
             unread: false,
             ps: None,
             title: Some("t".repeat(64)),
+            fg: None,
+            shell: None,
         };
         let hosts = vec![HostRow { host: None, launchers: Vec::new(), shells: installed_shells() }];
         let list = TermList { terms: (0..1000).map(row).collect(), hosts };
@@ -899,6 +1092,58 @@ mod tests {
         assert_eq!(cut.terms[..], list.terms[..cut.terms.len()]);
         let small = TermList { terms: list.terms[..3].to_vec(), hosts: list.hosts.clone() };
         assert_eq!(fit(small.clone()), small);
+    }
+
+    fn shells_for_test() -> Vec<Shell> {
+        let sh = |path: &str, default: bool| Shell { path: path.into(), name: path.rsplit('/').next().unwrap().into(), default };
+        vec![sh("/bin/zsh", true), sh("/opt/my shells/fish", false)]
+    }
+
+    #[test]
+    fn rows_carry_fg_and_shell() {
+        let mut st = status_with(None);
+        st.fg = Some("vim".into());
+        st.shell = Some(false);
+        let u = Mutex::new(Unread::new(1000));
+        let rows = status_rows(&u, &[st, status_with(None)], 1100);
+        assert_eq!((rows[0].fg.as_deref(), rows[0].shell), (Some("vim"), Some(false)));
+        assert_eq!((rows[1].fg.as_deref(), rows[1].shell), (None, None));
+        let v = serde_json::to_value(&rows[1]).unwrap();
+        assert!(v.get("fg").is_none() && v.get("shell").is_none());
+    }
+
+    #[test]
+    fn open_from_uses_source_shell() {
+        let mut st = status_with(None);
+        st.command = "/opt/my shells/fish -l".into();
+        st.tty = Some("/dev/ttys004".into());
+        let src = source_of(Some(&st), &shells_for_test());
+        assert_eq!(src.shell.as_deref(), Some("/opt/my shells/fish"));
+        assert_eq!(src.tty.as_deref(), Some("/dev/ttys004"));
+        st.command = "/usr/bin/cat".into();
+        assert_eq!(source_of(Some(&st), &shells_for_test()).shell, None);
+        assert_eq!(source_of(None, &shells_for_test()), Source::default());
+    }
+
+    #[test]
+    fn open_from_missing_cwd_falls_back() {
+        let d = tempfile::tempdir().unwrap();
+        let mut st = status_with(None);
+        st.cwd = Some(d.path().to_string_lossy().into_owned());
+        assert_eq!(source_of(Some(&st), &[]).cwd.as_deref(), Some(d.path()));
+        let gone = d.path().to_path_buf();
+        drop(d);
+        st.cwd = Some(gone.to_string_lossy().into_owned());
+        assert_eq!(source_of(Some(&st), &[]).cwd, None);
+    }
+
+    #[test]
+    fn open_and_end_requests_parse() {
+        let r: Req = serde_json::from_str(r#"{"op":"open","app":"Terminal"}"#).unwrap();
+        assert!(matches!(r, Req::Open { from: None, .. }));
+        let r: Req = serde_json::from_str(r#"{"op":"open","app":"Terminal","from":"term:pty:ab"}"#).unwrap();
+        assert!(matches!(r, Req::Open { from: Some(_), .. }));
+        assert!(matches!(serde_json::from_str(r#"{"op":"end","term":"x"}"#).unwrap(), Req::End { .. }));
     }
 
     #[test]
