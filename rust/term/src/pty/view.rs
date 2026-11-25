@@ -342,6 +342,9 @@ mod tests {
             fit: Mutex::default(),
             ps: Mutex::new(None),
             title: Mutex::new(None),
+            fg: Mutex::default(),
+            fg_rev: watch::channel(0).0,
+            tty: None,
         };
         (Arc::new(sh), rx)
     }

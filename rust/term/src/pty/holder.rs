@@ -108,6 +108,9 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
         fit: Mutex::default(),
         ps: Mutex::new(None),
         title: Mutex::new(None),
+        fg: Mutex::default(),
+        fg_rev: watch::channel(0).0,
+        tty: tty_name(),
     });
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path).with_context(|| format!("cannot listen on {}", path.display()))?;
@@ -166,6 +169,8 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
 
     let mut tick = tokio::time::interval(TICK);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut fg_tick = tokio::time::interval(FG_EVERY);
+    fg_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let end = loop {
         tokio::select! {
             status = &mut exited => break End::Exited(exit_code(status)),
@@ -174,6 +179,7 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
             _ = int.recv() => break End::Signal(libc::SIGINT),
             _ = quit.recv() => break End::Signal(libc::SIGQUIT),
             _ = winch.recv() => resize(pair.master.as_ref(), &shared),
+            _ = fg_tick.tick() => probe_fg(&shared, pair.master.process_group_leader(), child_pid.unwrap_or(0)),
             _ = tick.tick() => {
                 tick_sync(&shared, Emu::tick);
                 resize_window(&window, &shared);
@@ -203,6 +209,23 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
     drop(bound);
     drop(raw);
     Ok(code)
+}
+
+/// How often the foreground program is looked up.
+const FG_EVERY: Duration = Duration::from_secs(1);
+
+/// The holder's own window tty, read once.
+fn tty_name() -> Option<String> {
+    let p = unsafe { libc::ttyname(0) };
+    (!p.is_null()).then(|| unsafe { std::ffi::CStr::from_ptr(p) }.to_string_lossy().into_owned())
+}
+
+/// Reads the foreground group into `shared.fg`; on a change bumps `shared.fg_rev`.
+fn probe_fg(shared: &Shared, pgrp: Option<i32>, child_pid: u32) {
+    let changed = shared.fg.lock().unwrap_or_else(|e| e.into_inner()).update(pgrp, child_pid);
+    if changed {
+        shared.fg_rev.send_modify(|v| *v += 1);
+    }
 }
 
 /// Why the main loop stopped.
@@ -504,6 +527,9 @@ mod tests {
             fit: Mutex::default(),
             ps: Mutex::new(None),
             title: Mutex::new(None),
+            fg: Mutex::default(),
+            fg_rev: watch::channel(0).0,
+            tty: None,
         };
         (sh, rx)
     }

@@ -1,3 +1,4 @@
+pub mod fg;
 pub mod fit;
 pub mod grid;
 pub mod holder;
@@ -43,6 +44,12 @@ pub struct Shared {
     pub ps: Mutex<Option<ps::Ps>>,
     /// The title the program set (OSC 0/1/2), cleaned; kept by the output pump.
     pub title: Mutex<Option<String>>,
+    /// The foreground program and its directory, probed once a second by the holder.
+    pub fg: Mutex<fg::Fg>,
+    /// Bumped whenever `fg` changed. The title composer (a later task) subscribes with `fg_rev.subscribe()`.
+    pub fg_rev: watch::Sender<u64>,
+    /// The holder's own window tty (`ttyname(0)`, read once at start); none when not a tty.
+    pub tty: Option<String>,
 }
 
 impl Meta {
@@ -53,6 +60,7 @@ impl Meta {
 
 impl Shared {
     pub fn status(&self) -> local::Status {
+        let fg = self.fg.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let s = self.emu.lock().unwrap_or_else(|e| e.into_inner()).screen();
         local::Status {
             v: local::LOCAL_V,
@@ -67,6 +75,10 @@ impl Shared {
             key: Some(self.meta.key.clone()),
             ps: self.ps.lock().unwrap_or_else(|e| e.into_inner()).clone(),
             title: if self.meta.named.load(Ordering::Relaxed) { None } else { self.title.lock().unwrap_or_else(|e| e.into_inner()).clone() },
+            fg: fg.prog.clone(),
+            cwd: fg.cwd.as_ref().map(|p| p.to_string_lossy().into_owned()),
+            shell: fg.probed.then_some(fg.shell),
+            tty: self.tty.clone(),
         }
     }
 }

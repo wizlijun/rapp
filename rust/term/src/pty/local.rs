@@ -114,6 +114,18 @@ pub struct Status {
     /// The title the program set for itself; none when it set none or the session was named by hand.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// The foreground program's name (argv[0]'s file name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fg: Option<String>,
+    /// The foreground program's current directory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    /// Whether the program the holder started is the foreground one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell: Option<bool>,
+    /// The holder's window tty, like `/dev/ttys012`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tty: Option<String>,
 }
 
 /// Why a socket gave no status.
@@ -402,6 +414,10 @@ mod tests {
                     key: None,
                     ps: None,
                     title: None,
+                    fg: None,
+                    cwd: None,
+                    shell: None,
+                    tty: None,
                 };
                 w.write_all(format!("{}\n", serde_json::to_string(&st).unwrap()).as_bytes()).await.unwrap();
             }

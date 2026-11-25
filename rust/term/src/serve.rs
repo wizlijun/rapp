@@ -798,6 +798,10 @@ mod tests {
             key: None,
             ps,
             title: None,
+            fg: None,
+            cwd: None,
+            shell: None,
+            tty: None,
         }
     }
 
