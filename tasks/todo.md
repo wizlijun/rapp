@@ -1062,3 +1062,18 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] [Linux v0.15.28](https://github.com/wizlijun/rapp/releases/tag/v0.15.28) 已发布（源码 `cc9583a6`，`--latest=false`）；两包 40 文件一致、14 ELF 依赖完整，隔离网络命名空间服务/CLI/端口共享测试通过；三个远端附件 SHA256 与匿名校验清单一致，macOS Latest 保留 `v0.15.27`。
 - [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-25-linux-01528-parity.md`。
 - [ ] 实机验收：Linux / Omarchy 下连接远端设备的总览「打开应用」菜单交互与中文输入法筛选。
+
+## 程序状态 S1（分支 `feat/program-status-s1`，2026-11-25）实机检查
+
+规格 `docs/superpowers/specs/2026-11-25-rapp-program-status-design.md` §8、§9；计划 `docs/superpowers/plans/2026-11-25-rapp-program-status-s1.md`。S2–S4 待写计划。
+
+- [ ] 1 `rapp-term run -- claude`：Claude Code 开始报状态；会话列表里看得到“在干活”
+- [ ] 2 让 Claude Code 跑一条要确认的命令：不点开会话，设备页那一行是“等确认 · approve Bash: …”，“需要你”多一条，点“打开”进到会话；看过以后不清，回了才清
+- [ ] 3 同时开三个会话各跑一个 CLI：不点开就看得出哪个在等确认；Agent 安静思考时不亮未读
+- [ ] 4 Codex：等确认时是“等确认”（没有 `msg`）
+- [ ] 5 agy（P0 第 1、2 条）：答了探测以后报不报、结尾是什么、`msg` 里是什么
+- [ ] 6 外层是 iTerm2 ≥ 3.7.5 或 kitty ≥ 0.50.0 时，程序收到两次探测回答有没有副作用（P0 第 3 条）
+- [ ] 7 Claude Code 的 `done` 和 `idle` 各在什么时候出现，回合结束是否正好亮一次未读（P0 第 5 条）
+- [ ] 8 `term.json` 写 `{"programStatus": false}` 后新开的会话：和现在完全一样，没有状态
+- [ ] 9 错误色没做，`error` 只靠“出错 · …”的字（Task 6）
+- [ ] 10 真伪终端加真窗口：程序先读到 7501 的回答，再读到窗口对设备属性查询的回答（目前只有单元测试，没有在真窗口里验过）
