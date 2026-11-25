@@ -1077,3 +1077,4 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 8 `term.json` 写 `{"programStatus": false}` 后新开的会话：和现在完全一样，没有状态
 - [ ] 9 错误色没做，`error` 只靠“出错 · …”的字（Task 6）
 - [ ] 10 真伪终端加真窗口：程序先读到 7501 的回答，再读到窗口对设备属性查询的回答（目前只有单元测试，没有在真窗口里验过）
+- [ ] 11 遗留小项：已打开终端卡片的“等待”灯不看设备是否离线（`main_state.dart` `_termBlocked` 没查 `_offlineSince`），设备刚离线时卡片可能还亮等待；顺手修 `main_state.dart` ~1062 的缩进
