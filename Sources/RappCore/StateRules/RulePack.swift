@@ -160,7 +160,7 @@ public struct RulePack: Equatable {
             variants.append(VariantSpec(name: item["name"]?.stringValue ?? "#\(i)", when: when,
                                         patch: item["patch"] ?? .object([:])))
         }
-        return RulePack(id: id, name: v["name"]?.stringValue ?? id, rev: Int(v["rev"]?.numberValue ?? 0),
+        return RulePack(id: id, name: v["name"]?.stringValue ?? id, rev: v["rev"]?.numberValue.flatMap { Int(exactly: $0.rounded(.towardZero)) } ?? 0,
                         regions: regions, signals: signals, states: states,
                         require: (v["require"]?.arrayValue ?? []).compactMap(\.stringValue), variants: variants)
     }

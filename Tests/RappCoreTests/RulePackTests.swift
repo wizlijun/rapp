@@ -98,4 +98,22 @@ final class RulePackTests: XCTestCase {
         XCTAssertEqual(p.variants[0].patch["a"], .number(1))
         XCTAssertEqual(p.name, "x"); XCTAssertEqual(p.rev, 0)
     }
+
+    func testHugeNumbersDoNotCrash() throws {
+        for rev in ["1e30", "-1e30", "1e308", "2.9"] {
+            let p = try RulePack.decode(try v("{\"format\":\"1.0\",\"id\":\"x\",\"rev\":\(rev)}"))
+            XCTAssertEqual(p.rev, rev == "2.9" ? 2 : 0)
+        }
+        let p = try RulePack.decode(try v(#"""
+        {"format":"1.0","id":"x","rev":1e30,
+         "regions":{"e":{"edge":{"from":"left","min":-1e30,"max":1e308}},
+                    "b":{"box":{"top":1e30,"width":"1e30%"}},
+                    "s":{"strip":{"of":"e","side":"left","width":1e308}},
+                    "o":{"blob":{"in":"e","size":[-1e30,1e30]}}},
+         "signals":{"a":{"in":"b","detect":{"motion":{"window":1e30,"min":-1e30},"color":{"h":[1e30,-1e30]}}}},
+         "states":[{"state":"working","hold":1e30,"release":-1e308}]}
+        """#))
+        XCTAssertEqual(p.rev, 0)
+        XCTAssertEqual(p.states.count, 1)
+    }
 }
