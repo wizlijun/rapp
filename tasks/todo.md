@@ -1003,7 +1003,7 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] `key_bar_keys_test.dart`、`key_bar_test.dart`、`linux_key_bar_test.dart` 共 82 项通过（云端 Linux 副本，Flutter 3.50.1）。全量 3086 通过、11 跳过、11 失败；这 11 项在没改动的副本上同样失败，是那个环境的问题（以 root 跑所以只读目录写得进去；副本里没有 `rust/`、`Tests/`、原生库和 systemd）。本机还没跑全量。
 
 实机检查：
-- [ ] 1 iPhone 竖屏：第一排十颗的字都没被裁（重点看 `⇧Tab`）；第二排终端 10 颗、App 会话 11 颗也不裁。
+- [ ] 1 iPhone 竖屏：第一排的字都没被裁（后来改成 11 颗，见下面 ⋯ ⌄ 一节）（重点看 `⇧Tab`）；第二排终端 10 颗、App 会话 11 颗也不裁。
 - [ ] 2 Claude Code 权限框：↑ ↓ 选、⏎ 确认、Esc 拒绝；右手拇指够 ↑ ↓ ⌫ ⏎ 顺不顺，⋯ 在中间别不别扭。
 - [ ] 3 不开 ⋯：⌫ 能删远端提示符里的字，长按连发。
 - [ ] 4 不开 ⋯：点 ⌃ 再在软键盘上打 o / r / t，远端收到 ⌃O / ⌃R / ⌃T，草稿里没多出字母；点 ⌃ 再点 ⌫ 删一个词。
@@ -1011,3 +1011,12 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 6 第二排：← → 挪远端光标，上滑是 Home / End；⌃L 重画 Claude Code 的画面。
 - [ ] 7 VoiceOver：⌘C ⌘V 两颗念「复制」「粘贴」。
 - [ ] 8 macOS / Linux：同 2–6。
+
+### 第一排末尾 ⋯ ⌄（分支 `feat/key-bar-fold`，2026-11-25）
+
+用户：「是不是还却一个隐藏键的位置」→「把... 和折叠 放在第一行的末尾」。第一排改成 `Tab ⇧Tab Esc ⌃C ⌃ ↑ ↓ ⌫ ⏎ ⋯ ⌄`（11 颗），⌄ 收起快捷区，框里的开关照留。
+
+- [x] `key_bar_keys_test` / `key_bar_test` / `linux_key_bar_test` 通过；本机全量 3092 通过、16 跳过；`linux_detach_test` 两项在新 worktree 里缺 `rust/target/release/rapp-session` 才失败，借主目录的构建重跑 5 项全过。
+- [ ] 9 iPhone 竖屏 11 颗：`⇧Tab` 和 `⌄` 的字不裁，⋯ ⌄ 两颗不容易点错。
+- [ ] 10 点 ⌄：快捷区收起，框里的开关变暗；再点开关又出来。⌃ 亮着时点 ⌄ 也收。
+- [ ] 11 VoiceOver：⌄ 念「收起快捷区」。

@@ -485,9 +485,9 @@ void main() {
       ]);
     });
 
-    iosTest('left to right: Tab ⇧Tab Esc ⌃C ⌃ ⋯ ↑ ↓ ⌫ ⏎', (tester) async {
+    iosTest('left to right: Tab ⇧Tab Esc ⌃C ⌃ ↑ ↓ ⌫ ⏎ ⋯ ⌄', (tester) async {
       await tester.pumpWidget(bar(tsess));
-      const order = ['tab', 'stab', 'esc', 'cc', 'ctrl', 'more', 'up', 'down', 'bksp', 'enter'];
+      const order = ['tab', 'stab', 'esc', 'cc', 'ctrl', 'up', 'down', 'bksp', 'enter', 'more', 'hide'];
       final xs = [for (final id in order) tester.getCenter(k(id)).dx];
       for (var i = 1; i < xs.length; i++) {
         expect(xs[i], greaterThan(xs[i - 1]), reason: '${order[i]} is right of ${order[i - 1]}');
@@ -571,11 +571,34 @@ void main() {
       expect(File('${tmp.path}/devices/123456789/gui.json').readAsStringSync(), contains('"key_bar_more":false'));
     });
 
-    iosTest('⋯ is the last key of the first row; no ⊙', (tester) async {
+    iosTest('⌄ is the last key of the first row, ⋯ just before it', (tester) async {
       await tester.pumpWidget(bar(tsess));
-      expect(k('hide'), findsNothing);
+      expect(k('hide'), findsOneWidget);
       expect(k('more'), findsOneWidget);
-      expect(find.descendant(of: find.byType(KeyBar), matching: find.bySemanticsLabel('收起快捷区')), findsNothing);
+      expect(tester.getCenter(k('hide')).dx, greaterThan(tester.getCenter(k('more')).dx));
+      expect(tester.getCenter(k('hide')).dy, tester.getCenter(k('more')).dy);
+      expect(find.descendant(of: find.byType(KeyBar), matching: find.bySemanticsLabel('收起快捷区')), findsOneWidget);
+    });
+
+    iosTest('⌄ folds the 快捷区 of its kind: a terminal sets quick_hidden_term, Safari quick_hidden_app', (tester) async {
+      s.setQuickHidden(term: false, hidden: false); // apps start folded
+      await tester.pumpWidget(bar(tsess));
+      expect(s.prefs.quickHiddenTerm, isFalse);
+      await tap(tester, 'hide');
+      expect(s.prefs.quickHiddenTerm, isTrue);
+      expect(s.prefs.quickHiddenApp, isFalse);
+      expect(termKeys(), isEmpty);
+      await tester.pumpWidget(bar(app));
+      await tap(tester, 'hide');
+      expect(s.prefs.quickHiddenApp, isTrue);
+    });
+
+    iosTest('⌄ folds even with ⌃ lit and 打字后自动收起 off', (tester) async {
+      await tester.pumpWidget(bar(tsess));
+      s.setQuickAutoHide(false);
+      await tap(tester, 'ctrl');
+      await tap(tester, 'hide');
+      expect(s.prefs.quickHiddenTerm, isTrue);
     });
 
     iosTest('the bar is as high as keyBarHeightOf says, even at zoom 1.75 widths', (tester) async {

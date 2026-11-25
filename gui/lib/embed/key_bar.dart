@@ -320,6 +320,9 @@ class _KeyBarState extends State<KeyBar> {
         _paste();
       case BarKind.more:
         widget.state.setKeyBarMore(!widget.state.prefs.keyBarMore);
+      case BarKind.hide:
+        // Asked for, so not [foldKeyBar]: a lit ⌃ or 打字后自动收起 off does not keep the 快捷区 up.
+        widget.state.setQuickHidden(term: termKind(widget.state, widget.session), hidden: true);
     }
     return null;
   }
