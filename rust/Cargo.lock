@@ -1693,6 +1693,7 @@ version = "0.15.28"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
+ "base64",
  "libc",
  "portable-pty",
  "rapp-net",
