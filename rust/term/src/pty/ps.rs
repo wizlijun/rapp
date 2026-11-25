@@ -498,11 +498,20 @@ pub struct Ps {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub progress: Option<u8>,
     /// The Unix second this `state` began.
+    #[serde(default)]
     pub since: u64,
     /// The Unix second the program last stopped (working or blocked to done, error or idle); 0 if never.
+    #[serde(default)]
     pub stopped: u64,
     /// Goes up by one whenever the snapshot changes.
+    #[serde(default)]
     pub seq: u64,
+}
+
+/// For `Status.ps`: a snapshot this build cannot read (a newer `run`) is no status, not a failed `Status`.
+pub fn lenient<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Ps>, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(v).ok().flatten())
 }
 
 /// What one `Tracker::feed` saw.
@@ -531,6 +540,9 @@ impl Tracker {
     pub fn feed(&mut self, bytes: &[u8], now: u64) -> Fed {
         let mut events = Vec::new();
         self.scanner.feed(bytes, |e| events.push(e));
+        if events.is_empty() {
+            return Fed { probes: 0, changed: false };
+        }
         let mut probes = 0;
         let mut stopped_changed = false;
         let mut prev = self.records.deciding().map(|r| r.state);
@@ -617,6 +629,14 @@ mod tests {
         format!("\x1b]7501;{body}\x07").into_bytes()
     }
 
+    #[test]
+    fn tracker_chunk_without_events_changes_nothing() {
+        let mut t = Tracker::default();
+        t.feed(&rep("state=working"), 10);
+        let f = t.feed(b"plain output", 99);
+        assert_eq!((f.probes, f.changed), (0, false));
+        assert_eq!(t.ps().map(|p| (p.since, p.seq)), Some((10, 1)));
+    }
     #[test]
     fn tracker_snapshot_since_stopped_seq() {
         let mut t = Tracker::default();

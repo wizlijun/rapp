@@ -13,7 +13,7 @@
 
 use super::fit::Window;
 use super::grid::Emu;
-use super::ps::{Tracker, MAX_REPLIES, PROBE_REPLY};
+use super::ps::{Fed, Tracker, MAX_REPLIES, PROBE_REPLY};
 use super::{local, view, Meta, Shared};
 use crate::id::{clean_name, default_name, session_name};
 use anyhow::{anyhow, Context};
@@ -289,13 +289,20 @@ fn pump_output<W: Write>(
         // The probe's answer is queued before the window sees the chunk, so the window's own answers to whatever
         // the program sent after the probe come behind it. The tracker is outside `guarded`: an emulator panic
         // cannot stop it. At most MAX_REPLIES answers per chunk keeps an unread input queue bounded by the output.
-        if let Some(t) = tracker.as_mut() {
-            let fed = t.feed(&b[..n], now());
-            if fed.probes > 0 {
-                let _ = shared.input.send(PROBE_REPLY.repeat(fed.probes.min(MAX_REPLIES)));
-            }
-            if fed.changed {
-                *shared.ps.lock().unwrap_or_else(|e| e.into_inner()) = t.ps().cloned();
+        if tracker.is_some() {
+            let at = now();
+            match track(&mut tracker, |t| t.feed(&b[..n], at)) {
+                Some(fed) => {
+                    if fed.probes > 0 {
+                        let _ = shared.input.send(PROBE_REPLY.repeat(fed.probes.min(MAX_REPLIES)));
+                    }
+                    if fed.changed {
+                        *shared.ps.lock().unwrap_or_else(|e| e.into_inner()) = tracker.as_ref().and_then(|t| t.ps().cloned());
+                    }
+                }
+                // The tracker panicked and is gone: the status stops, the output keeps flowing.
+                None if tracker.is_none() => *shared.ps.lock().unwrap_or_else(|e| e.into_inner()) = None,
+                None => {}
             }
         }
         // A window that is gone is no reason to stop: viewers still see the screen.
@@ -309,6 +316,19 @@ fn pump_output<W: Write>(
         shared.rev.send_modify(|r| *r += 1);
     }
     let _ = drained.send(());
+}
+
+/// Runs `f` on the tracker; if it panics the tracker is dropped (None) and so is the result. Nothing the program
+/// prints may stop `pump_output`, the only thread draining the pty.
+fn track(tracker: &mut Option<Tracker>, f: impl FnOnce(&mut Tracker) -> Fed) -> Option<Fed> {
+    let t = tracker.as_mut()?;
+    match std::panic::catch_unwind(AssertUnwindSafe(|| f(t))) {
+        Ok(v) => Some(v),
+        Err(_) => {
+            *tracker = None;
+            None
+        }
+    }
 }
 
 /// Runs `f` on the emulator; None when it panicked, and the emulator is then a fresh one of size `fresh`, or else of
@@ -503,6 +523,14 @@ mod tests {
         let pty = Chunks(VecDeque::from([&b"\x1b]7501;?\x07\x1b[c"[..]]));
         pump_output(pty, &window, &sh, tx, Emu::feed, Some(Tracker::default()));
         assert_eq!(window.lock().unwrap().get_ref().log, ["reply:10", "window"]);
+    }
+
+    #[test]
+    fn a_panicking_tracker_is_dropped_and_output_keeps_flowing() {
+        let mut t = Some(Tracker::default());
+        assert!(track(&mut t, |_| panic!("tracker fell over")).is_none());
+        assert!(t.is_none());
+        assert!(track(&mut t, |t| t.feed(b"x", 1)).is_none());
     }
 
     #[test]

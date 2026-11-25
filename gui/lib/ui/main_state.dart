@@ -1062,8 +1062,10 @@ class MainState extends ChangeNotifier {
       for (final h in hub?.hosts ?? const <HubHost>[])
         if (_seenOnline.contains(h.id) && _offlineSince.containsKey(h.id))
           NeedItem(NeedKind.device, h.id, '${deviceName(h.id)} 离线', _offlineSince[h.id]!),
+      // A device that dropped keeps its last list; its terminals cannot be opened, so they are not asks.
       for (final e in hub?.termLists.entries ?? const <MapEntry<String, TermList>>[])
-        for (final r in e.value.terms)
+        if (!_offlineSince.containsKey(e.key))
+         for (final r in e.value.terms)
           if (!r.dead && r.ps?.state == 'blocked')
             () {
               final key = '${e.key}\n${r.id}\n${r.ps!.seq}';
@@ -1182,6 +1184,13 @@ class MainState extends ChangeNotifier {
   /// current one, else the one stored with it.
   String labelOf(AppRef a) => isTermApp(a.bundle) ? termTitle(termName(a.device, a.bundle) ?? a.name) : a.name;
 
+  /// A text terminal on [device] whose live row says its program waits for the person.
+  bool _termBlocked(String device, String app) {
+    if (!isTermApp(app)) return false;
+    final r = hub?.termLists[device]?.terms.where((r) => r.id == app).firstOrNull;
+    return r != null && !r.dead && r.ps?.state == 'blocked';
+  }
+
   SessionEntry _entryOf(SessionRecord r) {
     final sid = r.sid;
     final rs = sid == null ? null : remote[sid];
@@ -1195,7 +1204,7 @@ class MainState extends ChangeNotifier {
       appName: r.app == 'desktop:' ? _desktopName(r.id) : r.appName,
       device: deviceName(r.id),
       path: r.path,
-      lamp: recordLamp(r, rs),
+      lamp: r.phase != Phase.disconnected && _termBlocked(r.id, r.app) ? Lamp.waiting : recordLamp(r, rs),
       bytesPerSecond: r.phase == Phase.live ? rs?.bytesPerSecond : null,
       reason: r.phase == Phase.disconnected ? disconnectWord(r.reason) : null,
       takenOver: r.phase == Phase.disconnected && takenOver(r.reason),
@@ -1217,7 +1226,7 @@ class MainState extends ChangeNotifier {
           appName: appName(s.id, s.app),
           device: deviceName(s.id),
           path: s.path,
-          lamp: Lamp.active,
+          lamp: _termBlocked(s.id, s.app) ? Lamp.waiting : Lamp.active,
         );
         if (seen.add(e.key)) out.add(e);
       }

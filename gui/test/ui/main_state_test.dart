@@ -5753,6 +5753,44 @@ void main() {
       expect(s.needs, isEmpty);
     });
 
+    test('a device that dropped has no terminal needs', () async {
+      put([row('term:pty:a', const TermPs('blocked', seq: 3))]);
+      expect(s.needs, hasLength(1));
+      t.emit({'event': 'presence', 'id': '111', 'online': false});
+      await pump();
+      expect(s.needs.where((n) => n.kind == NeedKind.terminal), isEmpty);
+      t.emit({'event': 'presence', 'id': '111', 'online': true});
+      await pump();
+      expect(s.needs.where((n) => n.kind == NeedKind.terminal), hasLength(1));
+    });
+
+    test('an opened terminal whose program is blocked has the waiting lamp', () async {
+      Future<void> list(String state, {bool dead = false}) async {
+        t.emit({
+          'event': 'terms',
+          'id': '111',
+          'terms': [
+            {'id': 'term:pty:a', 'name': 'a', 'command': 'claude', 'activity': 1, 'dead': dead, 'ps': {'state': state, 'seq': 3}},
+          ],
+          'hosts': [],
+        });
+        await pump();
+      }
+
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') t.emit({...opened(1, '111', 'term:pty:a'), 'req': m['req']});
+      };
+      await s.openOrSwitch('111', 'term:pty:a', 'a');
+      await pump();
+      expect(s.current!.lamp, Lamp.active);
+      await list('blocked');
+      expect(s.current!.lamp, Lamp.waiting);
+      await list('blocked', dead: true);
+      expect(s.current!.lamp, Lamp.active);
+      await list('working');
+      expect(s.current!.lamp, Lamp.active);
+    });
+
     test('a dead session that was blocked is not in needs', () {
       put([row('term:pty:a', const TermPs('blocked'), dead: true)]);
       expect(s.needs, isEmpty);

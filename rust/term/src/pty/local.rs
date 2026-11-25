@@ -109,7 +109,7 @@ pub struct Status {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
     /// What the program says about itself; none when it says nothing.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, deserialize_with = "super::ps::lenient", skip_serializing_if = "Option::is_none")]
     pub ps: Option<super::ps::Ps>,
 }
 
@@ -283,6 +283,17 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use tokio::io::{AsyncWriteExt, BufReader};
     use tokio::net::UnixListener;
+
+    #[test]
+    fn a_ps_this_build_cannot_read_is_no_ps_not_no_status() {
+        let base = |ps: &str| format!(r#"{{"v":2,"name":"a","command":"sh","cols":80,"rows":24,"activity":1,"viewers":0,"pid":7,"ps":{ps}}}"#);
+        for bad in [r#"{"state":"working","progress":999}"#, r#""x""#, r#"{"seq":1}"#, "null"] {
+            let s = serde_json::from_str::<Status>(&base(bad)).unwrap();
+            assert_eq!((s.ps, s.name.as_str(), s.pid), (None, "a", 7), "{bad}");
+        }
+        let s = serde_json::from_str::<Status>(&base(r#"{"state":"working"}"#)).unwrap();
+        assert_eq!(s.ps.unwrap().state, "working");
+    }
 
     #[test]
     fn status_without_ps_reads_and_unknown_fields_are_ignored() {
