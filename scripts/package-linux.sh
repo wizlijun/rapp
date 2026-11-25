@@ -81,9 +81,9 @@ Esc cancels; Tab edits before sending. Change the shortcut in the sidebar.
 AI correction learning and prompt/chat modes use the shared LLM endpoint.
 Gateway hotwords provide spelling context to local recognition on each recording.
 Cached correction rules fix recognized words locally before sending or editing.
-The input dock, quick-area toggle and regrouped key bar (first row ending with
-⋯ and ⌄; second row starting with ⌘C ⌘V and adding ⌃L) share the macOS 0.15.25
-layout and preferences.
+The input dock, quick-area toggle, regrouped key bar (first row ending with
+⋯ and ⌄; second row starting with ⌘C ⌘V and adding ⌃L) and overview Open App
+dropdown menu share the macOS 0.15.27 layout and preferences.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and
