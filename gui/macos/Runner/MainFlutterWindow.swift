@@ -11,6 +11,11 @@ class MainFlutterWindow: NSWindow {
       SingleInstance.handOff()
       exit(0)
     }
+    // The connection manager stays out of sight while the main window is on screen: its overview lists the same
+    // sessions.
+    if SingleInstance.isConnectionManager && SingleInstance.mainIsShowing() {
+      exit(0)
+    }
     // Forward process arguments (minus argv[0]) to Dart's main(args), e.g. `--cm`.
     let project = FlutterDartProject()
     project.dartEntrypointArguments = Array(CommandLine.arguments.dropFirst())
@@ -44,7 +49,9 @@ class MainFlutterWindow: NSWindow {
     NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: self,
                                            queue: .main) { [weak self] _ in
       guard let self else { return }
-      self.systemChannel?.invokeMethod("visible", arguments: self.occlusionState.contains(.visible))
+      let visible = self.occlusionState.contains(.visible)
+      if !SingleInstance.isConnectionManager { SingleInstance.setMainVisible(visible) }
+      self.systemChannel?.invokeMethod("visible", arguments: visible)
     }
 
     super.awakeFromNib()

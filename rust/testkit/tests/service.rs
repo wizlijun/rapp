@@ -135,6 +135,9 @@ async fn open_splices_bytes_to_worker_and_kick_ends_it() {
     assert_eq!(sessions.len(), 1, "{st}");
     assert_eq!(sessions[0]["app"], "com.example.echo");
     assert_eq!(sessions[0]["path"], "lan");
+    // A password connection declares no name; it is a viewing session, not a side one.
+    assert_eq!(sessions[0]["name"], Value::Null);
+    assert_eq!(sessions[0]["side"], false);
     assert!(sessions[0]["since"].as_u64().unwrap() > 1_700_000_000);
     let sid = sessions[0]["sid"].clone();
 
@@ -985,6 +988,9 @@ async fn relayed_request_reaches_the_service() {
     assert_eq!(r["ok"], true, "{r}");
     let st = ipc.call(json!({"cmd":"status"})).await;
     assert_eq!(st["sessions"][0]["path"], "relay");
+    // The name B declared in its hello, for the GUI's 正在被接入 cards.
+    assert_eq!(st["sessions"][0]["name"], "test-b", "{st}");
+    assert_eq!(st["sessions"][0]["side"], false);
     let t = wait_log(a.home.path(), "trust", |v| v["path"] == "relay").await;
     assert_eq!(t["fp"], json!(bid.fp.to_string()));
 }

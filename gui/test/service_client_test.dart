@@ -151,6 +151,23 @@ void main() {
     expect(s.sessions.single.sid, 3);
     expect(s.sessions.single.peer, '1.2.3.4:5');
     expect(s.sessions.single.path, 'lan');
+    // An old service sends neither field.
+    expect(s.sessions.single.name, isNull);
+    expect(s.sessions.single.side, isFalse);
+  });
+
+  test('a session carries the name the peer declared and whether it is a side connection', () {
+    final s = ServiceStatus.fromJson({
+      'ok': true,
+      'sessions': [
+        {'sid': 4, 'peer': 'dev1', 'name': 'iPad', 'app': 'a', 'path': 'relay', 'since': 1, 'side': true},
+        {'sid': 5, 'peer': 'dev1', 'name': null, 'app': 'a', 'path': 'relay', 'since': 1, 'side': false},
+      ],
+    });
+    expect(s.sessions[0].name, 'iPad');
+    expect(s.sessions[0].side, isTrue);
+    expect(s.sessions[1].name, isNull);
+    expect(s.sessions[1].side, isFalse);
   });
 
   test('the ID is shown as id@ip, one per address', () {

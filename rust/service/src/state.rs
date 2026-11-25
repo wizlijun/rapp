@@ -241,7 +241,7 @@ impl State {
     pub fn status(&self) -> Value {
         let cfg = self.cfg.lock().unwrap().clone();
         let sessions: Vec<Value> = self.sessions.lock().unwrap().1.iter()
-            .map(|(sid, s)| json!({"sid":sid,"peer":s.peer.addr,"app":s.app,"path":s.peer.path,"since":s.since}))
+            .map(|(sid, s)| json!({"sid":sid,"peer":s.peer.addr,"name":s.peer.name,"app":s.app,"path":s.peer.path,"since":s.since,"side":s.side}))
             .collect();
         let id = cfg.id.clone().unwrap_or_default();
         let (relay, relay_error) = self.relay.lock().unwrap().clone();

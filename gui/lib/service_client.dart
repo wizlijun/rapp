@@ -21,12 +21,18 @@ class ServiceException implements Exception {
 }
 
 class ServiceSession {
-  const ServiceSession(this.sid, this.peer, this.app, this.path, this.since);
+  const ServiceSession(this.sid, this.peer, this.app, this.path, this.since, {this.name, this.side = false});
   final Object sid;
   final String peer;
   final String app;
   final String path;
   final Object? since;
+
+  /// The name the peer declared in its hello ("自称", never checked); null when it gave none.
+  final String? name;
+
+  /// A file-transfer side connection, not a viewing session.
+  final bool side;
 }
 
 class ServiceStatus {
@@ -122,7 +128,8 @@ class ServiceStatus {
       sessions: (m['sessions'] as List? ?? const [])
           .whereType<Map>()
           .map((s) => ServiceSession(s['sid'] as Object, '${s['peer'] ?? ''}', '${s['app'] ?? ''}',
-              '${s['path'] ?? ''}', s['since']))
+              '${s['path'] ?? ''}', s['since'],
+              name: s['name'] is String ? s['name'] as String : null, side: s['side'] == true))
           .toList(),
     );
   }
