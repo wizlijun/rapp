@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:rapp/paths.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/traffic_label.dart';
@@ -30,6 +31,8 @@ void main() {
   var offline = <String>{};
   String? hubVersion;
   var versions = <String, String>{};
+  var appsOf = <String, List<Map<String, String>>>{};
+  var capsOf = <String, Map<String, Object>>{};
 
   Future<void> flush() => Future<void>.delayed(Duration.zero);
 
@@ -42,6 +45,8 @@ void main() {
     offline = {};
     hubVersion = null;
     versions = {};
+    appsOf = {};
+    capsOf = {};
   });
 
   tearDown(() {
@@ -63,7 +68,7 @@ void main() {
       } else if (m['cmd'] == 'apps') {
         t.emit(offline.contains(m['id'])
             ? {'event': 'error', 'req': m['req'], 'error': 'connect timed out'}
-            : {'event': 'apps', 'req': m['req'], 'id': m['id'], 'path': 'lan', 'apps': [], 'version': ?versions[m['id']]});
+            : {'event': 'apps', 'req': m['req'], 'id': m['id'], 'path': 'lan', 'apps': appsOf[m['id']] ?? [], 'capabilities': ?capsOf[m['id']], 'version': ?versions[m['id']]});
       } else if (m['cmd'] == 'open') {
         t.emit({
           'event': 'opened', 'sid': ++sid, 'id': m['id'], 'app': m['app'], 'path': 'lan',
@@ -255,16 +260,276 @@ void main() {
         greaterThan(tester.getBottomLeft(inside('column-m1', find.byType(Text)).first).dy));
   });
 
-  testWidgets('an empty host column offers 打开 app', (tester) async {
+  // ---- 打开应用 ----
+  Future<void> settle(WidgetTester tester) async {
+    await tester.runAsync(() async {
+      for (var i = 0; i < 6; i++) {
+        await flush();
+      }
+    });
+    await tester.pump();
+  }
+
+  Future<void> openMenu(WidgetTester tester, [String id = 'm1']) async {
+    await tester.tap(find.byKey(Key('open-apps-$id')));
+    await tester.pump();
+    await settle(tester);
+  }
+
+  const menu = Key('open-apps-menu');
+
+  void twoApps() => appsOf = {
+        'm1': [
+          {'app': 'desktop:', 'name': '桌面'},
+          {'app': 'com.x.Notes', 'name': 'Notes'},
+          {'app': 'com.x.Safari', 'name': 'Safari'},
+        ],
+      };
+
+  testWidgets('打开应用 sits right of the version on remote columns only; no more 打开 app', (tester) async {
+    hubVersion = '0.14.7';
+    versions = {'m1': '0.14.8'};
     await boot(tester, apps: []);
     await show(tester);
-    expect(inside('column-local', find.text('没有打开的 app')), findsOneWidget);
-    expect(inside('column-local', find.text('打开 app')), findsNothing);
-    expect(inside('column-m1', find.text('没有打开的 app')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('open-app-m1')));
+    final link = find.byKey(const Key('open-apps-m1'));
+    expect(link, findsOneWidget);
+    expect(find.byKey(const Key('open-apps-local')), findsNothing);
+    expect(find.byKey(const Key('open-app-m1')), findsNothing);
+    expect(find.text('打开 app'), findsNothing);
+    final v = tester.getCenter(find.byKey(const Key('version-m1')));
+    expect((tester.getCenter(link).dy - v.dy).abs(), lessThan(4));
+    expect(tester.getTopRight(link).dx, moreOrLessEquals(tester.getTopRight(find.byKey(const Key('column-m1'))).dx, epsilon: 1));
+    expect(tester.getSize(link).height, greaterThanOrEqualTo(48));
+  });
+
+  testWidgets('an offline device: 打开应用 does not open', (tester) async {
+    offline = {'m1'};
+    await boot(tester, apps: []);
+    await show(tester);
+    await tester.tap(find.byKey(const Key('open-apps-m1')), warnIfMissed: false);
     await tester.pump();
+    expect(find.byKey(menu), findsNothing);
+  });
+
+  testWidgets('the menu groups the apps; a tap opens one and closes the menu', (tester) async {
+    twoApps();
+    await boot(tester, apps: []);
+    await show(tester);
+    await openMenu(tester);
+    expect(find.byKey(menu), findsOneWidget);
+    expect(find.text('屏幕'), findsOneWidget);
+    expect(find.text('应用（2）'), findsOneWidget);
+    expect(find.byKey(const Key('open-apps-star-desktop:')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('open-apps-row-com.x.Notes')));
+    await settle(tester);
+    expect(s.entries.map((e) => e.app), contains('com.x.Notes'));
+    expect(find.byKey(menu), findsNothing);
+  });
+
+  testWidgets('an open app reads 已打开 and a tap switches to it', (tester) async {
+    twoApps();
+    await boot(tester, apps: ['m1/com.x.Safari']);
+    await show(tester);
+    await openMenu(tester);
+    expect(find.descendant(of: find.byKey(const Key('open-apps-row-com.x.Safari')), matching: find.text('连接中')), findsOneWidget);
+    frame(1);
+    await settle(tester);
+    expect(find.descendant(of: find.byKey(const Key('open-apps-row-com.x.Safari')), matching: find.text('已打开')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('open-apps-row-com.x.Safari')));
+    await settle(tester);
+    expect(s.currentKey, 'm1/com.x.Safari');
+    expect(s.entries.where((e) => e.app == 'com.x.Safari'), hasLength(1));
+  });
+
+  testWidgets('the star toggles 常用 and keeps the menu open', (tester) async {
+    twoApps();
+    await boot(tester, apps: []);
+    await show(tester);
+    await openMenu(tester);
+    await tester.tap(find.byKey(const Key('open-apps-star-com.x.Notes')));
+    await tester.pump();
+    expect(s.isFavorite('m1', 'com.x.Notes'), isTrue);
+    expect(find.byKey(menu), findsOneWidget);
+    await tester.tap(find.byKey(const Key('open-apps-star-com.x.Notes')));
+    await tester.pump();
+    expect(s.isFavorite('m1', 'com.x.Notes'), isFalse);
+  });
+
+  testWidgets('typing filters; Return opens the first match; no match does nothing', (tester) async {
+    twoApps();
+    await boot(tester, apps: []);
+    await show(tester);
+    await openMenu(tester);
+    await tester.enterText(find.byKey(const Key('open-apps-filter')), 'zzz');
+    await tester.pump();
+    expect(find.text('没有匹配的应用'), findsOneWidget);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await settle(tester);
+    expect(find.byKey(menu), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('open-apps-filter')), 'saf');
+    await tester.pump();
+    expect(find.byKey(const Key('open-apps-row-com.x.Notes')), findsNothing);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await settle(tester);
+    expect(s.entries.map((e) => e.app), contains('com.x.Safari'));
+    expect(find.byKey(menu), findsNothing);
+  });
+
+  testWidgets('arrow keys move the pick; Escape closes', (tester) async {
+    twoApps();
+    await boot(tester, apps: []);
+    await show(tester);
+    await openMenu(tester);
+    await tester.showKeyboard(find.byKey(const Key('open-apps-filter')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pump();
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await settle(tester);
+    expect(s.entries.map((e) => e.app), ['com.x.Notes']);
+    await openMenu(tester);
+    expect(find.byKey(menu), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.byKey(menu), findsNothing);
+  });
+
+  testWidgets('设备详情 goes to the device panel; a bundle id opens that app', (tester) async {
+    twoApps();
+    await boot(tester, apps: []);
+    await show(tester);
+    await openMenu(tester);
+    await tester.enterText(find.byKey(const Key('open-apps-bundle')), 'com.y.Pages');
+    await tester.tap(find.byKey(const Key('open-apps-bundle-open')));
+    await settle(tester);
+    expect(s.entries.map((e) => e.app), contains('com.y.Pages'));
+    expect(find.byKey(menu), findsNothing);
+    await openMenu(tester);
+    await tester.tap(find.byKey(const Key('open-apps-details')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
     expect(s.panel, PanelTab.devices);
     expect(s.deviceTab, 'm1');
+    expect(find.byKey(menu), findsNothing);
+  });
+
+  testWidgets('apps not read yet: 正在读取…', (tester) async {
+    await boot(tester, apps: []);
+    s.probes.remove('m1');
+    t.onSend = (m) {}; // the probe never answers
+    await show(tester);
+    await openMenu(tester);
+    expect(find.text('正在读取…'), findsOneWidget);
+  });
+
+  testWidgets('near the bottom the menu opens upward and stays on screen', (tester) async {
+    twoApps();
+    await boot(tester, apps: ['m1/com.x.Safari']); // a block above pushes the link down
+    tester.view.physicalSize = const Size(1194, 320);
+    addTearDown(tester.view.resetPhysicalSize);
+    s.toggleOverview();
+    await tester.pumpWidget(wrap(SizedBox(width: 1194, height: 320, child: Overview(state: s))));
+    await tester.pump();
+    await openMenu(tester);
+    final r = tester.getRect(find.byKey(menu));
+    final link = tester.getRect(find.byKey(const Key('open-apps-m1')));
+    expect(link.bottom, greaterThan(320 - 200), reason: 'the link is near the bottom');
+    expect(r.bottom, lessThanOrEqualTo(link.top + 1));
+    expect(r.top, greaterThanOrEqualTo(0));
+    expect(r.right, moreOrLessEquals(link.right, epsilon: 1));
+    expect(r.width, 290);
+  });
+
+  testWidgets('the menu fills in place when the apps arrive; a pick made before keeps its app', (tester) async {
+    twoApps();
+    await boot(tester, apps: []);
+    s.hub!.termLists['m1'] = const TermList('m1');
+    s.probes.remove('m1');
+    final send = t.onSend!;
+    Map<String, dynamic>? held;
+    t.onSend = (m) => m['cmd'] == 'apps' ? held = m : send(m);
+    await show(tester);
+    await openMenu(tester);
+    expect(find.text('正在读取…'), findsOneWidget);
+    expect(find.byKey(const Key('open-apps-row-terms:')), findsOneWidget);
+    await tester.showKeyboard(find.byKey(const Key('open-apps-filter')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown); // picks 终端, the only row
+    t.onSend = send;
+    send(held!);
+    await settle(tester);
+    expect(find.text('正在读取…'), findsNothing);
+    expect(find.byKey(const Key('open-apps-row-com.x.Notes')), findsOneWidget);
+    // 屏幕 now sits above 终端: Return still opens 终端, not 桌面.
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await settle(tester);
+    expect(find.byKey(menu), findsNothing);
+    expect(s.entries.map((e) => e.app), isNot(contains('desktop:')));
+  });
+
+  testWidgets('a text-only device: the 终端 group plus why there are no apps; no bundle field', (tester) async {
+    capsOf = {'m1': {'graphical': false}};
+    await boot(tester, apps: []);
+    s.hub!.termLists['m1'] = const TermList('m1');
+    await show(tester);
+    await openMenu(tester);
+    expect(find.byKey(const Key('open-apps-row-terms:')), findsOneWidget);
+    expect(find.text('屏幕'), findsNothing);
+    expect(find.text('这台设备支持文本终端和端口分享，暂不提供应用画面'), findsOneWidget);
+    expect(find.byKey(const Key('open-apps-bundle')), findsNothing);
+  });
+
+  testWidgets('the device goes offline while the menu is open: the reason shows, nothing opens', (tester) async {
+    twoApps();
+    await boot(tester, apps: []);
+    await show(tester);
+    await openMenu(tester);
+    offline = {'m1'};
+    s.probe('m1');
+    await settle(tester);
+    expect(find.byKey(menu), findsOneWidget);
+    expect(find.textContaining('连接'), findsWidgets);
+    await tester.tap(find.byKey(const Key('open-apps-row-com.x.Notes')));
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await settle(tester);
+    expect(s.entries, isEmpty);
+    expect(find.byKey(menu), findsOneWidget);
+  });
+
+  testWidgets('arrow keys keep the pick in view across group titles', (tester) async {
+    appsOf = {
+      'm1': [
+        {'app': 'desktop:', 'name': '桌面'},
+        for (var i = 0; i < 20; i++) {'app': 'com.x.A$i', 'name': 'App $i'},
+      ],
+    };
+    await boot(tester, apps: []);
+    s.hub!.termLists['m1'] = const TermList('m1');
+    await show(tester);
+    await openMenu(tester);
+    await tester.showKeyboard(find.byKey(const Key('open-apps-filter')));
+    for (var i = 0; i < 14; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump();
+    }
+    final view = tester.getRect(find.descendant(of: find.byKey(menu), matching: find.byType(SingleChildScrollView)));
+    final row = tester.getRect(find.byKey(const Key('open-apps-row-com.x.A12')));
+    expect(row.top, greaterThanOrEqualTo(view.top - 0.5));
+    expect(row.bottom, lessThanOrEqualTo(view.bottom + 0.5));
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await settle(tester);
+    expect(s.entries.map((e) => e.app), ['com.x.A12']);
+  });
+
+  testWidgets('the link reads 打开应用，<name> and has a tap action', (tester) async {
+    final handle = tester.ensureSemantics();
+    twoApps();
+    await boot(tester, apps: []);
+    await show(tester);
+    expect(tester.getSemantics(find.byKey(const Key('open-apps-m1'))),
+        matchesSemantics(label: '打开应用，mini', isButton: true, hasEnabledState: true, isEnabled: true, hasTapAction: true));
+    handle.dispose();
   });
 
   testWidgets('count taps', (tester) async {
@@ -355,7 +620,7 @@ void main() {
     await boot(tester, apps: ['m1/a']);
     port.emit(const DisconnectedEvent(1, 'user'));
     await show(tester);
-    for (final k in ['block-m1/a', 'open-app-m2', 'count-disconnected', 'count-online']) {
+    for (final k in ['block-m1/a', 'open-apps-m2', 'count-disconnected', 'count-online']) {
       expect(tester.getSize(find.byKey(Key(k))).height, greaterThanOrEqualTo(48), reason: k);
     }
   });
