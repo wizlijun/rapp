@@ -87,6 +87,8 @@ pub enum Input {
     Ack(u16),
     Ping(u32),
     Unlock(Password),
+    /// v16: a rules pack; this host does not evaluate rules, so the content is dropped.
+    StateRules,
 }
 pub fn input(kind: u8, p: &[u8]) -> Result<Input> {
     let mut r = Reader::new(p);
@@ -94,6 +96,11 @@ pub fn input(kind: u8, p: &[u8]) -> Result<Input> {
         5 => {
             ensure!(p.len() <= 65535, "text too large");
             return Ok(Input::Text(std::str::from_utf8(p)?.into()));
+        }
+        43 => {
+            ensure!(p.len() <= 65536, "state rules too large");
+            std::str::from_utf8(p)?;
+            return Ok(Input::StateRules);
         }
         6 => {
             let (k, m, d) = (r.u16()?, r.u64()?, r.u8()?);
@@ -220,6 +227,14 @@ pub fn window_table(windows: &[Window]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn state_rules_are_accepted_and_checked() {
+        assert!(matches!(input(43, b"{}"), Ok(Input::StateRules)));
+        assert!(matches!(input(43, b""), Ok(Input::StateRules)));
+        assert!(input(43, &[0xFF]).is_err());
+        assert!(matches!(input(43, &vec![b' '; 65536]), Ok(Input::StateRules)));
+        assert!(input(43, &vec![b' '; 65537]).is_err());
+    }
     #[test]
     fn rejects_untrusted_input_before_backend_calls() {
         assert!(input(7, &[0; 15]).is_err()); // nonexistent window

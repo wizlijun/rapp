@@ -1,7 +1,12 @@
 use anyhow::{bail, ensure, Context, Result};
 use std::{collections::HashSet, io::Read};
 
-pub const VERSION: u8 = 15;
+pub const VERSION: u8 = 16;
+
+/// The largest rules pack a client may send (bytes, v16 type 43).
+pub const STATE_RULES_LIMIT: usize = 65536;
+/// The largest app-state report a host may send (bytes, v16 type 44).
+pub const APP_STATE_LIMIT: usize = 4096;
 
 /// The longest unlock password a client may send (bytes, v11).
 pub const UNLOCK_PASSWORD_LIMIT: usize = 1024;
@@ -91,6 +96,8 @@ pub enum Incoming {
     SecureFocus(bool),
     /// A paused session's picture changed (v15, no payload, at most once a second).
     Changed,
+    /// v16: the host's app-state report (raw JSON, at most `APP_STATE_LIMIT` bytes).
+    AppState(String),
 }
 #[derive(Clone, Debug)]
 pub struct Address {
@@ -202,6 +209,10 @@ pub fn unlock(password: &str) -> Vec<u8> {
 /// Asks A to close the cover `id` of a `Covered` message (v13; A refuses system prompts).
 pub fn dismiss_cover(id: u32) -> Vec<u8> {
     id_packet(38, id)
+}
+/// Sends a state-rules pack (v16): the whole payload is UTF-8 JSON, empty turns rules off.
+pub fn state_rules(json: &str) -> Vec<u8> {
+    packet(43, json.as_bytes().to_vec())
 }
 pub fn select_input(id: &str) -> Vec<u8> {
     let mut p = vec![];
@@ -341,8 +352,8 @@ pub fn read_message(input: &mut impl Read) -> Result<(Incoming, usize)> {
     input.read_exact(&mut h).context("host disconnected")?;
     ensure!(
         // Main-connection host messages in RappCore/Protocol.swift, including v12 focusRegion and
-        // v13 covered/appOpened/secureFocus and v15 changed. Side-transfer and client-to-host types stay rejected.
-        [2, 3, 4, 13, 17, 19, 21, 26, 28, 29, 32, 33, 34, 36, 37, 39, 40, 42].contains(&h[0]),
+        // v13 covered/appOpened/secureFocus and v15 changed and v16 appState. Side-transfer and client-to-host types stay rejected.
+        [2, 3, 4, 13, 17, 19, 21, 26, 28, 29, 32, 33, 34, 36, 37, 39, 40, 42, 44].contains(&h[0]),
         "unexpected host message type {}",
         h[0]
     );
@@ -531,6 +542,10 @@ pub fn decode(kind: u8, p: &[u8]) -> Result<Incoming> {
             Incoming::SecureFocus(v == 1)
         }
         42 => Incoming::Changed,
+        44 => {
+            ensure!(p.len() <= APP_STATE_LIMIT, "app state too large");
+            return Ok(Incoming::AppState(std::str::from_utf8(p)?.into()));
+        }
         _ => bail!("unknown host message type {kind}"),
     };
     r.end()?;
@@ -557,5 +572,21 @@ pub fn input_blocked_notice(by: &str) -> String {
         "远端正在被另一台设备操作".into()
     } else {
         format!("远端正在被 {by} 操作")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn v16_state_messages() {
+        assert_eq!(VERSION, 16);
+        assert_eq!(state_rules("{}"), vec![43, 2, 0, 0, 0, b'{', b'}']);
+        assert!(matches!(decode(44, b"{\"state\":\"done\"}"), Ok(Incoming::AppState(s)) if s == "{\"state\":\"done\"}"));
+        assert!(decode(44, &[0xFF]).is_err());
+        assert!(decode(44, &vec![b' '; APP_STATE_LIMIT + 1]).is_err());
+        assert!(decode(44, &vec![b' '; APP_STATE_LIMIT]).is_ok());
+        let framed = [&[44u8, 2, 0, 0, 0][..], b"{}"].concat();
+        assert!(matches!(read_message(&mut &framed[..]), Ok((Incoming::AppState(_), 7))));
     }
 }

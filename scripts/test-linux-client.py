@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the real GTK worker against an independent Python v15 host fixture.
+"""Exercise the real GTK worker against an independent Python v16 host fixture.
 Requires a graphical session (or xvfb-run). No real host credentials are used.
 For isolated input with a rootful Xwayland server, set DISPLAY to that server
 and RAPP_TEST_NO_WM=1. Window-manager minimize/take-back checks are then omitted.
