@@ -126,6 +126,28 @@ private func medianColor(_ image: RuleImage, points: [Int], gw: Int, ox: Int, oy
     return (median(rs), median(gs), median(bs))
 }
 
+/// The enclosed hole of `c` is round (aspect 0.7...1.43, fill 0.6..<0.88) and at least half as wide as `c`.
+private func isRing(_ c: Block, mask: [Bool], gw: Int) -> Bool {
+    let w = c.w, h = c.h
+    var inC = [Bool](repeating: false, count: w * h)
+    for i in c.points { inC[(i / gw - c.y0) * w + (i % gw - c.x0)] = true }
+    var outside = [Bool](repeating: false, count: w * h)
+    var stack: [Int] = []
+    func push(_ x: Int, _ y: Int) { let i = y * w + x; if !inC[i], !outside[i] { outside[i] = true; stack.append(i) } }
+    for x in 0..<w { push(x, 0); push(x, h - 1) }
+    for y in 0..<h { push(0, y); push(w - 1, y) }
+    while let i = stack.popLast() {
+        let x = i % w, y = i / w
+        if x > 0 { push(x - 1, y) }; if x + 1 < w { push(x + 1, y) }
+        if y > 0 { push(x, y - 1) }; if y + 1 < h { push(x, y + 1) }
+    }
+    let holes = (0..<w * h).map { !inC[$0] && !outside[$0] }
+    guard let hole = largestBlock(holes, gw: w, gh: h) else { return false }
+    let aspect = Double(hole.w) / Double(hole.h)
+    let fill = Double(hole.points.count) / Double(hole.w * hole.h)
+    return aspect >= 0.7 && aspect <= 1.43 && fill >= 0.6 && fill < 0.88 && Double(hole.w) >= 0.5 * Double(w)
+}
+
 public func shape(in image: RuleImage, rect: RuleRect) -> (name: ShapeName, score: Double) {
     guard let r = clip(rect, image) else { return (.none, 0) }
     let base = baseColor(image, r)
@@ -135,10 +157,8 @@ public func shape(in image: RuleImage, rect: RuleRect) -> (name: ShapeName, scor
 
     var k = c, gw = r.w
     // Container: a big block with a different-coloured thing inside it; judge the inside.
-    // A ring (hollow centre, thin) is not a container: its hole is the page showing through.
-    let cFill = Double(c.points.count) / Double(c.w * c.h)
-    let cCentre = (c.y0 + c.h / 2) * r.w + (c.x0 + c.w / 2)
-    let cIsRing = cFill < 0.6 && !c.points.contains(cCentre)
+    // A ring (round hole, thin wall) is not a container: its hole is the page showing through.
+    let cIsRing = isRing(c, mask: mask, gw: r.w)
     if !cIsRing, Double(c.w) >= 0.75 * Double(r.w), Double(c.h) >= 0.75 * Double(r.h) {
         let ix = Int((0.2 * Double(c.w)).rounded()), iy = Int((0.2 * Double(c.h)).rounded())
         let iw = c.w - 2 * ix, ih = c.h - 2 * iy
@@ -215,7 +235,7 @@ public final class SignalEvaluator {
     private let text: TextReader?
     private var last: [String: SignalResult] = [:]
 
-    private struct Shot { var at: TimeInterval; var w: Int, h: Int; var v: [UInt8] }
+    private struct Shot { var at: TimeInterval; var rw: Int, rh: Int; var w: Int, h: Int; var v: [UInt8] }
     private var motion: [String: [[Shot]]] = [:]          // signal -> per rect index -> recent thumbnails
     private struct TextState { var digest: UInt64; var lines: [[String]]; var at: TimeInterval }
     private var texts: [String: TextState] = [:]
@@ -304,7 +324,7 @@ public final class SignalEvaluator {
             guard let r = rects[i] else { hist[i] = []; continue }
             let cur = thumbnail(image, r, maxDim: 16)
             var shots = hist[i].filter { now - $0.at <= historySeconds && $0.at <= now }
-            if let f = shots.first, f.w != cur.w || f.h != cur.h { shots = [] }
+            if let f = shots.first, f.rw != r.w || f.rh != r.h { shots = [] }
             // Newest shot at least `window` old, else the oldest one.
             let ref = shots.last { now - $0.at >= window } ?? shots.first
             if let ref {
@@ -312,7 +332,7 @@ public final class SignalEvaluator {
                 for j in 0..<cur.v.count where abs(Int(cur.v[j]) - Int(ref.v[j])) >= motionDiff { changed += 1 }
                 out[i] = changed > 0 && Double(changed) / Double(cur.v.count) >= min
             }
-            shots.append(Shot(at: now, w: cur.w, h: cur.h, v: cur.v))
+            shots.append(Shot(at: now, rw: r.w, rh: r.h, w: cur.w, h: cur.h, v: cur.v))
             hist[i] = shots
         }
         motion[name] = hist

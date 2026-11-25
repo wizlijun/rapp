@@ -30,6 +30,38 @@ final class RuleDetectTests: XCTestCase {
         XCTAssertEqual(shape(in: bar, rect: RuleRect(x: 8, y: 20, w: 48, h: 8)).name, .other)
     }
 
+    func testBigIconsAndThinRing() {
+        let page = Canvas.white
+        func disc(_ icon: (inout RuleImage) -> Void) -> RuleImage {
+            var img = Canvas.solid(width: 64, height: 64, page)
+            Canvas.disc(&img, x: 16, y: 16, size: 32, Canvas.black); icon(&img); return img
+        }
+        let sq = disc { Canvas.fill(&$0, RuleRect(x: 24, y: 24, w: 16, h: 16), Canvas.white) }
+        XCTAssertEqual(shape(in: sq, rect: Canvas.buttonRect).name, .square)
+        let arrow = disc { img in
+            Canvas.fill(&img, RuleRect(x: 30, y: 24, w: 4, h: 16), Canvas.white)
+            for row in 0..<8 { Canvas.fill(&img, RuleRect(x: 32 - (row + 1), y: 24 + row, w: 2 * (row + 1), h: 1), Canvas.white) }
+        }
+        XCTAssertEqual(shape(in: arrow, rect: Canvas.buttonRect).name, .arrow)
+        var ring = Canvas.solid(width: 64, height: 64)
+        Canvas.ring(&ring, x: 16, y: 16, size: 32, thickness: 4, Canvas.black, hole: Canvas.white)
+        XCTAssertEqual(shape(in: ring, rect: Canvas.buttonRect).name, .ring)
+    }
+
+    func testMotionHistoryClearsOnResize() {
+        let spec = SignalSpec(region: .named("a"), detects: [.motion(window: 0.4, min: 0.02)])
+        let p = RulePack(id: "t", name: "t", rev: 0, regions: [:], signals: ["s": spec], states: [], require: [], variants: [])
+        let ev = SignalEvaluator(caps: [], text: nil)
+        let a = Canvas.solid(width: 64, height: 64), b = Canvas.solid(width: 64, height: 64, (0, 0, 0))
+        func run(_ img: RuleImage, _ w: Int, _ t: Double) -> Bool? {
+            ev.evaluate(p, regions: ["a": [RuleRect(x: 0, y: 0, w: w, h: 20)]], image: img, now: t)["s"]?.holds
+        }
+        XCTAssertEqual(run(a, 20, 0), false)
+        XCTAssertEqual(run(b, 20, 0.5), true)       // same size, changed
+        XCTAssertEqual(run(a, 30, 1.0), false)      // resized 20 -> 30: first frame is not moving
+        XCTAssertEqual(run(b, 30, 1.5), true)
+    }
+
     func testNamedColors() {
         XCTAssertTrue(ColorRange.named("green")!.contains(hsl(r: 52, g: 199, b: 89)))
         XCTAssertTrue(ColorRange.named("gray")!.contains(hsl(r: 160, g: 160, b: 160)))
