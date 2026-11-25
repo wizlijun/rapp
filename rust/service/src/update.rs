@@ -22,7 +22,8 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
-const LEFTOVER: &str = "上次升级没收拾干净：请手动删除 rapp.app 同目录的 .rapp-new.app，或 previous/.rapp-old.app";
+const LEFTOVER: &str =
+    "上次升级没收拾干净：请手动删除 rapp.app 同目录的 .rapp-new.app，或 previous 里的 .rapp-old.backup / .rapp-old.app";
 const STILL_OPEN: &str = "rApp 还开着";
 const NOT_LAUNCHD: &str = "服务不是由系统启动的，请从 release 页面手动装 pkg";
 const NEEDS_ADMIN: &str = "这次需要管理员密码";
@@ -189,7 +190,7 @@ pub fn status_json(state: &State) -> Value {
     };
     let cache = up::load_cache(&cache_file(state));
     let dismissed = cache.latest_version.is_some() && cache.latest_version == cache.dismissed_version;
-    let can_rollback = state.update_opts.is_some() && previous_dir(state).join("rapp.app").is_dir();
+    let can_rollback = state.update_opts.is_some() && up::previous_app(&previous_dir(state)).is_dir();
     // Read on every report, so a pkg run while the service is up clears it at once.
     let needs_reinstall = state
         .update_opts
@@ -211,7 +212,12 @@ pub fn status_json(state: &State) -> Value {
 pub async fn on_start(state: &Arc<State>) {
     let Some(o) = state.update_opts.clone() else { return };
     let bundle = o.bundle.clone();
-    let (current, dr) = blocking(state, move |r| (up::bundle_version(r, &bundle), up::designated(r, &bundle))).await;
+    let prev = previous_dir(state);
+    let (current, dr) = blocking(state, move |r| {
+        up::adopt_legacy_previous(r, &prev);
+        (up::bundle_version(r, &bundle), up::designated(r, &bundle))
+    })
+    .await;
     let latest = up::load_cache(&cache_file(state)).latest_version;
     note_signature(state, dr.as_deref());
     modify(state, |u| {
@@ -568,8 +574,9 @@ fn auto_allowed(state: &State, o: &UpdateOpts, want: &str) -> bool {
 fn leftover(state: &State) -> bool {
     let Some(o) = &state.update_opts else { return false };
     let staged = o.bundle.parent().map(|d| d.join(".rapp-new.app"));
-    let aside = previous_dir(state).join(".rapp-old.app");
-    let found = staged.iter().chain([&aside]).any(|p| std::fs::symlink_metadata(p).is_ok());
+    let dir = previous_dir(state);
+    let aside = [dir.join(up::ASIDE), dir.join(up::LEGACY_ASIDE)];
+    let found = staged.iter().chain(&aside).any(|p| std::fs::symlink_metadata(p).is_ok());
     if found {
         fail(state, Stage::Install, LEFTOVER);
     }
@@ -607,7 +614,7 @@ async fn put_in_place(state: &Arc<State>, busy: Busy, mode: Mode) {
     }
     let prev_dir = previous_dir(state);
     let (src, to) = if mode == Mode::Rollback {
-        let src = prev_dir.join("rapp.app");
+        let src = up::previous_app(&prev_dir);
         let s = src.clone();
         match blocking(state, move |r| up::verify_local(r, &s).map(|_| up::bundle_version(r, &s))).await {
             Err(f) => return failed(f.stage, &f.reason).await,
@@ -760,13 +767,13 @@ pub async fn apply(state: &Arc<State>, confirm: bool, closed: watch::Receiver<()
     ok(json!({}))
 }
 
-/// `update_rollback` (K13): swap with `previous/rapp.app`, the same way as a manual install.
+/// `update_rollback` (K13): swap with `previous/rapp.backup`, the same way as a manual install.
 pub async fn rollback(state: &Arc<State>, closed: watch::Receiver<()>) -> Value {
     let Some(o) = state.update_opts.clone() else { return err(NO_PREVIOUS) };
     if !o.launchd {
         return page_err(NOT_LAUNCHD, state.update.lock().unwrap().page.clone());
     }
-    if state.update.lock().unwrap().state == "off" || !previous_dir(state).join("rapp.app").is_dir() {
+    if state.update.lock().unwrap().state == "off" || !up::previous_app(&previous_dir(state)).is_dir() {
         return err(NO_PREVIOUS);
     }
     if leftover(state) {

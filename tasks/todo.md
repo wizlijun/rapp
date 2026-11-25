@@ -1020,3 +1020,14 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 9 iPhone 竖屏 11 颗：`⇧Tab` 和 `⌄` 的字不裁，⋯ ⌄ 两颗不容易点错。
 - [ ] 10 点 ⌄：快捷区收起，框里的开关变暗；再点开关又出来。⌃ 亮着时点 ⌄ 也收。
 - [ ] 11 VoiceOver：⌄ 念「收起快捷区」。
+
+## 升级后开机冒出旧版 rApp（2026-11-25，分支 `fix/update-previous-inert`，等下次发版一起合）
+
+原因：升级把旧版整个挪到 `~/rapp/local/previous/rapp.app` 留作回退。那份仍是登记过的 `.app`，系统按 bundle id 在登录时把它和新版一起打开（总览本机显示 0.15.20、旧的圆形快捷区按钮）。
+
+- [x] 备份改名为 `previous/rapp.backup`（换下时的暂存名 `.rapp-old.backup`），换完用 `lsregister -u` 注销；回退照常从它装回
+- [x] 服务启动时把老版本留下的 `previous/rapp.app` 先注销再改名；两份都在时不删任何一份
+- [ ] 实机 1：装新版后重启电脑，只起一个 rApp，总览本机是新版本号
+- [ ] 实机 2：「回到上一版」仍可用，回退后再升级回来也正常
+- [ ] 实机 3：`lsregister -dump | grep previous/` 不再有 rapp
+- 注意：回退到 0.15.24 及更早的版本后，那个旧版自己的升级会再留下 `previous/rapp.app`，要等再升到新版、服务启动时才会被改名

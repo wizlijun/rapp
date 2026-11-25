@@ -191,7 +191,7 @@ impl Env {
     }
 
     fn previous(&self) -> PathBuf {
-        self.home.join("previous/rapp.app")
+        self.home.join("previous/rapp.backup")
     }
 
     fn gui_line(&self) -> String {
@@ -675,9 +675,9 @@ async fn leftovers_from_a_failed_install_block_every_install() {
     make_app(&e.previous(), "prev");
     e.start().await;
     let u = e.wait_state("failed").await;
-    assert_eq!(u["error"], "上次升级没收拾干净：请手动删除 rapp.app 同目录的 .rapp-new.app，或 previous/.rapp-old.app", "{u}");
+    assert_eq!(u["error"], "上次升级没收拾干净：请手动删除 rapp.app 同目录的 .rapp-new.app，或 previous 里的 .rapp-old.backup / .rapp-old.app", "{u}");
     let f = wait_log(&e.home, "update_failed", |_| true).await;
-    assert_eq!((&f["stage"], &f["reason"]), (&json!("install"), &json!("上次升级没收拾干净：请手动删除 rapp.app 同目录的 .rapp-new.app，或 previous/.rapp-old.app")));
+    assert_eq!((&f["stage"], &f["reason"]), (&json!("install"), &json!("上次升级没收拾干净：请手动删除 rapp.app 同目录的 .rapp-new.app，或 previous 里的 .rapp-old.backup / .rapp-old.app")));
     let r = e.call(json!({"cmd":"update_rollback"})).await;
     assert_eq!(r["ok"], false, "{r}");
     e.no_restart_for(POLL * 4).await;
@@ -695,7 +695,7 @@ async fn old_previous_left_aside_blocks_rollback() {
     make_app(&aside, "older");
     e.start().await;
     let r = e.call(json!({"cmd":"update_rollback"})).await;
-    assert_eq!(r, json!({"ok": false, "error": "上次升级没收拾干净：请手动删除 rapp.app 同目录的 .rapp-new.app，或 previous/.rapp-old.app"}));
+    assert_eq!(r, json!({"ok": false, "error": "上次升级没收拾干净：请手动删除 rapp.app 同目录的 .rapp-new.app，或 previous 里的 .rapp-old.backup / .rapp-old.app"}));
     e.no_restart_for(POLL * 4).await;
     assert_eq!((marker_of(&e.bundle), marker_of(&aside)), ("current".into(), "older".into()));
 }
@@ -778,6 +778,30 @@ async fn rollback_swaps_and_restarts() {
     assert_eq!(marker_of(&e.previous()), "current");
     let m = e.applied();
     assert_eq!((&m["from"], &m["to"], &m["mode"]), (&json!("0.4.1"), &json!("0.4.0"), &json!("rollback")), "{m}");
+}
+
+/// A `previous/rapp.app` left by an older version is renamed at start, so login can't open it
+/// next to the new one, and 回到上一版 still finds it.
+#[tokio::test]
+async fn legacy_previous_app_is_adopted_at_start() {
+    let mut e = Env::new(Knobs { cfg: json!({"check_updates": false}), ..Default::default() });
+    let legacy = e.home.join("previous/rapp.app");
+    make_app(&legacy, "prev");
+    e.start().await;
+    assert!(!legacy.exists());
+    assert_eq!(marker_of(&e.previous()), "prev");
+    assert_eq!(e.update().await["can_rollback"], true);
+}
+
+/// A new-style leftover aside blocks rollback too.
+#[tokio::test]
+async fn backup_left_aside_blocks_rollback() {
+    let mut e = Env::new(Knobs { cfg: json!({"check_updates": false}), ..Default::default() });
+    make_app(&e.previous(), "prev");
+    make_app(&e.home.join("previous/.rapp-old.backup"), "older");
+    e.start().await;
+    let r = e.call(json!({"cmd":"update_rollback"})).await;
+    assert_eq!(r, json!({"ok": false, "error": "上次升级没收拾干净：请手动删除 rapp.app 同目录的 .rapp-new.app，或 previous 里的 .rapp-old.backup / .rapp-old.app"}));
 }
 
 /// Final review I-2: after 回到上一版 the restarted older service must not fetch and install the

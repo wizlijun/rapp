@@ -151,7 +151,7 @@
 **④ 安装**（自动：满足 2.3 的「没人在用」；手动：GUI 点「立即升级」）
 1. 手动时，GUI 先发 `update_apply`，然后自己退出。service 等这个 GUI 的 IPC 连接断开（最多 10 秒），再检查一次 rapp.app 里没有别的进程。手动升级和回到上一版**不管远程会话**：常有人从 B 远程连到 A 上点升级，会话随 service 重启断开，之后重连（2026-11-15 改）。自动升级仍等会话结束。
 2. 把新 app 移到 `/Applications/.rapp-new.app`，和目标在同一目录、同一个卷，改名是原子的。
-3. `rename(/Applications/rapp.app → ~/Library/Application Support/rapp/previous/rapp.app)`，跨目录改名失败时退回 `ditto` 复制再删除。然后 `rename(/Applications/.rapp-new.app → /Applications/rapp.app)`。第二步失败就把第一步移回去，并记 `update_failed`。
+3. `rename(/Applications/rapp.app → ~/Library/Application Support/rapp/previous/rapp.backup)`（0.15.25 起不带 `.app`，并用 `lsregister -u` 注销；带 `.app` 时系统按 bundle id 会在登录时把旧版和新版一起打开。服务启动时会把老版本留下的 `previous/rapp.app` 改成这个名字），跨目录改名失败时退回 `ditto` 复制再删除。然后 `rename(/Applications/.rapp-new.app → /Applications/rapp.app)`。第二步失败就把第一步移回去，并记 `update_failed`。
 4. `/Applications/rapp.app` 不可写（还是 root 所有、或者当前用户不是管理员）时，不自动替换，GUI 提示「这次需要管理员密码」，并给「打开安装包」按钮：下载的不是 pkg，所以这一步改为打开 release 页面，让用户手动装 pkg。之后 §3.1 的 chown 会让下次不再需要。
 5. 写 `<configDir>/update-applied.json` = `{from, to, at, gui_was_open}`。
 
@@ -164,7 +164,7 @@
 - 不是 launchd 拉起的 service（命令行直接运行）不自动安装，只提示。
 
 **⑥ 回到上一版（v1 手动）**
-- GUI 本机 › 版本与升级 有「回到上一版」（`ConfirmButton`），用 `previous/rapp.app` 走 ④⑤。
+- GUI 本机 › 版本与升级 有「回到上一版」（`ConfirmButton`），用 `previous/rapp.backup` 走 ④⑤。
 - 新版连 service 都起不来时，到 release 页面下载上一版 pkg 手动装。
 
 **⑦ 要重新运行 pkg 的版本**（补，2026-11-16，见 `2026-11-16-rapp-install-level-design.md`）
