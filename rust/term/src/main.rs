@@ -4,6 +4,7 @@
 //! its program did (see `pty::holder`). Errors go to stderr as one line and never carry the command, the screen or
 //! the input.
 
+use rapp_term::config;
 use rapp_term::id::session_name;
 use rapp_term::proto::PROTO;
 use rapp_term::pty::holder::{self, NoTerminal, RunOpts};
@@ -133,12 +134,16 @@ async fn run(a: &Args) -> Res<i32> {
     if a.cwd.as_deref().is_some_and(|d| !Path::new(d).is_dir()) {
         return Err(usage("--cwd is not a directory"));
     }
+    let dir = a.dir.as_ref().map_or_else(local::default_dir, PathBuf::from);
+    // Read once, at start: a broken file means on (serve already refuses requests then, so it is seen).
+    let program_status = config::load(&config::beside(&dir)).map(|c| c.program_status).unwrap_or(true);
     let opts = RunOpts {
         name: a.name.clone(),
         cwd: a.cwd.as_ref().map(PathBuf::from),
-        dir: a.dir.as_ref().map_or_else(local::default_dir, PathBuf::from),
+        dir,
         ticket: a.ticket.clone(),
         command: a.command.clone().unwrap_or_default(),
+        program_status,
     };
     holder::run(opts).await.map_err(|e| match e.downcast_ref::<NoTerminal>() {
         Some(n) => Fail::Terminal(n.to_string()),

@@ -476,6 +476,11 @@ pub(crate) fn chunks(name: &str) -> Vec<Vec<u8>> {
         .collect()
 }
 
+/// What the program is told when it probes: a fixed answer, never anything from a report.
+pub const PROBE_REPLY: &[u8] = b"\x1b]7501;?\x1b\\";
+/// Most answers sent for one chunk of output.
+pub const MAX_REPLIES: usize = 64;
+
 /// At most this many chars of `msg` go into a snapshot; a longer one is cut and gets `…`.
 pub const MSG_CHARS: usize = 200;
 
@@ -560,7 +565,7 @@ impl Tracker {
             stopped: self.stopped,
             seq: self.seq,
         });
-        let mut changed = stopped_changed;
+        let mut changed = false;
         let next = match (next, self.ps.take()) {
             (None, old) => {
                 if old.is_some() {
@@ -655,6 +660,25 @@ mod tests {
         let mut t = Tracker::default();
         t.feed(&rep("state=blocked:kind=question"), 1);
         t.feed(b"\x1b]133;A\x07", 2);
+        assert!(t.ps().is_none());
+    }
+    #[test]
+    fn msg_of_exactly_200_chars_is_not_cut() {
+        for (n, cut) in [(200, false), (201, true)] {
+            let mut t = Tracker::default();
+            t.feed(&rep(&format!("state=done:msg={}", b64(&"问".repeat(n)))), 1);
+            let m = t.ps().unwrap().msg.clone().unwrap();
+            assert_eq!((m.chars().count(), m.ends_with('…')), (if cut { 201 } else { 200 }, cut));
+        }
+    }
+    #[test]
+    fn stopping_with_nothing_to_show_is_not_a_change() {
+        let mut t = Tracker::default();
+        // Working, done and clear inside one chunk: the snapshot was None and is None.
+        let mut b = rep("state=working");
+        b.extend(rep("state=done"));
+        b.extend(rep("state=clear"));
+        assert!(!t.feed(&b, 5).changed);
         assert!(t.ps().is_none());
     }
     #[test]
