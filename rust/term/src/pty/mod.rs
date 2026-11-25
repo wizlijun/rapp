@@ -4,6 +4,7 @@ pub mod holder;
 pub mod launch;
 pub mod local;
 pub mod ps;
+pub mod title;
 pub mod view;
 
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};

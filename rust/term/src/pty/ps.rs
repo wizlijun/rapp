@@ -36,6 +36,8 @@ pub enum Event {
     Report(String),
     /// `OSC 133;A`, a shell prompt start.
     Prompt,
+    /// `OSC 0|1|2 ; text`: slot is the OSC number.
+    Title { slot: u8, text: String },
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +57,7 @@ enum Kind {
     Pending,
     Is7501,
     Prompt,
+    Title(u8),
     Skip,
 }
 
@@ -120,7 +123,7 @@ impl Scanner {
     fn osc_byte(&mut self, c: u8) {
         match self.kind {
             Kind::Skip | Kind::Prompt => return,
-            Kind::Is7501 => {
+            Kind::Is7501 | Kind::Title(_) => {
                 if self.buf.len() >= MAX_BUFFER {
                     self.kind = Kind::Skip;
                     self.buf.clear();
@@ -137,7 +140,10 @@ impl Scanner {
             self.kind = Kind::Is7501;
         } else if b == b"133;A;" {
             self.kind = Kind::Prompt;
-        } else if !(P7501.starts_with(b) || P133A.starts_with(b)) {
+        } else if matches!(b, b"0;" | b"1;" | b"2;") {
+            self.kind = Kind::Title(b[0] - b'0');
+            self.buf.clear();
+        } else if !(matches!(b, b"0" | b"1" | b"2") || P7501.starts_with(b) || P133A.starts_with(b)) {
             self.kind = Kind::Skip;
         }
     }
@@ -158,6 +164,10 @@ impl Scanner {
                     emit(Event::Report(String::from_utf8_lossy(body).into_owned()));
                 }
             }
+            Kind::Title(slot) => emit(Event::Title {
+                slot,
+                text: String::from_utf8_lossy(&self.buf).into_owned(),
+            }),
             _ => {}
         }
     }
@@ -557,6 +567,7 @@ impl Tracker {
                 Event::Prompt => {
                     self.records.drop_transient();
                 }
+                Event::Title { .. } => {}
             }
             let cur = self.records.deciding().map(|r| r.state);
             if matches!(prev, Some(State::Working | State::Blocked))
@@ -720,6 +731,7 @@ mod tests {
                     Event::Probe => "probe".to_string(),
                     Event::Prompt => "prompt".to_string(),
                     Event::Report(b) => format!("report:{b}"),
+                    Event::Title { slot, text } => format!("title{slot}:{text}"),
                 })
             });
         }
@@ -769,8 +781,10 @@ mod tests {
     }
 
     #[test]
-    fn other_osc_is_ignored() {
-        assert!(events(&[b"\x1b]0;title\x07\x1b]75010;x\x07\x1b]1337;?\x07"]).is_empty());
+    fn osc_0_1_2_are_titles_and_other_osc_is_ignored() {
+        assert_eq!(events(&[b"\x1b]0;a\x07\x1b]1;b\x1b\\\x1b]2;c\x07\x1b]75010;x\x07\x1b]1337;?\x07\x1b]10;?\x07"]),
+            ["title0:a", "title1:b", "title2:c"]);
+        assert_eq!(events(&[b"\x1b]0;ti", b"tle\x07"]), ["title0:title"]);
     }
 
     #[test]
@@ -919,6 +933,7 @@ mod tests {
         for c in chunks(name) {
             sc.feed(&c, |e| match e {
                 Event::Probe => out.push("probe".to_string()),
+                Event::Title { .. } => {}
                 Event::Prompt => {
                     recs.drop_transient();
                     out.push("prompt".to_string());
@@ -955,7 +970,7 @@ mod tests {
                     recs.apply(m.clone());
                     f(&m, &recs);
                 }
-                Event::Probe => {}
+                Event::Probe | Event::Title { .. } => {}
             });
         }
         recs
