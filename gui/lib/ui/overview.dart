@@ -8,6 +8,7 @@ import '../embed/traffic_label.dart';
 import 'controls.dart';
 import 'lamp.dart';
 import 'main_state.dart';
+import 'open_apps_menu.dart';
 import 'overview_model.dart';
 import 'prefs.dart' show FirstLayer;
 import 'projects.dart' show orderedProjects;
@@ -332,24 +333,64 @@ class _Column extends StatelessWidget {
               ),
             ],
           ],
-          if (col.entries.isEmpty && id != null) ...[
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: RappButton.secondary(
-                key: Key('open-app-$id'),
-                label: '打开 app',
-                onPressed: () => state.showDevice(id),
-              ),
-            ),
-          ],
         ]),
-        if (col.version case final v?)
+        // The version, and on a remote column 打开应用 at the right: all its apps in one menu.
+        if (col.version != null || id != null)
           Padding(
-            padding: const EdgeInsets.only(top: 14),
-            child: Text(v, key: Key('version-${id ?? 'local'}'), style: small?.copyWith(color: t.muted)),
+            padding: EdgeInsets.only(top: id == null ? 14 : 6),
+            child: Row(children: [
+              if (col.version case final v?)
+                Flexible(
+                  child: Text(v,
+                      key: Key('version-${id ?? 'local'}'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: small?.copyWith(color: t.muted)),
+                ),
+              const Spacer(),
+              if (id != null) _OpenAppsLink(id: id, name: col.name, enabled: state.hubUsable && !col.offline, state: state),
+            ]),
           ),
       ]),
+    );
+  }
+}
+
+/// 「打开应用 ▾」at the foot of a remote column; a tap opens the device's app menu right under it.
+class _OpenAppsLink extends StatelessWidget {
+  const _OpenAppsLink({required this.id, required this.name, required this.enabled, required this.state});
+  final String id;
+  final String name;
+  final bool enabled;
+  final MainState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    final color = enabled ? t.on : t.muted.withValues(alpha: 0.6);
+    final style = Theme.of(context).textTheme.bodySmall?.copyWith(color: color);
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: '打开应用，$name',
+      excludeSemantics: true,
+      child: Builder(
+        builder: (anchor) => InkWell(
+          key: Key('open-apps-$id'),
+          borderRadius: BorderRadius.circular(t.r),
+          onTap: enabled ? () => showOpenAppsMenu(anchor, state, id) : null,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 48),
+            child: Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Text('打开应用', style: style),
+                Icon(Icons.arrow_drop_down, size: 18, color: color),
+              ]),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
