@@ -168,7 +168,7 @@ void main() {
         inside('inbound-kick-1', find.byType(InkWell)).evaluate().length,
         reason: 'the only ink on the card is the 断开 button');
     final sem = tester.getSemantics(inside('inbound-1', find.byType(Semantics)).first);
-    expect(sem.label, contains('正在被接入'));
+    expect(sem.label, '正在被接入，a，mini', reason: 'app and who, no age: the label must not change every second');
     expect(sem.getSemanticsData().flagsCollection.isButton, isFalse);
   });
 

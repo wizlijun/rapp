@@ -114,6 +114,7 @@ class _InboundGroupState extends State<InboundGroup> {
           session: s,
           title: inboundTitle(s.app),
           subtitle: inboundSubtitle(s, widget.hosts, now),
+          spoken: '${inboundWho(s, widget.hosts)}${s.side ? '，传文件' : ''}',
           onKick: () => _kick(s.sid),
         ),
       ],
@@ -123,10 +124,14 @@ class _InboundGroupState extends State<InboundGroup> {
 
 /// A dashed, inert card: it reads 正在被接入 to a screen reader and only its 断开 does anything.
 class _InboundCard extends StatelessWidget {
-  const _InboundCard({required this.session, required this.title, required this.subtitle, required this.onKick});
+  const _InboundCard(
+      {required this.session, required this.title, required this.subtitle, required this.spoken, required this.onKick});
   final ServiceSession session;
   final String title;
   final String subtitle;
+
+  /// Who is in, for a screen reader: without the age, so the label does not change every second.
+  final String spoken;
   final VoidCallback onKick;
 
   @override
@@ -138,7 +143,7 @@ class _InboundCard extends StatelessWidget {
       height: _cardHeight,
       child: Semantics(
         container: true,
-        label: '正在被接入，$title，$subtitle',
+        label: '正在被接入，$title，$spoken',
         child: CustomPaint(
           painter: _DashedFrame(color: t.muted, radius: t.r),
           child: Padding(

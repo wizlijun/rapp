@@ -76,11 +76,36 @@ enum SingleInstance {
     return true
   }
 
-  /// Whether a main window process holds the lock now. The connection manager asks: while the main window runs,
-  /// its overview already lists who is in (正在被接入), so the service's automatic `--cm` shows nothing.
-  static func mainIsRunning() -> Bool {
-    let fd = open(lockPath, O_RDWR)
-    if fd < 0 { return false }  // no lock file: no main window has run since boot
+  /// Held by the main process only while its window is on screen; the kernel drops it on crash.
+  private static var visibleFD: Int32 = -1
+  private static var visiblePath: String {
+    (NSTemporaryDirectory() as NSString).appendingPathComponent("com.rapp.rapp.gui.visible.lock")
+  }
+
+  /// The main window came on screen (true) or went away: minimized, closed to the Dock, hidden, covered,
+  /// another Space. A blocking lock: a connection manager's probe holds it only for an instant.
+  static func setMainVisible(_ on: Bool) {
+    if on {
+      if visibleFD >= 0 { return }
+      let fd = open(visiblePath, O_RDWR | O_CREAT, 0o600)
+      if fd < 0 { return }
+      if flock(fd, LOCK_EX) != 0 {
+        close(fd)
+        return
+      }
+      visibleFD = fd
+    } else if visibleFD >= 0 {
+      flock(visibleFD, LOCK_UN)
+      close(visibleFD)
+      visibleFD = -1
+    }
+  }
+
+  /// Whether the main window is on screen now. The connection manager asks: then the overview already lists who is
+  /// in (正在被接入), so the service's automatic `--cm` shows nothing. A main window out of sight still lets it pop up.
+  static func mainIsShowing() -> Bool {
+    let fd = open(visiblePath, O_RDWR)
+    if fd < 0 { return false }  // no lock file: no main window has been on screen since boot
     defer { close(fd) }
     if flock(fd, LOCK_EX | LOCK_NB) != 0 { return true }
     flock(fd, LOCK_UN)
