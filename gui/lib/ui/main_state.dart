@@ -1184,12 +1184,16 @@ class MainState extends ChangeNotifier {
   /// current one, else the one stored with it.
   String labelOf(AppRef a) => isTermApp(a.bundle) ? termTitle(termName(a.device, a.bundle) ?? a.name) : a.name;
 
-  /// A text terminal on [device] whose live row says its program waits for the person.
-  bool _termBlocked(String device, String app) {
-    if (!isTermApp(app)) return false;
+  /// A text terminal's program status from its live row on [device]; null when the app is no terminal, the row is
+  /// gone or dead, or the device dropped (its last list is stale).
+  TermPs? _termPs(String device, String app) {
+    if (!isTermApp(app) || _offlineSince.containsKey(device)) return null;
     final r = hub?.termLists[device]?.terms.where((r) => r.id == app).firstOrNull;
-    return r != null && !r.dead && r.ps?.state == 'blocked';
+    return r == null || r.dead ? null : r.ps;
   }
+
+  /// A text terminal on [device] whose live row says its program waits for the person.
+  bool _termBlocked(String device, String app) => _termPs(device, app)?.state == 'blocked';
 
   SessionEntry _entryOf(SessionRecord r) {
     final sid = r.sid;
@@ -1208,6 +1212,7 @@ class MainState extends ChangeNotifier {
       bytesPerSecond: r.phase == Phase.live ? rs?.bytesPerSecond : null,
       reason: r.phase == Phase.disconnected ? disconnectWord(r.reason) : null,
       takenOver: r.phase == Phase.disconnected && takenOver(r.reason),
+      ps: r.phase == Phase.disconnected ? null : _termPs(r.id, r.app),
     );
   }
 
@@ -1227,6 +1232,7 @@ class MainState extends ChangeNotifier {
           device: deviceName(s.id),
           path: s.path,
           lamp: _termBlocked(s.id, s.app) ? Lamp.waiting : Lamp.active,
+          ps: _termPs(s.id, s.app),
         );
         if (seen.add(e.key)) out.add(e);
       }

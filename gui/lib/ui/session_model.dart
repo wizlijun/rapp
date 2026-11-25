@@ -1,4 +1,5 @@
 // Session list model: entries, grouping, prev/next stepping.
+import '../hub_client.dart' show TermPs;
 import '../term/term_id.dart';
 import 'lamp.dart';
 import 'projects.dart';
@@ -22,7 +23,11 @@ class SessionEntry {
     this.bytesPerSecond,
     this.reason,
     this.takenOver = false,
+    this.ps,
   });
+
+  /// A text terminal's program status, from its live row; null when it reports none, is gone, or its device is offline.
+  final TermPs? ps;
 
   /// Disconnected because another device took it over: the button says 「拿回来」.
   final bool takenOver;

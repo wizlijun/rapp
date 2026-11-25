@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/term/term_session_port.dart';
 import 'package:rapp/embed/traffic_label.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/lamp.dart';
@@ -56,7 +57,7 @@ void main() {
   });
 
   /// Builds the state, opens [apps] (`id/app`) in order and shows the overview.
-  Future<void> boot(WidgetTester tester, {List<String> apps = const [], bool embed = true}) async {
+  Future<void> boot(WidgetTester tester, {List<String> apps = const [], bool embed = true, TermSessionPort? termPort}) async {
     tester.view.physicalSize = const Size(1194, 834);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -84,6 +85,7 @@ void main() {
       data: DataDir(tmp.path),
       prefs: UiPrefs(),
       port: embed ? port : null,
+      termPort: termPort,
       clock: () => epoch,
     );
     await tester.runAsync(() async {
@@ -133,6 +135,44 @@ void main() {
     expect(inside('block-m1/a', find.text('48.0 KB/s')), findsOneWidget);
     final reason = s.entries.firstWhere((e) => e.app == 'b').reason!;
     expect(inside('block-m1/b', find.text('已断开：$reason')), findsOneWidget);
+  });
+
+  testWidgets('an opened terminal shows its program status in place of the traffic, every state', (tester) async {
+    final term = FakeTermSessionPort();
+    await boot(tester, apps: ['m1/term:pty:a'], termPort: term);
+    term.play(const ReadyEvent(1, 'x'));
+    term.play(const TrafficEvent(1, 48000, 1));
+    Future<void> report(Map<String, Object?> ps) async {
+      await tester.runAsync(() async {
+        t.emit({
+          'event': 'terms',
+          'id': 'm1',
+          'terms': [
+            {'id': 'term:pty:a', 'name': 'a', 'command': 'claude', 'activity': 1, 'dead': false, 'ps': ps},
+          ],
+          'hosts': [],
+        });
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+    }
+
+    await show(tester);
+    expect(inside('block-m1/term:pty:a', find.text('48.0 KB/s')), findsOneWidget);
+    for (final (ps, word) in [
+      ({'state': 'working', 'progress': 42}, '在干活 · 42%'),
+      ({'state': 'blocked', 'kind': 'permission', 'msg': 'approve Bash: ls'}, '等确认 · approve Bash: ls'),
+      ({'state': 'error', 'msg': 'API Error: 400'}, '出错 · API Error: 400'),
+      ({'state': 'done'}, '完成'),
+      ({'state': 'idle'}, '空闲'),
+    ]) {
+      await report({...ps, 'seq': 1});
+      expect(inside('block-m1/term:pty:a', find.text(word)), findsOneWidget, reason: word);
+      expect(inside('block-m1/term:pty:a', find.text('48.0 KB/s')), findsNothing, reason: word);
+    }
+    expect(find.bySemanticsLabel(RegExp('^CLI · a，空闲')), findsOneWidget);
   });
 
   testWidgets('favourites with no session are listed under 常用 and open on a tap', (tester) async {
