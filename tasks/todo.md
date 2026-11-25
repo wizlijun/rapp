@@ -995,3 +995,14 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] [Linux v0.15.24](https://github.com/wizlijun/rapp/releases/tag/v0.15.24) 已发布（源码 `4c992ac0`）。两种包 40 文件一致、14 个 ELF 依赖完整，隔离 QUIC/CLI/端口共享检查通过；三个附件远端大小/SHA256 和匿名校验清单核验通过。
 - [x] macOS Latest 保留 v0.15.23；仓库下载快照更新。本轮不安装系统包、不重启服务、不部署静态站。
 - [ ] 实际物理输入法、触屏及 macOS 真机对端验收；详见 `docs/superpowers/plans/2026-11-25-linux-01524-parity.md`。
+
+## 升级后开机冒出旧版 rApp（2026-11-25，分支 `fix/update-previous-inert`，等下次发版一起合）
+
+原因：升级把旧版整个挪到 `~/rapp/local/previous/rapp.app` 留作回退。那份仍是登记过的 `.app`，系统按 bundle id 在登录时把它和新版一起打开（总览本机显示 0.15.20、旧的圆形快捷区按钮）。
+
+- [x] 备份改名为 `previous/rapp.backup`（换下时的暂存名 `.rapp-old.backup`），换完用 `lsregister -u` 注销；回退照常从它装回
+- [x] 服务启动时把老版本留下的 `previous/rapp.app` 先注销再改名；两份都在时不删任何一份
+- [ ] 实机 1：装新版后重启电脑，只起一个 rApp，总览本机是新版本号
+- [ ] 实机 2：「回到上一版」仍可用，回退后再升级回来也正常
+- [ ] 实机 3：`lsregister -dump | grep previous/` 不再有 rapp
+- 注意：回退到 0.15.24 及更早的版本后，那个旧版自己的升级会再留下 `previous/rapp.app`，要等再升到新版、服务启动时才会被改名

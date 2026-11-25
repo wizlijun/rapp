@@ -12,6 +12,8 @@ pub const TCCUTIL: &str = "/usr/bin/tccutil";
 pub const OPEN: &str = "/usr/bin/open";
 pub const PS: &str = "/bin/ps";
 pub const DF: &str = "/bin/df";
+pub const LSREGISTER: &str =
+    "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Out {

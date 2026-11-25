@@ -1,13 +1,46 @@
 //! Verifying a downloaded app, swapping it into place, and the marker the next service reads.
 
 use crate::fetch::{Failure, Stage};
-use crate::runner::{Runner, CODESIGN, DITTO, PLUTIL};
+use crate::runner::{Runner, CODESIGN, DITTO, LSREGISTER, PLUTIL};
 use crate::{canonical_version, parse_dr};
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
 
 pub const MARKER: &str = "update-applied.json";
+
+/// The kept version's name in `previous/`. Not `.app`: moved out of /Applications by rename, a
+/// `rapp.app` kept Launch Services' record, and login reopened it next to the new version.
+const PREVIOUS_APP: &str = "rapp.backup";
+/// Where versions before 0.15.25 kept it.
+const LEGACY_PREVIOUS_APP: &str = "rapp.app";
+/// The old previous set aside during a swap (not `.app` either).
+pub const ASIDE: &str = ".rapp-old.backup";
+/// The aside name before 0.15.25; a leftover by that name still blocks installs.
+pub const LEGACY_ASIDE: &str = ".rapp-old.app";
+
+pub fn previous_app(previous_dir: &Path) -> PathBuf {
+    previous_dir.join(PREVIOUS_APP)
+}
+
+/// Drops Launch Services' record of `app`, so nothing opens it by bundle id. Best effort.
+fn unregister(r: &dyn Runner, app: &Path) {
+    let _ = r.run(LSREGISTER, &["-u".into(), s(app)]);
+}
+
+/// A `previous/rapp.app` kept by an older version: unregistered, then renamed to the backup name
+/// unless a backup is already there (then it stays put; nothing is deleted).
+pub fn adopt_legacy_previous(r: &dyn Runner, previous_dir: &Path) {
+    let legacy = previous_dir.join(LEGACY_PREVIOUS_APP);
+    if !legacy.is_dir() {
+        return;
+    }
+    unregister(r, &legacy);
+    let backup = previous_app(previous_dir);
+    if !backup.exists() {
+        let _ = std::fs::rename(&legacy, &backup);
+    }
+}
 
 fn s(p: &Path) -> String {
     p.display().to_string()
@@ -112,8 +145,8 @@ fn move_dir(r: &dyn Runner, from: &Path, to: &Path) -> io::Result<()> {
     }
 }
 
-/// Swaps `new_app` into `bundle`, keeping the replaced app as `<previous_dir>/rapp.app` (K12).
-/// Rolling back is the same call with `new_app = <previous_dir>/rapp.app` (K13).
+/// Swaps `new_app` into `bundle`, keeping the replaced app as [`previous_app`] (K12), unregistered.
+/// Rolling back is the same call with `new_app = previous_app(previous_dir)` (K13).
 ///
 /// Failure paths never delete anything that may be the only whole copy of a version: putting a
 /// complete app back at `bundle` comes first, then the old previous and the staged app go back
@@ -128,9 +161,9 @@ pub fn install(r: &dyn Runner, new_app: &Path, bundle: &Path, previous_dir: &Pat
         }
     };
     let staging = bundle.parent().ok_or_else(|| failed("安装位置不对"))?.join(".rapp-new.app");
-    let prev = previous_dir.join("rapp.app");
+    let prev = previous_app(previous_dir);
     // The old previous waits here until the swap has succeeded.
-    let aside = previous_dir.join(".rapp-old.app");
+    let aside = previous_dir.join(ASIDE);
 
     // ① stage the new app next to the bundle, on the same volume. move_dir cleans up after itself.
     remove_dir(&staging).map_err(|e| admin_or(&e, "清不掉上次留下的 .rapp-new.app"))?;
@@ -140,7 +173,7 @@ pub fn install(r: &dyn Runner, new_app: &Path, bundle: &Path, previous_dir: &Pat
     let undo = |m: &str, e: Option<&io::Error>| {
         let mut left = Vec::new();
         if aside.exists() && (prev.exists() || std::fs::rename(&aside, &prev).is_err()) {
-            left.push("原来的上一版留在 previous/.rapp-old.app");
+            left.push("原来的上一版留在 previous/.rapp-old.backup");
         }
         if move_dir(r, &staging, new_app).is_err() {
             left.push("要装的那一版留在 .rapp-new.app");
@@ -182,6 +215,7 @@ pub fn install(r: &dyn Runner, new_app: &Path, bundle: &Path, previous_dir: &Pat
         return Err(undo(m, None));
     }
     let _ = remove_dir(&aside);
+    unregister(r, &prev);
     Ok(())
 }
 
@@ -220,7 +254,7 @@ pub fn clear_marker(home: &Path) {
 mod tests {
     use super::*;
     use crate::fake::FakeRunner;
-    use crate::runner::{Out, CODESIGN, DITTO, PLUTIL};
+    use crate::runner::{Out, CODESIGN, DITTO, LSREGISTER, PLUTIL};
     use std::path::PathBuf;
 
     const DR: &str = "identifier \"com.rapp.rapp\" and certificate leaf[subject.CN] = \"Apple Development: a (B)\"";
@@ -257,7 +291,7 @@ mod tests {
         }
 
         fn aside(&self) -> PathBuf {
-            self.previous.join(".rapp-old.app")
+            self.previous.join(".rapp-old.backup")
         }
     }
 
@@ -376,10 +410,10 @@ mod tests {
     #[test]
     fn install_swaps_and_keeps_one_previous() {
         let e = Env::new();
-        make_app(&e.previous.join("rapp.app"), "old0");
+        make_app(&e.previous.join("rapp.backup"), "old0");
         install(&FakeRunner::new(), &e.new_app, &e.bundle, &e.previous).unwrap();
         assert_eq!(marker_of(&e.bundle), "new");
-        assert_eq!(marker_of(&e.previous.join("rapp.app")), "current");
+        assert_eq!(marker_of(&e.previous.join("rapp.backup")), "current");
         assert!(!e.staging().exists());
         assert!(!e.new_app.exists());
         assert!(!e.aside().exists());
@@ -393,21 +427,21 @@ mod tests {
         assert!(matches!(err, InstallError::Failed(_)), "{err:?}");
         assert_eq!(marker_of(&e.bundle), "current");
         assert!(!e.staging().exists());
-        assert!(!e.previous.join("rapp.app").exists());
+        assert!(!e.previous.join("rapp.backup").exists());
         assert_eq!(marker_of(&e.new_app), "new");
     }
 
     #[test]
     fn fourth_step_failure_puts_old_previous_back() {
         let e = Env::new();
-        make_app(&e.previous.join("rapp.app"), "old0");
+        make_app(&e.previous.join("rapp.backup"), "old0");
         let r = FakeRunner::new().rename_fails(3, io::Error::other("boom"));
         assert_eq!(
             install(&r, &e.new_app, &e.bundle, &e.previous),
             Err(InstallError::Failed("换上新版失败，已还原".into()))
         );
         assert_eq!(marker_of(&e.bundle), "current");
-        assert_eq!(marker_of(&e.previous.join("rapp.app")), "old0");
+        assert_eq!(marker_of(&e.previous.join("rapp.backup")), "old0");
         assert_eq!(marker_of(&e.new_app), "new");
         assert!(!e.staging().exists());
         assert!(!e.aside().exists());
@@ -416,12 +450,12 @@ mod tests {
     #[test]
     fn double_rename_failure_on_install_loses_no_version() {
         let e = Env::new();
-        let prev = e.previous.join("rapp.app");
+        let prev = e.previous.join("rapp.backup");
         make_app(&prev, "old0");
         let r = FakeRunner::new().rename_fails(3, io::Error::other("④")).rename_fails(4, io::Error::other("restore"));
         let err = install(&r, &e.new_app, &e.bundle, &e.previous).unwrap_err();
         let InstallError::Failed(reason) = err else { panic!("{err:?}") };
-        assert!(reason.contains(".rapp-old.app"), "{reason}");
+        assert!(reason.contains(".rapp-old.backup"), "{reason}");
         assert!(!reason.contains("http"), "{reason}");
         assert!(!e.bundle.exists(), "no restore rename succeeded");
         assert_eq!(marker_of(&prev), "current");
@@ -433,7 +467,7 @@ mod tests {
     #[test]
     fn double_rename_failure_on_rollback_loses_no_version() {
         let e = Env::new();
-        let prev = e.previous.join("rapp.app");
+        let prev = e.previous.join("rapp.backup");
         make_app(&prev, "old");
         let r = FakeRunner::new().rename_fails(3, io::Error::other("④")).rename_fails(4, io::Error::other("restore"));
         let err = install(&r, &prev, &e.bundle, &e.previous).unwrap_err();
@@ -447,7 +481,7 @@ mod tests {
     #[test]
     fn rollback_unstage_never_merges_into_occupied_previous() {
         let e = Env::new();
-        let prev = e.previous.join("rapp.app");
+        let prev = e.previous.join("rapp.backup");
         make_app(&prev, "old");
         let r = FakeRunner::new()
             .rename_fails(3, io::Error::other("④"))
@@ -466,7 +500,7 @@ mod tests {
     #[test]
     fn rollback_fourth_step_failure_restores_both() {
         let e = Env::new();
-        let prev = e.previous.join("rapp.app");
+        let prev = e.previous.join("rapp.backup");
         make_app(&prev, "old");
         let r = FakeRunner::new().rename_fails(3, io::Error::other("④"));
         assert!(install(&r, &prev, &e.bundle, &e.previous).is_err());
@@ -483,7 +517,7 @@ mod tests {
             Out::ok("")
         });
         install(&r, &e.new_app, &e.bundle, &e.previous).unwrap();
-        let prev = e.previous.join("rapp.app");
+        let prev = e.previous.join("rapp.backup");
         let want = (DITTO.to_string(), vec![e.bundle.display().to_string(), prev.display().to_string()]);
         assert!(r.calls().contains(&want), "{:?}", r.calls());
         assert_eq!(marker_of(&prev), "current");
@@ -507,7 +541,7 @@ mod tests {
         assert_eq!(res, Err(InstallError::NeedsAdmin));
         assert_eq!(marker_of(&e.bundle), "current");
         assert_eq!(marker_of(&locked), "x");
-        assert!(!e.previous.join("rapp.app").exists());
+        assert!(!e.previous.join("rapp.backup").exists());
         assert!(!e.staging().exists());
         assert_eq!(marker_of(&e.new_app), "new");
     }
@@ -533,12 +567,58 @@ mod tests {
     #[test]
     fn rollback_swaps_current_and_previous() {
         let e = Env::new();
-        let prev = e.previous.join("rapp.app");
+        let prev = e.previous.join("rapp.backup");
         make_app(&prev, "old");
         install(&FakeRunner::new(), &prev, &e.bundle, &e.previous).unwrap();
         assert_eq!(marker_of(&e.bundle), "old");
         assert_eq!(marker_of(&prev), "current");
         assert!(!e.staging().exists());
+    }
+
+    /// The kept version is no `.app` and is unregistered: Launch Services followed it out of
+    /// /Applications and opened it at login next to the new one.
+    #[test]
+    fn install_leaves_the_previous_version_unlaunchable() {
+        let e = Env::new();
+        let r = FakeRunner::new();
+        install(&r, &e.new_app, &e.bundle, &e.previous).unwrap();
+        let prev = previous_app(&e.previous);
+        assert_eq!(prev, e.previous.join("rapp.backup"));
+        assert_eq!(marker_of(&prev), "current");
+        assert!(!e.previous.join("rapp.app").exists());
+        let want = (LSREGISTER.to_string(), vec!["-u".to_string(), prev.display().to_string()]);
+        assert!(r.calls().contains(&want), "{:?}", r.calls());
+    }
+
+    #[test]
+    fn legacy_previous_app_is_renamed_and_unregistered() {
+        let e = Env::new();
+        let legacy = e.previous.join("rapp.app");
+        make_app(&legacy, "old");
+        let r = FakeRunner::new();
+        adopt_legacy_previous(&r, &e.previous);
+        assert!(!legacy.exists());
+        assert_eq!(marker_of(&previous_app(&e.previous)), "old");
+        let u = |p: &Path| (LSREGISTER.to_string(), vec!["-u".to_string(), p.display().to_string()]);
+        assert_eq!(r.calls(), vec![u(&legacy)], "unregistered while it still has its .app name");
+    }
+
+    #[test]
+    fn legacy_previous_never_overwrites_the_backup() {
+        let e = Env::new();
+        make_app(&e.previous.join("rapp.app"), "older");
+        make_app(&previous_app(&e.previous), "kept");
+        adopt_legacy_previous(&FakeRunner::new(), &e.previous);
+        assert_eq!(marker_of(&previous_app(&e.previous)), "kept");
+        assert_eq!(marker_of(&e.previous.join("rapp.app")), "older", "nothing is deleted");
+    }
+
+    #[test]
+    fn nothing_to_adopt_runs_nothing() {
+        let e = Env::new();
+        let r = FakeRunner::new();
+        adopt_legacy_previous(&r, &e.previous);
+        assert!(r.calls().is_empty(), "{:?}", r.calls());
     }
 
     #[test]

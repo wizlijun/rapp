@@ -10,8 +10,8 @@ pub mod fetch;
 pub mod runner;
 
 pub use apply::{
-    bundle_version, clear_marker, designated, install, read_marker, verify, verify_local, write_marker, InstallError,
-    Marker, Verified, MARKER,
+    adopt_legacy_previous, bundle_version, clear_marker, designated, install, previous_app, read_marker, verify,
+    verify_local, write_marker, InstallError, Marker, Verified, ASIDE, LEGACY_ASIDE, MARKER,
 };
 pub use fetch::{download, fetch_manifest, free_bytes, part_path, sha256_file, zip_path, Failure, Stage};
 pub use runner::{Out, Runner, SystemRunner};
