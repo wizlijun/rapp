@@ -52,7 +52,7 @@ Object? mergeRules(Object? base, Object? patch) {
     }
     return out;
   }
-  return patch;
+  return patch is Map ? _strip(patch) : patch;
 }
 
 /// A value taken as new: `null`s inside objects mean nothing there, so they are dropped like a merge onto nothing.
@@ -95,8 +95,11 @@ class StateRulesLibrary {
 
     void offer(_Entry e) {
       final cur = entries[e.id];
-      // A larger rev wins; a tie goes to mine (and, among mine files, the later file name).
-      if (cur == null || e.rev > cur.rev || (e.rev == cur.rev && e.layer == RulesLayer.mine)) entries[e.id] = e;
+      // A larger rev wins; a tie goes to mine.
+      // Files come in name order, so at a full tie the first file name stays.
+      if (cur == null || e.rev > cur.rev || (e.rev == cur.rev && e.layer == RulesLayer.mine && cur.layer == RulesLayer.builtin)) {
+        entries[e.id] = e;
+      }
     }
 
     if (builtinJson != null) {
@@ -116,6 +119,7 @@ class StateRulesLibrary {
     for (final name in (mineFiles.keys.toList()..sort())) {
       try {
         final v = jsonDecode(mineFiles[name]!);
+        if (_deeper(v, 64)) throw 'too deep';
         if (v is! Map) throw '顶层不是对象';
         if (!_major1(v['format'])) throw '格式版本不认识';
         if (v.containsKey('patchOf')) {
@@ -133,6 +137,13 @@ class StateRulesLibrary {
       }
     }
     return StateRulesLibrary._(entries, patches, errors);
+  }
+
+  static bool _deeper(Object? v, int left) {
+    if (left < 0) return true;
+    if (v is Map) return v.values.any((x) => _deeper(x, left - 1));
+    if (v is List) return v.any((x) => _deeper(x, left - 1));
+    return false;
   }
 
   static Map<String, Object?> _asMap(Map m) => {for (final e in m.entries) '${e.key}': e.value};
@@ -166,33 +177,56 @@ class StateRulesLibrary {
     return StateRulesLibrary._(lib._entries, lib._patches, [...errs, ...lib.errors]);
   }
 
-  /// Resolved pack of [id] (extends, then mine patches), or null when missing or cyclic.
-  Map<String, Object?>? _resolve(String id, List<String> stack) {
-    final e = _entries[id];
-    if (e == null || stack.contains(id)) return null;
-    Object? merged = e.pack;
-    final base = e.pack['extends'];
-    if (base != null) {
-      if (base is! String) return null;
-      final b = _resolve(base, [...stack, id]);
-      if (b == null) return null;
-      merged = mergeRules(b, {...e.pack}..remove('extends'));
+  /// Resolved pack of [id] (extends, then mine patches) and whether a mine patch was applied anywhere in
+  /// the chain; null when missing, cyclic or unreadable. Never changes the stored packs.
+  ({Map<String, Object?> pack, bool patched})? _resolve(String id, List<String> stack) {
+    try {
+      final e = _entries[id];
+      if (e == null || stack.contains(id)) return null;
+      Object? merged = e.pack;
+      var patched = false;
+      final base = e.pack['extends'];
+      if (base != null) {
+        if (base is! String) return null;
+        final b = _resolve(base, [...stack, id]);
+        if (b == null) return null;
+        patched = b.patched;
+        merged = mergeRules(b.pack, {...e.pack}..remove('extends'));
+      }
+      for (final p in _patches[id] ?? const <Map<String, Object?>>[]) {
+        merged = mergeRules(merged, p);
+        patched = true;
+      }
+      final out = {...(merged as Map<String, Object?>)}..remove('extends');
+      return (pack: out, patched: patched);
+    } catch (_) {
+      return null;
     }
-    for (final p in _patches[id] ?? const <Map<String, Object?>>[]) {
-      merged = mergeRules(merged, p);
+  }
+
+  /// Whether [id] extends [base], directly or further up.
+  bool _extends(String id, String base) {
+    var cur = _entries[id]?.pack['extends'];
+    for (var i = 0; cur is String && i < 32; i++) {
+      if (cur == base) return true;
+      cur = _entries[cur]?.pack['extends'];
     }
-    final out = merged as Map<String, Object?>;
-    out.remove('extends');
-    return out;
+    return false;
   }
 
   ChosenRules? _chosen(String id) {
     final e = _entries[id];
-    final m = _resolve(id, const []);
-    if (e == null || m == null) return null;
-    final json = jsonEncode(m);
+    final res = _resolve(id, const []);
+    if (e == null || res == null) return null;
+    final m = res.pack;
+    final String json;
+    try {
+      json = jsonEncode(m);
+    } catch (_) {
+      return null;
+    }
     if (utf8.encode(json).length > stateRulesLimit) return null;
-    final patched = (_patches[id] ?? const []).isNotEmpty;
+    final patched = res.patched;
     var t = 0, s = 0, r = 0, u = 0;
     final sigs = m['signals'];
     if (sigs is Map) {
@@ -225,17 +259,21 @@ class StateRulesLibrary {
     final want = appId.toLowerCase();
     _Entry? best;
     for (final e in _entries.values) {
-      final ids = e.pack['ids'] ?? _inheritedIds(e.id);
+      final ids = _resolve(e.id, const [])?.pack['ids'];
       if (ids is! List || !ids.any((i) => i is String && i.toLowerCase() == want)) continue;
       if (_chosen(e.id) == null) continue;
-      if (best == null ||
-          e.rev > best.rev ||
-          (e.rev == best.rev && e.layer == RulesLayer.mine && best.layer != RulesLayer.mine)) {
-        best = e;
-      }
+      if (best == null || _beats(e, best)) best = e;
     }
     return best == null ? null : _chosen(best.id);
   }
 
-  Object? _inheritedIds(String id) => _resolve(id, const [])?['ids'];
+  /// Larger rev, then mine, then the extender over its base, then the smaller file name (then id).
+  bool _beats(_Entry a, _Entry b) {
+    if (a.rev != b.rev) return a.rev > b.rev;
+    if (a.layer != b.layer) return a.layer == RulesLayer.mine;
+    if (_extends(a.id, b.id)) return true;
+    if (_extends(b.id, a.id)) return false;
+    final c = a.name.compareTo(b.name);
+    return c != 0 ? c < 0 : a.id.compareTo(b.id) < 0;
+  }
 }

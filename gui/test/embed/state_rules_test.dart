@@ -81,4 +81,47 @@ void main() {
     expect(t.seen, 2); // rowDot, workedFor
     expect(t.untested, 3); // stop, rowBusy, ask
   });
+
+  test('merge onto a non-object base strips nulls like Swift', () {
+    expect(mergeRules(5, {'a': null, 'b': {'c': null}}), {'b': <String, Object?>{}});
+    expect(mergeRules({'a': 5}, {'a': {'x': null, 'y': 1}}), {'a': {'y': 1}});
+  });
+
+  test('a hostile deep file is an error, and choose does not throw', () {
+    final deep = '${'{"a":' * 20000}1${'}' * 20000}';
+    final lib = StateRulesLibrary.parse(builtin, {
+      'deep.json': '{"format":"1.0","id":"d","ids":["com.d"],"x":$deep}'
+    });
+    expect(lib.errors, hasLength(1));
+    expect(lib.choose('com.d', null), isNull);
+    expect(lib.choose('com.openai.codex', null), isNotNull);
+  });
+
+  test('a patch on the base reaches the extender, flagged patched and mine', () {
+    final lib = StateRulesLibrary.parse(builtin, {
+      'g.json': '{"format":"1.0","patchOf":"generic-chat","patch":{"regions":{"tail":{"box":{"height":99}}}}}'
+    });
+    final c = lib.choose('com.anthropic.claudefordesktop', null)!;
+    expect(c.patched, isTrue);
+    expect(c.layer, RulesLayer.mine);
+    expect((jsonDecode(c.json) as Map)['regions']['tail']['box']['height'], 99);
+    expect(c.id, 'claude-desktop');
+  });
+
+  test('equal rev and layer: the extender beats its base, then file name ascending', () {
+    final base = {'format': '1.0', 'id': 'b', 'rev': 1, 'ids': ['com.t']};
+    final ext = {'format': '1.0', 'id': 'e', 'rev': 1, 'extends': 'b', 'ids': ['com.t']};
+    expect(StateRulesLibrary.parse(null, {'1.json': jsonEncode(base), '2.json': jsonEncode(ext)}).choose('com.t', null)!.id, 'e');
+    expect(StateRulesLibrary.parse(null, {'1.json': jsonEncode(ext), '2.json': jsonEncode(base)}).choose('com.t', null)!.id, 'e');
+    final x = {'format': '1.0', 'id': 'x', 'rev': 1, 'ids': ['com.u']};
+    final y = {'format': '1.0', 'id': 'y', 'rev': 1, 'ids': ['com.u']};
+    expect(StateRulesLibrary.parse(null, {'b.json': jsonEncode(x), 'a.json': jsonEncode(y)}).choose('com.u', null)!.id, 'y');
+  });
+
+  test('choosing does not change the stored pack', () {
+    final l = StateRulesLibrary.parse(builtin, {});
+    final a = l.choose('com.openai.codex', null)!.json;
+    expect(l.choose('com.openai.codex', null)!.json, a);
+    expect(l.choose('x', 'chatgpt-desktop')!.json, a);
+  });
 }

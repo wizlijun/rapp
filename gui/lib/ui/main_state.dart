@@ -253,7 +253,10 @@ class MainState extends ChangeNotifier {
     if (pp != null) hint = hint.isEmpty ? pp : '$hint；$pp';
     profiles.addListener(_onProfiles);
     StateRulesLibrary.load(d, _builtinStateRules).then((lib) {
-      if (data.root == d.root) stateRules = lib;
+      if (data.root == d.root) {
+        stateRules = lib;
+        notifyListeners();
+      }
     });
     for (final rs in remote.values) {
       rs.setProfile(profiles.resolve(rs.appId));
