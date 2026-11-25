@@ -17,28 +17,42 @@ final class VisionText: TextReader {
     private static var isReady = false
     var ready: Bool { Self.readyLock.withLock { Self.isReady } }
 
-    private static let warmed: Void = {
+    private static let warmed = NSLock()
+    private static var warmStarted = false
+
+    /// Loads Vision once per process, off the caller's queue. Later calls do nothing. When the warm-up
+    /// recognition fails the reader stays not ready (text signals read nothing) and one line says so.
+    static func warmUp(log: @escaping (String) -> Void) {
+        let first = warmed.withLock { () -> Bool in defer { warmStarted = true }; return !warmStarted }
+        guard first else { return }
         DispatchQueue.global(qos: .utility).async {
             // The first recognition loads the model (seconds); pay for it here, not on the watcher queue.
             var px = [UInt8](repeating: 255, count: 64 * 64 * 4)
             for i in stride(from: 0, to: px.count, by: 4) where (i / 4) % 64 > 20 && (i / 4) % 64 < 40 { px[i] = 0; px[i + 1] = 0; px[i + 2] = 0 }
-            _ = VisionText().lines(in: RuleImage(width: 64, height: 64, pixels: px), rect: RuleRect(x: 0, y: 0, w: 64, h: 64), force: true)
+            let probe = RuleImage(width: 64, height: 64, pixels: px)
+            guard VisionText().recognise(in: probe, rect: RuleRect(x: 0, y: 0, w: 64, h: 64)) != nil else {
+                log("state rules: text recognition unavailable (warm-up failed), text signals are off")
+                return
+            }
             readyLock.withLock { isReady = true }
         }
-    }()
-
-    /// Loads Vision once per process, off the caller's queue. Later calls do nothing.
-    static func warmUp() { _ = warmed }
+    }
 
     func lines(in image: RuleImage, rect: RuleRect) -> [String] { lines(in: image, rect: rect, force: false) }
 
     private func lines(in image: RuleImage, rect: RuleRect, force: Bool) -> [String] {
-        guard force || ready, let cg = Self.makeImage(image, rect: rect) else { return [] }
+        guard force || ready else { return [] }
+        return recognise(in: image, rect: rect) ?? []
+    }
+
+    /// Nil when the image is degenerate or Vision failed; the recognised lines otherwise.
+    private func recognise(in image: RuleImage, rect: RuleRect) -> [String]? {
+        guard let cg = Self.makeImage(image, rect: rect) else { return nil }
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.recognitionLanguages = ["zh-Hans", "en-US"]
         request.usesLanguageCorrection = false
-        do { try VNImageRequestHandler(cgImage: cg, options: [:]).perform([request]) } catch { return [] }
+        do { try VNImageRequestHandler(cgImage: cg, options: [:]).perform([request]) } catch { return nil }
         return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
     }
 

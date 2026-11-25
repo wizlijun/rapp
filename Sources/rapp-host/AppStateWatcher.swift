@@ -56,7 +56,7 @@ final class AppStateWatcher {
             let bundleURL = app.bundleURL
             let version = appVersion(bundleURL: bundleURL)
             var caps: Set<String> = ["pixels"]
-            if text != nil { caps.insert("text"); VisionText.warmUp() }
+            if text != nil { caps.insert("text"); VisionText.warmUp(log: log) }
             let env = RuleEnv(appVersion: version, os: "macos", locale: Locale.preferredLanguages.first ?? "en",
                               caps: caps, rereadVersion: { appVersion(bundleURL: bundleURL) })
             do {
