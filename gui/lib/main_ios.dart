@@ -9,6 +9,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'data_dir.dart';
 import 'embed/rime_glue.dart';
 import 'embed/session_port.dart';
+import 'embed/state_rules.dart';
 import 'hub_client.dart';
 import 'hub_ffi.dart';
 import 'ios_channel.dart';
@@ -80,6 +81,10 @@ Future<void> mainIos() async {
   try {
     builtin = await rootBundle.loadString('assets/app_profiles.json');
   } catch (_) {}
+  String? builtinRules;
+  try {
+    builtinRules = await rootBundle.loadString('assets/state_rules.json');
+  } catch (_) {}
   final state = MainState(
       hub: hub,
       hubError: hubError,
@@ -89,6 +94,8 @@ Future<void> mainIos() async {
       termPort: TermSessionPort(),
       doubleClick: doubleClick,
       profiles: AppProfileStore.load(data.sharedDir, builtin),
+      stateRules: await StateRulesLibrary.load(data, builtinRules),
+      builtinStateRules: builtinRules,
       log: _log);
   state.overview = true;
   // The built-in input method follows 全局设置 and the session on the stage. Lives as long as the app.

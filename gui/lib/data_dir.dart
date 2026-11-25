@@ -64,7 +64,7 @@ const migratedFrom = 'migrated-from';
 /// Returns whether this call migrated. Copies only; [legacy] is never changed. No [legacy] (iOS): nothing to copy.
 /// Throws [FileSystemException] on failure.
 bool prepareDataDir(String root, String? legacy) {
-  for (final d in ['shared', 'devices', 'agent', 'clipboard', 'files/transfers', 'files/clipboard']) {
+  for (final d in ['shared', 'shared/state_rules', 'devices', 'agent', 'clipboard', 'files/transfers', 'files/clipboard']) {
     Directory('$root/$d').createSync(recursive: true);
   }
   final loc = '$root/local';

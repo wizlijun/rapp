@@ -28,4 +28,5 @@ flutter:
   assets:
     - assets/tray_icon.png
     - assets/app_profiles.json
+    - assets/state_rules.json
     - assets/themes/

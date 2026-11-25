@@ -8,6 +8,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'cm_page.dart';
 import 'embed/session_port.dart';
+import 'embed/state_rules.dart';
 import 'embed/linux_session_port.dart';
 import 'hub_client.dart';
 import 'pages/local_section.dart';
@@ -98,6 +99,10 @@ Future<void> main(List<String> args) async {
   try {
     builtin = await rootBundle.loadString('assets/app_profiles.json');
   } catch (_) {}
+  String? builtinRules;
+  try {
+    builtinRules = await rootBundle.loadString('assets/state_rules.json');
+  } catch (_) {}
   final state = MainState(
       hub: hub,
       hubError: hubError,
@@ -108,6 +113,8 @@ Future<void> main(List<String> args) async {
       termPort: port == null ? null : TermSessionPort(),
       doubleClick: doubleClick,
       profiles: AppProfileStore.load(data.sharedDir, builtin),
+      stateRules: await StateRulesLibrary.load(data, builtinRules),
+      builtinStateRules: builtinRules,
       log: stderr.writeln);
   mainState = state;
   // Native window visibility: macOS occlusion, Linux mapping/minimization.

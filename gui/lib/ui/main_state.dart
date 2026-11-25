@@ -25,6 +25,7 @@ import '../history/input_recorder.dart';
 import '../hub_client.dart';
 import '../permissions.dart';
 import '../embed/app_profile.dart';
+import '../embed/state_rules.dart';
 import '../embed/composer_model.dart';
 import '../embed/modifier_latch.dart';
 import '../term/term_id.dart';
@@ -151,11 +152,15 @@ class MainState extends ChangeNotifier {
     this.doubleClick = const Duration(milliseconds: 500),
     DateTime Function()? clock,
     AppProfileStore? profiles,
+    StateRulesLibrary? stateRules,
+    String? builtinStateRules,
     UnlockStore? unlockStore,
     void Function(String line)? log,
     VoiceInput? voice,
     LlmApi? llmApi,
-  })  : resources = ResourcesState(clock: clock),
+  })  : _builtinStateRules = builtinStateRules,
+        stateRules = stateRules ?? StateRulesLibrary.parse(builtinStateRules, const {}),
+        resources = ResourcesState(clock: clock),
         voice = voice ??
             (defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.macOS
                 ? VoiceInput()
@@ -247,6 +252,9 @@ class MainState extends ChangeNotifier {
     final pp = profiles.problem;
     if (pp != null) hint = hint.isEmpty ? pp : '$hint；$pp';
     profiles.addListener(_onProfiles);
+    StateRulesLibrary.load(d, _builtinStateRules).then((lib) {
+      if (data.root == d.root) stateRules = lib;
+    });
     for (final rs in remote.values) {
       rs.setProfile(profiles.resolve(rs.appId));
       _syncHidden(rs);
@@ -335,6 +343,10 @@ class MainState extends ChangeNotifier {
 
   /// My app profiles (`apps.json` in `shared/`) and the built-in ones; swapped by [relocate].
   late AppProfileStore profiles;
+
+  /// The built-in and my state rule packs (`shared/state_rules/`); swapped by [relocate].
+  StateRulesLibrary stateRules;
+  final String? _builtinStateRules;
   final void Function(String line) _log;
   final Map<Object, List<int>> _sentHidden = {};
   final Map<Object, int> _loggedHidden = {};
