@@ -5,7 +5,9 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../embed/traffic_label.dart';
+import '../service_client.dart';
 import 'controls.dart';
+import 'inbound.dart';
 import 'lamp.dart';
 import 'main_state.dart';
 import 'open_apps_menu.dart';
@@ -29,13 +31,16 @@ const _bandHeight = 88 + 2 * _gap;
 const overviewArtMaxSide = 440.0;
 
 class Overview extends StatelessWidget {
-  const Overview({super.key, required this.state});
+  const Overview({super.key, required this.state, this.monitor});
   final MainState state;
+
+  /// This machine's service: who is in (正在被接入, on the 本机 column). Null where there is none (iOS).
+  final ServiceMonitor? monitor;
 
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: Listenable.merge([state, state.resources]),
+      listenable: Listenable.merge([state, state.resources, ?monitor]),
       builder: (context, _) {
         final entries = state.entries;
         final hosts = state.hub?.hosts ?? const [];
@@ -62,7 +67,7 @@ class Overview extends StatelessWidget {
                   key: const Key('wall'),
                   spacing: _gap,
                   runSpacing: _gap,
-                  children: [for (final c in cols) _Column(state: state, col: c)],
+                  children: [for (final c in cols) _Column(state: state, col: c, monitor: monitor)],
                 ),
               ),
             ),
@@ -274,9 +279,10 @@ class _CountCell extends StatelessWidget {
 }
 
 class _Column extends StatelessWidget {
-  const _Column({required this.state, required this.col});
+  const _Column({required this.state, required this.col, this.monitor});
   final MainState state;
   final DeviceColumn col;
+  final ServiceMonitor? monitor;
 
   @override
   Widget build(BuildContext context) {
@@ -320,6 +326,14 @@ class _Column extends StatelessWidget {
             if (i > 0) const SizedBox(height: 8),
             _Block(state: state, entry: e),
           ],
+          // Who is in on this machine: not tasks, so they follow the sessions and open nothing.
+          if (id == null && monitor != null)
+            InboundGroup(
+              sessions: monitor!.status?.sessions ?? const [],
+              hosts: state.hub?.hosts ?? const [],
+              now: state.now,
+              onKick: monitor!.kick,
+            ),
           if (favorites.isNotEmpty) ...[
             Padding(
               padding: const EdgeInsets.only(top: 14, bottom: 6),

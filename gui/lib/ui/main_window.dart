@@ -352,7 +352,7 @@ class _MainWindowState extends State<MainWindow> {
                               : state.logs
                                   ? _logScreen()
                               : state.overview
-                                  ? Overview(state: state)
+                                  ? Overview(state: state, monitor: widget.monitor)
                                   : Stage(state: state, fullscreen: _full),
                         ),
                         if (open)

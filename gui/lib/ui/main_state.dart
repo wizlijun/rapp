@@ -3959,6 +3959,9 @@ class MainState extends ChangeNotifier {
   // ---- current project (§6) ----
   final DateTime Function() _now;
 
+  /// The state's clock (tests set it).
+  DateTime now() => _now();
+
   /// Where each project was left (`local/project_positions.json`).
   final ProjectPositions positions;
 
