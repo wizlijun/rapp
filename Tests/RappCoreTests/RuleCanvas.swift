@@ -72,7 +72,8 @@ enum Canvas {
     /// `dots == nil`: three black dots (older tests). `spinnerPhase` 1 brightens the dots (they "move");
     /// `tailText` draws a text-like bar in the tail region.
     static func chatWindow(width: Int = 800, height: Int = 600, sidebar: Bool = true, dark: Bool = false,
-                           dots: [Dot]? = nil, spinnerPhase: Int = 0, tailText: Bool = false) -> RuleImage {
+                           dots: [Dot]? = nil, spinnerPhase: Int = 0, tailText: Bool = false,
+                           button: Icon = .square) -> RuleImage {
         let side: RGB = dark ? (32, 32, 32) : (240, 240, 240)
         let main: RGB = dark ? (18, 18, 18) : (255, 255, 255)
         let box: RGB = dark ? (26, 26, 26) : (244, 244, 244)
@@ -92,7 +93,14 @@ enum Canvas {
         if tailText { fill(&img, RuleRect(x: left + 40, y: 300, w: 200, h: 14), (60, 60, 60)) }
         fill(&img, RuleRect(x: left + 20, y: 500, w: width - left - 40, h: 80), box)
         disc(&img, x: width - 60, y: 520, size: 32, ink)
-        fill(&img, RuleRect(x: width - 50, y: 530, w: 12, h: 12), paper)
+        let bx = width - 60, by = 520
+        switch button {
+        case .square: fill(&img, RuleRect(x: width - 50, y: 530, w: 12, h: 12), paper)
+        case .arrow:
+            fill(&img, RuleRect(x: bx + 14, y: by + 9, w: 4, h: 14), paper)
+            for row in 0..<7 { fill(&img, RuleRect(x: bx + 16 - (row + 1), y: by + 9 + row, w: 2 * (row + 1), h: 1), paper) }
+        case .none: break
+        }
         return img
     }
 }
