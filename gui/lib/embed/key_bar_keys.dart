@@ -2,7 +2,7 @@
 // Pure data and layout: the widget draws what keyBarRows says and sends what barKeys says.
 import 'modifier_latch.dart';
 
-enum BarKind { send, mod, copy, paste, more }
+enum BarKind { send, mod, copy, paste, more, hide }
 
 /// One key. [wire] is the terminal wire name; [code] and [mods] the macOS key code and modifier bits for app sessions;
 /// [bit] the latch bit of a mod key; [alt] the id of the swipe-up key.
@@ -54,14 +54,16 @@ const barKeys = <String, BarKey>{
   'copy': (id: 'copy', label: '⌘C', spoken: '复制', kind: BarKind.copy, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
   'paste': (id: 'paste', label: '⌘V', spoken: '粘贴', kind: BarKind.paste, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
   'more': (id: 'more', label: '⋯', spoken: '更多按键', kind: BarKind.more, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
+  'hide': (id: 'hide', label: '⌄', spoken: '收起快捷区', kind: BarKind.hide, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
 };
 
 /// The rows of the bar, each a list of key ids, grouped by what the key is for (key-bar-keys research, 2026-11-25).
-/// First row, ten keys: complete and switch mode (Tab ⇧Tab), stop (Esc ⌃C), more keys (⌃ ⋯), choose (↑ ↓), then ⌫
-/// and ⏎ at the right end. [more] adds the second row: copy and paste (shown as ⌘C ⌘V), ⌥ (and ⌘ for an app), ← →,
+/// First row, eleven keys: complete and switch mode (Tab ⇧Tab), stop (Esc ⌃C), the sticky ⌃, choose (↑ ↓), ⌫ ⏎, then
+/// the bar's own two at the right end: ⋯ (second row) and ⌄ (fold the 快捷区, as the toggle in the box does; the user
+/// asked for it back on 2026-11-25). [more] adds the second row: copy and paste (shown as ⌘C ⌘V), ⌥ (and ⌘ for an app), ← →,
 /// then the ⌃ keys by how often the agent CLIs use them. Any other ⌃ key is the sticky ⌃ and a typed letter.
 List<List<String>> keyBarRows({required bool app, required bool more}) {
-  const first = ['tab', 'stab', 'esc', 'cc', 'ctrl', 'more', 'up', 'down', 'bksp', 'enter'];
+  const first = ['tab', 'stab', 'esc', 'cc', 'ctrl', 'up', 'down', 'bksp', 'enter', 'more', 'hide'];
   if (!more) return [first];
   return [
     first,
