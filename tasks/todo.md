@@ -1095,7 +1095,7 @@ macOS、Linux、Duo、iPad 各一遍。
 
 规格 `docs/superpowers/specs/2026-11-25-rapp-app-state-rules-design.md`；计划 `docs/superpowers/plans/2026-11-25-rapp-app-state-rules.md`。协议 v16（类型 43 `stateRules`、44 `appState`）。
 
-- [ ] 1 ChatGPT 做完一轮：灯从在干活变成完成，行上有 `推断`
+- [ ] 1 ChatGPT 做完一轮：灯从在干活回到空闲，行上显示完成 + 推断
 - [ ] 2 Claude 桌面端：在干活时灰点、做完绿点，灯跟着变
 - [ ] 3 Claude 要你确认时：灯变“等你”；`ask` 没验过时**不**进“需要你”
 - [ ] 4 关掉 `stateRules`（配置页选“关”）：重连后灯和以前一样
