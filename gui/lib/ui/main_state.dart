@@ -8,6 +8,7 @@ import 'dart:ui' show Offset, Size;
 import '../paths.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show Clipboard;
+import 'package:flutter/widgets.dart' show StringCharacters;
 
 import '../embed/phrases.dart';
 import '../embed/remote_session.dart';
@@ -1683,15 +1684,18 @@ class MainState extends ChangeNotifier {
   }
 
   /// A report counts only while rules are on for the link and it says it came from them: the pack and rev that
-  /// were sent. (A report in flight when the rules went off or changed is late.) An unreadable-pack report has
-  /// no pack to name; it counts when rules were sent.
+  /// were sent. (A report in flight when the rules went off or changed is late.) A report that names no pack
+  /// (unreadable pack, or the host's last shrink) counts when rules were sent.
   bool _appReportWanted(AppStateEvent e) {
     final chosen = _rulesBySid[e.sid];
     if (chosen == null) return false;
     final a = AppState.parse(e.json);
     if (a == null) return false;
-    if (a.health == 'invalid' && a.pack == null) return true;
-    return a.pack == chosen.id && a.rev == chosen.rev;
+    // The host's last shrink step drops pack and rev; the one before cuts pack to 64 characters (Swift's
+    // `prefix`, by grapheme clusters). Without a pack there is nothing to compare.
+    final pack = a.pack;
+    if (pack == null) return true;
+    return pack == chosen.id.characters.take(64).string && a.rev == chosen.rev;
   }
 
   /// An app session is ready: the host gets the rules for it (again on every new link; a text terminal and the

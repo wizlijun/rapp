@@ -38,10 +38,8 @@ final class VisionText: TextReader {
         }
     }
 
-    func lines(in image: RuleImage, rect: RuleRect) -> [String] { lines(in: image, rect: rect, force: false) }
-
-    private func lines(in image: RuleImage, rect: RuleRect, force: Bool) -> [String] {
-        guard force || ready else { return [] }
+    func lines(in image: RuleImage, rect: RuleRect) -> [String] {
+        guard ready else { return [] }
         return recognise(in: image, rect: rect) ?? []
     }
 

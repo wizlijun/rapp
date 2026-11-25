@@ -830,6 +830,41 @@ void main() {
       }, app: codex, stateRulesJson: rulesJson, profiles: profiles);
     });
 
+    test('a rev-less pack extending another is chosen with the resolved rev, and its reports are accepted', () {
+      final sid = codex.length;
+      final root = jsonDecode(rulesJson) as Map;
+      final long = 'x' * 70;
+      final json = jsonEncode({
+        ...root,
+        'packs': [
+          ...(root['packs'] as List),
+          {'format': '1.0', 'id': 'child', 'ids': ['zz.none'], 'extends': 'generic-chat'},
+          {'format': '1.0', 'id': long, 'rev': 3, 'ids': ['zz.none'], 'extends': 'generic-chat'},
+        ]
+      });
+      env((a, t, port, st, hints) {
+        port.emit(ReadyEvent(sid, 'ChatGPT'));
+        final sentJson = jsonDecode(sent(port).single.$2['json']! as String) as Map;
+        expect(sentJson['id'], 'child');
+        expect(sentJson['rev'], 1); // inherited from generic-chat
+        expect(st.rulesOf(sid)!.rev, 1);
+        port.emit(AppStateEvent(sid, report('working', pack: 'child', rev: 1)));
+        expect(st.currentRemote!.appState!.state, 'working');
+        // the host's last shrink step drops pack and rev
+        port.emit(AppStateEvent(sid, jsonEncode({'state': 'done', 'health': 'ok'})));
+        expect(st.currentRemote!.appState!.state, 'done');
+        port.emit(AppStateEvent(sid, report('idle', pack: 'other', rev: 1)));
+        expect(st.currentRemote!.appState!.state, 'done'); // a wrong pack is still dropped
+      }, app: codex, stateRulesJson: json, profiles: store('child'));
+      env((a, t, port, st, hints) {
+        port.emit(ReadyEvent(sid, 'ChatGPT'));
+        expect(st.rulesOf(sid)!.id, long);
+        // the shrink step cuts pack to 64 characters
+        port.emit(AppStateEvent(sid, report('working', pack: long.substring(0, 64), rev: 3)));
+        expect(st.currentRemote!.appState!.state, 'working');
+      }, app: codex, stateRulesJson: json, profiles: store(long));
+    });
+
     test('the rules bookkeeping of a session goes when the session ends', () {
       final sid = codex.length;
       env((a, t, port, st, hints) {

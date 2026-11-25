@@ -249,7 +249,7 @@ class StateRulesLibrary {
     }
     return ChosenRules(
         id: id,
-        rev: e.rev,
+        rev: _rev(m['rev']), // the resolved pack's: the host reports the rev of the JSON it was sent
         layer: patched ? RulesLayer.mine : e.layer,
         patched: patched,
         json: json,
