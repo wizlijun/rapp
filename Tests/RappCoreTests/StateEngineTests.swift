@@ -105,23 +105,86 @@ final class StateEngineTests: XCTestCase {
         XCTAssertEqual(e3.report.health, "ok")
     }
 
-    func testRereadWithNewVersionRestartsTheSearchAndUnfitRecovers() throws {
-        // Version 1 fits nothing; after the reread says 2 the "v2" variant fits.
+    func testSelfCheckForcesTheUntriedVersionVariantBeforeAnyReread() throws {
         let rules = pack(require: ["bottom"], variants: #"""
         [{"name":"v1","when":{"appVersion":{"max":"1.9"}},"patch":{"regions":{"bottom":{"box":{"in":"nowhere"}}}}},
          {"name":"v2","when":{"appVersion":{"min":"2.0"}},"patch":{}}]
         """#)
-        let e = try StateEngine(rules: rules, env: env(version: "1.0", reread: { "2.0" }), text: nil)
+        var rereads = 0
+        let e = try StateEngine(rules: rules, env: env(version: "1.0", reread: { rereads += 1; return "1.0" }), text: nil)
+        for i in 0..<5 { _ = e.tick(image: Canvas.chatWindow(), visible: true, now: Double(i)) }
+        XCTAssertEqual(e.report.variants, ["v2"]); XCTAssertEqual(e.report.health, "switched")
+        XCTAssertEqual(rereads, 0)
+    }
+
+    func testRereadReturningANewVersionRestartsTheSearch() throws {
+        // v1 (the only versioned variant) breaks the pack and is tried first; the reread says 3.0, to which
+        // no variant applies, so the plain pack fits again.
+        let rules = pack(require: ["bottom"], variants: #"""
+        [{"name":"v1","when":{"appVersion":{"max":"1.9"}},"patch":{"regions":{"bottom":{"box":{"in":"nowhere"}}}}}]
+        """#)
+        var rereads = 0
+        let e = try StateEngine(rules: rules, env: env(version: "1.0", reread: { rereads += 1; return "3.0" }), text: nil)
         let img = Canvas.chatWindow()
         for i in 0..<5 { _ = e.tick(image: img, visible: true, now: Double(i)) }
-        // "v2" is untried, so it is forced first (spec §7 step 1).
-        XCTAssertEqual(e.report.variants, ["v2"]); XCTAssertEqual(e.report.health, "switched")
+        XCTAssertEqual(rereads, 1)
+        XCTAssertEqual(e.report.appVersion, "3.0"); XCTAssertEqual(e.report.variants, [])
+        XCTAssertEqual(e.report.health, "switched"); XCTAssertNotNil(e.report.state)
+        for i in 5..<15 { _ = e.tick(image: img, visible: true, now: Double(i)) }
+        XCTAssertEqual(rereads, 1)
+    }
 
-        // Unfit recovers after five rounds that find the region again.
-        let bad = pack(require: ["bottom"], variants: #"[{"name":"v","when":{"appVersion":{"min":"1"}},"patch":{"regions":{"bottom":{"box":{"in":"nowhere"}}}}}]"#)
-        let e2 = try StateEngine(rules: bad, env: env(version: "2.0"), text: nil)
-        for i in 0..<5 { _ = e2.tick(image: img, visible: true, now: Double(i)) }
-        XCTAssertEqual(e2.report.health, "unfit")
+    func testUnfitRecoversAfterFiveFoundRounds() throws {
+        let rules = pack(require: ["sidebar"])
+        var rereads = 0
+        let e = try StateEngine(rules: rules, env: env(version: "2.0", reread: { rereads += 1; return "2.0" }), text: nil)
+        let off = Canvas.chatWindow(sidebar: false), on = Canvas.chatWindow()
+        var t = 0.0
+        func rounds(_ img: RuleImage, _ n: Int) { for _ in 0..<n { _ = e.tick(image: img, visible: true, now: t); t += 1 } }
+        rounds(off, 5)
+        XCTAssertEqual(e.report.health, "unfit"); XCTAssertNil(e.report.state)
+        XCTAssertEqual(rereads, 1)
+        rounds(on, 4)
+        XCTAssertEqual(e.report.health, "unfit"); XCTAssertNil(e.report.state)
+        rounds(off, 1)                                   // a miss resets the streak
+        rounds(on, 4)
+        XCTAssertEqual(e.report.health, "unfit")
+        rounds(on, 1)
+        XCTAssertEqual(e.report.health, "ok"); XCTAssertNotNil(e.report.state)
+        // The search runs in full again after a recovery: reread is allowed once more.
+        rounds(off, 5)
+        XCTAssertEqual(e.report.health, "unfit"); XCTAssertEqual(rereads, 2)
+    }
+
+    func testSwitchedIsStickyAndRecoveryReopensTheSearch() throws {
+        let rules = pack(require: ["sidebar"], variants: #"""
+        [{"name":"v1","when":{"appVersion":{"max":"1.9"}},"patch":{}}]
+        """#)
+        var rereads = 0
+        let e = try StateEngine(rules: rules, env: env(version: "1.0", reread: { rereads += 1; return "3.0" }), text: nil)
+        var t = 0.0
+        func rounds(_ img: RuleImage, _ n: Int) { for _ in 0..<n { _ = e.tick(image: img, visible: true, now: t); t += 1 } }
+        rounds(Canvas.chatWindow(sidebar: false), 5)     // v1 spent, reread brings 3.0 -> switched
+        XCTAssertEqual(e.report.health, "switched"); XCTAssertEqual(rereads, 1)
+        rounds(Canvas.chatWindow(sidebar: false), 10)    // v1 untried after the restart: forced, spent; rereaded: unfit
+        XCTAssertEqual(e.report.health, "unfit"); XCTAssertEqual(rereads, 1)
+        rounds(Canvas.chatWindow(), 5)
+        XCTAssertEqual(e.report.health, "switched")      // sticky: it did change things on its own
+        XCTAssertNotNil(e.report.state)
+        rounds(Canvas.chatWindow(sidebar: false), 5)     // the search runs in full again: v1 spent, reread once more
+        XCTAssertEqual(rereads, 2); XCTAssertEqual(e.report.health, "unfit")
+    }
+
+    func testAVariantWhosePatchBreaksThePackIsNotReported() throws {
+        let rules = pack(variants: #"""
+        [{"name":"good","when":{},"patch":{}},
+         {"name":"breaks","when":{},"patch":{"id":null}},
+         {"name":"scalar","when":{},"patch":7}]
+        """#)
+        let e = try StateEngine(rules: rules, env: env(version: nil), text: nil)
+        let r = try XCTUnwrap(e.tick(image: Canvas.chatWindow(), visible: true, now: 0))
+        XCTAssertEqual(r.variants, ["good"])
+        XCTAssertEqual(r.pack, "generic-chat")
     }
 
     func testSureOnlyForTestedSignals() throws {

@@ -120,7 +120,7 @@ public final class StateEngine {
     private let capsList: [String]
     private var appVersion: String?
 
-    private var packCache: [String: RulePack] = [:]
+    private var packCache: [String: (pack: RulePack, idx: [Int])] = [:]
     private var pack: RulePack
     private var active: [Int] = []
     private var table: StateTable
@@ -263,13 +263,12 @@ public final class StateEngine {
         }
         let regionKeys: Set<String> = ["found", "missing"]
         let early = vs.indices.filter { !hasKey(vs[$0], regionKeys) && applies($0, found: nil) }
-        var p = packFor(early)
+        var (p, idx) = packFor(early)
         var regions = resolveRegions(p, in: img)
-        var idx = early
         if vs.contains(where: { hasKey($0, regionKeys) }) {
             let names = Set(regions.keys)
             let all = vs.indices.filter { early.contains($0) || (hasKey(vs[$0], regionKeys) && applies($0, found: names)) }
-            if all != early { idx = all; p = packFor(all); regions = resolveRegions(p, in: img) }
+            if all != early { (p, idx) = packFor(all); regions = resolveRegions(p, in: img) }
         }
         return Selection(pack: p, idx: idx, regions: regions)
     }
@@ -289,16 +288,21 @@ public final class StateEngine {
         return true
     }
 
-    private func packFor(_ idx: [Int]) -> RulePack {
-        if idx.isEmpty { return basePack }
+    /// The base pack with the variants' patches laid on in order, and the variants that really went on:
+    /// a patch whose merged result no longer decodes is left out (and not reported).
+    private func packFor(_ idx: [Int]) -> (RulePack, [Int]) {
+        if idx.isEmpty { return (basePack, []) }
         let key = idx.map(String.init).joined(separator: ",")
-        if let hit = packCache[key] { return hit }
-        var v = base
-        for i in idx { v = v.merged(with: basePack.variants[i].patch) }
-        let p = (try? RulePack.decode(v)) ?? basePack
+        if let hit = packCache[key] { return (hit.pack, hit.idx) }
+        var v = base, p = basePack, used: [Int] = []
+        for i in idx {
+            let merged = v.merged(with: basePack.variants[i].patch)
+            guard let decoded = try? RulePack.decode(merged) else { continue }
+            v = merged; p = decoded; used.append(i)
+        }
         if packCache.count >= 32 { packCache = [:] }
-        packCache[key] = p
-        return p
+        packCache[key] = (p, used)
+        return (p, used)
     }
 
     // MARK: self-check (spec §7)
@@ -309,8 +313,9 @@ public final class StateEngine {
         if unfit {
             foundStreak = found ? foundStreak + 1 : 0
             if foundStreak >= healthRounds {
-                unfit = false; foundStreak = 0; misses = 0; rereaded = false
-                switched = forced != nil
+                // Recovered: the whole search may run again later. `switched` is sticky: once the
+                // engine changed variant or version by itself, the report keeps saying so.
+                unfit = false; foundStreak = 0; misses = 0; rereaded = false; tried = []
                 evaluator.reset(); table = StateTable(self.pack.states)
             }
             return false
