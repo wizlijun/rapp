@@ -104,7 +104,7 @@ void main() {
   }
 
   group('terminal', () {
-    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌃ ⌥ ⌘ and copy / paste
+    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌥ ⌘, ← →, the ⌃ keys and copy / paste
     iosTest('tap Esc twice sends [Esc] twice', (tester) async {
       await tester.pumpWidget(bar(tsess));
       await tap(tester, 'esc');
@@ -168,7 +168,15 @@ void main() {
       ]);
     });
 
-    iosTest('复制 calls onCopy', (tester) async {
+    iosTest('⌃L sends Ctrl-L', (tester) async {
+      await tester.pumpWidget(bar(tsess, width: 900));
+      await tap(tester, 'cl');
+      expect(termKeys(), [
+        ['Ctrl-L'],
+      ]);
+    });
+
+    iosTest('⌘C calls onCopy', (tester) async {
       await tester.pumpWidget(bar(tsess, width: 900));
       await tap(tester, 'copy');
       expect(copied, 1);
@@ -177,7 +185,7 @@ void main() {
   });
 
   group('app', () {
-    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌃ ⌥ ⌘ and copy / paste
+    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌥ ⌘, ← →, the ⌃ keys and copy / paste
     iosTest('⇧Tab sends key(48, latchShift); ⌃ then ↑ sends key(126, latchCtrl) after keyEvent(59, down)', (tester) async {
       await tester.pumpWidget(bar(app, width: 900));
       await tap(tester, 'stab');
@@ -193,7 +201,13 @@ void main() {
       ]);
     });
 
-    iosTest('复制 sends key(8, latchCmd)', (tester) async {
+    iosTest('⌃L sends key(37, latchCtrl)', (tester) async {
+      await tester.pumpWidget(bar(app, width: 900));
+      await tap(tester, 'cl');
+      expect(appKeys(), [('key', 1, 37, latchCtrl)]);
+    });
+
+    iosTest('⌘C sends key(8, latchCmd)', (tester) async {
       await tester.pumpWidget(bar(app, width: 900));
       await tap(tester, 'copy');
       expect(appKeys(), [('key', 1, 8, latchCmd)]);
@@ -314,7 +328,7 @@ void main() {
   });
 
   group('repeat and swipe', () {
-    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌃ ⌥ ⌘ and copy / paste
+    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌥ ⌘, ← →, the ⌃ keys and copy / paste
     iosTest('hold ← 400 ms then 160 ms: three Left', (tester) async {
       await tester.pumpWidget(bar(tsess));
       final g = await tester.startGesture(tester.getCenter(k('left')));
@@ -421,8 +435,8 @@ void main() {
   });
 
   group('paste', () {
-    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌃ ⌥ ⌘ and copy / paste
-    iosTest('粘贴 sends the clipboard and leaves composer draft unchanged', (tester) async {
+    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌥ ⌘, ← →, the ⌃ keys and copy / paste
+    iosTest('⌘V sends the clipboard and leaves composer draft unchanged', (tester) async {
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (c) async {
         if (c.method == 'Clipboard.getData') return {'text': 'hello'};
         return null;
@@ -458,6 +472,53 @@ void main() {
     });
   });
 
+  group('first row', () {
+    iosTest('⌫ and ⌃ are there without ⋯: ⌫ sends Backspace, ⌃ then ⌫ sends Ctrl-Backspace', (tester) async {
+      await tester.pumpWidget(bar(tsess));
+      expect(s.prefs.keyBarMore, isFalse);
+      await tap(tester, 'bksp');
+      await tap(tester, 'ctrl');
+      await tap(tester, 'bksp');
+      expect(termKeys(), [
+        ['Backspace'],
+        ['Ctrl-Backspace'],
+      ]);
+    });
+
+    iosTest('left to right: Tab ⇧Tab Esc ⌃C ⌃ ⋯ ↑ ↓ ⌫ ⏎', (tester) async {
+      await tester.pumpWidget(bar(tsess));
+      const order = ['tab', 'stab', 'esc', 'cc', 'ctrl', 'more', 'up', 'down', 'bksp', 'enter'];
+      final xs = [for (final id in order) tester.getCenter(k(id)).dx];
+      for (var i = 1; i < xs.length; i++) {
+        expect(xs[i], greaterThan(xs[i - 1]), reason: '${order[i]} is right of ${order[i - 1]}');
+      }
+      final ys = {for (final id in order) tester.getCenter(k(id)).dy};
+      expect(ys.length, 1);
+    });
+
+    iosTest('← → wait on the second row', (tester) async {
+      await tester.pumpWidget(bar(tsess));
+      expect(k('left'), findsNothing);
+      expect(k('right'), findsNothing);
+      await tap(tester, 'more');
+      await tester.pump();
+      await tap(tester, 'left');
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(termKeys(), [
+        ['Left'],
+      ]);
+    });
+
+    iosTest('the copy and paste keys read ⌘C and ⌘V', (tester) async {
+      s.prefs.keyBarMore = true;
+      await tester.pumpWidget(bar(tsess, width: 900));
+      expect(find.descendant(of: k('copy'), matching: find.text('⌘C')), findsOneWidget);
+      expect(find.descendant(of: k('paste'), matching: find.text('⌘V')), findsOneWidget);
+      expect(find.text('复制'), findsNothing);
+      expect(find.text('粘贴'), findsNothing);
+    });
+  });
+
   group('state of the bar', () {
     iosTest('blocked: keys grey, taps send nothing', (tester) async {
       t.emit({'event': 'hosts', 'hosts': [{'id': '111', 'name': 'mini'}]});
@@ -477,7 +538,7 @@ void main() {
       await tester.pumpWidget(bar(app));
       port.calls.clear();
       await tester.tap(k('esc'));
-      await tester.tap(k('left'));
+      await tester.tap(k('up'));
       await tester.pump(const Duration(seconds: 1));
       expect(appKeys(), isEmpty);
       expect(haptics, isEmpty);
@@ -498,11 +559,11 @@ void main() {
 
     iosTest('⋯ shows the second row and writes prefs.keyBarMore', (tester) async {
       await tester.pumpWidget(bar(tsess));
-      expect(k('bksp'), findsNothing);
+      expect(k('left'), findsNothing);
       await tap(tester, 'more');
       expect(s.prefs.keyBarMore, isTrue);
       await tester.pump();
-      expect(k('bksp'), findsOneWidget);
+      expect(k('left'), findsOneWidget);
       expect(tester.getSize(find.byType(KeyBar)).height, keyBarHeightOf(s, tsess));
       expect(keyBarHeightOf(s, tsess), 100 + phraseStripHeight);
       await tap(tester, 'more');
