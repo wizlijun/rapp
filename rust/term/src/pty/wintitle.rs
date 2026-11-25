@@ -7,7 +7,8 @@ use super::fg::Fg;
 use super::title::clean;
 use std::path::Path;
 
-/// A partial OSC longer than this is not held: it goes to the window as it came.
+/// A partial OSC longer than this is not held: a title (0/1/2) is dropped up to its end, any other goes to the
+/// window as it came.
 const MAX_HELD: usize = 4096;
 /// Longer than this, a directory is cut to its last two levels.
 const MAX_DIR: usize = 32;
@@ -19,6 +20,9 @@ enum State {
     Esc,
     Osc,
     OscEsc,
+    /// Inside a title too long to hold: everything up to its BEL, ST, CAN or SUB is dropped.
+    Drop,
+    DropEsc,
 }
 
 /// Removes complete OSC 0/1/2 sequences from a byte stream, across chunk borders.
@@ -33,8 +37,19 @@ impl OscStrip {
     /// Copies `bytes` to `out` minus complete OSC 0/1/2; returns the last program title seen (empty when cleared).
     pub fn feed(&mut self, bytes: &[u8], out: &mut Vec<u8>) -> Option<String> {
         let mut title = None;
-        for &b in bytes {
-            self.byte(b, out, &mut title);
+        let mut i = 0;
+        while i < bytes.len() {
+            if self.state == State::Ground {
+                // Plain text goes out in one copy, up to the next ESC.
+                let run = bytes[i..].iter().position(|&b| b == 0x1B).unwrap_or(bytes.len() - i);
+                out.extend_from_slice(&bytes[i..i + run]);
+                i += run;
+                if i == bytes.len() {
+                    break;
+                }
+            }
+            self.byte(bytes[i], out, &mut title);
+            i += 1;
         }
         title
     }
@@ -76,10 +91,28 @@ impl OscStrip {
                 _ => {
                     self.held.push(b);
                     if self.held.len() > MAX_HELD {
-                        self.give_up(out);
+                        if matches!(self.held[2..], [b'0' | b'1' | b'2', b';', ..]) {
+                            self.held.clear();
+                            self.state = State::Drop;
+                        } else {
+                            self.give_up(out);
+                        }
                     }
                 }
             },
+            State::Drop => match b {
+                0x07 | 0x18 | 0x1A => self.state = State::Ground,
+                0x1B => self.state = State::DropEsc,
+                _ => {}
+            },
+            State::DropEsc => {
+                self.state = State::Ground;
+                if b != b'\\' {
+                    // ESC began something else.
+                    self.byte(0x1B, out, title);
+                    self.byte(b, out, title);
+                }
+            }
             State::OscEsc => {
                 if b == b'\\' {
                     self.held.push(b);
@@ -208,10 +241,36 @@ mod tests {
     }
 
     #[test]
-    fn overlong_passes_through() {
+    fn an_overlong_title_is_dropped_up_to_its_end() {
+        for end in [&b"\x07"[..], b"\x1b\\", b"\x18", b"\x1a"] {
+            let mut a = b"a\x1b]2;".to_vec();
+            a.extend(std::iter::repeat_n(b'x', 5000));
+            a.extend_from_slice(end);
+            a.extend_from_slice(b"after");
+            assert_eq!(strip(&[&a]), (b"aafter".to_vec(), None));
+            // Across chunks too.
+            let (one, two) = a.split_at(3000);
+            assert_eq!(strip(&[one, two]), (b"aafter".to_vec(), None));
+        }
+        // An ESC that starts something else ends it.
         let mut a = b"\x1b]0;".to_vec();
         a.extend(std::iter::repeat_n(b'x', 5000));
+        a.extend_from_slice(b"\x1b[31mred");
+        assert_eq!(strip(&[&a]), (b"\x1b[31mred".to_vec(), None));
+    }
+
+    #[test]
+    fn an_overlong_other_osc_passes_through() {
+        let mut a = b"\x1b]52;c;".to_vec();
+        a.extend(std::iter::repeat_n(b'x', 5000));
+        a.extend_from_slice(b"\x07z");
         assert_eq!(strip(&[&a]), (a.clone(), None));
+    }
+
+    #[test]
+    fn plain_runs_between_sequences_keep_their_order() {
+        let (out, t) = strip(&[b"one\x1b[1mtwo\x1b]0;t\x07three", b"\x1b", b"]0;u\x07four"]);
+        assert_eq!((out, t), (b"one\x1b[1mtwothreefour".to_vec(), Some("u".into())));
     }
 
     #[test]

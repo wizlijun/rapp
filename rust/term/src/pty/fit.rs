@@ -241,7 +241,7 @@ impl<W: Write> Window<W> {
     }
 
     pub fn output(&mut self, bytes: &[u8]) -> std::io::Result<()> {
-        let mut kept = Vec::new();
+        let mut kept = Vec::with_capacity(bytes.len());
         let bytes = match self.titles.as_mut() {
             Some(t) => {
                 if let Some(p) = t.strip.feed(bytes, &mut kept) {
