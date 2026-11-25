@@ -196,9 +196,10 @@ void main() {
 
   testWidgets('常用 · 终端 says 新建 and opens a new terminal each tap', (tester) async {
     await boot(tester);
-    TermList list(String mode) => TermList('m1',
+    TermList list() => TermList('m1',
         terms: [TermRow('term:pty:a', 'a', 'zsh', null, 1, 0, 1, false, false)], hosts: [TermHost(null, launchers: const ['Terminal'])]);
-    s.hub!.termLists['m1'] = list('text');
+    s.prefs.termOpen['m1'] = 'text';
+    s.hub!.termLists['m1'] = list();
     final inner = t.onSend!;
     var n = 0;
     t.onSend = (m) {

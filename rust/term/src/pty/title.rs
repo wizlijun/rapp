@@ -11,9 +11,15 @@ fn decoration(c: char) -> bool {
             0x2190..=0x21ff | 0x2300..=0x23ff | 0x25a0..=0x27bf | 0x2800..=0x28ff | 0x2b00..=0x2bff)
 }
 
+fn invisible(c: char) -> bool {
+    c.is_control()
+        || matches!(c as u32,
+            0x200b..=0x200f | 0x2028 | 0x2029 | 0x202a..=0x202e | 0x2060..=0x2064 | 0x2066..=0x2069 | 0xfeff)
+}
+
 /// A title as shown: no control chars, no leading spinner or decoration, at most 64 chars.
 pub fn clean(raw: &str) -> Option<String> {
-    let no_ctl: String = raw.chars().filter(|c| !c.is_control()).collect();
+    let no_ctl: String = raw.chars().filter(|c| !invisible(*c)).collect();
     let text: String = no_ctl.trim().trim_start_matches(decoration).chars().take(MAX_CHARS).collect();
     let text = text.trim_end().to_string();
     if text.is_empty() {
@@ -34,13 +40,16 @@ pub struct Titles {
 impl Titles {
     /// Returns true when `shown()` changed.
     pub fn feed(&mut self, bytes: &[u8]) -> bool {
-        let before = self.shown();
         let mut titles = Vec::new();
         self.scanner.feed(bytes, |e| {
             if let Event::Title { slot, text } = e {
                 titles.push((slot, clean(&text)));
             }
         });
+        if titles.is_empty() {
+            return false;
+        }
+        let before = self.shown();
         for (slot, text) in titles {
             if slot != 2 {
                 self.tab = text.clone();
@@ -70,6 +79,9 @@ mod tests {
         assert_eq!(clean("修复 终端"), Some("修复 终端".into()));
         assert_eq!(clean("⠂ "), None);
         assert_eq!(clean(""), None);
+        assert_eq!(clean("\u{202E}abc"), Some("abc".into()));
+        assert_eq!(clean("a\u{2028}b"), Some("ab".into()));
+        assert_eq!(clean("\u{200B}\u{FEFF}"), None);
         assert_eq!(clean(&"x".repeat(80)).unwrap().chars().count(), 64);
     }
 
