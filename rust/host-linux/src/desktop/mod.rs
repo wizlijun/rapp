@@ -3,6 +3,7 @@ mod application;
 pub(crate) mod hyprland;
 mod hyprland_protocol;
 pub mod keys;
+mod omarchy_lock;
 mod unlock;
 mod wayland;
 mod x11;

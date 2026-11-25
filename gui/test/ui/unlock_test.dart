@@ -264,7 +264,7 @@ void main() {
       expect(e.calls('unlock'), hasLength(1));
       a.elapse(const Duration(seconds: 5));
       a.flushMicrotasks();
-      expect(e.state.hint, '密码可能不对');
+      expect(e.state.hint, '尚未确认解锁，请检查远端锁屏状态或系统密码');
       expect(store.credential!.password, 'secret');
       expect(store.credential!.auto, false);
       expect(asks, ['111']);
@@ -275,6 +275,26 @@ void main() {
       a.flushMicrotasks();
       expect(e.calls('unlock'), hasLength(1));
       expect(asks, ['111', '111']);
+    });
+  });
+
+  test('host refusal keeps the session and reason, and disables automatic retry', () {
+    env((a, e, store) {
+      final sid = e.sid('desktop:');
+      e.port.emit(ScreenLockedEvent(sid, true));
+      a.flushMicrotasks();
+      expect(e.calls('unlock'), hasLength(1));
+      e.port.emit(InputBlockedEvent(sid, 'unlock-failed: Omarchy is already authenticating'));
+      expect(e.state.hint, '无法解锁：Omarchy is already authenticating');
+      a.elapse(const Duration(seconds: 5));
+      a.flushMicrotasks();
+      expect(e.state.hint, '无法解锁：Omarchy is already authenticating');
+      expect(store.credential!.auto, false);
+      e.state.unlock('111', 'retry', remember: false, auto: false);
+      a.flushMicrotasks();
+      expect(e.calls('unlock'), hasLength(2));
+      a.elapse(const Duration(seconds: 5));
+      expect(e.state.hint, '尚未确认解锁，请检查远端锁屏状态或系统密码');
     });
   });
 
@@ -357,9 +377,9 @@ void main() {
         expect(e.calls('unlock').single['sid'], sid);
         expect(store.credential!.password, 'typed');
         a.elapse(const Duration(seconds: 4));
-        expect(e.state.hint, isNot('密码可能不对'));
+        expect(e.state.hint, isNot('尚未确认解锁，请检查远端锁屏状态或系统密码'));
         a.elapse(const Duration(seconds: 1));
-        expect(e.state.hint, '密码可能不对');
+        expect(e.state.hint, '尚未确认解锁，请检查远端锁屏状态或系统密码');
         e.state.unlock('111', 'again', remember: false, auto: false);
         a.flushMicrotasks();
         expect(store.credential, isNull);

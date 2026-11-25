@@ -143,7 +143,7 @@
   - 没有的话，用这台设备任何一条已连上、没在结束、报告“已锁”的算数会话；
   - 都没有，就提示“请先打开这台电脑上的 app 或桌面”。
 - **自动输入失败**：输入后 5 秒还是“已锁”：
-  - 提示“密码可能不对”；
+  - 提示“尚未确认解锁，请检查远端锁屏状态或系统密码”（2026-11-25 修正：超时不能据此断言密码错误）；
   - 把这台设备的“连上时自动输入”关掉，记住的密码保留（我定的），macOS 和 Linux 都这样做，这样不会每次打开都用错密码试一次，macOS 输错多次会越来越慢；
   - 再弹一次对话框，密码框里预先填好记住的密码，自动输入的勾选是空的；
   - 自动输入不重试。
@@ -214,3 +214,14 @@
 - `rapp-host lock` 判断成功的轮询间隔。
 - “当前显示的会话”在代码里怎么判断（沿用 `currentKey`）。
 - 按设备解锁的进行中状态放在 `MainState` 的哪个结构里。
+
+
+### 2026-11-25：Omarchy Quickshell 锁屏兼容
+
+Linux 主机保留 hyprlock / swaylock 支持，并识别 `/usr/bin/quickshell -n -p /usr/share/omarchy/shell`（也接受省略 `-n`）。仅凭进程名不放行：从当前运行目录的 Omarchy Unix socket 获取 `SO_PEERCRED`，核对进程 UID、可执行文件、完整配置参数及 Wayland 会话环境，再只读查询 `lock status`。响应限 4096 字节、500 ms；缺字段、错误响应或超时都拒绝输入。需要 compositor 的已锁通知，且 shell 报告 `locked/requested/sessionLocked/secure/passwordPam=true`、`authenticating=false`。指纹或密码认证进行中时先拒绝，结束后可手动重试。
+
+通过校验后，沿用 Ctrl+U → 逐字输入 → Return，由 Omarchy 自己的 PAM 验证系统密码；每个字符及提交前继续检查 compositor 锁状态，状态消失立即停止。密码不经过 IPC、命令行、剪贴板或日志。保留跨进程输入互斥。
+
+Linux 解锁拒绝不结束会话：记录 `unlock` 事件的 `reason`，并用现有 v15 操作码 26 的文本负载 `unlock-failed: <reason>` 返回原因。新版共享 GUI 将其显示为“无法解锁：…”；5 秒定时器保留关闭自动输入的行为，但不覆盖该原因。旧客户端仍能消费包、继续连接和解锁，但拒绝提示会沿用旧版“远端正在被…操作”的格式。成功仍以操作码 34 报告未锁为准，不把输入完成当成认证成功。
+
+验证覆盖进程/会话绑定、锁状态字段、IPC 截断/超限/超时、输入中锁状态变化和输入失败释放按键，以及 GUI 拒绝后重试与停用自动输入。本机可运行 `cargo test --manifest-path rust/Cargo.toml -p rapp-host-linux native_omarchy_status_verifies_the_actual_peer -- --ignored`，只查询实际 shell 状态。真实锁屏下跨设备密码输入及 PAM 成功/失败仍需端到端验收。

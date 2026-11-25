@@ -65,10 +65,6 @@ pub fn type_password(desktop: &mut Desktop, password: &str) -> Result<()> {
         desktop.lock_state()? == Some(true),
         "no verified lock screen"
     );
-    ensure!(
-        trusted_locker(),
-        "this session locker does not support verified remote password entry"
-    );
     let runtime = std::env::var_os("XDG_RUNTIME_DIR").context("no session runtime directory")?;
     let lock = OpenOptions::new()
         .create(true)
@@ -82,6 +78,11 @@ pub fn type_password(desktop: &mut Desktop, password: &str) -> Result<()> {
         unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
         "another session is entering a password"
     );
+    // Check readiness after acquiring the cross-process input lock: another
+    // worker may have submitted a password while we were verifying the session.
+    if !trusted_locker() {
+        super::omarchy_lock::verify()?;
+    }
     enter_password(desktop, password)
 }
 trait LockInput {
@@ -158,6 +159,7 @@ mod tests {
     struct Fake {
         lock: bool,
         unlock_after_text: bool,
+        fail_text: bool,
         text: String,
         keys: Vec<u16>,
         releases: usize,
@@ -173,6 +175,7 @@ mod tests {
             Ok(())
         }
         fn text(&mut self, text: &str) -> Result<()> {
+            ensure!(!self.fail_text, "synthetic input failure");
             self.text += text;
             if self.unlock_after_text {
                 self.lock = false;
@@ -205,6 +208,18 @@ mod tests {
         enter_password(&mut d, "中secret").unwrap();
         assert_eq!(d.text, "中secret");
         assert_eq!(d.keys, [32, 36]);
+    }
+    #[test]
+    fn releases_keys_and_never_submits_after_input_error() {
+        let mut d = Fake {
+            lock: true,
+            fail_text: true,
+            ..Default::default()
+        };
+        assert!(enter_password(&mut d, "secret").is_err());
+        assert!(d.text.is_empty());
+        assert_eq!(d.keys, [32]);
+        assert_eq!(d.releases, 2);
     }
     #[test]
     fn chunks_preserve_unicode_without_copying_passwords() {

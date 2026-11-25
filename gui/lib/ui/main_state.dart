@@ -287,6 +287,7 @@ class MainState extends ChangeNotifier {
 
   /// Per device: the 5 s check after a password was sent. Present = an unlock is in flight.
   final Map<String, Timer> _unlockBusy = {};
+  final Set<String> _unlockRejected = {};
   /// Devices whose saved password was typed by itself and no unlocked report has come since.
   /// Survives session end and reconnect; while set, the saved password is not typed again (§6.6).
   final Set<String> _autoUnconfirmed = {};
@@ -299,7 +300,10 @@ class MainState extends ChangeNotifier {
   void _releaseUnlockBusy(SessionRecord r) {
     final others = _records.values.any((x) =>
         x != r && x.id == r.id && _countsForUnlock(x.app) && x.phase == Phase.live && !x.ending);
-    if (!others) _unlockBusy.remove(r.id)?.cancel();
+    if (!others) {
+      _unlockBusy.remove(r.id)?.cancel();
+      _unlockRejected.remove(r.id);
+    }
   }
 
   /// Secondary screens share the main desktop's lock state; terminals never report it.
@@ -1384,7 +1388,7 @@ class MainState extends ChangeNotifier {
       if (moving != null && _reroutes.containsKey(moving) && e is! ClosedEvent && e is! DisconnectedEvent) {
         // The old session of a move is still on the stage: its windows keep up until the swap.
         if (e is InputBlockedEvent) {
-          if (moving.key == currentKey) _showBlocked(e.by);
+          _inputFeedback(moving, e.by);
           return;
         }
         _applyPortEvent(rs, e);
@@ -1430,7 +1434,7 @@ class MainState extends ChangeNotifier {
       return;
     }
     if (e is InputBlockedEvent) {
-      if (r.key == currentKey) _showBlocked(e.by);
+      _inputFeedback(r, e.by);
       return;
     }
     if (e is HostNoticeActionEvent) {
@@ -1464,6 +1468,7 @@ class MainState extends ChangeNotifier {
         if (!e.locked) {
           _manualLock.remove(r.id);
           _unlockBusy.remove(r.id)?.cancel();
+          _unlockRejected.remove(r.id);
         }
       }
       if (!e.locked) _autoUnconfirmed.remove(r.id);
@@ -1609,6 +1614,21 @@ class MainState extends ChangeNotifier {
     if (r == null || n == null || n.bundle == null) return;
     closeHostNotice();
     unawaited(openOrSwitch(r.id, n.bundle!, n.name!));
+  }
+
+  void _inputFeedback(SessionRecord r, String by) {
+    const prefix = 'unlock-failed: ';
+    if (by.startsWith(prefix)) {
+      // Keep the timer: an unconfirmed automatic attempt must still disable
+      // auto entry. Its timeout must not overwrite the host's specific reason.
+      if (_unlockBusy.containsKey(r.id)) _unlockRejected.add(r.id);
+      if (currentRecord?.id == r.id) {
+        hint = '无法解锁：${by.substring(prefix.length)}';
+        notifyListeners();
+      }
+    } else if (r.key == currentKey) {
+      _showBlocked(by);
+    }
   }
 
   /// 「远端正在被 X 操作」 for [blockedHintFor], only while it is still the hint.
@@ -2943,14 +2963,16 @@ class MainState extends ChangeNotifier {
     final device = r.id;
     if (auto) _autoUnconfirmed.add(device);
     _unlockBusy.remove(device)?.cancel();
+    _unlockRejected.remove(device);
     _unlockBusy[device] = Timer(const Duration(seconds: 5), () {
       _unlockBusy.remove(device);
+      final rejected = _unlockRejected.remove(device);
       final live = _canUnlock(r, start, epoch);
       // Any unlocked report cancels this timer, so a pending auto attempt here did not work,
       // even when the session it went through is gone.
       if (auto && _autoUnconfirmed.remove(device)) unawaited(_autoFailed(device, password));
-      if (!live) return;
-      hint = '密码可能不对';
+      if (!live || rejected) return;
+      hint = '尚未确认解锁，请检查远端锁屏状态或系统密码';
       notifyListeners();
     });
   }
@@ -4207,6 +4229,7 @@ class MainState extends ChangeNotifier {
       t.cancel();
     }
     _unlockBusy.clear();
+    _unlockRejected.clear();
     unawaited(_unlockAsks.close());
     for (final t in _retryTimers.values) {
       t.cancel();

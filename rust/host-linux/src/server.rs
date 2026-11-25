@@ -749,20 +749,36 @@ fn handle(l: &mut Live, desktop: &mut Desktop, input: Input) -> Result<()> {
         }
         // Do not type a password based on logind's hint: it does not prove focus is a lock field.
         Input::Unlock(password) => {
-            if desktop.lock_state()? == Some(true) {
-                desktop.unlock(password.as_str())?;
-                l.next_lock_check = Instant::now();
-            } else {
-                ensure!(
-                    l.locked != Some(true),
-                    "this desktop does not expose verified remote password entry"
-                );
+            let result = (|| -> Result<()> {
+                if desktop.lock_state()? == Some(true) {
+                    desktop.unlock(password.as_str())?;
+                } else {
+                    ensure!(
+                        l.locked != Some(true),
+                        "this desktop does not expose verified remote password entry"
+                    );
+                }
+                Ok(())
+            })();
+            l.next_lock_check = Instant::now();
+            if let Some(message) = unlock_failure(result) {
+                // v15 text feedback: older clients can still consume this packet.
+                // A refused unlock is recoverable and must not close the session.
+                l.send(&wire::text_packet(26, &message))?;
             }
         }
         _ => {}
     }
     Ok(())
 }
+fn unlock_failure(result: Result<()>) -> Option<String> {
+    result.err().map(|error| {
+        let reason = error.to_string();
+        emit(json!({"event":"unlock", "reason":reason}));
+        format!("unlock-failed: {reason}")
+    })
+}
+
 fn metadata(l: &mut Live, value: &Value) -> Result<()> {
     let secure = value["secure"] == true;
     if l.secure != secure {
@@ -830,6 +846,14 @@ fn covered(l: &mut Live, desktop: &Desktop, x: f32, y: f32) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unlock_refusal_is_recoverable_v15_feedback() {
+        assert!(unlock_failure(Ok(())).is_none());
+        let message = unlock_failure(Err(anyhow::anyhow!("no verified lock screen"))).unwrap();
+        let packet = wire::text_packet(26, &message);
+        assert_eq!(packet[0], 26);
+        assert_eq!(message, "unlock-failed: no verified lock screen");
+    }
     #[test]
     fn helper_timeout_and_argument_boundaries() {
         let text = b"quotes ' and $HOME; $(touch nope)\n\xe4\xb8\xad\xe6\x96\x87";
