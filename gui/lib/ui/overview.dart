@@ -339,15 +339,15 @@ class _Column extends StatelessWidget {
           Padding(
             padding: EdgeInsets.only(top: id == null ? 14 : 6),
             child: Row(children: [
-              if (col.version case final v?)
-                Flexible(
-                  child: Text(v,
-                      key: Key('version-${id ?? 'local'}'),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: small?.copyWith(color: t.muted)),
-                ),
-              const Spacer(),
+              Expanded(
+                child: col.version == null
+                    ? const SizedBox.shrink()
+                    : Text(col.version!,
+                        key: Key('version-${id ?? 'local'}'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: small?.copyWith(color: t.muted)),
+              ),
               if (id != null) _OpenAppsLink(id: id, name: col.name, enabled: state.hubUsable && !col.offline, state: state),
             ]),
           ),
@@ -369,16 +369,18 @@ class _OpenAppsLink extends StatelessWidget {
     final t = RappTokens.of(context);
     final color = enabled ? t.on : t.muted.withValues(alpha: 0.6);
     final style = Theme.of(context).textTheme.bodySmall?.copyWith(color: color);
-    return Semantics(
-      button: true,
-      enabled: enabled,
-      label: '打开应用，$name',
-      excludeSemantics: true,
-      child: Builder(
-        builder: (anchor) => InkWell(
+    return Builder(builder: (anchor) {
+      final onTap = enabled ? () => showOpenAppsMenu(anchor, state, id) : null;
+      return Semantics(
+        button: true,
+        enabled: enabled,
+        label: '打开应用，$name',
+        excludeSemantics: true,
+        onTap: onTap,
+        child: InkWell(
           key: Key('open-apps-$id'),
           borderRadius: BorderRadius.circular(t.r),
-          onTap: enabled ? () => showOpenAppsMenu(anchor, state, id) : null,
+          onTap: onTap,
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 48),
             child: Padding(
@@ -390,8 +392,8 @@ class _OpenAppsLink extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
+      );
+    });
   }
 }
 

@@ -1025,7 +1025,7 @@ macOS、Linux、Duo、iPad 各一遍。
 
 用户：「每个设备常用应用的最下面 版本号的右边 右对齐的地方，增加一个打开应用的连接，点开后，以列表的方式显示设备所有的可能的应用」，效果图选 A 下拉菜单。规格 `docs/superpowers/specs/2026-11-25-rapp-overview-open-apps-design.md`。只列正在运行的；本机列不放；空列原来的「打开 app」按钮去掉。
 
-- [x] `overview_test`（35）+ `device_apps_test`（6）通过；全量 3107 通过、16 跳过；`linux_detach_test` 两项缺 worktree 的 `rust/target/release/rapp-session`，借主目录构建重跑 5 项全过；analyze 干净
+- [x] `overview_test`（40）+ `device_apps_test`（6）通过；整分支评审 6 项重要 + 若干次要已修；全量 3114 通过、16 跳过（`rapp-session` 借主目录构建）；analyze 干净
 - [ ] 1 macOS：总览每台远程设备列底部版本号右边是「打开应用 ▾」，本机列没有；离线设备的是灰的、点不开
 - [ ] 2 点开：菜单右边和链接对齐，屏幕 / 终端 / 应用（N）三组和设备页同序；已打开的显示「已打开」、灯和会话一致
 - [ ] 3 直接打字筛选，↑↓ 选、回车打开、Esc 关；点星改常用，菜单不关，列里的「常用」跟着变
@@ -1033,6 +1033,7 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 5 包名框输入 com.apple.TextEdit 回车能打开；「设备详情 ›」跳到设备页那台
 - [ ] 6 iPad：点链接不弹软键盘；点一行直接打开；VoiceOver 念「打开应用，<设备名>」
 - [ ] 7 Linux：同 1–5
+- [ ] 8 菜单开着时拔网线 / 关掉对方：菜单里出现断开原因，点行不打开
 
 ## 升级后开机冒出旧版 rApp（2026-11-25，分支 `fix/update-previous-inert`，已发版 0.15.25）
 
