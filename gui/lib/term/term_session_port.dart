@@ -227,8 +227,9 @@ class TermSessionPort extends SessionPort {
         t.model.applyHistory(m);
         fetchHistory(t.sid);
       case TermError():
-        if (m.error == 'session ended') {
-          _lost(t, 'session ended');
+        // Ended, or gone while the link was down (the device has no such terminal on a reconnect).
+        if (m.error == 'session ended' || m.error == noSuchTextTerminal) {
+          _lost(t, m.error);
         } else {
           t.model.fail(m.error);
         }

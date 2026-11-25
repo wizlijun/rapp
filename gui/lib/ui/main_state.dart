@@ -1642,6 +1642,8 @@ class MainState extends ChangeNotifier {
     if (e is DisconnectedEvent && r.phase != Phase.disconnected) {
       if (r.ending) {
         _finishEnding(r);
+      } else if (isTermApp(r.app) && termEnded(e.reason)) {
+        _termEnded(r);
       } else {
         _disconnect(r, e.reason);
       }
@@ -2822,19 +2824,91 @@ class MainState extends ChangeNotifier {
   }
 
   /// Opens a text terminal window on [id], then switches to it without waiting for the session to connect; a
-  /// refusal is thrown with the hub's words.
-  Future<void> openText(String id, {String? shell}) async {
+  /// refusal is thrown with the hub's words. [from]: the terminal it opens beside (its directory, shell and window).
+  Future<void> openText(String id, {String? shell, String? from}) async {
     if (!hubUsable) return;
     final launchers = hub?.termLists[id]?.hosts.where((h) => h.host == null).firstOrNull?.launchers ?? const <String>[];
     if (launchers.isEmpty) throw StateError('这台设备没有可用的终端窗口');
     final app = prefs.termAppFor(id, launchers);
-    final term = await hub!.openTerm(id, shell: shell, app: app);
+    final term = await hub!.openTerm(id, shell: shell, app: app, from: from);
     try {
       await hub?.terms(id);
     } catch (_) {}
     final row = hub?.termLists[id]?.terms.where((r) => r.id == term).firstOrNull;
     final shown = row == null ? '已结束' : termDisplayName(row.shown, row.host);
     unawaited(openOrSwitch(id, term, shown));
+  }
+
+  Future<void> _newTerms = Future<void>.value();
+
+  /// ⌘T: a new text terminal on [device] beside [term], switched to once made. Presses queue: each opens after the
+  /// one before it is made (or failed). A failure is the hint, as opening one from the overview says it.
+  Future<void> newTermFrom(String device, String term) => _newTerms = _newTerms.then((_) async {
+        if (_disposed) return;
+        try {
+          if (!hubUsable) throw StateError('这台设备没有可用的终端窗口');
+          await openText(device, from: term);
+        } catch (e) {
+          if (_disposed) return;
+          hint = switch (e) { StateError(:final message) => message, HubException(:final message) => message, _ => '$e' };
+          notifyListeners();
+        }
+      });
+
+  /// The device's list row of the text terminal on record [key]; null for any other record, or when it is not
+  /// listed.
+  TermRow? termRowOf(String key) {
+    final r = _records[key];
+    if (r == null || !isTermApp(r.app)) return null;
+    return hub?.termLists[r.id]?.terms.where((t) => t.id == r.app).firstOrNull;
+  }
+
+  /// Whether the device of text terminal [key] can end it: its row says [TermRow.shell] (a new device and holder).
+  bool canEndTerm(String key) => termRowOf(key)?.shell != null;
+
+  /// The record [rs] is the session of (or the old session of, before a reconnect swaps it).
+  SessionRecord? recordOfSession(RemoteSession rs) => _recordOfSid(rs.sid) ?? _recordOfLastSid(rs.sid);
+
+  final _endingTerms = <String>{};
+
+  /// 结束终端 with a question first when a program other than the shell is in front ([confirm] is shown its name,
+  /// and says whether to go on). Nothing on a device that cannot end it.
+  Future<void> endTermAsk(String key, {required Future<bool> Function(String? fg) confirm}) async {
+    final row = termRowOf(key);
+    if (row?.shell == null) return;
+    if (row!.shell == false && !await confirm(row.fg)) return;
+    await endTerm(key);
+  }
+
+  /// Ends the text terminal on record [key] for good, on its device: the record goes with 「已结束 <名字>」; a
+  /// refusal keeps it and says why. The view's own `session ended` may come first; either way it goes once.
+  Future<void> endTerm(String key) async {
+    final r = _records[key];
+    if (r == null || !isTermApp(r.app) || !hubUsable || !_endingTerms.add(key)) return;
+    try {
+      await hub!.endTerm(r.id, r.app);
+    } catch (e) {
+      if (_disposed) return;
+      final words = e is HubException ? e.message : '$e';
+      // An old holder (`unsupported`, or a run that cannot be ended), or an old device (`unknown op`).
+      final old = ['cannot be ended', 'unsupported', 'unknown op'].any(words.contains);
+      hint = old ? '这台设备的 rApp 太旧，不能结束终端' : words;
+      notifyListeners();
+      return;
+    } finally {
+      _endingTerms.remove(key);
+    }
+    if (_disposed || _records[key] != r) return; // the view's `session ended` took it off already
+    _termEnded(r);
+    notifyListeners();
+  }
+
+  /// Text terminal [r] is over on its device: its link is closed and the record goes with 「已结束 <名字>」 instead of
+  /// 已断开 (nothing is left to reconnect to). Callers notify.
+  void _termEnded(SessionRecord r) {
+    final sid = r.sid;
+    if (sid != null && termPort?.owns(sid) == true) termPort!.close(sid);
+    _finishEnding(r);
   }
 
   /// Renames text terminal [term] of device [device]; an invalid name or the device's refusal is thrown.

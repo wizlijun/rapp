@@ -99,6 +99,12 @@ void main() {
       expect(run(down(PhysicalKeyboardKey.equal, LogicalKeyboardKey.equal, '+'), {..._meta, ..._shift}, mac: true), isA<TermReserved>());
       expect(run(down(PhysicalKeyboardKey.minus, LogicalKeyboardKey.minus, '-'), _meta, mac: true), isA<TermReserved>());
     });
+    test('cmd+t is a new terminal, cmd+w closes it', () {
+      expect((run(down(PhysicalKeyboardKey.keyT, LogicalKeyboardKey.keyT, 't'), _meta, mac: true) as TermAction).action,
+          TermShortcut.newTerm);
+      expect((run(down(PhysicalKeyboardKey.keyW, LogicalKeyboardKey.keyW, 'w'), _meta, mac: true) as TermAction).action,
+          TermShortcut.closeTerm);
+    });
     test('other meta combos bubble', () {
       expect(run(down(PhysicalKeyboardKey.keyQ, LogicalKeyboardKey.keyQ, 'q'), _meta, mac: true), isNull);
       expect(run(down(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA, 'a'), _meta, mac: true), isNull);
@@ -116,6 +122,18 @@ void main() {
       expect(run(down(PhysicalKeyboardKey.keyF, LogicalKeyboardKey.keyF), cs), isA<TermReserved>());
       expect(run(down(PhysicalKeyboardKey.equal, LogicalKeyboardKey.equal), cs), isA<TermReserved>());
       expect(run(down(PhysicalKeyboardKey.minus, LogicalKeyboardKey.minus), cs), isA<TermReserved>());
+    });
+    test('ctrl+shift+t is a new terminal, ctrl+shift+w closes it', () {
+      expect((run(down(PhysicalKeyboardKey.keyT, LogicalKeyboardKey.keyT), cs) as TermAction).action, TermShortcut.newTerm);
+      expect((run(down(PhysicalKeyboardKey.keyW, LogicalKeyboardKey.keyW), cs) as TermAction).action, TermShortcut.closeTerm);
+    });
+    test('plain ctrl+t and ctrl+w go to the terminal', () {
+      expectKeys(run(down(PhysicalKeyboardKey.keyT, LogicalKeyboardKey.keyT), _ctrl), ['Ctrl-t']);
+      expectKeys(run(down(PhysicalKeyboardKey.keyW, LogicalKeyboardKey.keyW), _ctrl), ['Ctrl-w']);
+      expectKeys(run(down(PhysicalKeyboardKey.keyT, LogicalKeyboardKey.keyT), _ctrl, mac: true), ['Ctrl-t']);
+    });
+    test('meta+t is not a shortcut off the mac', () {
+      expect(run(down(PhysicalKeyboardKey.keyT, LogicalKeyboardKey.keyT), _meta), isNull);
     });
     test('plain ctrl+c goes to the terminal', () {
       expectKeys(run(down(PhysicalKeyboardKey.keyC, LogicalKeyboardKey.keyC), _ctrl), ['Ctrl-c']);

@@ -24,6 +24,7 @@ import '../platform_caps.dart';
 import '../ui/keep_focus.dart';
 import '../ui/main_state.dart';
 import '../ui/tokens.dart';
+import 'end_term_dialog.dart';
 import 'sgr.dart' show TermLine;
 import 'term_keys.dart';
 import 'term_layout.dart';
@@ -800,6 +801,10 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       _copy();
       return KeyEventResult.handled;
     }
+    // ⌘T and ⌘W are rApp's, whatever the pane is doing (an exited pane, a dropped link).
+    if (input case TermAction(action: final a) when a == TermShortcut.newTerm || a == TermShortcut.closeTerm) {
+      return _termShortcut(a);
+    }
     // An exited pane (T4) takes nothing: nothing is sent or kept, and the window's own keys
     // (Esc, Ctrl+[ / ], Ctrl+O, F11) are the window's again.
     if (!_canInput || widget.frozen) return KeyEventResult.ignored;
@@ -829,11 +834,24 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
         widget.port.type(widget.session.sid, text);
         _sentInput();
       case TermAction():
-        _paste();
+        _paste(); // the others are handled above
       case TermReserved():
         break; // rApp's (find, font size); not the terminal's either
     }
     // A key the live terminal would take is never the window's.
+    return KeyEventResult.handled;
+  }
+
+  /// ⌘T: a new terminal beside this one. ⌘W: end this one, on a device that can (else the window has the key).
+  KeyEventResult _termShortcut(TermShortcut action) {
+    final r = widget.state.recordOfSession(widget.session);
+    if (r == null) return KeyEventResult.ignored;
+    if (action == TermShortcut.newTerm) {
+      unawaited(widget.state.newTermFrom(r.id, r.app));
+      return KeyEventResult.handled;
+    }
+    if (!widget.state.canEndTerm(r.key)) return KeyEventResult.ignored;
+    unawaited(askEndTerm(context, widget.state, r.key));
     return KeyEventResult.handled;
   }
 

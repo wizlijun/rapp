@@ -106,6 +106,10 @@ void main() {
     expect(autoReconnects('session ended'), false);
     expect(stopsAutoReconnect('session ended'), true);
   });
+  test('a terminal the device no longer has stops automatic tries', () {
+    expect(autoReconnects('no such text terminal'), false);
+    expect(stopsAutoReconnect('no such text terminal'), true);
+  });
   test('relay and key words', () {
     expect(disconnectWord('relay not set: add the host as id@ip'), '没设中继，请用 ID@IP 添加');
     expect(disconnectWord('relay unreachable: connection refused'), '中继连不上');

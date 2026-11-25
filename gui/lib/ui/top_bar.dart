@@ -3,10 +3,13 @@
 // network marker, the traffic label (the stream menu), the session menu, fullscreen (where there is a fullscreen control).
 // Narrowing, it yields in this order (iPad spec §7.2): the hint's line (its ▾ stays), the 本机 button, the network
 // marker, the window title (the count stays).
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../embed/stream_menu.dart';
 import '../embed/traffic_label.dart';
+import '../term/end_term_dialog.dart';
 import '../pages/app_profile_page.dart';
 import 'lamp.dart';
 import 'lifecycle.dart';
@@ -267,6 +270,7 @@ class TopBar extends StatelessWidget {
       onDisconnect: state.hubUsable ? state.disconnectCurrent : null,
       onReconnect: state.hubUsable ? state.reconnectCurrent : null,
       onEnd: state.endCurrent,
+      onEndTerm: state.canEndTerm(cur.key) ? () => unawaited(askEndTerm(context, state, cur.key)) : null,
       onToggleDetach: state.canToggleDetach ? state.toggleDetach : null,
       onRememberStream: state.rememberStream,
       onOpenProfile: () => openAppProfilePage(context, state.profiles,

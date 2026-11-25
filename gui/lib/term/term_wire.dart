@@ -1,6 +1,10 @@
 // Wire messages of the terminal worker (`rust/term/src/proto.rs`): one JSON object per line.
 import 'dart:convert';
 
+/// What a device answers a view of a text terminal it does not have (`serve.rs` `NO_TEXT_TERMINAL`): it went while
+/// the link was down.
+const noSuchTextTerminal = 'no such text terminal';
+
 class TermPane {
   final String id, win, window, title, command;
   final int cols, rows;
