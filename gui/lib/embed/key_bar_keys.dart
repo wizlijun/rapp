@@ -33,11 +33,11 @@ const barKeys = <String, BarKey>{
   'stab': (id: 'stab', label: '⇧Tab', spoken: 'Shift Tab', kind: BarKind.send, wire: 'Shift-Tab', code: 48, mods: latchShift, bit: null, alt: null, repeats: false),
   'tab': (id: 'tab', label: 'Tab', spoken: 'Tab', kind: BarKind.send, wire: 'Tab', code: 48, mods: 0, bit: null, alt: null, repeats: false),
   'cc': (id: 'cc', label: '⌃C', spoken: 'Control C', kind: BarKind.send, wire: 'Ctrl-C', code: 8, mods: latchCtrl, bit: null, alt: null, repeats: false),
-  'cd': (id: 'cd', label: '⌃D', spoken: 'Control D', kind: BarKind.send, wire: 'Ctrl-D', code: 2, mods: latchCtrl, bit: null, alt: null, repeats: false),
   'cr': (id: 'cr', label: '⌃R', spoken: 'Control R', kind: BarKind.send, wire: 'Ctrl-R', code: 15, mods: latchCtrl, bit: null, alt: null, repeats: false),
   'co': (id: 'co', label: '⌃O', spoken: 'Control O', kind: BarKind.send, wire: 'Ctrl-O', code: 31, mods: latchCtrl, bit: null, alt: null, repeats: false),
   'ct': (id: 'ct', label: '⌃T', spoken: 'Control T', kind: BarKind.send, wire: 'Ctrl-T', code: 17, mods: latchCtrl, bit: null, alt: null, repeats: false),
   'cb': (id: 'cb', label: '⌃B', spoken: 'Control B', kind: BarKind.send, wire: 'Ctrl-B', code: 11, mods: latchCtrl, bit: null, alt: null, repeats: false),
+  'cl': (id: 'cl', label: '⌃L', spoken: 'Control L', kind: BarKind.send, wire: 'Ctrl-L', code: 37, mods: latchCtrl, bit: null, alt: null, repeats: false),
   'left': (id: 'left', label: '←', spoken: '左', kind: BarKind.send, wire: 'Left', code: 123, mods: 0, bit: null, alt: 'home', repeats: true),
   'up': (id: 'up', label: '↑', spoken: '上', kind: BarKind.send, wire: 'Up', code: 126, mods: 0, bit: null, alt: 'pgup', repeats: true),
   'down': (id: 'down', label: '↓', spoken: '下', kind: BarKind.send, wire: 'Down', code: 125, mods: 0, bit: null, alt: 'pgdn', repeats: true),
@@ -51,21 +51,25 @@ const barKeys = <String, BarKey>{
   'ctrl': (id: 'ctrl', label: '⌃', spoken: 'Control', kind: BarKind.mod, wire: null, code: null, mods: 0, bit: latchCtrl, alt: null, repeats: false),
   'opt': (id: 'opt', label: '⌥', spoken: 'Option', kind: BarKind.mod, wire: null, code: null, mods: 0, bit: latchOpt, alt: null, repeats: false),
   'cmd': (id: 'cmd', label: '⌘', spoken: 'Command', kind: BarKind.mod, wire: null, code: null, mods: 0, bit: latchCmd, alt: null, repeats: false),
-  'copy': (id: 'copy', label: '复制', spoken: '复制', kind: BarKind.copy, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
-  'paste': (id: 'paste', label: '粘贴', spoken: '粘贴', kind: BarKind.paste, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
+  'copy': (id: 'copy', label: '⌘C', spoken: '复制', kind: BarKind.copy, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
+  'paste': (id: 'paste', label: '⌘V', spoken: '粘贴', kind: BarKind.paste, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
   'more': (id: 'more', label: '⋯', spoken: '更多按键', kind: BarKind.more, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
 };
 
-/// The rows of the bar, each a list of key ids: one row of ten, ⋯ last, and [more] adds the second row.
+/// The rows of the bar, each a list of key ids, grouped by what the key is for (key-bar-keys research, 2026-11-25).
+/// First row, ten keys: complete and switch mode (Tab ⇧Tab), stop (Esc ⌃C), more keys (⌃ ⋯), choose (↑ ↓), then ⌫
+/// and ⏎ at the right end. [more] adds the second row: copy and paste (shown as ⌘C ⌘V), ⌥ (and ⌘ for an app), ← →,
+/// then the ⌃ keys by how often the agent CLIs use them. Any other ⌃ key is the sticky ⌃ and a typed letter.
 List<List<String>> keyBarRows({required bool app, required bool more}) {
-  const first = ['esc', 'stab', 'tab', 'cc', 'left', 'up', 'down', 'right', 'enter', 'more'];
+  const first = ['tab', 'stab', 'esc', 'cc', 'ctrl', 'more', 'up', 'down', 'bksp', 'enter'];
   if (!more) return [first];
   return [
     first,
     [
-      'ctrl', 'opt', if (app) 'cmd',
-      'cr', 'co', 'ct', 'cb', if (!app) 'cd',
-      'bksp', 'copy', 'paste',
+      'copy', 'paste',
+      'opt', if (app) 'cmd',
+      'left', 'right',
+      'co', 'cr', 'ct', 'cb', 'cl',
     ],
   ];
 }

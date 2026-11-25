@@ -995,3 +995,19 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] [Linux v0.15.24](https://github.com/wizlijun/rapp/releases/tag/v0.15.24) 已发布（源码 `4c992ac0`）。两种包 40 文件一致、14 个 ELF 依赖完整，隔离 QUIC/CLI/端口共享检查通过；三个附件远端大小/SHA256 和匿名校验清单核验通过。
 - [x] macOS Latest 保留 v0.15.23；仓库下载快照更新。本轮不安装系统包、不重启服务、不部署静态站。
 - [ ] 实际物理输入法、触屏及 macOS 真机对端验收；详见 `docs/superpowers/plans/2026-11-25-linux-01524-parity.md`。
+
+## 快捷区按键重排（feat/key-bar-keys，2026-11-25，已合并到 main，未发版）
+
+依据和排法：`docs/superpowers/specs/2026-11-25-rapp-key-bar-keys-research.md`。第一排 `Tab ⇧Tab Esc ⌃C ⌃ ⋯ ↑ ↓ ⌫ ⏎`，第二排 `⌘C ⌘V ⌥ (⌘) ← → ⌃O ⌃R ⌃T ⌃B ⌃L`。上面几节实机检查里写的旧键位（⋯ 在最右、⌫ 和「复制 粘贴」在第二排末尾、⌃D）以这里为准。
+
+- [x] `key_bar_keys_test.dart`、`key_bar_test.dart`、`linux_key_bar_test.dart` 共 82 项通过（云端 Linux 副本，Flutter 3.50.1）。全量 3086 通过、11 跳过、11 失败；这 11 项在没改动的副本上同样失败，是那个环境的问题（以 root 跑所以只读目录写得进去；副本里没有 `rust/`、`Tests/`、原生库和 systemd）。本机还没跑全量。
+
+实机检查：
+- [ ] 1 iPhone 竖屏：第一排十颗的字都没被裁（重点看 `⇧Tab`）；第二排终端 10 颗、App 会话 11 颗也不裁。
+- [ ] 2 Claude Code 权限框：↑ ↓ 选、⏎ 确认、Esc 拒绝；右手拇指够 ↑ ↓ ⌫ ⏎ 顺不顺，⋯ 在中间别不别扭。
+- [ ] 3 不开 ⋯：⌫ 能删远端提示符里的字，长按连发。
+- [ ] 4 不开 ⋯：点 ⌃ 再在软键盘上打 o / r / t，远端收到 ⌃O / ⌃R / ⌃T，草稿里没多出字母；点 ⌃ 再点 ⌫ 删一个词。
+- [ ] 5 第二排：⌘C 复制终端里选中的字，⌘V 把本机剪贴板贴过去；App 会话里 ⌘C 发 ⌘C。
+- [ ] 6 第二排：← → 挪远端光标，上滑是 Home / End；⌃L 重画 Claude Code 的画面。
+- [ ] 7 VoiceOver：⌘C ⌘V 两颗念「复制」「粘贴」。
+- [ ] 8 macOS / Linux：同 2–6。

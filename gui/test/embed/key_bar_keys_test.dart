@@ -4,17 +4,24 @@ import 'package:rapp/embed/key_bar_keys.dart';
 import 'package:rapp/embed/modifier_latch.dart';
 
 void main() {
-  test('one row of ten, ⋯ last; more adds the second row', () {
+  test('one row of ten by intent: Tab ⇧Tab, Esc ⌃C, ⌃ ⋯, ↑ ↓, ⌫ ⏎; more adds the second row', () {
     expect(keyBarRows(app: false, more: false), [
-      ['esc', 'stab', 'tab', 'cc', 'left', 'up', 'down', 'right', 'enter', 'more'],
+      ['tab', 'stab', 'esc', 'cc', 'ctrl', 'more', 'up', 'down', 'bksp', 'enter'],
     ]);
     expect(keyBarRows(app: false, more: true)[1],
-        ['ctrl', 'opt', 'cr', 'co', 'ct', 'cb', 'cd', 'bksp', 'copy', 'paste']);
+        ['copy', 'paste', 'opt', 'left', 'right', 'co', 'cr', 'ct', 'cb', 'cl']);
   });
 
-  test('app: ⌘ after ⌥, ⌃D gives way', () {
+  test('app: ⌘ after ⌥', () {
     expect(keyBarRows(app: true, more: true)[1],
-        ['ctrl', 'opt', 'cmd', 'cr', 'co', 'ct', 'cb', 'bksp', 'copy', 'paste']);
+        ['copy', 'paste', 'opt', 'cmd', 'left', 'right', 'co', 'cr', 'ct', 'cb', 'cl']);
+  });
+
+  test('no key is on the bar twice', () {
+    for (final app in [false, true]) {
+      final ids = [for (final row in keyBarRows(app: app, more: true)) ...row];
+      expect(ids.toSet().length, ids.length, reason: 'app: $app');
+    }
   });
 
   test('no hide key: the toggle is in the box', () {
@@ -45,10 +52,25 @@ void main() {
 
   test('macLetterCodes: 26 letters, each ⌃-letter key carries its code', () {
     expect(macLetterCodes.length, 26);
-    const ctrlKeys = {'cc': 'c', 'cd': 'd', 'cr': 'r', 'co': 'o', 'ct': 't', 'cb': 'b'};
+    const ctrlKeys = {'cc': 'c', 'cr': 'r', 'co': 'o', 'ct': 't', 'cb': 'b', 'cl': 'l'};
     for (final e in ctrlKeys.entries) {
       expect(barKeys[e.key]!.code, macLetterCodes[e.value], reason: e.key);
     }
+  });
+
+  test('⌃L is Ctrl-L on a terminal and L with ⌃ on an app', () {
+    final cl = barKeys['cl']!;
+    expect(cl.label, '⌃L');
+    expect(cl.wire, 'Ctrl-L');
+    expect(cl.code, 37);
+    expect(cl.mods, latchCtrl);
+  });
+
+  test('copy and paste show their shortcut and are spoken by name', () {
+    expect(barKeys['copy']!.label, '⌘C');
+    expect(barKeys['copy']!.spoken, '复制');
+    expect(barKeys['paste']!.label, '⌘V');
+    expect(barKeys['paste']!.spoken, '粘贴');
   });
 
   test('key table: arrows swipe to their partner and repeat; non-send keys carry no wire or code', () {
