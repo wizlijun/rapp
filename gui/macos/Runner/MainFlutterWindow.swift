@@ -11,6 +11,10 @@ class MainFlutterWindow: NSWindow {
       SingleInstance.handOff()
       exit(0)
     }
+    // The connection manager stays out of sight while the main window runs: the overview lists the same sessions.
+    if SingleInstance.isConnectionManager && SingleInstance.mainIsRunning() {
+      exit(0)
+    }
     // Forward process arguments (minus argv[0]) to Dart's main(args), e.g. `--cm`.
     let project = FlutterDartProject()
     project.dartEntrypointArguments = Array(CommandLine.arguments.dropFirst())

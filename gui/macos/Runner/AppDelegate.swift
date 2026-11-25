@@ -76,6 +76,17 @@ enum SingleInstance {
     return true
   }
 
+  /// Whether a main window process holds the lock now. The connection manager asks: while the main window runs,
+  /// its overview already lists who is in (正在被接入), so the service's automatic `--cm` shows nothing.
+  static func mainIsRunning() -> Bool {
+    let fd = open(lockPath, O_RDWR)
+    if fd < 0 { return false }  // no lock file: no main window has run since boot
+    defer { close(fd) }
+    if flock(fd, LOCK_EX | LOCK_NB) != 0 { return true }
+    flock(fd, LOCK_UN)
+    return false
+  }
+
   /// Ask the running instance (pid in the lock file) to show its main window and give it focus.
   static func handOff() {
     DistributedNotificationCenter.default().postNotificationName(
