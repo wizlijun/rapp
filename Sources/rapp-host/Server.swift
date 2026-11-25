@@ -762,7 +762,7 @@ final class Session {
                         height: UInt16(clamping: Int(display.height.rounded()))))
         }
         if !desktop {
-            let watcher = AppStateWatcher(app: app, text: nil,
+            let watcher = AppStateWatcher(app: app, text: VisionText(),
                                           send: { [weak self] m in self?.queue.async { guard let self, !self.ended else { return }; self.send(m) } },
                                           log: { [output] in output.log($0) })
             sampleLock.withLock { appState = watcher }
