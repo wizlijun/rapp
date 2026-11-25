@@ -77,6 +77,9 @@ class _Entry {
 
 int _rev(Object? v) => v is num ? v.toInt() : 0;
 
+/// A pack's `rev` is absent (0) or an integer in 0...2147483647 (what Swift `RulePack.decode` takes too).
+bool _revOk(Object? v) => v == null || (v is num && v == v.truncateToDouble() && v >= 0 && v <= 2147483647);
+
 bool _major1(Object? format) => format is String && (format == '1' || format.startsWith('1.'));
 
 class StateRulesLibrary {
@@ -108,7 +111,7 @@ class StateRulesLibrary {
         final list = root is Map ? root['packs'] : null;
         if (list is List) {
           for (final p in list) {
-            if (p is Map && _major1(p['format']) && p['id'] is String && (p['id'] as String).isNotEmpty) {
+            if (p is Map && _major1(p['format']) && _revOk(p['rev']) && p['id'] is String && (p['id'] as String).isNotEmpty) {
               offer(_Entry(_asMap(p), RulesLayer.builtin, ''));
             }
           }
@@ -130,6 +133,7 @@ class StateRulesLibrary {
         } else {
           final id = v['id'];
           if (id is! String || id.isEmpty) throw '缺少 id';
+          if (!_revOk(v['rev'])) throw 'rev 不是 0 到 2147483647 的整数';
           offer(_Entry(_asMap(v), RulesLayer.mine, name));
         }
       } catch (e) {

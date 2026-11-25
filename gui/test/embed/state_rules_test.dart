@@ -56,6 +56,22 @@ void main() {
     expect(StateRulesLibrary.parse(builtin, {'a.json': tie}).choose('com.openai.codex', null)!.layer, RulesLayer.mine);
   });
 
+  test('a rev that is not an integer in 0...2147483647 is rejected, not clamped', () {
+    final base = {'format': '1.0', 'id': 'r', 'ids': ['com.r']};
+    for (final bad in [2147483648, -1, 1.5, 1e30, 'x']) {
+      final lib = StateRulesLibrary.parse(null, {'r.json': jsonEncode({...base, 'rev': bad})});
+      expect(lib.errors, hasLength(1), reason: '$bad');
+      expect(lib.choose('com.r', null), isNull, reason: '$bad');
+    }
+    for (final ok in [0, 7, 2147483647]) {
+      final lib = StateRulesLibrary.parse(null, {'r.json': jsonEncode({...base, 'rev': ok})});
+      expect(lib.errors, isEmpty, reason: '$ok');
+      expect(lib.choose('com.r', null)!.rev, ok);
+    }
+    final b = jsonEncode({'version': 1, 'packs': [{...base, 'rev': 2147483648}]});
+    expect(StateRulesLibrary.parse(b, {}).choose('com.r', null), isNull);
+  });
+
   test('bad mine files are listed and skipped; cycles and oversize packs are not chosen', () {
     final lib = StateRulesLibrary.parse(builtin, {
       'bad.json': '{',

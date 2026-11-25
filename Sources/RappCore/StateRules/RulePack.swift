@@ -143,6 +143,12 @@ public struct RulePack: Equatable {
             throw RuleError.unsupportedFormat(format)
         }
         guard let id = v["id"]?.stringValue, !id.isEmpty else { throw RuleError.notAPack("id") }
+        // rev is absent (0) or an integer in 0...Int32.max; anything else rejects the pack (the GUI does the same).
+        var rev = 0
+        if let raw = v["rev"] {
+            guard let n = raw.numberValue, n == n.rounded(.towardZero), n >= 0, n <= 2147483647 else { throw RuleError.notAPack("rev") }
+            rev = Int(n)
+        }
         var regions: [String: RegionSpec] = [:]
         for (k, r) in v["regions"]?.objectValue ?? [:] { regions[k] = decodeRegion(r) }
         var signals: [String: SignalSpec] = [:]
@@ -160,7 +166,7 @@ public struct RulePack: Equatable {
             variants.append(VariantSpec(name: item["name"]?.stringValue ?? "#\(i)", when: when,
                                         patch: item["patch"] ?? .object([:])))
         }
-        return RulePack(id: id, name: v["name"]?.stringValue ?? id, rev: v["rev"]?.numberValue.flatMap { Int(exactly: $0.rounded(.towardZero)) } ?? 0,
+        return RulePack(id: id, name: v["name"]?.stringValue ?? id, rev: rev,
                         regions: regions, signals: signals, states: states,
                         require: (v["require"]?.arrayValue ?? []).compactMap(\.stringValue), variants: variants)
     }

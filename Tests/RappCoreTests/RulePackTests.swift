@@ -23,6 +23,44 @@ final class RulePackTests: XCTestCase {
         XCTAssertEqual(b.size, 6...20)
     }
 
+    func testRevMustBeAnIntegerInRange() throws {
+        func decode(_ rev: String) throws -> RulePack {
+            try RulePack.decode(try v(#"{"format":"1.0","id":"x","rev":\#(rev)}"#))
+        }
+        XCTAssertEqual(try decode("0").rev, 0)
+        XCTAssertEqual(try decode("2147483647").rev, 2147483647)
+        XCTAssertEqual(try RulePack.decode(try v(#"{"format":"1.0","id":"x"}"#)).rev, 0)
+        for bad in ["2147483648", "-1", "1.5", "1e30", "\"7\""] {
+            XCTAssertThrowsError(try decode(bad), bad)
+        }
+    }
+
+    /// The pack file the GUI ships: every pack, with `extends` resolved the way the GUI does, decodes with no
+    /// unusable signal and no unknown region.
+    func testShippedAssetPacksAreAllUsable() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("gui/assets/state_rules.json")
+        let root = try v(String(contentsOf: url, encoding: .utf8))
+        let packs = root["packs"]?.arrayValue ?? []
+        XCTAssertGreaterThanOrEqual(packs.count, 4)
+        var byId: [String: RuleValue] = [:]
+        for p in packs { if let id = p["id"]?.stringValue { byId[id] = p } }
+        func resolved(_ id: String, depth: Int = 0) throws -> RuleValue {
+            let p = try XCTUnwrap(byId[id], id)
+            XCTAssertLessThan(depth, 8)
+            guard let base = p["extends"]?.stringValue else { return p }
+            var child = try XCTUnwrap(p.objectValue)
+            child["extends"] = nil
+            return try resolved(base, depth: depth + 1).merged(with: .object(child))
+        }
+        for id in byId.keys.sorted() {
+            let pack = try RulePack.decode(try resolved(id))
+            XCTAssertEqual(pack.id, id)
+            for (name, sig) in pack.signals { XCTAssertTrue(sig.usable, "\(id).\(name) unusable") }
+            for (name, r) in pack.regions { XCTAssertNotEqual(r, .unknown, "\(id).\(name) unknown region") }
+        }
+    }
+
     func testShippedPacksDecode() throws {
         for j in [chatgptDesktopJSON, claudeDesktopJSON, antigravityAppJSON] {
             XCTAssertNoThrow(try RulePack.decode(try v(j)))
@@ -100,12 +138,11 @@ final class RulePackTests: XCTestCase {
     }
 
     func testHugeNumbersDoNotCrash() throws {
-        for rev in ["1e30", "-1e30", "1e308", "2.9"] {
-            let p = try RulePack.decode(try v("{\"format\":\"1.0\",\"id\":\"x\",\"rev\":\(rev)}"))
-            XCTAssertEqual(p.rev, rev == "2.9" ? 2 : 0)
+        for rev in ["1e30", "-1e30", "1e308", "2.9"] { // a bad rev rejects the pack, never traps
+            XCTAssertThrowsError(try RulePack.decode(try v("{\"format\":\"1.0\",\"id\":\"x\",\"rev\":\(rev)}")))
         }
         let p = try RulePack.decode(try v(#"""
-        {"format":"1.0","id":"x","rev":1e30,
+        {"format":"1.0","id":"x","rev":1,
          "regions":{"e":{"edge":{"from":"left","min":-1e30,"max":1e308}},
                     "b":{"box":{"top":1e30,"width":"1e30%"}},
                     "s":{"strip":{"of":"e","side":"left","width":1e308}},
@@ -113,7 +150,7 @@ final class RulePackTests: XCTestCase {
          "signals":{"a":{"in":"b","detect":{"motion":{"window":1e30,"min":-1e30},"color":{"h":[1e30,-1e30]}}}},
          "states":[{"state":"working","hold":1e30,"release":-1e308}]}
         """#))
-        XCTAssertEqual(p.rev, 0)
+        XCTAssertEqual(p.rev, 1)
         XCTAssertEqual(p.states.count, 1)
     }
 }
