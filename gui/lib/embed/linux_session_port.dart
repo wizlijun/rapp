@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'session_port.dart';
+import 'state_rules.dart' show stateRulesLimit;
 import 'modifier_latch.dart';
 import 'voice_key_gate.dart';
 import 'linux_transfer.dart';
@@ -672,6 +673,10 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
       case 'unlock':
       case 'dismiss_cover':
         s.send({'cmd': method, ...args});
+      case 'state_rules':
+        // The session process drops the link on a bad command: an oversized pack never goes out.
+        final json = args['json'];
+        if (json is String && utf8.encode(json).length <= stateRulesLimit) s.send({'cmd': method, 'json': json});
       case 'move_top_left':
         final id = args['window'];
         var slot = 0.0;

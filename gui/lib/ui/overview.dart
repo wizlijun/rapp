@@ -488,7 +488,7 @@ class _Block extends StatelessWidget {
       child: Semantics(
         button: true,
         selected: selected,
-        label: [entry.title, _status, ?windows].join('，'),
+        label: [entry.title, _status, if (_program != null && entry.inferred) '推断', ?windows].join('，'),
         excludeSemantics: true,
         onTap: onTap,
         child: Material(
@@ -534,6 +534,12 @@ class _Block extends StatelessWidget {
                                   style: small?.copyWith(fontFamily: t.mono, fontFamilyFallback: t.monoFallback),
                                 ),
                               ),
+                            ])
+                          else if (_program != null && entry.inferred)
+                            Row(children: [
+                              Flexible(child: Text(_status, maxLines: 1, overflow: TextOverflow.ellipsis, style: small)),
+                              const SizedBox(width: 6),
+                              Text('推断', maxLines: 1, style: small),
                             ])
                           else
                             Text(_status, maxLines: 1, overflow: TextOverflow.ellipsis, style: small),

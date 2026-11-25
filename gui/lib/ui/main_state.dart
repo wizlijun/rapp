@@ -75,11 +75,12 @@ class HintRecord {
   bool get goes => device != null && app != null;
 }
 
-enum NeedKind { session, device, terminal }
+enum NeedKind { session, device, terminal, app }
 
 /// One thing waiting for the person: a disconnected session ([target] its record key) or a
 /// device that dropped ([target] its id), or a text terminal blocked on the person ([target] its session id,
-/// [device] its device, [title] its shown name). Newer [seq] first.
+/// [device] its device, [title] its shown name), or an app session whose screen shows a sure block ([target] its
+/// record key). Newer [seq] first.
 class NeedItem {
   const NeedItem(this.kind, this.target, this.text, this.seq, {this.reconnectWord = '重连', this.device, this.title});
   final String reconnectWord;
@@ -667,6 +668,7 @@ class MainState extends ChangeNotifier {
         openOrSwitch(n.device!, n.target, n.title!);
         notifyListeners();
       case NeedKind.session:
+      case NeedKind.app:
         corner = null;
         select(n.target);
       case NeedKind.device:
@@ -1163,6 +1165,16 @@ class MainState extends ChangeNotifier {
                   _termNeedSeq.putIfAbsent(key, () => ++_seq),
                   device: e.key, title: title);
             }(),
+      // An app whose screen shows a sure block waits for the person; a guess (or out-of-date rules) does not.
+      for (final r in _records.values)
+        if (r.phase == Phase.live && r.sid != null && remote[r.sid]?.inferredNeed == true)
+          () {
+            final key = 'app\n${r.key}';
+            seen.add(key);
+            return NeedItem(NeedKind.app, r.key,
+                '${r.appName} @ ${deviceName(r.id)}：${termAskWord(remote[r.sid]!.inferredPs!)}',
+                _termNeedSeq.putIfAbsent(key, () => ++_seq));
+          }(),
     ];
     _termNeedSeq.removeWhere((k, _) => !seen.contains(k));
     out.sort((a, b) => b.seq.compareTo(a.seq));
@@ -1289,6 +1301,7 @@ class MainState extends ChangeNotifier {
     // A terminal's name is the device's current one; the last one seen stays when the row is gone.
     final tn = isTermApp(r.app) ? termName(r.id, r.app) : null;
     if (tn != null) r.appName = tn;
+    final inferredPs = r.phase == Phase.live ? rs?.inferredPs : null;
     return SessionEntry(
       sid: sid,
       id: r.id,
@@ -1300,7 +1313,8 @@ class MainState extends ChangeNotifier {
       bytesPerSecond: r.phase == Phase.live ? rs?.bytesPerSecond : null,
       reason: r.phase == Phase.disconnected ? disconnectWord(r.reason) : null,
       takenOver: r.phase == Phase.disconnected && takenOver(r.reason),
-      ps: r.phase == Phase.disconnected ? null : _termPs(r.id, r.app),
+      ps: r.phase == Phase.disconnected ? null : (_termPs(r.id, r.app) ?? inferredPs),
+      inferred: inferredPs != null && !isTermApp(r.app),
     );
   }
 
@@ -1582,6 +1596,8 @@ class MainState extends ChangeNotifier {
     }
     final wasLocked = rs.screenLocked;
     _applyPortEvent(rs, e);
+    if (e is ReadyEvent) _sendRules(r, rs, e.sid);
+    if (e is AppStateEvent) _trackAppState(r, rs, e.sid);
     if (e is ComposerDraftEvent && e.action != null) _nativeAction(rs, e.action!);
     if (e is ComposerDraftEvent && (e.send || e.retry)) unawaited(_submitNative(rs, e));
     if (e is ScreenLockedEvent) {
@@ -1638,6 +1654,42 @@ class MainState extends ChangeNotifier {
   }
 
   Timer? _blockedTimer;
+
+  /// The rules sent on each live link (by sid); [rulesOf] reads them.
+  final Map<Object, ChosenRules> _rulesBySid = {};
+
+  /// The (state, kind) each link last reported, to queue only changes; the first report is the starting point.
+  final Map<Object, (String?, String?)> _appSeen = {};
+
+  /// What was sent to the host on [sid]'s link: null for none (a terminal, the desktop, `stateRules: off`, no pack).
+  ChosenRules? rulesOf(Object sid) => _rulesBySid[sid];
+
+  /// An app session is ready: the host gets the rules for it (again on every new link; a text terminal and the
+  /// whole desktop have none). The library is read now, not cached: a relocate reloads it.
+  void _sendRules(SessionRecord r, RemoteSession rs, Object sid) {
+    final live = {for (final x in _records.values) ...[x.sid, x.lastSid]};
+    _rulesBySid.removeWhere((k, _) => !live.contains(k));
+    _appSeen.removeWhere((k, _) => !live.contains(k));
+    if (isTermApp(r.app) || isDesktopApp(r.app) || _rulesBySid.containsKey(sid)) return;
+    final chosen = stateRules.choose(r.app, rs.profile.stateRules);
+    final port = portOf(sid);
+    if (chosen == null || port == null) return;
+    _rulesBySid[sid] = chosen;
+    port.stateRules(sid, chosen.json);
+  }
+
+  /// Queues a change of the inferred state in the status queue (marked inferred); a state-less report is no change.
+  void _trackAppState(SessionRecord r, RemoteSession rs, Object sid) {
+    final a = rs.appState;
+    final ps = rs.inferredPs;
+    if (a == null || ps == null) return;
+    final now = (a.state, a.kind);
+    final was = _appSeen[sid];
+    _appSeen[sid] = now;
+    if (was == null || was == now) return;
+    _queue(HintRecord('${r.appName} @ ${deviceName(r.id)}：${programWord(ps)}', _now(),
+        device: r.id, app: r.app, title: r.appName, lamp: programLamp(ps), inferred: true));
+  }
 
   /// Each record's latest host notice (by record key: a reconnect keeps it), and its expiry.
   final _notices = <String, ({HostNotice notice, Timer timer, int epoch})>{};

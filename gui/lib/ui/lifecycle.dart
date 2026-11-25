@@ -4,6 +4,7 @@ import '../embed/stream_choice.dart';
 import '../history/record_id.dart';
 import '../hub_client.dart';
 import 'lamp.dart';
+import 'term_status.dart';
 
 /// Hub messages the user can meet in the hint, in plain words.
 const hubWords = {
@@ -190,6 +191,9 @@ Lamp recordLamp(SessionRecord r, RemoteSession? rs) {
       return Lamp.connecting;
     case Phase.live:
       if (rs == null || !rs.sawFrame) return Lamp.connecting;
+      // What the host read off the app's screen drives the lamp like a program's own status does.
+      final ps = rs.inferredPs;
+      if (ps != null) return programLamp(ps) == Lamp.disconnected ? Lamp.idle : programLamp(ps);
       return rs.idle ? Lamp.idle : Lamp.active;
   }
 }

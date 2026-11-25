@@ -107,6 +107,16 @@ void main() {
     });
   });
 
+  test('linkDown clears the inferred state', () {
+    final rs = RemoteSession(1, 'Calc');
+    rs.apply(const AppStateEvent(1, '{"state":"working","health":"ok"}'));
+    expect(rs.appState!.state, 'working');
+    rs.apply(const AppStateEvent(1, 'junk'));
+    expect(rs.appState!.state, 'working'); // a bad report is skipped
+    rs.linkDown();
+    expect(rs.appState, isNull);
+  });
+
   group('focus', () {
     FocusRegionEvent ev(int window) => FocusRegionEvent(1, window, const [Rect.fromLTWH(0, 0, 10, 10)]);
 

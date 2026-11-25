@@ -160,6 +160,25 @@ void main() {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
   }, skip: Platform.isWindows);
 
+  testWidgets('state_rules goes to rapp-session as it is; an oversized pack is dropped', (tester) async {
+    final port = LinuxSessionPort('unused', framePresented: () async {});
+    final proc = await tester.runAsync(() => Process.start('cat', const []));
+    port.seedSessionForTest(3, proc!);
+    await tester.runAsync(() async {
+      await port.invoke('state_rules', {'sid': 3, 'json': '{}'});
+      await port.invoke('state_rules', {'sid': 3, 'json': 'x' * 70000});
+    });
+    final sent = await tester.runAsync(() async {
+      await proc.stdin.close();
+      return utf8.decode(await proc.stdout.expand((b) => b).toList());
+    });
+    expect(sent!.trim().split('\n').map((l) => jsonDecode(l) as Map).toList(), [
+      {'cmd': 'state_rules', 'json': '{}'},
+    ]);
+    port.dispose();
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+  }, skip: Platform.isWindows);
+
   testWidgets('a compose letter opens the draft with it; digits, Ctrl+letter and compose off go to A',
       (tester) async {
     final port = LinuxSessionPort('unused', framePresented: () async {});

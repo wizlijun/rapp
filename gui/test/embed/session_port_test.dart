@@ -87,6 +87,19 @@ void main() {
     expect(port.calls.single.$2, {'sid': 4, 'id': 9});
   });
 
+  test('app_state parses; state_rules goes out as a call and an oversized pack does not', () async {
+    expect(parseSessionEvent('app_state', {'sid': 3, 'json': '{}'}),
+        isA<AppStateEvent>().having((e) => e.json, 'json', '{}').having((e) => e.sid, 'sid', 3));
+    expect(parseSessionEvent('app_state', {'sid': 3}), isNull);
+    expect(parseSessionEvent('app_state', {'sid': 3, 'json': 5}), isNull);
+    final port = _PinPort();
+    port.stateRules(4, '{"id":"x"}');
+    port.stateRules(4, '"${'a' * 70000}"');
+    await Future<void>.delayed(Duration.zero);
+    expect(port.calls.single.$1, 'state_rules');
+    expect(port.calls.single.$2, {'sid': 4, 'json': '{"id":"x"}'});
+  });
+
   test('a window without a texture has none', () {
     final e = parseSessionEvent('windows', {'sid': 1, 'windows': [win(kind: 'menu', texture: null)]}) as WindowsEvent;
     expect(e.windows.single.texture, isNull);

@@ -137,6 +137,15 @@ void main() {
     expect(inside('block-m1/b', find.text('已断开：$reason')), findsOneWidget);
   });
 
+  testWidgets('an inferred app state shows the word and 推断', (tester) async {
+    await boot(tester, apps: ['m1/a']);
+    frame(1);
+    port.emit(const AppStateEvent(1, '{"state":"working","health":"ok","sure":false}'));
+    await show(tester);
+    expect(inside('block-m1/a', find.textContaining('在干活')), findsOneWidget);
+    expect(inside('block-m1/a', find.textContaining('推断')), findsOneWidget);
+  });
+
   testWidgets('an opened terminal shows its program status in place of the traffic, every state', (tester) async {
     final term = FakeTermSessionPort();
     await boot(tester, apps: ['m1/term:pty:a'], termPort: term);
