@@ -68,14 +68,14 @@ public struct ColorRange: Equatable {
         return hWraps ? !(h.lowerBound < hue && hue < h.upperBound) : h.contains(hue)
     }
 
-    /// Starter colour names. Hue in degrees, s/l in percent. Task 5 owns tuning these.
+    /// Colour names (brief Task 5). Hue in degrees, s/l in percent.
     public static func named(_ name: String) -> ColorRange? {
         switch name {
-        case "green": return ColorRange(h: 90...170, s: 30...100, l: 25...75)
-        case "red": return ColorRange(h: 20...340, hWraps: true, s: 40...100, l: 30...70)
-        case "orange": return ColorRange(h: 15...45, s: 50...100, l: 40...70)
-        case "blue": return ColorRange(h: 190...260, s: 40...100, l: 30...75)
-        case "gray", "grey": return ColorRange(s: 0...15, l: 25...80)
+        case "green": return ColorRange(h: 90...170, s: 25...100, l: 20...80)
+        case "red": return ColorRange(h: 15...345, hWraps: true, s: 30...100, l: 20...80)
+        case "orange": return ColorRange(h: 15...45, s: 40...100, l: 25...80)
+        case "blue": return ColorRange(h: 190...250, s: 25...100, l: 20...80)
+        case "gray", "grey": return ColorRange(s: 0...12, l: 25...85)
         default: return nil
         }
     }
