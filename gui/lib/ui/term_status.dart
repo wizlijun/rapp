@@ -6,6 +6,7 @@ String termStatus(TermRow r, int nowSecs) {
   if (r.dead) return '已退出';
   final ps = r.ps;
   if (ps != null) {
+    // 'done' and 'idle' (and unknown states) deliberately fall out of the switch to the old unread/activity words.
     switch (ps.state) {
       case 'blocked':
         return termAskWord(ps);

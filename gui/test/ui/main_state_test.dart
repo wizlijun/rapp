@@ -5735,6 +5735,45 @@ void main() {
       expect(opens(), 0);
     });
   });
+
+  group('terminal needs', () {
+    TermRow row(String id, TermPs? ps, {bool dead = false}) =>
+        TermRow(id, id.split(':').last, 'claude', null, 1, 0, 0, dead, false, ps: ps);
+    void put(List<TermRow> rows) => s.hub!.termLists['111'] = TermList('111', terms: rows);
+
+    test('a blocked terminal is in needs until it is not', () {
+      put([
+        row('term:pty:a', const TermPs('blocked', kind: 'permission', msg: 'approve Bash: ls', seq: 3)),
+        row('term:pty:b', const TermPs('working', seq: 1)),
+      ]);
+      final n = s.needs.single;
+      expect((n.kind, n.target, n.device, n.title), (NeedKind.terminal, 'term:pty:a', '111', 'a'));
+      expect(n.text, endsWith('等确认 · approve Bash: ls'));
+      put([row('term:pty:a', const TermPs('working', seq: 4))]);
+      expect(s.needs, isEmpty);
+    });
+
+    test('a dead session that was blocked is not in needs', () {
+      put([row('term:pty:a', const TermPs('blocked'), dead: true)]);
+      expect(s.needs, isEmpty);
+    });
+
+    test('a new ask comes first; the same ask keeps its place', () {
+      put([row('term:pty:a', const TermPs('blocked', seq: 3))]);
+      expect(s.needs.map((n) => n.target), ['term:pty:a']);
+      put([
+        row('term:pty:a', const TermPs('blocked', seq: 3)),
+        row('term:pty:b', const TermPs('blocked', seq: 1)),
+      ]);
+      expect(s.needs.map((n) => n.target), ['term:pty:b', 'term:pty:a']);
+      expect(s.needs.map((n) => n.target), ['term:pty:b', 'term:pty:a']);
+      put([
+        row('term:pty:a', const TermPs('blocked', seq: 5)),
+        row('term:pty:b', const TermPs('blocked', seq: 1)),
+      ]);
+      expect(s.needs.map((n) => n.target), ['term:pty:a', 'term:pty:b']);
+    });
+  });
 }
 
 /// A port whose `start` waits for the test to release it (null: ok, else the error thrown).
