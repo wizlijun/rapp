@@ -2596,12 +2596,62 @@ class MainState extends ChangeNotifier {
           graphical: probes[id]?.apps?.capabilities?['graphical'] != false &&
               probes[id]?.apps?.capabilities?['applications'] != false);
 
-  /// A 常用 tile for the 终端 entry creates a new terminal (the tile says 「新建」).
-  bool favoriteCreates(AppRef f) => f.bundle == termsEntry && _termsNewTargetOf(f.device) is NewText;
+  /// Devices whose existing text terminals the 常用 · 终端 tile has reopened since launch.
+  final _termsRestored = <String>{};
 
-  /// Taps a 常用 tile: the 终端 entry makes a new terminal when it can, anything else opens or switches.
-  Future<void> openFavorite(AppRef f) =>
-      f.bundle == termsEntry ? _openTerms(f.device, target: _termsNewTargetOf(f.device)) : openOrSwitch(f.device, f.bundle, f.name);
+  /// Live text terminals of [id] that have no session here, most recently active first.
+  List<TermRow> _unopenedTerms(String id) {
+    final rows = (hub?.termLists[id]?.terms ?? const <TermRow>[])
+        .where((r) => !r.dead && parseTermId(r.id)?.backend == 'pty' && entryFor('$id/${r.id}') == null)
+        .toList()
+      ..sort((a, b) => b.activity.compareTo(a.activity));
+    return rows;
+  }
+
+  /// The first tap on 常用 · 终端 after launch reopens the device's text terminals that are still running
+  /// (the tile says 「打开」), when its terminals open as text and some have no session here.
+  bool _restoresTerms(String id) =>
+      !_termsRestored.contains(id) &&
+      _termsNewTargetOf(id) is NewText &&
+      _unopenedTerms(id).isNotEmpty;
+
+  /// A 常用 tile for the 终端 entry creates a new terminal (the tile says 「新建」); before that, its first
+  /// tap after launch reopens the terminals still running (「打开」).
+  bool favoriteCreates(AppRef f) =>
+      f.bundle == termsEntry && !_restoresTerms(f.device) && _termsNewTargetOf(f.device) is NewText;
+
+  /// Taps a 常用 tile: the 终端 entry first reopens the running text terminals, then makes a new terminal
+  /// each tap when it can; anything else opens or switches.
+  Future<void> openFavorite(AppRef f) async {
+    if (f.bundle != termsEntry) return openOrSwitch(f.device, f.bundle, f.name);
+    final id = f.device;
+    if (_termListMissing(id)) await _awaitTermList(id);
+    if (_restoresTerms(id)) return _restoreTerms(id);
+    _termsRestored.add(id);
+    return _openTerms(id, target: _termsNewTargetOf(id));
+  }
+
+  /// Reopens every running text terminal of [id] that has no session here; the most recently active one
+  /// becomes current. One hint with the count.
+  Future<void> _restoreTerms(String id) async {
+    _termsRestored.add(id);
+    final rows = _unopenedTerms(id);
+    for (final (i, r) in rows.indexed) {
+      unawaited(_open(id, r.id, termDisplayName(r.shown, r.host), select: i == 0, quiet: true));
+    }
+    hint = '已打开 ${rows.length} 个终端';
+    notifyListeners();
+  }
+
+  /// Right after launch a device's terminal list may not have arrived; text mode asks for it before
+  /// choosing what to open, so a tap then does not fall back to the pixel Terminal app.
+  bool _termListMissing(String id) => hub != null && !hub!.termLists.containsKey(id) && prefs.termOpenFor(id) == 'text';
+
+  Future<void> _awaitTermList(String id) async {
+    try {
+      await hub!.terms(id).timeout(const Duration(seconds: 5));
+    } catch (_) {}
+  }
 
   /// The key of the session [m] opens; null for a 终端 entry that opens a new text terminal.
   String? _openedKey(Member m) {
@@ -2617,6 +2667,7 @@ class MainState extends ChangeNotifier {
   /// The 终端 entry; [select] and [quiet] as for [_open].
   Future<void> _openTerms(String id, {bool select = true, bool quiet = false, TermsTarget? target}) async {
     if (!hubUsable) return;
+    if (target == null && _termListMissing(id)) await _awaitTermList(id);
     switch (target ?? _termsTargetOf(id)) {
       case OpenTerm(:final app, :final name):
         return _open(id, app, name, select: select, quiet: quiet);
