@@ -1102,3 +1102,12 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 5 旧版被控端：照旧显示 zsh
 - [ ] 6 总览「常用 · 终端」：写「新建」，点两次开出两个新终端；画面模式写「打开」，照旧
 - [ ] 7 同一台设备两个终端都在 `~/git/rapp`：先开的叫 `~/git/rapp`，后开的叫 `~/git/rapp · 2`；其中一个 `cd` 走后，另一个回到不带后缀（分支 `feat/term-title-dupes`）
+
+## Linux 0.15.34 程序状态、状态队列、终端标题与常用终端恢复对齐与发布（2026-11-25）
+
+- [x] 对齐 macOS 0.15.29–0.15.33：OSC 7501 程序状态 S1、顶栏提示右侧 `▾` 状态队列与「需要你」全量可滚/整行直达、OSC 0/1/2 终端程序标题与重名 ` · 2` 后缀，以及总览「常用 · 终端」重启后首次点击恢复运行中文字终端并随后切换「新建」。
+- [x] 修正 `gui/lib/ui/main_state.dart` 中 `_termListMissing`：无应用级画面共享的 Linux 宿主（`graphical: false` 或 `applications: false`）在终端列表尚未到达时即使存过 `pixels` 偏好也先等待列表，不再跳过恢复与新建判断；补充 `TargetPlatform.linux` 回归用例（覆盖总览五态、重名标题、`▾` 状态队列与「需要你」直达及仅桌面 Linux 宿主恢复/新建）。
+- [x] Flutter 3.50.0 `analyze` 无 error/warning（141 条既有弃用 info），全量基线及本次新增回归（634 项核心 UI/状态用例）全部通过；Rust 套件（`rapp-term`、`rapp-host-linux`、`rapp-service`、`rapp-hub`、`rapp-client-core`、`rapp-update`、`rapp-speech-linux`、`rapp-testkit --test term --test update`）clippy `-D warnings` 与测试通过；`scripts/test-linux-build.py` 与打包产物 `scripts/test-linux-terminal-service.py` 通过。
+- [x] [Linux v0.15.34](https://github.com/wizlijun/rapp/releases/tag/v0.15.34) 已发布（源码 `2f544075`，`--latest=false`）；两包 40 文件逐字节一致、14 个 ELF 依赖完整、`BUILD-INFO.json` 与隔离网络命名空间服务/CLI/端口共享测试通过；三个远端附件大小与 SHA256 与本地一致，macOS Latest 保留 `v0.15.33`。
+- [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-25-linux-01534-parity.md`。
+- [ ] 实机验收：Linux / Omarchy 下运行 Claude Code / Codex / agy 验证 OSC 7501 状态与 OSC 0/1/2 标题、重名 ` · 2` 编号及重启 rApp 后总览「常用 · 终端」首点恢复。
