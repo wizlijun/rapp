@@ -239,6 +239,8 @@ public final class SignalEvaluator {
     private var motion: [String: [[Shot]]] = [:]          // signal -> per rect index -> recent thumbnails
     private struct TextState { var digest: UInt64; var lines: [[String]]; var at: TimeInterval }
     private var texts: [String: TextState] = [:]
+    /// One round's OCR results by rect: signals reading the same rect with an unchanged digest share a call.
+    private var shared: [RuleRect: (digest: UInt64, lines: [String])] = [:]
 
     private let historySeconds: TimeInterval = 3
     private let motionDiff = 16
@@ -259,6 +261,7 @@ public final class SignalEvaluator {
             if !keys.isEmpty { for (k, v) in resolveRegions(p, in: image) where k.hasPrefix("\u{0}sig:") { regions[k] = v } }
         }
         var out: [String: SignalResult] = [:]
+        shared = [:]
         for (name, sig) in pack.signals {
             let usable = sig.usable && sig.needs.isSubset(of: caps)
             let hasMotion = sig.detects.contains { if case .motion = $0 { return true }; return false }
@@ -352,7 +355,17 @@ public final class SignalEvaluator {
         let prev = texts[name]
         if let prev, prev.lines.count == rects.count, prev.digest == digest || now - prev.at < textEvery { return prev.lines }
         guard let text else { return [[String]](repeating: [], count: rects.count) }
-        let lines = rects.map { $0.map { text.lines(in: image, rect: $0) } ?? [] }
+        let lines: [[String]] = rects.map { r in
+            guard let r else { return [] }
+            var d: UInt64 = 14695981039346656037
+            fnv(&d, [UInt8(truncatingIfNeeded: r.w), UInt8(truncatingIfNeeded: r.w >> 8),
+                     UInt8(truncatingIfNeeded: r.h), UInt8(truncatingIfNeeded: r.h >> 8)])
+            fnv(&d, thumbnail(image, r, maxDim: 32).v)
+            if let hit = shared[r], hit.digest == d { return hit.lines }
+            let l = text.lines(in: image, rect: r)
+            shared[r] = (d, l)
+            return l
+        }
         texts[name] = TextState(digest: digest, lines: lines, at: now)
         return lines
     }
