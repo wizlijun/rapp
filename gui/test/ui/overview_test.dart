@@ -745,6 +745,140 @@ void main() {
     expect(find.byKey(const Key('open-apps-bundle')), findsNothing);
   }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 
+  testWidgets('Linux: overview shows program status, duplicate titles and 常用 · 终端 新建 on a Linux host',
+      (tester) async {
+    capsOf = {
+      'm1': {'graphical': true, 'desktop': true, 'applications': false, 'terminal': true, 'ports': true},
+    };
+    final term = FakeTermSessionPort();
+    await boot(tester, apps: ['m1/term:pty:a'], termPort: term);
+    term.play(const ReadyEvent(1, 'x'));
+    term.play(const TrafficEvent(1, 24000, 1));
+    s.prefs.termOpen['m1'] = 'pixels'; // desktop-only Linux host forces text mode
+    final inner = t.onSend!;
+    var created = 0;
+    t.onSend = (m) {
+      if (m['cmd'] == 'open_term') {
+        t.emit({'event': 'term_created', 'req': m['req'], 'id': m['id'], 'term': 'term:pty:n${++created}'});
+      } else if (m['cmd'] == 'terms') {
+        t.emit({
+          'event': 'terms',
+          'req': m['req'],
+          'id': m['id'],
+          'terms': [
+            {
+              'id': 'term:pty:a',
+              'name': 'zsh',
+              'title': '~/git/rapp · 2',
+              'command': 'claude',
+              'activity': 1,
+              'dead': false,
+              'ps': {'state': 'blocked', 'kind': 'permission', 'msg': 'approve Bash: ls', 'seq': 2},
+            },
+          ],
+          'hosts': [
+            {
+              'host': null,
+              'launchers': ['ghostty'],
+              'shells': [{'name': 'zsh', 'path': '/bin/zsh', 'default': true}],
+            },
+          ],
+        });
+      } else {
+        inner(m);
+      }
+    };
+    await tester.runAsync(() async {
+      t.emit({
+        'event': 'terms',
+        'id': 'm1',
+        'terms': [
+          {
+            'id': 'term:pty:a',
+            'name': 'zsh',
+            'title': '~/git/rapp · 2',
+            'command': 'claude',
+            'activity': 1,
+            'dead': false,
+            'ps': {'state': 'blocked', 'kind': 'permission', 'msg': 'approve Bash: ls', 'seq': 2},
+          },
+        ],
+        'hosts': [
+          {
+            'host': null,
+            'launchers': ['ghostty'],
+            'shells': [{'name': 'zsh', 'path': '/bin/zsh', 'default': true}],
+          },
+        ],
+      });
+      for (var i = 0; i < 4; i++) {
+        await flush();
+      }
+    });
+    s.toggleFavorite('m1', termsEntry, termsEntryName);
+    await show(tester);
+    expect(inside('block-m1/term:pty:a', find.text('CLI · ~/git/rapp · 2')), findsOneWidget);
+    expect(inside('block-m1/term:pty:a', find.text('等确认 · approve Bash: ls')), findsOneWidget);
+    const fav = Key('ov-favorite-m1/terms:');
+    expect(find.descendant(of: find.byKey(fav), matching: find.text('新建')), findsOneWidget);
+    await tester.tap(find.byKey(fav));
+    await settle(tester);
+    final opens = t.sent.where((m) => m['cmd'] == 'open_term').toList();
+    expect(opens, hasLength(1));
+    expect(opens.single['app'], 'ghostty');
+    expect(opens.single['shell'], '/bin/zsh');
+  }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
+  testWidgets('Linux desktop-only host: 常用 · 终端 awaits missing terms list even with saved pixels mode and restores',
+      (tester) async {
+    capsOf = {
+      'm1': {'graphical': true, 'desktop': true, 'applications': false, 'terminal': true, 'ports': true},
+    };
+    final term = FakeTermSessionPort();
+    await boot(tester, termPort: term);
+    s.prefs.termOpen['m1'] = 'pixels';
+    s.hub!.termLists.remove('m1');
+    final inner = t.onSend!;
+    t.onSend = (m) {
+      if (m['cmd'] == 'terms') {
+        t.emit({
+          'event': 'terms',
+          'req': m['req'],
+          'id': m['id'],
+          'terms': [
+            {'id': 'term:pty:a', 'name': 'zsh', 'title': '~/git/rapp', 'command': 'zsh', 'activity': 2, 'dead': false},
+            {'id': 'term:pty:b', 'name': 'zsh-2', 'title': '~/git/rapp · 2', 'command': 'claude', 'activity': 9, 'dead': false},
+          ],
+          'hosts': [
+            {
+              'host': null,
+              'launchers': ['foot'],
+              'shells': [{'name': 'bash', 'path': '/bin/bash', 'default': true}],
+            },
+          ],
+        });
+      } else {
+        inner(m);
+      }
+    };
+    s.toggleFavorite('m1', termsEntry, termsEntryName);
+    await show(tester);
+    const fav = Key('ov-favorite-m1/terms:');
+    await tester.tap(find.byKey(fav));
+    await tester.runAsync(() async {
+      for (var i = 0; i < 8; i++) {
+        await flush();
+      }
+    });
+    await tester.pump();
+    expect(s.entries.map((e) => e.app).toSet(), {'term:pty:a', 'term:pty:b'});
+    expect(s.currentKey, 'm1/term:pty:b');
+    expect(t.sent.where((m) => m['cmd'] == 'open_term'), isEmpty);
+    if (!s.overview) s.toggleOverview();
+    await tester.pump();
+    expect(find.descendant(of: find.byKey(fav), matching: find.text('新建')), findsOneWidget);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
   testWidgets('count taps', (tester) async {
     await boot(tester, apps: ['m1/a']);
     port.emit(const DisconnectedEvent(1, 'user'));

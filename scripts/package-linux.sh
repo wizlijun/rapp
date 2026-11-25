@@ -82,8 +82,10 @@ AI correction learning and prompt/chat modes use the shared LLM endpoint.
 Gateway hotwords provide spelling context to local recognition on each recording.
 Cached correction rules fix recognized words locally before sending or editing.
 The input dock, quick-area toggle, regrouped key bar (first row ending with
-⋯ and ⌄; second row starting with ⌘C ⌘V and adding ⌃L) and overview Open App
-dropdown menu share the macOS 0.15.27 layout and preferences.
+⋯ and ⌄; second row starting with ⌘C ⌘V and adding ⌃L), overview Open App
+dropdown menu, OSC 7501 program status, top-bar status queue, Needs You
+direct jump, OSC 0/1/2 terminal titles (with · 2 numbering on clashes) and
+overview favorite Terminal restore/creation share the macOS 0.15.33 layout and rules.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and
