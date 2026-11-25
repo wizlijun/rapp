@@ -1031,3 +1031,12 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 实机 2：「回到上一版」仍可用，回退后再升级回来也正常
 - [ ] 实机 3：`lsregister -dump | grep previous/` 不再有 rapp
 - 注意：回退到 0.15.24 及更早的版本后，那个旧版自己的升级会再留下 `previous/rapp.app`，要等再升到新版、服务启动时才会被改名
+
+## Linux 0.15.26 快捷区按键重排、折叠键与 Omarchy 锁屏对齐发布（2026-11-25）
+
+- [x] 对齐 macOS 0.15.25 快捷区按键重排（第一排 11 颗 `Tab ⇧Tab Esc ⌃C ⌃ ↑ ↓ ⌫ ⏎ ⋯ ⌄`，第二排 `⌘C ⌘V ⌥ (⌘) ← → ⌃O ⌃R ⌃T ⌃B ⌃L`）并随包发布已合入的 Omarchy Quickshell 锁屏密码输入支持（`0853fa0d`）。
+- [x] 为 `KeyBar` 增加 `TextFieldTapRegion`，修复 Linux 桌面鼠标点击快捷区（含 `⌄` 与 `⋯`）时写作框失焦的问题，并补充 Linux 键序、语义、`⌃L`、`⌄` 收起释放粘滞 `⌃`、选区/IME 保持与 `evdev` 键码映射回归用例。
+- [x] 核验 macOS `previous/rapp.app` 防开机重起修复不适用于 Linux（Linux 通过 pacman / 便携包与单个 systemd 用户服务运行，不启用 `.app` 自更新）；Rust 更新测试与全量 Flutter 3112 项通过（3 跳过），analyze 无 error/warning。
+- [x] [Linux v0.15.26](https://github.com/wizlijun/rapp/releases/tag/v0.15.26) 已发布（源码 `ca1805fe`，`--latest=false`）；两包 40 文件一致、14 ELF 依赖完整，隔离命名空间服务/CLI/端口共享验证通过，三个远端附件大小与 SHA256 一致，macOS Latest 保留 `v0.15.25`。
+- [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-25-linux-01526-parity.md`。
+- [ ] 实机验收：物理输入法、触屏、真实锁屏跨设备解锁及与 macOS 真机对端联调。
