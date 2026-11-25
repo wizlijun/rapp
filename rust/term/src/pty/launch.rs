@@ -221,7 +221,7 @@ const TERMINAL_TAB: &str = r#"on run argv
 		tell application "Terminal"
 			repeat with w in windows
 				if known does not contain (id of w) then
-					do script ("exec /bin/sh " & quoted form of f) in selected tab of w
+					do script (" exec /bin/sh " & quoted form of f) in selected tab of w
 					return "tab"
 				end if
 			end repeat

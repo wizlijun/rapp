@@ -1113,4 +1113,4 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 3 第一次会弹「rApp 想控制 Terminal / System Events」：允许后标签页正常；拒绝后照旧开新窗口，不会开出两个
 - [ ] 4 rApp 开的窗口最小化了、或在别的桌面：被拉回来并开出标签页
 - [ ] 5 只有用户自己开的 Terminal 窗口（没有 rApp 终端）：不往里加标签页，开新窗口
-- [ ] 6 新标签页里那行 `exec /bin/sh …` 不留在 zsh 历史里造成困扰（若碍事再改）
+- [ ] 6 新标签页里那行 ` exec /bin/sh …` 前有空格：开了 hist_ignore_space 的 zsh 不记进历史
