@@ -81,7 +81,9 @@ Esc cancels; Tab edits before sending. Change the shortcut in the sidebar.
 AI correction learning and prompt/chat modes use the shared LLM endpoint.
 Gateway hotwords provide spelling context to local recognition on each recording.
 Cached correction rules fix recognized words locally before sending or editing.
-The input dock and quick-area toggle share the macOS layout and preferences.
+The input dock, quick-area toggle and regrouped key bar (first row ending with
+⋯ and ⌄; second row starting with ⌘C ⌘V and adding ⌃L) share the macOS 0.15.25
+layout and preferences.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and
@@ -104,9 +106,9 @@ and applications exposing their corresponding protocols/accessibility metadata.
 Hyprland toplevel export clips popups to their parent surface; X11 includes
 separate popup surfaces. GNOME/KDE Wayland portal hosting is not implemented.
 Verified Hyprland lock notifications allow password entry to a same-session
-hyprlock/swaylock. Other lock screens require local unlock; a logind hint alone
-never authorizes automatic password typing. Actual account unlock is not part
-of the isolated regression suite.
+hyprlock/swaylock or verified Omarchy Quickshell lock screen. Other lock screens
+require local unlock; a logind hint alone never authorizes automatic password
+typing. Actual account unlock is not part of the isolated regression suite.
 Writing panels optionally render inline candidates with Fcitx5's sumicandidates
 addon (org.fcitx.Fcitx.SumiCandidates1). Without that separately installed addon,
 the system candidate window remains available. Rapp does not install or restart

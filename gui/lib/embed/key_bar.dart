@@ -330,7 +330,8 @@ class _KeyBarState extends State<KeyBar> {
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
-    return ListenableBuilder(
+    return TextFieldTapRegion(
+      child: ListenableBuilder(
         listenable: Listenable.merge([widget.state, _latch]),
         builder: (context, _) {
           final rows = _rowsOf(widget.state, widget.session);
@@ -354,6 +355,7 @@ class _KeyBarState extends State<KeyBar> {
             ),
           );
         },
+      ),
     );
   }
 

@@ -835,6 +835,54 @@ void main() {
       }
     });
 
+    testWidgets('Linux: first row has 11 keys ending in ⋯ ⌄; second row has ⌘C ⌘V and ⌃L; ⌄ folds per kind', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      try {
+        tester.view.physicalSize = const Size(1000, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        await tester.pumpWidget(bar(tsess, width: 720));
+        const first = ['tab', 'stab', 'esc', 'cc', 'ctrl', 'up', 'down', 'bksp', 'enter', 'more', 'hide'];
+        final xs = [for (final id in first) tester.getCenter(k(id)).dx];
+        for (var i = 1; i < xs.length; i++) {
+          expect(xs[i], greaterThan(xs[i - 1]), reason: '${first[i]} right of ${first[i - 1]}');
+        }
+        await tap(tester, 'bksp');
+        await tap(tester, 'ctrl');
+        await tap(tester, 'bksp');
+        expect(termKeys(), [
+          ['Backspace'],
+          ['Ctrl-Backspace'],
+        ]);
+        await tap(tester, 'more');
+        await tester.pump();
+        expect(find.descendant(of: k('copy'), matching: find.text('⌘C')), findsOneWidget);
+        expect(find.descendant(of: k('paste'), matching: find.text('⌘V')), findsOneWidget);
+        expect(find.descendant(of: k('copy'), matching: find.bySemanticsLabel('复制')), findsOneWidget);
+        expect(find.descendant(of: k('paste'), matching: find.bySemanticsLabel('粘贴')), findsOneWidget);
+        expect(k('cd'), findsNothing);
+        term.calls.clear();
+        await tap(tester, 'cl');
+        expect(termKeys(), [
+          ['Ctrl-L'],
+        ]);
+        s.setQuickHidden(term: false, hidden: false);
+        s.setQuickAutoHide(false);
+        await tap(tester, 'ctrl');
+        await tap(tester, 'hide');
+        expect(s.prefs.quickHiddenTerm, isTrue);
+        expect(s.prefs.quickHiddenApp, isFalse);
+        await tester.pumpWidget(bar(app, width: 720));
+        port.calls.clear();
+        await tap(tester, 'cl');
+        expect(appKeys(), [('key', 1, 37, latchCtrl)]);
+        await tap(tester, 'hide');
+        expect(s.prefs.quickHiddenApp, isTrue);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+
     testWidgets('Linux: Ctrl-held keys (the app shortcuts) do not fold', (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.linux;
       try {

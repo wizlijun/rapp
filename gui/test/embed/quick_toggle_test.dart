@@ -150,7 +150,63 @@ void main() {
       expect(editor().controller.value.composing, TextRange.empty);
       expect(port.calls.where((c) => c.$1 == 'composer_send'), isEmpty);
     }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
+    testWidgets('Linux: clicking ⌄ or ⋯ on the key bar preserves focus, selection and IME ($composing)', (tester) async {
+      big(tester);
+      await tester.pumpWidget(layer(tapp));
+      await tester.pumpAndSettle();
+      final field = find.byKey(const Key('composer-field'));
+      await tester.tap(field, kind: PointerDeviceKind.mouse);
+      await tester.pump();
+      EditableText editor() => tester.widget<EditableText>(find.descendant(of: field, matching: find.byType(EditableText)));
+      final before = TextEditingValue(
+        text: composing ? 'hello ni' : 'hello world',
+        selection: composing ? const TextSelection.collapsed(offset: 8) : const TextSelection(baseOffset: 6, extentOffset: 11),
+        composing: composing ? const TextRange(start: 6, end: 8) : TextRange.empty,
+      );
+      tester.testTextInput.updateEditingValue(before);
+      await tester.pump();
+      // Clicking ⋯ (second row) and ⌄ (fold) with a mouse keeps the editor focused and untouched.
+      await tester.tap(find.byKey(const Key('bar-more')), kind: PointerDeviceKind.mouse);
+      await tester.pumpAndSettle();
+      expect(es.prefs.keyBarMore, isTrue);
+      expect(editor().focusNode.hasFocus, isTrue);
+      expect(editor().controller.value, before);
+      await tester.tap(find.byKey(const Key('bar-hide')), kind: PointerDeviceKind.mouse);
+      await tester.pumpAndSettle();
+      expect(es.prefs.quickHiddenTerm, isTrue);
+      expect(lit(tester), isFalse);
+      expect(editor().focusNode.hasFocus, isTrue);
+      expect(editor().controller.value, before);
+      expect(tapp.composer.open, isTrue);
+      tester.testTextInput.updateEditingValue(const TextEditingValue(
+        text: 'hello 你', selection: TextSelection.collapsed(offset: 7)));
+      await tester.pump();
+      expect(editor().controller.text, 'hello 你');
+      expect(editor().controller.value.composing, TextRange.empty);
+      expect(port.calls.where((c) => c.$1 == 'composer_send'), isEmpty);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
   }
+
+  testWidgets('Linux: folding an app key bar via ⌄ releases a lit sticky ⌃', (tester) async {
+    big(tester);
+    es.setQuickHidden(term: false, hidden: false);
+    await tester.pumpWidget(layer(app));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('bar-ctrl')), kind: PointerDeviceKind.mouse);
+    await tester.pump();
+    expect(es.appLatch.flags, isNonZero);
+    port.calls.clear();
+    await tester.tap(find.byKey(const Key('bar-hide')), kind: PointerDeviceKind.mouse);
+    await tester.pumpAndSettle();
+    expect(es.prefs.quickHiddenApp, isTrue);
+    expect(es.appLatch.flags, 0);
+    expect(
+      port.calls.where((c) => c.$1 == 'key_event' && c.$2['keyCode'] == 59 && c.$2['down'] == false),
+      hasLength(1),
+    );
+    expect(port.calls.where((c) => c.$1 == 'latch').last.$2['modifiers'], 0);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 
   testWidgets('a screen reader hears the toggle\'s name once, not again from its tooltip', (tester) async {
     big(tester);

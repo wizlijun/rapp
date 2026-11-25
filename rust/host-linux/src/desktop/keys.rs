@@ -122,6 +122,9 @@ mod tests {
     fn shortcuts_and_navigation_map_in_both_client_directions() {
         assert_eq!(evdev(8), Some(46)); // C
         assert_eq!(evdev(36), Some(28));
+        assert_eq!(evdev(37), Some(38)); // L (Ctrl-L on key bar)
+        assert_eq!(evdev(48), Some(15)); // Tab / Shift-Tab
+        assert_eq!(evdev(51), Some(14)); // Backspace
         assert_eq!(evdev(123), Some(105));
         assert_eq!(xkb_mods(1 << 20), 4); // Cmd-C -> Ctrl-C
         assert_eq!(xkb_mods(1 << 18), 64); // Linux client's Super -> wire Control
