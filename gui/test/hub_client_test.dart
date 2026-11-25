@@ -554,6 +554,22 @@ void main() {
       expect(r[5].ps!.progress, 42);
     });
 
+    test('a term row is shown by its title, else its name', () async {
+      t.emit({
+        'event': 'terms', 'id': 'P', 'path': 'lan', 'hosts': [],
+        'terms': [
+          {'id': 'term:pty:k', 'name': 'zsh', 'title': '~/git/rapp'},
+          {'id': 'term:pty:n', 'name': 'zsh'},
+          {'id': 'term:pty:e', 'name': 'zsh', 'title': ''},
+          {'id': 'term:pty:i', 'name': 'zsh', 'title': 3},
+        ],
+      });
+      await Future<void>.delayed(Duration.zero);
+      final r = hub.termLists['P']!.terms;
+      expect(r.map((x) => x.shown), ['~/git/rapp', 'zsh', 'zsh', 'zsh']);
+      expect(r[0].name, 'zsh');
+    });
+
     test('openTerm sends open_term and answers the new id', () async {
       final f = hub.openTerm('d1', shell: '/bin/zsh', app: 'Terminal');
       final cmd = t.sent.last;

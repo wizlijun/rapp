@@ -71,7 +71,7 @@ TermsTarget termsTarget({required String mode, required TermList list, required 
     }
 
     final pty = latest('pty');
-    if (pty != null) return OpenTerm(pty.id, termDisplayName(pty.name, pty.host));
+    if (pty != null) return OpenTerm(pty.id, termDisplayName(pty.shown, pty.host));
     final local = list.hosts.where((h) => h.host == null).firstOrNull;
     if (local != null && local.launchers.isNotEmpty) {
       return NewText(local.shells?.where((s) => s.isDefault).firstOrNull?.path);

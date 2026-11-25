@@ -626,7 +626,7 @@ class MainState extends ChangeNotifier {
         final was = _psSeen[k];
         _psSeen[k] = now;
         if (first || was == now) continue;
-        final title = termDisplayName(r.name, r.host);
+        final title = termDisplayName(r.shown, r.host);
         _queue(HintRecord('$title @ ${deviceName(device)}：${programWord(ps)}', _now(),
             device: device, app: r.id, title: title, lamp: programLamp(ps)));
       }
@@ -1143,7 +1143,7 @@ class MainState extends ChangeNotifier {
             () {
               final key = '${e.key}\n${r.id}\n${r.ps!.seq}';
               seen.add(key);
-              final title = termDisplayName(r.name, r.host);
+              final title = termDisplayName(r.shown, r.host);
               return NeedItem(NeedKind.terminal, r.id, '$title @ ${deviceName(e.key)}：${termAskWord(r.ps!)}',
                   _termNeedSeq.putIfAbsent(key, () => ++_seq),
                   device: e.key, title: title);
@@ -1251,7 +1251,7 @@ class MainState extends ChangeNotifier {
   /// A text terminal's current name on [device], from the device's terms list; null when it is not listed (the
   /// session ended, or the list has not come yet).
   String? termName(String device, String term) =>
-      hub?.termLists[device]?.terms.where((r) => r.id == term).firstOrNull?.name;
+      hub?.termLists[device]?.terms.where((r) => r.id == term).firstOrNull?.shown;
 
   /// What a favourite or project member is called: `CLI · <name>` for a text terminal, whose name is the list's
   /// current one, else the one stored with it.
@@ -2632,7 +2632,7 @@ class MainState extends ChangeNotifier {
       await hub?.terms(id);
     } catch (_) {}
     final row = hub?.termLists[id]?.terms.where((r) => r.id == term).firstOrNull;
-    final shown = row == null ? '已结束' : termDisplayName(row.name, row.host);
+    final shown = row == null ? '已结束' : termDisplayName(row.shown, row.host);
     unawaited(openOrSwitch(id, term, shown));
   }
 
