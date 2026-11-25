@@ -32,7 +32,7 @@ import '../embed/composer_model.dart';
 import '../embed/modifier_latch.dart';
 import '../term/term_id.dart';
 import '../term/term_session_port.dart';
-import '../term/term_wire.dart' show TermPane;
+import '../term/term_wire.dart' show TermPane, noSuchTextTerminal;
 import 'app_profile_store.dart';
 import 'lamp.dart';
 import 'term_status.dart' show programLamp, programWord, termAskWord;
@@ -2841,16 +2841,26 @@ class MainState extends ChangeNotifier {
 
   Future<void> _newTerms = Future<void>.value();
 
+  /// How long one queued ⌘T waits for its terminal before the next one goes ahead.
+  @visibleForTesting
+  Duration newTermTimeout = const Duration(seconds: 20);
+
   /// ⌘T: a new text terminal on [device] beside [term], switched to once made. Presses queue: each opens after the
-  /// one before it is made (or failed). A failure is the hint, as opening one from the overview says it.
+  /// one before it is made (or failed, or waited [newTermTimeout] for). A failure is the hint, as opening one from
+  /// the overview says it.
   Future<void> newTermFrom(String device, String term) => _newTerms = _newTerms.then((_) async {
         if (_disposed) return;
         try {
           if (!hubUsable) throw StateError('这台设备没有可用的终端窗口');
-          await openText(device, from: term);
+          await openText(device, from: term).timeout(newTermTimeout);
         } catch (e) {
           if (_disposed) return;
-          hint = switch (e) { StateError(:final message) => message, HubException(:final message) => message, _ => '$e' };
+          hint = switch (e) {
+            StateError(:final message) => message,
+            HubException(:final message) => message,
+            TimeoutException() => '新建终端没有回应，请稍后再试',
+            _ => '$e',
+          };
           notifyListeners();
         }
       });
@@ -2890,6 +2900,12 @@ class MainState extends ChangeNotifier {
     } catch (e) {
       if (_disposed) return;
       final words = e is HubException ? e.message : '$e';
+      if (words == noSuchTextTerminal) {
+        // Gone already: that is the end asked for.
+        if (_records[key] == r) _termEnded(r);
+        notifyListeners();
+        return;
+      }
       // An old holder (`unsupported`, or a run that cannot be ended), or an old device (`unknown op`).
       final old = ['cannot be ended', 'unsupported', 'unknown op'].any(words.contains);
       hint = old ? '这台设备的 rApp 太旧，不能结束终端' : words;
@@ -2908,6 +2924,8 @@ class MainState extends ChangeNotifier {
   void _termEnded(SessionRecord r) {
     final sid = r.sid;
     if (sid != null && termPort?.owns(sid) == true) termPort!.close(sid);
+    // A reconnect in flight finds it ending: its new session is closed quietly, a failed one says nothing (R14).
+    r.ending = true;
     _finishEnding(r);
   }
 

@@ -802,8 +802,9 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       return KeyEventResult.handled;
     }
     // ⌘T and ⌘W are rApp's, whatever the pane is doing (an exited pane, a dropped link).
+    // A held key's repeats do nothing: one press, one terminal opened or ended.
     if (input case TermAction(action: final a) when a == TermShortcut.newTerm || a == TermShortcut.closeTerm) {
-      return _termShortcut(a);
+      return e is KeyRepeatEvent ? _repeatOf(a) : _termShortcut(a);
     }
     // An exited pane (T4) takes nothing: nothing is sent or kept, and the window's own keys
     // (Esc, Ctrl+[ / ], Ctrl+O, F11) are the window's again.
@@ -839,6 +840,14 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
         break; // rApp's (find, font size); not the terminal's either
     }
     // A key the live terminal would take is never the window's.
+    return KeyEventResult.handled;
+  }
+
+  /// A repeat of a held ⌘T / ⌘W: taken (never typed), but only where the press itself was ours.
+  KeyEventResult _repeatOf(TermShortcut action) {
+    final r = widget.state.recordOfSession(widget.session);
+    if (r == null) return KeyEventResult.ignored;
+    if (action == TermShortcut.closeTerm && !widget.state.canEndTerm(r.key)) return KeyEventResult.ignored;
     return KeyEventResult.handled;
   }
 

@@ -867,6 +867,93 @@ void main() {
       expect(s.entryFor(key), isNull);
     }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
+    testWidgets('a held ⌘T opens one terminal, and a held ⌘W ends once; the repeats are not typed', (tester) async {
+      await tester.pumpWidget(wrap(window()));
+      t.emit(listOf(shell: true, fg: 'zsh'));
+      await openTerm(tester, two);
+      hubAnswers(list: listOf(shell: true, fg: 'zsh'), endError: 'device offline'); // the record stays for the repeats
+      Future<void> hold(LogicalKeyboardKey key) async {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+        await tester.sendKeyDownEvent(key);
+        await tester.sendKeyRepeatEvent(key);
+        await tester.sendKeyRepeatEvent(key);
+        await tester.sendKeyUpEvent(key);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+        await settle(tester);
+      }
+
+      await hold(LogicalKeyboardKey.keyW);
+      expect(t.sent.where((m) => m['cmd'] == 'end_term'), hasLength(1));
+      await hold(LogicalKeyboardKey.keyT);
+      expect(t.sent.where((m) => m['cmd'] == 'open_term'), hasLength(1));
+      expect(term.calls.where((c) => c.$1 == 'keys' || c.$1 == 'type'), isEmpty);
+      await tester.pump(const Duration(seconds: 1));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+    testWidgets('an end answered no such text terminal is an end: 已结束, not the device words', (tester) async {
+      t.emit(listOf(shell: true));
+      await tester.pumpWidget(wrap(window()));
+      await openTerm(tester, two);
+      hubAnswers(endError: 'no such text terminal');
+      await tester.runAsync(() => s.endTerm(key));
+      await settle(tester);
+      expect(s.entryFor(key), isNull);
+      expect(s.hint, '已结束 work');
+      expect(term.calls.where((c) => c.$1 == 'close').single.$2['sid'], 1);
+    });
+
+    testWidgets('a ⌘T the hub never answers does not hold up the next one', (tester) async {
+      t.emit(listOf(shell: true));
+      await tester.pumpWidget(wrap(window()));
+      await openTerm(tester, two);
+      s.newTermTimeout = const Duration(milliseconds: 50);
+      hubAnswers(list: listOf(shell: true), gates: [Completer<void>()]); // the first is never made
+      await tester.runAsync(() async {
+        unawaited(s.newTermFrom('111', app));
+        await s.newTermFrom('111', app);
+      });
+      await settle(tester);
+      expect(t.sent.where((m) => m['cmd'] == 'open_term'), hasLength(2));
+      expect(s.hintHistory.map((h) => h.text), contains('新建终端没有回应，请稍后再试'));
+      expect(s.currentKey, '111/term:pty:n2');
+      await tester.pump(const Duration(seconds: 1));
+    });
+
+    for (final opens in [true, false]) {
+      testWidgets('ended while it reconnects: the record stays gone with one hint (the open ${opens ? 'answers' : 'fails'})',
+          (tester) async {
+        t.emit(listOf(shell: true));
+        await tester.pumpWidget(wrap(window()));
+        await openTerm(tester, two);
+        term.play(const DisconnectedEvent(1, 'bad token'));
+        await settle(tester);
+        hubAnswers(list: listOf(shell: true));
+        final answer = t.onSend;
+        Map<String, dynamic>? held;
+        t.onSend = (m) => m['cmd'] == 'open' ? held = m : answer?.call(m);
+        await tester.runAsync(() async {
+          s.reconnectCurrent();
+          await flush();
+        });
+        expect(held, isNotNull);
+        expect(s.currentRecord!.phase, Phase.connecting);
+        await tester.runAsync(() => s.endTerm(key));
+        await settle(tester);
+        expect(s.entryFor(key), isNull);
+        t.emit(opens
+            ? {'event': 'opened', 'sid': 2, 'id': '111', 'app': app, 'path': 'lan', 'port': 5001, 'token': 'tk',
+                'req': held!['req']}
+            : {'event': 'error', 'req': held!['req'], 'error': 'cannot reach the host'});
+        await settle(tester);
+        expect(s.entryFor(key), isNull);
+        expect(s.hintHistory.where((h) => h.text == '已结束 work'), hasLength(1));
+        expect(s.hint, '已结束 work');
+        expect(s.remote.containsKey(2), isFalse);
+        expect(term.calls.where((c) => c.$1 == 'start' && c.$2['sid'] == 2), isEmpty);
+        if (opens) expect(t.sent.where((m) => m['cmd'] == 'close' && m['sid'] == 2), hasLength(1));
+      });
+    }
+
     testWidgets('Ctrl+Shift+T opens one beside it off the mac', (tester) async {
       await tester.pumpWidget(wrap(window()));
       t.emit(listOf(shell: true, fg: 'zsh'));

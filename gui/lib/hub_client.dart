@@ -224,7 +224,7 @@ TermList _termList(Map<String, dynamic> m, String fallbackId) {
           TermRow('${r['id']}', '${r['name'] ?? ''}', '${r['command'] ?? ''}', _str(r['host']), _int(r['panes']),
             _int(r['attached']), _int(r['activity']), r['dead'] == true, r['unread'] == true,
             ps: termPs(r['ps']), title: switch (r['title']) { String s when s.isNotEmpty => s, _ => null },
-            fg: _str(r['fg']), shell: switch (r['shell']) { bool b => b, _ => null }),
+            fg: switch (r['fg']) { String s when s.isNotEmpty => s, _ => null }, shell: switch (r['shell']) { bool b => b, _ => null }),
     ],
     hosts: [
       for (final h in (m['hosts'] as List? ?? const []).whereType<Map>())

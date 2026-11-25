@@ -126,10 +126,10 @@ class StreamMenuAnchor extends StatefulWidget {
 
   /// 「标记输入区」 (the next click on the picture marks it) and 「清除输入区标记」.
   final VoidCallback? onMarkInput;
+  final VoidCallback? onClearInput;
 
   /// A text terminal's 「结束终端」 (for good, on its device); null leaves it out (an old device cannot).
   final VoidCallback? onEndTerm;
-  final VoidCallback? onClearInput;
 
   /// A terminal's 「本机 · 跟着我的窗口」: whether it is on, and the switch (null greys it).
   final bool termFit;

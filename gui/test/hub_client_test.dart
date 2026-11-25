@@ -603,11 +603,12 @@ void main() {
           {'id': 'term:pty:b', 'name': 'b', 'fg': 'zsh', 'shell': true},
           {'id': 'term:pty:c', 'name': 'c'},
           {'id': 'term:pty:d', 'name': 'd', 'fg': 3, 'shell': 'yes'},
+          {'id': 'term:pty:e', 'name': 'e', 'fg': '', 'shell': true},
         ],
       });
       await Future<void>.delayed(Duration.zero);
       final r = hub.termLists['P']!.terms;
-      expect(r.map((x) => (x.fg, x.shell)), [('vim', false), ('zsh', true), (null, null), (null, null)]);
+      expect(r.map((x) => (x.fg, x.shell)), [('vim', false), ('zsh', true), (null, null), (null, null), (null, true)]);
     });
 
     test('openTerm with from sends it', () async {
