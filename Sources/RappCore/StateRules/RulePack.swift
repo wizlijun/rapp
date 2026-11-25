@@ -287,9 +287,25 @@ public struct RulePack: Equatable {
         case "any", "all":
             guard let items = arg.arrayValue, !items.isEmpty else { return .never }
             let subs = items.map(decodeCondition)
+            // An unreadable form anywhere makes the whole condition never match (even under `not`/`any`).
+            if subs.contains(where: { $0.hasNever }) { return .never }
             return key == "any" ? .any(subs) : .all(subs)
-        case "not": return .not(decodeCondition(arg))
+        case "not":
+            let sub = decodeCondition(arg)
+            return sub.hasNever ? .never : .not(sub)
         default: return .never
+        }
+    }
+}
+
+extension Condition {
+    /// `.never` only comes from an unreadable form, so any `.never` inside poisons the condition.
+    fileprivate var hasNever: Bool {
+        switch self {
+        case .never: return true
+        case .signal: return false
+        case .not(let c): return c.hasNever
+        case .any(let cs), .all(let cs): return cs.contains { $0.hasNever }
         }
     }
 }
