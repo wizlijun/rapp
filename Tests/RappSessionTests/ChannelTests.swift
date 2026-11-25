@@ -164,6 +164,15 @@ final class ChannelTests: XCTestCase {
         XCTAssertThrowsError(try channelCommand("dismiss_cover", ["sid": 2, "id": 1 << 33]))
     }
 
+    func testStateRulesCommandAndAppStateEvent() throws {
+        XCTAssertEqual(try channelCommand("state_rules", ["sid": 2, "json": "{\"id\":\"x\"}"]), .stateRules(sid: 2, json: "{\"id\":\"x\"}"))
+        XCTAssertThrowsError(try channelCommand("state_rules", ["sid": 2]))
+        let e = try XCTUnwrap(eventPayload(.appState("{\"state\":\"done\"}"), sid: 4, textures: [:]))
+        XCTAssertEqual(e.method, "app_state")
+        XCTAssertEqual(e.args["json"] as? String, "{\"state\":\"done\"}")
+        XCTAssertEqual(e.args["sid"] as? Int64, 4)
+    }
+
     func testDropTexturesCommand() {
         XCTAssertEqual(try channelCommand("drop_textures", ["sid": 3]), .dropTextures(sid: 3))
         XCTAssertThrowsError(try channelCommand("drop_textures", [:])) { XCTAssertEqual($0 as? ChannelError, .bad("drop_textures")) }

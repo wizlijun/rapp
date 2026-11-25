@@ -398,6 +398,9 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .unlock(sid, password):
       live[sid]?.session.send(.unlock(password: password))
       result(nil)
+    case let .stateRules(sid, json):
+      live[sid]?.session.send(.stateRules(json))
+      result(nil)
     case let .dismissCover(sid, id):
       live[sid]?.session.send(.dismissCover(id))
       result(nil)
@@ -830,6 +833,8 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       // The textures stay registered while detached: attaching shows the picture at once.
       detached[sid]?.update(detachedWindows(windows, hidden: hidden[sid] ?? []))
       #endif
+    case .appState:
+      break  // Flutter gets it through eventPayload
     case let .secureFocus(on):
       if on { secure.insert(sid) } else { secure.remove(sid) }
     case .disconnected:

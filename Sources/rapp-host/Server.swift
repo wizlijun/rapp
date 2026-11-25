@@ -524,8 +524,10 @@ final class Session {
         case let .setView(window, rect):
             view = viewFor(window: window, rect: rect)
             applyRegion(table)
+        case .stateRules:
+            break  // Task 8: hand the pack to the state engine
         case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked, .weak,
-             .inputSource, .pong, .saving, .screenLocked, .focusRegion, .covered, .appOpened, .secureFocus, .changed:
+             .inputSource, .pong, .saving, .screenLocked, .focusRegion, .covered, .appOpened, .secureFocus, .changed, .appState:
             fail("unexpected message from client")
         }
     }

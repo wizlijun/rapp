@@ -17,7 +17,7 @@ import time
 import tomllib
 import zlib
 
-PROTOCOL = 15
+PROTOCOL = 16
 NO_WM = os.environ.get("RAPP_TEST_NO_WM") == "1"
 
 def xdo_command(args):

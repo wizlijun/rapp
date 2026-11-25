@@ -88,6 +88,8 @@ public enum ChannelCommand: Equatable {
     case dismissCover(sid: Int64, id: UInt32)
     /// The system is short of memory (iOS): a disconnected session off the stage lets go of its window textures.
     case dropTextures(sid: Int64)
+    /// This session's app-state rules pack (v16), UTF-8 JSON; "" = no rules.
+    case stateRules(sid: Int64, json: String)
 }
 
 /// Longest input source id `select_input` passes on (hosts cut theirs to 1024 bytes).
@@ -102,7 +104,7 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
                               "composer_paste", "composer_attach", "composer_send", "composer_drop_block",
                               "detach", "attach", "raise_detached", "fetch_clip", "copy_local", "drop_copy", "reveal",
                               "pin_save", "pin_load", "set_hidden", "close_window", "select_input",
-                              "unlock", "set_banner", "dismiss_cover", "drop_textures", "set_voice_hotkey", "voice_end"]
+                              "unlock", "set_banner", "dismiss_cover", "drop_textures", "state_rules", "set_voice_hotkey", "voice_end"]
     guard known.contains(method) else { throw ChannelError.unknown(method) }
     guard let map = args as? [String: Any] else { throw ChannelError.bad(method) }
     let a = Args(method: method, map: map)
@@ -184,6 +186,10 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
     case "dismiss_cover":
         guard let id = UInt32(exactly: try a.int("id")) else { throw ChannelError.bad(method) }
         return .dismissCover(sid: sid, id: id)
+    case "state_rules":
+        let json = try a.string("json")
+        guard json.utf8.count <= stateRulesLimit else { throw ChannelError.bad(method) }
+        return .stateRules(sid: sid, json: json)
     case "drop_textures":
         return .dropTextures(sid: sid)
     case "voice_end":
@@ -424,6 +430,8 @@ public func eventPayload(_ e: SessionEvent, sid: Int64, textures: [UInt32: Int64
         return payload("app_opened", ["bundle": bundleID, "name": name])
     case let .secureFocus(on):
         return payload("secure_focus", ["on": on])
+    case let .appState(json):
+        return payload("app_state", ["json": json])
     case let .disconnected(reason):
         return payload("disconnected", ["reason": reason])
     case let .closed(reason):

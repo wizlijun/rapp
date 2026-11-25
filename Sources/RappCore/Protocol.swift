@@ -1,5 +1,6 @@
 import Foundation
 
+/// v16: stateRules (43), appState (44)
 /// Protocol v15 = v14 + pause: setStream's fps may be 0 (send no pictures; hello's may not), and the
 /// host answers a paused session's picture changes with `changed` (at most one a second).
 /// v14 = v13 + setView (client -> host: which part of a window B shows; window 0 = all).
@@ -11,7 +12,11 @@ import Foundation
 /// ping/pong and the saving ladder: B's setStream values are its ceiling and its pinned byte means
 /// "automatic saving off") + desktop sessions: screenLocked/unlock for the remote lock screen.
 /// The host and client must both speak exactly this version.
-public let protocolVersion: UInt8 = 15
+public let protocolVersion: UInt8 = 16
+
+/// The longest rules pack `stateRules` carries, and the longest report `appState` carries, in UTF-8 bytes.
+public let stateRulesLimit = 65536
+public let appStateLimit = 4096
 
 /// The longest system password `unlock` carries, in UTF-8 bytes.
 public let unlockPasswordLimit = 1024
@@ -156,6 +161,11 @@ public enum Message: Equatable {
     /// The paused session's picture changed (no payload, at most one a second; never while streaming).
     case changed                                                                             // 42, host -> client (v15)
 
+    /// One app-state rules pack (UTF-8 JSON); empty = this session uses no rules.
+    case stateRules(String)                                                                  // 43, client -> host (v16)
+    /// The host's app-state report (UTF-8 JSON).
+    case appState(String)                                                                    // 44, host -> client (v16)
+
     public func encoded() -> [UInt8] {
         var w = Writer()
         let type: UInt8
@@ -299,6 +309,12 @@ public enum Message: Equatable {
             w.u8(on ? 1 : 0)
         case .changed:
             type = 42
+        case let .stateRules(json):
+            type = 43
+            w.bytes += Array(json.utf8)
+        case let .appState(json):
+            type = 44
+            w.bytes += Array(json.utf8)
         }
         precondition(w.bytes.count <= maxMessageLength, "message too large")
         var out: [UInt8] = [type]
@@ -451,6 +467,16 @@ public enum Message: Equatable {
             message = .secureFocus(flag == 1)
         case 42:
             message = .changed
+        case 43:
+            let bytes = r.rest()
+            guard bytes.count <= stateRulesLimit else { throw CodecError("rules too large") }
+            guard let s = String(bytes: bytes, encoding: .utf8) else { throw CodecError("rules not UTF-8") }
+            message = .stateRules(s)
+        case 44:
+            let bytes = r.rest()
+            guard bytes.count <= appStateLimit else { throw CodecError("state too large") }
+            guard let s = String(bytes: bytes, encoding: .utf8) else { throw CodecError("state not UTF-8") }
+            message = .appState(s)
         default:
             throw CodecError("unknown message type \(type)")
         }
@@ -459,7 +485,7 @@ public enum Message: Equatable {
     }
 }
 
-private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42]
+private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44]
 
 /// Turns a byte stream into messages. Feed it whatever the socket delivers
 /// with `append`, then call `next()` until it returns nil.
