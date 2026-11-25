@@ -1,9 +1,11 @@
-// The top bar's hint, right-aligned before the right-hand group, and its history: once anything
-// has been said this run, a ▾ stays at the hint's right end (the line, while there is one, sits to
-// its left), and a tap on either opens the list of every line, newest first.
+// The top bar's hint, right-aligned before the right-hand group, and the status queue behind it: once
+// anything has been said or any program changed state this run, a ▾ stays at the hint's right end (the
+// line, while there is one, sits to its left), and a tap on either opens the queue, newest first: what
+// rApp said, and what programs on the devices reported. A line about a session goes to it on a tap.
 import 'package:flutter/material.dart';
 
 import 'corner_popover.dart';
+import 'lamp.dart';
 import 'main_state.dart';
 import 'tokens.dart';
 
@@ -45,7 +47,7 @@ class HintAnchor extends StatelessWidget {
           child: Semantics(
             button: true,
             selected: open,
-            label: text.isEmpty ? '提示历史' : '$text，提示历史',
+            label: text.isEmpty ? '提示和状态' : '$text，提示和状态',
             excludeSemantics: true,
             onTap: () => state.toggleCorner(Corner.hints),
             child: Material(
@@ -89,7 +91,7 @@ class HintAnchor extends StatelessWidget {
       );
 }
 
-/// `13:42:07  已打开 Xcode @ mac-mini`, newest first.
+/// `13:42:07  已打开 Xcode @ mac-mini`, newest first; a program's line has its lamp and goes to its session.
 class HintHistoryList extends StatelessWidget {
   const HintHistoryList({super.key, required this.state});
 
@@ -101,29 +103,54 @@ class HintHistoryList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
+    final records = state.hintHistory;
     return SingleChildScrollView(
       key: const Key('hint-history'),
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [for (var i = 0; i < records.length; i++) _row(t, records[i], i)],
+      ),
+    );
+  }
+
+  Widget _row(RappTokens t, HintRecord r, int i) {
+    final line = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (final r in state.hintHistory)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    clock(r.at),
-                    style: TextStyle(color: t.muted, fontFamily: t.mono, fontFamilyFallback: t.monoFallback),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(child: Text(r.text)),
-                ],
-              ),
-            ),
+          Text(
+            clock(r.at),
+            style: TextStyle(color: t.muted, fontFamily: t.mono, fontFamilyFallback: t.monoFallback),
+          ),
+          const SizedBox(width: 12),
+          if (r.lamp != null) ...[
+            Padding(padding: const EdgeInsets.only(top: 3), child: StatusLamp(r.lamp!, size: 12)),
+            const SizedBox(width: 8),
+          ],
+          Expanded(child: Text(r.text)),
+          if (r.inferred) ...[
+            const SizedBox(width: 8),
+            Text('推断', style: TextStyle(color: t.muted)),
+          ],
         ],
+      ),
+    );
+    if (!r.goes) return line;
+    return Semantics(
+      button: true,
+      label: '${clock(r.at)} ${r.text}${r.inferred ? '，推断' : ''}',
+      excludeSemantics: true,
+      onTap: () => state.goToQueued(r),
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          key: Key('queue-$i'),
+          onTap: () => state.goToQueued(r),
+          child: ConstrainedBox(constraints: const BoxConstraints(minHeight: 48), child: line),
+        ),
       ),
     );
   }

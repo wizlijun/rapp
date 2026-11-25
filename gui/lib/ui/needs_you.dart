@@ -1,5 +1,6 @@
-// 「需要你」: the top bar's count of what waits for the person (dropped sessions, dropped devices)
-// and the popover that lists it. The only thing that may come looking for the person is 等你 (§0),
+// 「需要你」: the top bar's count of what waits for the person (dropped sessions, dropped devices,
+// terminals whose program asks) and the popover that lists all of it. A tap on a row goes there; the
+// row's button does its one thing. The only thing that may come looking for the person is 等你 (§0),
 // so nothing here opens by itself.
 import 'package:flutter/material.dart';
 
@@ -131,14 +132,7 @@ class _NeedsList extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (final n in needs.take(3)) _row(t, n),
-          if (needs.length > 3)
-            Container(
-              constraints: const BoxConstraints(minHeight: 48),
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              alignment: Alignment.centerLeft,
-              child: Text('还有 ${needs.length - 3} 件', style: TextStyle(color: t.muted)),
-            ),
+          for (final n in needs) _row(t, n),
         ],
       ),
     );
@@ -146,11 +140,32 @@ class _NeedsList extends StatelessWidget {
 
   Widget _row(RappTokens t, NeedItem n) {
     final session = n.kind == NeedKind.session;
+    final where = n.kind == NeedKind.device ? '查看这台设备' : '切到这个会话';
+    // The whole row goes there; the button at its end keeps its own job (打开 / 重连 / 查看).
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        key: Key('need-row-${n.target}'),
+        onTap: () => state.goToNeed(n),
+        child: _rowBody(t, n, session, where),
+      ),
+    );
+  }
+
+  Widget _rowBody(RappTokens t, NeedItem n, bool session, String where) {
     return Container(
       constraints: const BoxConstraints(minHeight: 48),
       padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
       child: Row(children: [
-        Expanded(child: Text(n.text, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.text))),
+        Expanded(
+          child: Semantics(
+            button: true,
+            label: '${n.text}，$where',
+            excludeSemantics: true,
+            onTap: () => state.goToNeed(n),
+            child: Text(n.text, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.text)),
+          ),
+        ),
         const SizedBox(width: 8),
         if (n.kind == NeedKind.terminal)
           RappButton.accent(

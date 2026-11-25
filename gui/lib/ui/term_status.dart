@@ -2,20 +2,11 @@ import '../hub_client.dart';
 import 'lamp.dart';
 
 /// The status line of a terminal row: the program's own status when it reports one, else the quiet-time rules.
+/// Whether a finished program was looked at shows in the lamp ([termLamp]), not here.
 String termStatus(TermRow r, int nowSecs) {
   if (r.dead) return '已退出';
   final ps = r.ps;
-  if (ps != null) {
-    // 'done' and 'idle' (and unknown states) deliberately fall out of the switch to the old unread/activity words.
-    switch (ps.state) {
-      case 'blocked':
-        return termAskWord(ps);
-      case 'working':
-        return ps.progress != null ? '在干活 · ${ps.progress}%' : '在干活';
-      case 'error':
-        return _msg(ps) == null ? '出错' : '出错 · ${ps.msg}';
-    }
-  }
+  if (ps != null) return programWord(ps);
   if (r.unread) return '未读';
   final idle = nowSecs - r.activity;
   if (idle < 10) return '刚刚有输出';
@@ -40,6 +31,24 @@ Lamp termLamp(TermRow r, int nowSecs) {
   if (nowSecs - r.activity < 10) return Lamp.active;
   return Lamp.idle;
 }
+
+/// What a program says it is doing, in words: every one of the five states (overview, rows, the status queue).
+String programWord(TermPs ps) => switch (ps.state) {
+      'blocked' => termAskWord(ps),
+      'working' => ps.progress != null ? '在干活 · ${ps.progress}%' : '在干活',
+      'error' => _msg(ps) == null ? '出错' : '出错 · ${ps.msg}',
+      'done' => _msg(ps) == null ? '完成' : '完成 · ${ps.msg}',
+      'idle' => '空闲',
+      _ => '在干活',
+    };
+
+/// The lamp of a program's state in the status queue: working is active, an ask waits, an error is a fault.
+Lamp programLamp(TermPs ps) => switch (ps.state) {
+      'working' => Lamp.active,
+      'blocked' => Lamp.waiting,
+      'error' => Lamp.disconnected,
+      _ => Lamp.idle,
+    };
 
 /// The line of a blocked program: what it waits for, then its message (plain text).
 String termAskWord(TermPs ps) {

@@ -32,7 +32,7 @@ import '../term/term_session_port.dart';
 import '../term/term_wire.dart' show TermPane;
 import 'app_profile_store.dart';
 import 'lamp.dart';
-import 'term_status.dart' show termAskWord;
+import 'term_status.dart' show programLamp, programWord, termAskWord;
 import 'lifecycle.dart';
 import 'net_marker.dart' show weakRttMs;
 import 'pin_files.dart';
@@ -59,11 +59,19 @@ enum PanelTab { sessions, devices, projects, resources }
 /// The top bar's popovers: the stream menu, 需要你, 本机, 远程, and the session list.
 enum Corner { stream, needs, session, remote, sessions, hints }
 
-/// One line the top bar's hint showed, kept for its history.
+/// One line of the status queue (the hint's ▾ list): what rApp said in the hint, or a change a program on some
+/// device reported ([device] and [app] name its session, [title] its shown name, [lamp] its state).
+/// [inferred]: read off the screen by rules rather than reported by the program (GUI apps, not built yet).
 class HintRecord {
-  const HintRecord(this.text, this.at);
+  const HintRecord(this.text, this.at, {this.device, this.app, this.title, this.lamp, this.inferred = false});
   final String text;
   final DateTime at;
+  final String? device, app, title;
+  final Lamp? lamp;
+  final bool inferred;
+
+  /// Whether a tap goes to a session.
+  bool get goes => device != null && app != null;
 }
 
 enum NeedKind { session, device, terminal }
@@ -579,12 +587,77 @@ class MainState extends ChangeNotifier {
       hintHistory[0] = HintRecord(v, hintHistory[0].at);
       return;
     }
-    hintHistory.insert(0, HintRecord(v, _now()));
+    _queue(HintRecord(v, _now()));
+  }
+
+  void _queue(HintRecord r) {
+    hintHistory.insert(0, r);
     if (hintHistory.length > hintHistoryMax) hintHistory.removeLast();
   }
 
   static const hintHistoryMax = 50;
+
+  /// The status queue: every line the hint showed this run and every program status change, newest first,
+  /// at most [hintHistoryMax].
   final List<HintRecord> hintHistory = [];
+
+  /// The last program status seen per text terminal (`device\nterm`): its state, and the ask's seq while blocked.
+  final Map<String, (String, int)> _psSeen = {};
+
+  /// Devices whose terminal list was read once: what that first list says is the starting point, not news.
+  final Set<String> _psDevices = {};
+
+  /// Queues each change of a text terminal's program status: a new state, or a new ask. A progress number alone
+  /// is not a change. A dropped device's list is stale and is skipped.
+  void _trackPrograms() {
+    final lists = hub?.termLists;
+    if (lists == null) return;
+    for (final e in lists.entries) {
+      final device = e.key;
+      if (_offlineSince.containsKey(device)) continue;
+      final first = _psDevices.add(device);
+      final live = <String>{};
+      for (final r in e.value.terms) {
+        final ps = r.ps;
+        final k = '$device\n${r.id}';
+        if (r.dead || ps == null) continue;
+        live.add(k);
+        final now = (ps.state, ps.state == 'blocked' ? ps.seq : 0);
+        final was = _psSeen[k];
+        _psSeen[k] = now;
+        if (first || was == now) continue;
+        final title = termDisplayName(r.name, r.host);
+        _queue(HintRecord('$title @ ${deviceName(device)}：${programWord(ps)}', _now(),
+            device: device, app: r.id, title: title, lamp: programLamp(ps)));
+      }
+      _psSeen.removeWhere((k, _) => k.startsWith('$device\n') && !live.contains(k));
+    }
+  }
+
+  /// A tap on a queued line about a session: that session, opened if it is not, and the list closes.
+  void goToQueued(HintRecord r) {
+    if (!r.goes) return;
+    corner = null;
+    openOrSwitch(r.device!, r.app!, r.title ?? r.app!);
+    notifyListeners();
+  }
+
+  /// A tap on a 需要你 row: a blocked terminal opens (or comes up), a dropped session comes on stage
+  /// (its reconnect is there), a dropped device shows its panel.
+  void goToNeed(NeedItem n) {
+    switch (n.kind) {
+      case NeedKind.terminal:
+        if (!hubUsable) return;
+        corner = null;
+        openOrSwitch(n.device!, n.target, n.title!);
+        notifyListeners();
+      case NeedKind.session:
+        corner = null;
+        select(n.target);
+      case NeedKind.device:
+        showDevice(n.target);
+    }
+  }
   final Map<String, DeviceProbe> probes = {};
   String? deviceTab;
 
@@ -1184,12 +1257,16 @@ class MainState extends ChangeNotifier {
   /// current one, else the one stored with it.
   String labelOf(AppRef a) => isTermApp(a.bundle) ? termTitle(termName(a.device, a.bundle) ?? a.name) : a.name;
 
-  /// A text terminal on [device] whose live row says its program waits for the person.
-  bool _termBlocked(String device, String app) {
-    if (!isTermApp(app)) return false;
+  /// A text terminal's program status from its live row on [device]; null when the app is no terminal, the row is
+  /// gone or dead, or the device dropped (its last list is stale).
+  TermPs? _termPs(String device, String app) {
+    if (!isTermApp(app) || _offlineSince.containsKey(device)) return null;
     final r = hub?.termLists[device]?.terms.where((r) => r.id == app).firstOrNull;
-    return r != null && !r.dead && r.ps?.state == 'blocked';
+    return r == null || r.dead ? null : r.ps;
   }
+
+  /// A text terminal on [device] whose live row says its program waits for the person.
+  bool _termBlocked(String device, String app) => _termPs(device, app)?.state == 'blocked';
 
   SessionEntry _entryOf(SessionRecord r) {
     final sid = r.sid;
@@ -1208,6 +1285,7 @@ class MainState extends ChangeNotifier {
       bytesPerSecond: r.phase == Phase.live ? rs?.bytesPerSecond : null,
       reason: r.phase == Phase.disconnected ? disconnectWord(r.reason) : null,
       takenOver: r.phase == Phase.disconnected && takenOver(r.reason),
+      ps: r.phase == Phase.disconnected ? null : _termPs(r.id, r.app),
     );
   }
 
@@ -1227,6 +1305,7 @@ class MainState extends ChangeNotifier {
           device: deviceName(s.id),
           path: s.path,
           lamp: _termBlocked(s.id, s.app) ? Lamp.waiting : Lamp.active,
+          ps: _termPs(s.id, s.app),
         );
         if (seen.add(e.key)) out.add(e);
       }
@@ -1244,6 +1323,7 @@ class MainState extends ChangeNotifier {
       if (probes[p.id]?.lamp == Lamp.connecting) continue;
       _setOnline(p.id, p.online, error: p.error);
     }
+    _trackPrograms();
     if (!hub!.alive) _watching.clear();
     final level = hub!.net?.level;
     final netBack = _netLevel == NetLevel.down && level != NetLevel.down;

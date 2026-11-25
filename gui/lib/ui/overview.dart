@@ -13,6 +13,7 @@ import 'overview_model.dart';
 import 'prefs.dart' show FirstLayer;
 import 'projects.dart' show orderedProjects;
 import 'session_model.dart';
+import 'term_status.dart' show programWord;
 import 'workspace_store.dart';
 import 'tokens.dart';
 
@@ -454,7 +455,17 @@ class _Block extends StatelessWidget {
   final MainState state;
   final SessionEntry entry;
 
-  String get _status => switch (entry.lamp) {
+  /// What a terminal's program says it is doing, while the session itself is up; it takes the traffic's place.
+  String? get _program {
+    final ps = entry.ps;
+    if (ps == null) return null;
+    return switch (entry.lamp) {
+      Lamp.disconnected || Lamp.connecting || Lamp.offline => null,
+      _ => programWord(ps),
+    };
+  }
+
+  String get _status => _program ?? switch (entry.lamp) {
         Lamp.active => '活动',
         Lamp.disconnected => entry.reason == null ? '已断开' : '已断开：${entry.reason}',
         final l => lampWord(l),
@@ -468,7 +479,7 @@ class _Block extends StatelessWidget {
     final border = rowBorder(entry.lamp, t, selected: selected);
     final windows = windowsWord(state.windowsOf(entry.key));
     final small = Theme.of(context).textTheme.bodySmall?.copyWith(color: t.muted);
-    final rate = state.embeds && entry.lamp == Lamp.active;
+    final rate = state.embeds && entry.lamp == Lamp.active && _program == null;
     void onTap() => state.select(entry.key);
     final radius = BorderRadius.circular(t.r);
     return SizedBox(

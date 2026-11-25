@@ -678,6 +678,77 @@ void main() {
       expect(find.byKey(const Key('hint-history')), findsNothing);
     });
 
+    testWidgets('program status changes join the queue; a tap on one goes to its session', (tester) async {
+      await tester.pumpWidget(wrap(Align(
+        alignment: Alignment.topLeft,
+        child: SizedBox(width: 1200, height: 800, child: TopBar(state: es, fullscreen: false, onToggleFullscreen: () {})),
+      )));
+      Future<void> report(Map<String, Object?> ps, {String id = '111'}) async {
+        t.emit({
+          'event': 'terms',
+          'id': id,
+          'terms': [
+            {'id': 'term:pty:a', 'name': 'a', 'command': 'claude', 'activity': 1, 'dead': false, 'ps': ps},
+          ],
+          'hosts': [],
+        });
+        await tester.runAsync(flush);
+        await tester.pump();
+      }
+
+      List<String> queued() => [for (final r in es.hintHistory) r.text];
+      final hint = es.hint;
+      await report({'state': 'working', 'seq': 1}); // the device's first list: where things start, not news
+      expect(queued(), isEmpty);
+      await report({'state': 'working', 'progress': 40, 'seq': 1}); // a progress number alone
+      expect(queued(), isEmpty);
+      await report({'state': 'blocked', 'kind': 'permission', 'msg': 'approve Bash: ls', 'seq': 2});
+      await report({'state': 'blocked', 'kind': 'permission', 'msg': 'approve Bash: ls', 'seq': 2}); // the same ask
+      await report({'state': 'blocked', 'kind': 'question', 'seq': 3}); // a new ask
+      await report({'state': 'error', 'msg': 'API Error: 400', 'seq': 3});
+      await report({'state': 'done', 'seq': 3});
+      expect(queued(), ['a @ mini：完成', 'a @ mini：出错 · API Error: 400', 'a @ mini：在提问', 'a @ mini：等确认 · approve Bash: ls']);
+      expect([for (final r in es.hintHistory) r.lamp], [Lamp.idle, Lamp.disconnected, Lamp.waiting, Lamp.waiting]);
+      expect(es.hint, hint); // the bar's own line stays rApp's
+      await tester.tap(find.byKey(const Key('hint-button')));
+      await tester.pump();
+      expect(find.descendant(of: find.byKey(const Key('hint-history')), matching: find.text('a @ mini：完成')),
+          findsOneWidget);
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('queue-0')));
+        await flush();
+      });
+      await tester.pump();
+      expect(es.corner, isNull);
+      expect(es.currentKey, '111/term:pty:a');
+    });
+
+    testWidgets('a dropped device queues nothing from its stale list', (tester) async {
+      await tester.pumpWidget(wrap(Align(
+        alignment: Alignment.topLeft,
+        child: SizedBox(width: 1200, height: 800, child: TopBar(state: es, fullscreen: false, onToggleFullscreen: () {})),
+      )));
+      Future<void> report(String state) async {
+        t.emit({
+          'event': 'terms',
+          'id': '111',
+          'terms': [
+            {'id': 'term:pty:a', 'name': 'a', 'command': 'claude', 'activity': 1, 'dead': false, 'ps': {'state': state}},
+          ],
+          'hosts': [],
+        });
+        await tester.runAsync(flush);
+        await tester.pump();
+      }
+
+      await report('working');
+      t.emit({'event': 'presence', 'id': '111', 'online': true});
+      t.emit({'event': 'presence', 'id': '111', 'online': false});
+      await tester.runAsync(flush);
+      await report('done');
+      expect(es.hintHistory.where((r) => r.app != null), isEmpty);
+    });
+
     test('the hint history keeps the newest 50', () {
       for (var i = 0; i < 60; i++) {
         es.hint = 'h$i';
@@ -824,7 +895,7 @@ void main() {
       expect(tester.widget<Text>(find.byKey(const Key('needs-count'))).data, '1');
     });
 
-    testWidgets('needs popover lists three and the rest', (tester) async {
+    testWidgets('needs popover lists every item', (tester) async {
       await tester.pumpWidget(wrap(ebar()));
       await tester.tap(find.byKey(const Key('needs-you')));
       await tester.pump();
@@ -838,8 +909,8 @@ void main() {
       await dropAll(tester, 4);
       await tester.tap(find.byKey(const Key('needs-you')));
       await tester.pump();
-      expect(find.textContaining('已断开：网络断了'), findsNWidgets(3));
-      expect(find.text('还有 1 件'), findsOneWidget);
+      expect(find.textContaining('已断开：网络断了'), findsNWidgets(4));
+      expect(find.textContaining('还有'), findsNothing);
       expect(find.text('没有需要你处理的事'), findsNothing);
     });
 
@@ -903,6 +974,55 @@ void main() {
       await tester.pump();
       expect(es.panel, PanelTab.devices);
       expect(es.deviceTab, '111');
+      expect(es.corner, isNull);
+    });
+
+    testWidgets('a tap anywhere on a device row opens the device panel too', (tester) async {
+      await tester.pumpWidget(wrap(ebar()));
+      t.emit({'event': 'presence', 'id': '111', 'online': true});
+      t.emit({'event': 'presence', 'id': '111', 'online': false});
+      await tester.runAsync(flush);
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('needs-you')));
+      await tester.pump();
+      await tester.runAsync(() async {
+        await tester.tap(find.text('mini 离线'));
+        await flush();
+      });
+      await tester.pump();
+      expect(es.panel, PanelTab.devices);
+      expect(es.deviceTab, '111');
+      expect(es.corner, isNull);
+    });
+
+    testWidgets('a tap on a needs row goes there: a dropped session comes on stage, an asking terminal opens',
+        (tester) async {
+      await tester.pumpWidget(wrap(ebar()));
+      await openApp(tester, 'a');
+      await openApp(tester, 'b');
+      es.select('111/b');
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      es.hub!.termLists['111'] = const TermList('111', terms: [
+        TermRow('term:pty:t', 't', 'claude', null, 1, 0, 0, false, false, ps: TermPs('blocked', kind: 'question')),
+      ]);
+      es.notifyListeners();
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('needs-you')));
+      await tester.pump();
+      expect(find.bySemanticsLabel(RegExp(r'^t @ mini：在提问，切到这个会话$')), findsOneWidget);
+      await tester.tap(find.textContaining('a @ mini 已断开'));
+      await tester.pump();
+      expect(es.currentKey, '111/a');
+      expect(es.corner, isNull);
+      expect(t.sent.where((m) => m['cmd'] == 'open' && m['reconnect'] == true), isEmpty); // going there is not 重连
+      await tester.tap(find.byKey(const Key('needs-you')));
+      await tester.pump();
+      await tester.runAsync(() async {
+        await tester.tap(find.text('t @ mini：在提问'));
+        await flush();
+      });
+      await tester.pump();
+      expect(es.currentKey, '111/term:pty:t');
       expect(es.corner, isNull);
     });
 

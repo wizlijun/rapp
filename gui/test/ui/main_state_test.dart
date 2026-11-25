@@ -5791,6 +5791,38 @@ void main() {
       expect(s.current!.lamp, Lamp.active);
     });
 
+    test('an opened terminal carries its live program status; not when dead or its device is offline', () async {
+      Future<void> list(String state, {bool dead = false, String? msg}) async {
+        t.emit({
+          'event': 'terms',
+          'id': '111',
+          'terms': [
+            {'id': 'term:pty:a', 'name': 'a', 'command': 'claude', 'activity': 1, 'dead': dead, 'ps': {'state': state, 'seq': 3, 'msg': ?msg}},
+          ],
+          'hosts': [],
+        });
+        await pump();
+      }
+
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') t.emit({...opened(1, '111', 'term:pty:a'), 'req': m['req']});
+      };
+      await s.openOrSwitch('111', 'term:pty:a', 'a');
+      await pump();
+      expect(s.current!.ps, isNull);
+      await list('working');
+      expect(s.current!.ps?.state, 'working');
+      await list('done', msg: 'ok');
+      expect((s.current!.ps?.state, s.current!.ps?.msg), ('done', 'ok'));
+      await list('blocked', dead: true);
+      expect(s.current!.ps, isNull);
+      await list('blocked');
+      expect(s.current!.lamp, Lamp.waiting);
+      t.emit({'event': 'presence', 'id': '111', 'online': false});
+      await pump();
+      expect(s.entries.where((e) => e.key == '111/term:pty:a').map((e) => (e.ps, e.lamp == Lamp.waiting)), everyElement((null, false)));
+    });
+
     test('a dead session that was blocked is not in needs', () {
       put([row('term:pty:a', const TermPs('blocked'), dead: true)]);
       expect(s.needs, isEmpty);
