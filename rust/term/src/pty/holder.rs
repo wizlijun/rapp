@@ -102,6 +102,7 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
         ended: watch::channel(false).0,
         activity: AtomicU64::new(now()),
         fit: Mutex::default(),
+        ps: Mutex::new(None),
     });
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path).with_context(|| format!("cannot listen on {}", path.display()))?;
@@ -447,6 +448,7 @@ mod tests {
             ended: watch::channel(false).0,
             activity: AtomicU64::new(0),
             fit: Mutex::default(),
+            ps: Mutex::new(None),
         }
     }
 

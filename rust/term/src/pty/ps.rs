@@ -12,6 +12,8 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
+
 use base64::alphabet::STANDARD as BASE64_STANDARD_ALPHABET;
 use base64::engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig};
 use base64::engine::{DecodePaddingMode, Engine as _};
@@ -474,9 +476,196 @@ pub(crate) fn chunks(name: &str) -> Vec<Vec<u8>> {
         .collect()
 }
 
+/// At most this many chars of `msg` go into a snapshot; a longer one is cut and gets `…`.
+pub const MSG_CHARS: usize = 200;
+
+/// The program's status as the session list shows it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Ps {
+    /// idle | working | done | blocked | error
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub msg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<u8>,
+    /// The Unix second this `state` began.
+    pub since: u64,
+    /// The Unix second the program last stopped (working or blocked to done, error or idle); 0 if never.
+    pub stopped: u64,
+    /// Goes up by one whenever the snapshot changes.
+    pub seq: u64,
+}
+
+/// What one `Tracker::feed` saw.
+pub struct Fed {
+    pub probes: usize,
+    pub changed: bool,
+}
+
+#[derive(Default)]
+pub struct Tracker {
+    scanner: Scanner,
+    records: Records,
+    ps: Option<Ps>,
+    seq: u64,
+    stopped: u64,
+}
+
+fn cut(msg: String) -> String {
+    match msg.char_indices().nth(MSG_CHARS) {
+        Some((i, _)) => format!("{}…", &msg[..i]),
+        None => msg,
+    }
+}
+
+impl Tracker {
+    pub fn feed(&mut self, bytes: &[u8], now: u64) -> Fed {
+        let mut events = Vec::new();
+        self.scanner.feed(bytes, |e| events.push(e));
+        let mut probes = 0;
+        let mut stopped_changed = false;
+        let mut prev = self.records.deciding().map(|r| r.state);
+        for e in events {
+            match e {
+                Event::Probe => probes += 1,
+                Event::Report(body) => {
+                    if let Some(m) = parse(&body) {
+                        self.records.apply(m);
+                    }
+                }
+                Event::Prompt => {
+                    self.records.drop_transient();
+                }
+            }
+            let cur = self.records.deciding().map(|r| r.state);
+            if matches!(prev, Some(State::Working | State::Blocked))
+                && matches!(cur, Some(State::Done | State::Error | State::Idle))
+            {
+                self.stopped = now;
+                stopped_changed = true;
+            }
+            prev = cur;
+        }
+        let next = self.records.deciding().map(|r| Ps {
+            state: r.state.as_str().to_string(),
+            kind: r.kind,
+            app: r.app,
+            msg: r.msg.map(cut),
+            progress: r.progress,
+            since: now,
+            stopped: self.stopped,
+            seq: self.seq,
+        });
+        let mut changed = stopped_changed;
+        let next = match (next, self.ps.take()) {
+            (None, old) => {
+                if old.is_some() {
+                    self.seq += 1;
+                    changed = true;
+                }
+                None
+            }
+            (Some(mut n), None) => {
+                self.seq += 1;
+                n.seq = self.seq;
+                changed = true;
+                Some(n)
+            }
+            (Some(mut n), Some(old)) => {
+                if n.state == old.state {
+                    n.since = old.since;
+                }
+                let same = n.state == old.state
+                    && n.kind == old.kind
+                    && n.app == old.app
+                    && n.msg == old.msg
+                    && n.progress == old.progress;
+                if !same || stopped_changed {
+                    self.seq += 1;
+                    changed = true;
+                }
+                n.seq = self.seq;
+                Some(n)
+            }
+        };
+        self.ps = next;
+        Fed { probes, changed }
+    }
+
+    pub fn ps(&self) -> Option<&Ps> {
+        self.ps.as_ref()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn b64(s: &str) -> String {
+        base64::engine::general_purpose::STANDARD.encode(s)
+    }
+    fn rep(body: &str) -> Vec<u8> {
+        format!("\x1b]7501;{body}\x07").into_bytes()
+    }
+
+    #[test]
+    fn tracker_snapshot_since_stopped_seq() {
+        let mut t = Tracker::default();
+        assert!(!t.feed(b"plain text", 100).changed);
+        assert!(t.ps().is_none());
+        let f = t.feed(&rep("state=working:app=codex"), 100);
+        assert!(f.changed);
+        assert_eq!(t.ps().map(|p| (p.state.as_str(), p.since, p.stopped, p.seq)), Some(("working", 100, 0, 1)));
+        assert!(!t.feed(&rep("state=working:app=codex"), 105).changed);
+        t.feed(&rep("state=blocked:kind=permission:app=codex"), 110);
+        assert_eq!(t.ps().map(|p| (p.kind.as_deref(), p.since, p.seq)), Some((Some("permission"), 110, 2)));
+        t.feed(&rep("state=done:app=codex"), 120);
+        assert_eq!(t.ps().map(|p| (p.since, p.stopped, p.seq)), Some((120, 120, 3)));
+    }
+    #[test]
+    fn tracker_one_chunk_working_then_done_still_stops() {
+        let mut t = Tracker::default();
+        let mut b = rep("state=working");
+        b.extend(rep("state=done"));
+        t.feed(&b, 50);
+        assert_eq!(t.ps().map(|p| (p.state.as_str(), p.stopped, p.seq)), Some(("done", 50, 1)));
+    }
+    #[test]
+    fn tracker_idle_at_start_is_not_a_stop() {
+        let mut t = Tracker::default();
+        t.feed(&rep("state=idle"), 10);
+        assert_eq!(t.ps().unwrap().stopped, 0);
+    }
+    #[test]
+    fn tracker_counts_probes_and_clear_empties() {
+        let mut t = Tracker::default();
+        assert_eq!(t.feed(b"\x1b]7501;?\x07\x1b]7501;?\x1b\\", 1).probes, 2);
+        t.feed(&rep("state=working"), 2);
+        t.feed(&rep("state=clear"), 3);
+        assert!(t.ps().is_none());
+        t.feed(&rep("state=working"), 4);
+        assert_eq!(t.ps().unwrap().seq, 3);
+    }
+    #[test]
+    fn tracker_prompt_drops_blocked() {
+        let mut t = Tracker::default();
+        t.feed(&rep("state=blocked:kind=question"), 1);
+        t.feed(b"\x1b]133;A\x07", 2);
+        assert!(t.ps().is_none());
+    }
+    #[test]
+    fn msg_is_cut_to_200_chars() {
+        let mut t = Tracker::default();
+        let long = "问".repeat(150) + &"😀".repeat(150);
+        t.feed(&rep(&format!("state=done:msg={}", b64(&long))), 1);
+        let m = t.ps().unwrap().msg.clone().unwrap();
+        assert_eq!(m.chars().count(), 201);
+        assert!(m.ends_with('…') && m.starts_with(&"问".repeat(150)));
+    }
 
     fn events(chunks: &[&[u8]]) -> Vec<String> {
         let mut s = Scanner::default();
