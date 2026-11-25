@@ -17,4 +17,7 @@ pub struct TermRow {
     /// What the program says about itself (OSC 7501); none when it says nothing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ps: Option<crate::pty::ps::Ps>,
+    /// The title the program set (OSC 0/1/2); none when it set none or the session was named by hand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }

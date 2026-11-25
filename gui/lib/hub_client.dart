@@ -123,7 +123,7 @@ class AppList {
 /// One terminal session of a device (`terms` event, spec §6). [host] is null on the device itself.
 class TermRow {
   const TermRow(this.id, this.name, this.command, this.host, this.panes, this.attached, this.activity, this.dead,
-      this.unread, {this.ps});
+      this.unread, {this.ps, this.title});
   final String id, name, command;
   final String? host;
   final int panes, attached;
@@ -134,6 +134,12 @@ class TermRow {
 
   /// The program status the session reports (OSC 7501); null when it reports none or something unrecognised.
   final TermPs? ps;
+
+  /// The title the program set (OSC 0/2); null when it set none or the session was named by hand.
+  final String? title;
+
+  /// What to show for the session: the program's title, else its name.
+  String get shown => title ?? name;
 }
 
 /// What a program in a terminal session says it is doing (spec §5.5).
@@ -210,7 +216,7 @@ TermList _termList(Map<String, dynamic> m, String fallbackId) {
         if (parseTermId('${r['id']}')?.backend == 'pty')
           TermRow('${r['id']}', '${r['name'] ?? ''}', '${r['command'] ?? ''}', _str(r['host']), _int(r['panes']),
             _int(r['attached']), _int(r['activity']), r['dead'] == true, r['unread'] == true,
-            ps: termPs(r['ps'])),
+            ps: termPs(r['ps']), title: switch (r['title']) { String s when s.isNotEmpty => s, _ => null }),
     ],
     hosts: [
       for (final h in (m['hosts'] as List? ?? const []).whereType<Map>())

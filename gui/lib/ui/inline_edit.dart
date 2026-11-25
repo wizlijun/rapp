@@ -28,6 +28,7 @@ class _InlineEditState extends State<InlineEdit> {
   final _controller = TextEditingController();
   final _focus = FocusNode(debugLabel: 'InlineEdit');
   bool _editing = false;
+  String _startText = '';
 
   @override
   void initState() {
@@ -48,6 +49,7 @@ class _InlineEditState extends State<InlineEdit> {
   }
 
   void _start() {
+    _startText = widget.text;
     _controller.value = TextEditingValue(
       text: widget.text,
       selection: TextSelection(baseOffset: 0, extentOffset: widget.text.length),
@@ -62,7 +64,8 @@ class _InlineEditState extends State<InlineEdit> {
     if (!_editing) return;
     final value = _controller.text;
     setState(() => _editing = false);
-    if (commit) widget.onCommit(value);
+    // Untouched text is no edit, even when the shown text moved on meanwhile (a live title).
+    if (commit && value.trim() != _startText.trim()) widget.onCommit(value);
   }
 
   @override

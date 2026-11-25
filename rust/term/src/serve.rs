@@ -547,6 +547,7 @@ fn pty_rows(unread: &Mutex<Unread>, statuses: &[Status], now: u64) -> Vec<TermRo
                 }
             },
             ps: s.ps.clone(),
+            title: s.title.clone(),
         })
         .collect()
 }
@@ -769,6 +770,7 @@ mod tests {
             ticket: None,
             key: None,
             ps,
+            title: None,
         }
     }
 
@@ -795,6 +797,17 @@ mod tests {
     }
 
     #[test]
+    fn a_status_title_lands_in_the_row() {
+        let unread = Mutex::new(Unread::new(1000));
+        let mut st = status_with(None);
+        st.title = Some("~/git/rapp".into());
+        let rows = pty_rows(&unread, &[st, status_with(None)], 1051);
+        assert_eq!(rows[0].title.as_deref(), Some("~/git/rapp"));
+        assert!(serde_json::to_string(&rows[0]).unwrap().contains(r#""title":"~/git/rapp""#));
+        assert!(!serde_json::to_string(&rows[1]).unwrap().contains("title"));
+    }
+
+    #[test]
     fn a_long_list_is_cut_to_one_line() {
         let row = |i: usize| TermRow {
             id: format!("term:pty:{i}"),
@@ -807,6 +820,7 @@ mod tests {
             dead: false,
             unread: false,
             ps: None,
+            title: Some("t".repeat(64)),
         };
         let hosts = vec![HostRow { host: None, launchers: Vec::new(), shells: installed_shells() }];
         let list = TermList { terms: (0..1000).map(row).collect(), hosts };

@@ -29,6 +29,18 @@ void main() {
         apps: [app('com.apple.Terminal')], graphical: false), isA<NoTerminal>());
   });
 
+  test('termsNewTarget always creates in text mode with launchers', () {
+    final list = TermList('m1', terms: [pty('a', activity: 3)], hosts: [local(['Terminal'], shells: [const TermShell('zsh', '/bin/zsh', true)])]);
+    expect(termsNewTarget(mode: 'text', list: list, apps: const []), isA<NewText>().having((t) => t.shell, 'shell', '/bin/zsh'));
+    expect(termsTarget(mode: 'text', list: list, apps: const []), isA<OpenTerm>());
+    expect(termsNewTarget(mode: 'pixels', list: list, apps: [app('com.apple.Terminal')]), isA<OpenPixels>());
+  });
+
+  test('termsNewTarget without launchers falls back to termsTarget', () {
+    final list = TermList('m1', terms: [pty('a', activity: 3)], hosts: [local([])]);
+    expect(termsNewTarget(mode: 'text', list: list, apps: const []), isA<OpenTerm>());
+  });
+
   test('desktop first and terminal apps folded when the entry shows', () {
     final apps = [app('com.apple.Safari'), app('com.apple.Terminal'), app('desktop:'), app('com.googlecode.iterm2')];
     expect(orderApps(apps, entry: true).map((a) => a.app), ['desktop:', 'com.apple.Safari']);

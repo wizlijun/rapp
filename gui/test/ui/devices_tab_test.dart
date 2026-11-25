@@ -675,8 +675,9 @@ void main() {
   int now() => DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
   Map<String, dynamic> termRow(String id, String name, String command,
-          {String? host, int panes = 1, int attached = 1, int? activity, bool dead = false, bool unread = false}) =>
+          {String? host, int panes = 1, int attached = 1, int? activity, bool dead = false, bool unread = false, String? title}) =>
       {
+        'title': ?title,
         'id': id, 'host': host, 'name': name, 'command': command, 'panes': panes, 'attached': attached,
         'activity': activity ?? now() - 7200, 'dead': dead, 'unread': unread,
       };
@@ -960,6 +961,38 @@ void main() {
     expect(m, {'cmd': 'rename_term', 'id': '111', 'term': 'term:pty:work', 'name': 'build', 'req': anything});
     expect(t.sent.map((m) => m['cmd']), containsAllInOrder(['rename_term', 'terms']));
     expect(find.byKey(const Key('rename-error')), findsNothing);
+  });
+
+  testWidgets('a titled row shows the title; committing it unchanged sends nothing, a new name is sent', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    await emitTerms(tester, [termRow('term:pty:work', 'work', 'claude', title: '~/git/rapp')],
+        hosts: [{'host': null, 'launchers': ['Terminal'], 'shells': shellsZshBash}]);
+    t.sent.clear();
+    expect(find.text('~/git/rapp'), findsOneWidget);
+    await renameTo(tester, '~/git/rapp');
+    expect(t.sent.where((m) => m['cmd'] == 'rename_term'), isEmpty);
+    await renameTo(tester, 'build');
+    final sent = t.sent.where((m) => m['cmd'] == 'rename_term').toList();
+    expect(sent, hasLength(1));
+    expect(sent.single['name'], 'build');
+  });
+
+  testWidgets('committing untouched text after the title changed mid-edit sends nothing', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    const hosts = [{'host': null, 'launchers': ['Terminal'], 'shells': shellsZshBash}];
+    await emitTerms(tester, [termRow('term:pty:work', 'work', 'claude', title: 'old title')], hosts: hosts);
+    t.sent.clear();
+    final name = find.byKey(const Key('term-name-term:pty:work'));
+    await tester.ensureVisible(name);
+    await tester.tap(name);
+    await tester.pump();
+    await emitTerms(tester, [termRow('term:pty:work', 'work', 'claude', title: 'new title')], hosts: hosts);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    await tester.pump();
+    expect(t.sent.where((m) => m['cmd'] == 'rename_term'), isEmpty);
   });
 
   testWidgets('an invalid name is not sent and the old name stays', (tester) async {

@@ -330,7 +330,8 @@ class _Column extends StatelessWidget {
               _FavoriteBlock(
                 favorite: f,
                 label: state.labelOf(f),
-                onTap: state.hubUsable && !col.offline ? () => state.openOrSwitch(f.device, f.bundle, f.name) : null,
+                verb: state.favoriteCreates(f) ? '新建' : '打开',
+                onTap: state.hubUsable && !col.offline ? () => state.openFavorite(f) : null,
               ),
             ],
           ],
@@ -400,9 +401,9 @@ class _OpenAppsLink extends StatelessWidget {
 
 /// A favourite that is not open: dashed, 「点按打开」; greyed while it cannot open.
 class _FavoriteBlock extends StatelessWidget {
-  const _FavoriteBlock({required this.favorite, required this.label, required this.onTap});
+  const _FavoriteBlock({required this.favorite, required this.label, required this.verb, required this.onTap});
   final AppRef favorite;
-  final String label;
+  final String label, verb;
   final VoidCallback? onTap;
 
   @override
@@ -416,7 +417,7 @@ class _FavoriteBlock extends StatelessWidget {
       child: Semantics(
         button: true,
         enabled: onTap != null,
-        label: '常用 $label，${onTap != null ? '点按打开' : '现在打不开'}',
+        label: '常用 $label，${onTap != null ? '点按$verb' : '现在打不开'}',
         excludeSemantics: true,
         onTap: onTap,
         child: Material(
@@ -439,7 +440,7 @@ class _FavoriteBlock extends StatelessWidget {
                       style: TextStyle(color: onTap != null ? t.text : t.muted),
                     ),
                   ),
-                  if (onTap != null) Text('打开', style: small),
+                  if (onTap != null) Text(verb, style: small),
                 ]),
               ),
             ),

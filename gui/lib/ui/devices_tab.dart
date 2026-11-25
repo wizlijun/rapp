@@ -401,7 +401,7 @@ class _DevicesTabState extends State<DevicesTab> {
                   row: r,
                   session: _session(id, r.id),
                   enabled: state.hubUsable && state.embeds,
-                  onOpen: () => state.openOrSwitch(id, r.id, termDisplayName(r.name, r.host)),
+                  onOpen: () => state.openOrSwitch(id, r.id, termDisplayName(r.shown, r.host)),
                   onRename: shells == null ? null : (v) => _rename(id, r, v),
                 ),
               ),
@@ -489,7 +489,7 @@ class _DevicesTabState extends State<DevicesTab> {
 
   /// Renames [r] on [id]; an unchanged name sends nothing, a refusal shows under the list.
   Future<void> _rename(String id, TermRow r, String name) async {
-    if (name.trim() == r.name) {
+    if (name.trim() == r.shown) {
       if (_renameErrors.containsKey(id)) setState(() => _renameErrors.remove(id));
       return;
     }
@@ -658,7 +658,7 @@ class _TermRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final name = termDisplayName(row.name, row.host);
+    final name = termDisplayName(row.shown, row.host);
     final status = termStatus(row, now);
     final verb = openVerb(session?.lamp, takenOver: session?.takenOver ?? false);
     return Container(
@@ -683,7 +683,7 @@ class _TermRow extends StatelessWidget {
                             style: TextStyle(color: t.text, fontWeight: FontWeight.w600))
                         : InlineEdit(
                             key: Key('term-name-${row.id}'),
-                            text: row.name,
+                            text: row.shown,
                             semanticLabel: '改名 $name',
                             style: TextStyle(color: t.text, fontWeight: FontWeight.w600),
                             onCommit: onRename!,

@@ -111,6 +111,9 @@ pub struct Status {
     /// What the program says about itself; none when it says nothing.
     #[serde(default, deserialize_with = "super::ps::lenient", skip_serializing_if = "Option::is_none")]
     pub ps: Option<super::ps::Ps>,
+    /// The title the program set for itself; none when it set none or the session was named by hand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 /// Why a socket gave no status.
@@ -303,6 +306,16 @@ mod tests {
         assert_eq!(serde_json::from_str::<Status>(newer).unwrap().ps.unwrap().state, "done");
     }
 
+    #[test]
+    fn a_status_title_is_optional() {
+        let base = r#"{"v":2,"name":"a","command":"sh","cols":80,"rows":24,"activity":1,"viewers":0,"pid":7"#;
+        let none: Status = serde_json::from_str(&format!("{base}}}")).unwrap();
+        assert_eq!(none.title, None);
+        assert!(!serde_json::to_string(&none).unwrap().contains("title"));
+        let some: Status = serde_json::from_str(&format!(r#"{base},"title":"x"}}"#)).unwrap();
+        assert_eq!(some.title.as_deref(), Some("x"));
+    }
+
     fn mode(p: &Path) -> u32 {
         std::fs::metadata(p).unwrap().permissions().mode() & 0o777
     }
@@ -388,6 +401,7 @@ mod tests {
                     ticket: None,
                     key: None,
                     ps: None,
+                    title: None,
                 };
                 w.write_all(format!("{}\n", serde_json::to_string(&st).unwrap()).as_bytes()).await.unwrap();
             }

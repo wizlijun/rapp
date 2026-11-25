@@ -5725,6 +5725,19 @@ void main() {
       expect(s.current!.appName, 'c');
     });
 
+    test('a terminal with a program title is shown by it', () async {
+      await termsOf([
+        {...ptyRow('k', 1), 'title': '~/git/rapp'},
+      ]);
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') t.emit({...opened(1, '111', 'term:pty:k'), 'req': m['req']});
+      };
+      await s.openOrSwitch('111', 'term:pty:k', 'k');
+      await pump();
+      expect(s.current!.appName, '~/git/rapp');
+      expect(s.labelOf(AppRef('111', 'term:pty:k', 'k')), 'CLI · ~/git/rapp');
+    });
+
     test('openText gives a refusal to the caller and opens nothing', () async {
       await termsOf([]);
       t.onSend = (m) {

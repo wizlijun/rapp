@@ -29,6 +29,8 @@ List<HubApp> orderApps(List<HubApp> apps, {required bool entry}) => [
 
 List<HubApp> terminalAppsOf(List<HubApp> apps) => [for (final a in apps) if (terminalApps.contains(a.app)) a];
 
+NewText _newText(TermHost local) => NewText(local.shells?.where((s) => s.isDefault).firstOrNull?.path);
+
 /// What tapping the entry opens.
 sealed class TermsTarget {
   const TermsTarget();
@@ -71,13 +73,24 @@ TermsTarget termsTarget({required String mode, required TermList list, required 
     }
 
     final pty = latest('pty');
-    if (pty != null) return OpenTerm(pty.id, termDisplayName(pty.name, pty.host));
+    if (pty != null) return OpenTerm(pty.id, termDisplayName(pty.shown, pty.host));
     final local = list.hosts.where((h) => h.host == null).firstOrNull;
     if (local != null && local.launchers.isNotEmpty) {
-      return NewText(local.shells?.where((s) => s.isDefault).firstOrNull?.path);
+      return _newText(local);
     }
   }
   if (!graphical) return const NoTerminal();
   final first = terminalAppsOf(apps).firstOrNull;
   return first == null ? const OpenPixels('com.apple.Terminal', 'Terminal') : OpenPixels(first.app, first.name);
+}
+
+/// What the overview's 常用 · 终端 opens: in text mode with local launchers always a new terminal, else [termsTarget].
+TermsTarget termsNewTarget({required String mode, required TermList list, required List<HubApp> apps, bool graphical = true}) {
+  if (mode == 'text' || !graphical) {
+    final local = list.hosts.where((h) => h.host == null).firstOrNull;
+    if (local != null && local.launchers.isNotEmpty) {
+      return _newText(local);
+    }
+  }
+  return termsTarget(mode: mode, list: list, apps: apps, graphical: graphical);
 }
