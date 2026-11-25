@@ -178,8 +178,95 @@ fn linux_command(app: &str, file: &Path, env: &BTreeMap<String, String>) -> anyh
     Ok(c)
 }
 
+/// Terminal's AppleScript has no new-tab command, and `open -a` always makes a new window. So: raise the frontmost
+/// window that already holds a `marker` process (a terminal rapp opened), press ⌘T there, and run `file` in the tab
+/// that appears. Terminal reports each native tab as a window of its own, so the new tab is the window whose id was
+/// not there before ⌘T. Answers `tab` once `file` runs; anything else means it did not run.
+const TERMINAL_TAB: &str = r#"on run argv
+	set f to item 1 of argv
+	set marker to item 2 of argv
+	if not (application "Terminal" is running) then return "none"
+	tell application "Terminal"
+		set target to missing value
+		repeat with w in windows
+			repeat with t in tabs of w
+				try
+					if (processes of t) contains marker then
+						set target to contents of w
+						exit repeat
+					end if
+				end try
+			end repeat
+			if target is not missing value then exit repeat
+		end repeat
+		if target is missing value then return "none"
+		set known to id of every window
+		try
+			set miniaturized of target to false
+		end try
+		set index of target to 1
+		activate
+	end tell
+	set raised to false
+	repeat 20 times
+		delay 0.05
+		tell application "System Events" to set raised to frontmost of process "Terminal"
+		if raised then exit repeat
+	end repeat
+	if not raised then return "not-front"
+	delay 0.1
+	tell application "System Events" to keystroke "t" using command down
+	repeat 30 times
+		delay 0.1
+		tell application "Terminal"
+			repeat with w in windows
+				if known does not contain (id of w) then
+					do script (" exec /bin/sh " & quoted form of f) in selected tab of w
+					return "tab"
+				end if
+			end repeat
+		end tell
+	end repeat
+	return "no-tab"
+end run
+"#;
+
+/// The process name a window rapp opened holds: `rapp-term run`.
+const HOLDER: &str = "rapp-term";
+
+#[derive(Debug, PartialEq)]
+enum TabOutcome {
+    /// `file` runs in a new tab.
+    Opened,
+    /// `file` did not run: open a window instead.
+    NotOpened,
+    /// The script was cut off and `file` may have run; a window now could start it twice.
+    Unsure,
+}
+
+fn tab_outcome(r: Result<Vec<u8>, CommandFailure>) -> TabOutcome {
+    match r {
+        Ok(out) if String::from_utf8_lossy(&out).trim() == "tab" => TabOutcome::Opened,
+        Ok(_) | Err(CommandFailure::Failed) => TabOutcome::NotOpened,
+        Err(CommandFailure::TimedOut) => TabOutcome::Unsure,
+    }
+}
+
+fn terminal_tab(file: &Path) -> TabOutcome {
+    let mut c = Command::new("osascript");
+    c.arg("-e").arg(TERMINAL_TAB).arg(file).arg(HOLDER);
+    tab_outcome(bounded_command(&mut c, Duration::from_secs(10)))
+}
+
 /// Open `file`; a test launcher is synchronous and has no platform dependencies.
 pub fn open(app: &str, file: &Path, launch_with: Option<&Path>) -> anyhow::Result<()> {
+    // A new terminal goes in a tab beside the ones rapp already opened; the first one gets a window.
+    // Unsure leaves the holder's own start-up wait to tell whether it started.
+    if cfg!(target_os = "macos") && launch_with.is_none() && app == "Terminal"
+        && terminal_tab(file) != TabOutcome::NotOpened
+    {
+        return Ok(());
+    }
     let mut c = match launch_with {
         Some(p) => {
             let mut c = Command::new(p);
@@ -291,6 +378,26 @@ mod tests {
         assert_eq!(args.last().unwrap(), &std::ffi::OsStr::new("/a b/session.command"));
         std::fs::set_permissions(&terminal, std::fs::Permissions::from_mode(0o600)).unwrap();
         assert!(linux_command("foot", Path::new("/a"), &env).is_err());
+    }
+
+    #[test]
+    fn only_a_tab_that_ran_the_file_counts_and_a_cut_off_script_never_opens_a_second_window() {
+        assert_eq!(tab_outcome(Ok(b"tab\n".to_vec())), TabOutcome::Opened);
+        for out in ["none\n", "no-tab\n", "not-front\n", ""] {
+            assert_eq!(tab_outcome(Ok(out.as_bytes().to_vec())), TabOutcome::NotOpened, "{out:?}");
+        }
+        assert_eq!(tab_outcome(Err(CommandFailure::Failed)), TabOutcome::NotOpened);
+        assert_eq!(tab_outcome(Err(CommandFailure::TimedOut)), TabOutcome::Unsure);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_terminal_tab_script_compiles() {
+        let out = std::env::temp_dir().join(format!("rapp-tab-{}.scpt", std::process::id()));
+        let status = Command::new("osacompile").arg("-o").arg(&out).arg("-e").arg(TERMINAL_TAB)
+            .stdout(Stdio::null()).stderr(Stdio::inherit()).status().unwrap();
+        let _ = std::fs::remove_file(&out);
+        assert!(status.success());
     }
 
     #[cfg(target_os = "macos")]
