@@ -100,7 +100,9 @@ final class RuleDetectTests: XCTestCase {
         r = ev.evaluate(pack, regions: resolveRegions(pack, in: img), image: img, now: 0.5)
         XCTAssertEqual(r["rowBusy"], SignalResult(holds: true, count: 3))
         r = ev.evaluate(pack, regions: resolveRegions(pack, in: img), image: nil, now: 1.0)
-        XCTAssertEqual(r["rowBusy"]?.holds, false)
+        XCTAssertEqual(r["rowBusy"], SignalResult(holds: true, count: 3))      // frameless, last frame 0.5 s old: kept
+        r = ev.evaluate(pack, regions: resolveRegions(pack, in: img), image: nil, now: 2.5)
+        XCTAssertEqual(r["rowBusy"]?.holds, false)                             // 2 s without a frame: no change
         XCTAssertEqual(r["rowGray"]?.count, 2)
 
         let reader = FakeReader(lines: ["Allow", "Deny"])

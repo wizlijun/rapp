@@ -46,15 +46,45 @@ final class StateEngineTests: XCTestCase {
         let w = try XCTUnwrap(e.tick(image: nil, visible: true, now: 0.7))
         XCTAssertEqual(w.state, "working"); XCTAssertEqual(w.by, ["stop"]); XCTAssertFalse(w.sure)
         // The frame that swaps the button for an arrow and turns a dot green also moves the dots
-        // (rowBusy fires on that one frame), so the release clock starts at the next, still frame.
+        // (rowBusy fires on that one frame). A frameless tick keeps motion for 1.5 s after a frame, so the
+        // release clock starts at the first tick past that (3.0), not at the first still tick.
         _ = e.tick(image: Canvas.chatWindow(dots: [.green], button: .arrow), visible: true, now: 1)
         XCTAssertEqual(e.report.state, "working")
         _ = e.tick(image: nil, visible: true, now: 1.2)
-        _ = e.tick(image: nil, visible: true, now: 3.0)                // release 2 s not over
+        _ = e.tick(image: nil, visible: true, now: 3.0)                // motion expired here; release 2 s starts
+        _ = e.tick(image: nil, visible: true, now: 4.9)                // release 2 s not over
         XCTAssertEqual(e.report.state, "working")
-        let d = try XCTUnwrap(e.tick(image: nil, visible: true, now: 3.3))
+        let d = try XCTUnwrap(e.tick(image: nil, visible: true, now: 5.1))
         XCTAssertEqual(d.state, "done"); XCTAssertEqual(d.counts["rowDot"], 1)
         XCTAssertEqual(d.json().contains("\"inferred\":true"), true)
+    }
+
+    /// A 1 fps feed (changed frames only, every one different) ticked every 0.5 s: the frameless ticks between
+    /// frames keep motion, so a 0.6 s hold on motion is met.
+    func testMotionSurvivesFramelessTicksAtOneFps() throws {
+        let e = try StateEngine(rules: Data(genericChatJSON.utf8), env: env(version: nil), text: nil)
+        var states: [Double: String] = [:]
+        for k in 0..<8 {
+            let t = Double(k) * 0.5
+            let frame: RuleImage? = k % 2 == 0 ? Canvas.chatWindow(spinnerPhase: (k / 2) % 2, button: .arrow) : nil
+            _ = e.tick(image: frame, visible: true, now: t)
+            states[t] = e.report.state
+        }
+        XCTAssertEqual(states[0], "idle")
+        XCTAssertEqual(states[2.0], "working")   // true since t = 1, held 1.0 s >= 0.6
+        XCTAssertEqual(states[3.5], "working")
+    }
+
+    func testMotionIsFalseTwoSecondsAfterTheLastFrame() throws {
+        let p = try RulePack.decode(try RuleValue.parse(Data(genericChatJSON.utf8)))
+        let ev = SignalEvaluator(caps: ["pixels"], text: nil)
+        let a = Canvas.chatWindow(spinnerPhase: 0, button: .arrow), b = Canvas.chatWindow(spinnerPhase: 1, button: .arrow)
+        _ = ev.evaluate(p, regions: resolveRegions(p, in: a), image: a, now: 0)
+        let hit = ev.evaluate(p, regions: resolveRegions(p, in: b), image: b, now: 1)
+        XCTAssertEqual(hit["rowBusy"]?.holds, true)
+        XCTAssertEqual(ev.evaluate(p, regions: [:], image: nil, now: 2.5)["rowBusy"]?.holds, true)  // 1.5 s old
+        XCTAssertEqual(ev.evaluate(p, regions: [:], image: nil, now: 3.0)["rowBusy"]?.holds, false) // 2 s old
+        XCTAssertEqual(ev.evaluate(p, regions: [:], image: nil, now: 3.5)["rowBusy"]?.holds, false)
     }
 
     func testVariantsByVersionThemeLocaleWidthAndFound() throws {

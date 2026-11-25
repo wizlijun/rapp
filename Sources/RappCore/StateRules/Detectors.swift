@@ -238,6 +238,10 @@ public final class SignalEvaluator {
     private let caps: Set<String>
     private let text: TextReader?
     private var last: [String: SignalResult] = [:]
+    private var lastFrameAt: TimeInterval?
+    /// A frameless tick keeps a motion signal's last result this long after the last frame (capture sends changed
+    /// frames only, so a 1 fps feed has a frame every second); after that no frame means no change.
+    private let motionKeep: TimeInterval = 1.5
 
     private struct Shot { var at: TimeInterval; var rw: Int, rh: Int; var w: Int, h: Int; var v: [UInt8] }
     private var motion: [String: [[Shot]]] = [:]          // signal -> per rect index -> recent thumbnails
@@ -252,12 +256,15 @@ public final class SignalEvaluator {
     public init(caps: Set<String>, text: TextReader?) { self.caps = caps; self.text = text }
 
     /// Pack or variants changed.
-    public func reset() { last = [:]; motion = [:]; texts = [:] }
+    public func reset() { last = [:]; motion = [:]; texts = [:]; lastFrameAt = nil }
 
-    /// `image == nil`: no new frame since the last call, so earlier results stand except `motion`, which is false.
+    /// `image == nil`: no new frame since the last call, so earlier results stand; `motion` too while the last frame
+    /// is at most `motionKeep` old, then it is false.
     public func evaluate(_ pack: RulePack, regions: [String: [RuleRect]], image: RuleImage?, now: TimeInterval)
         -> [String: SignalResult] {
         var regions = regions
+        if image != nil { lastFrameAt = now }
+        let recent = lastFrameAt.map { now - $0 <= motionKeep } ?? false
         var keys: [String: String] = [:]          // signal -> inline region key
         if let image {
             var p = pack
@@ -271,7 +278,7 @@ public final class SignalEvaluator {
             let hasMotion = sig.detects.contains { if case .motion = $0 { return true }; return false }
             guard usable else { out[name] = SignalResult(holds: false, count: nil); continue }
             guard let image else {
-                if hasMotion { out[name] = SignalResult(holds: false, count: last[name]?.count == nil ? nil : 0) }
+                if hasMotion && !recent { out[name] = SignalResult(holds: false, count: last[name]?.count == nil ? nil : 0) }
                 else { out[name] = last[name] ?? SignalResult(holds: false, count: nil) }
                 continue
             }
