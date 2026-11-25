@@ -1,0 +1,176 @@
+import AppKit
+import CoreVideo
+import Foundation
+import RappCore
+
+/// The app's version from `Contents/Info.plist`, read fresh each call (`Bundle` would cache it).
+func appVersion(bundleURL: URL?) -> String? {
+    guard let url = bundleURL,
+          let info = NSDictionary(contentsOf: url.appendingPathComponent("Contents/Info.plist")) else { return nil }
+    for key in ["CFBundleShortVersionString", "CFBundleVersion"] {
+        if let v = info[key] as? String, !v.isEmpty { return v }
+    }
+    return nil
+}
+
+/// Runs the state rules (spec §5, §7) on the app's main window and sends the inferred state.
+/// `offer` is called on the capture queue and stays cheap; the engine lives on `queue`.
+final class AppStateWatcher {
+    private let app: NSRunningApplication
+    private let text: TextReader?
+    private let send: (Message) -> Void
+    private let log: (String) -> Void
+    /// The session's latest captured frame and its region. Capture sends changed frames only, so a still window
+    /// gives `offer` nothing after rules arrive or the window moves; this seeds `newest` then. It takes the
+    /// session's `sampleLock`, so it is only ever called here without `lock` held (never both at once).
+    private let latest: () -> (CVPixelBuffer, CanvasRect)?
+    private let queue = DispatchQueue(label: "rapp.state", qos: .utility)
+
+    /// Guards `active`, `window` and `newest`, which the capture queue touches.
+    private let lock = NSLock()
+    private var active = false
+    private var window: CanvasRect?
+    /// The newest frame offered and not yet ticked; one retained buffer, replaced on every offer.
+    private var newest: (buffer: CVPixelBuffer, region: CanvasRect)?
+
+    /// Queue only.
+    private var engine: StateEngine?
+    private var timer: DispatchSourceTimer?
+    private var stopped = false
+
+    private static let interval: TimeInterval = 0.5
+
+    init(app: NSRunningApplication, text: TextReader?, latest: @escaping () -> (CVPixelBuffer, CanvasRect)? = { nil },
+         send: @escaping (Message) -> Void, log: @escaping (String) -> Void) {
+        self.app = app
+        self.latest = latest
+        self.text = text
+        self.send = send
+        self.log = log
+    }
+
+    /// "" stops; rules that cannot be read send one invalid report.
+    func setRules(_ json: String) {
+        queue.async { [self] in
+            guard !stopped else { return }
+            engine = nil
+            timer?.cancel()
+            timer = nil
+            lock.withLock { active = false; newest = nil }
+            guard !json.isEmpty else { return }
+
+            let bundleURL = app.bundleURL
+            let version = appVersion(bundleURL: bundleURL)
+            var caps: Set<String> = ["pixels"]
+            if text != nil { caps.insert("text"); VisionText.warmUp(log: log) }
+            let env = RuleEnv(appVersion: version, os: "macos", locale: Locale.preferredLanguages.first ?? "en",
+                              caps: caps, rereadVersion: { appVersion(bundleURL: bundleURL) })
+            do {
+                let engine = try StateEngine(rules: Data(json.utf8), env: env, text: text)
+                self.engine = engine
+                log("state rules: \(engine.report.pack ?? "-") rev \(engine.report.rev.map(String.init) ?? "-"), app \(version ?? "-")")
+            } catch {
+                let err = (error as? RuleError) ?? .badJSON
+                log("state rules: invalid (\(err))")
+                send(.appState(AppStateReport.invalid(err, caps: caps.sorted(), appVersion: version).json()))
+                return
+            }
+            lock.withLock { active = true }
+            seed()
+            let t = DispatchSource.makeTimerSource(queue: queue)
+            t.schedule(deadline: .now() + Self.interval, repeating: Self.interval)
+            t.setEventHandler { [weak self] in self?.tick() }
+            t.resume()
+            timer = t
+        }
+    }
+
+    /// The app's main window in canvas points; nil when there is none. A change drops the pending frame.
+    func setWindow(_ rect: CanvasRect?) {
+        let changed: Bool = lock.withLock {
+            let c = rect != window
+            if c { newest = nil }
+            window = rect
+            return c
+        }
+        if changed { queue.async { [self] in seed() } }
+    }
+
+    /// Queue only. Puts the session's latest frame in `newest` when nothing newer came in, so a still window
+    /// is read once after the rules arrive or the window moves. A frame offered meanwhile wins (the lock is
+    /// not held across `latest()`, which takes the session's sampleLock).
+    private func seed() {
+        guard !stopped, engine != nil, lock.withLock({ active }), let l = latest() else { return }
+        lock.withLock { if active, newest == nil { newest = (l.0, l.1) } }
+    }
+
+    /// Capture queue. Keeps only the newest frame; the sampling is done on the watcher queue.
+    func offer(_ buffer: CVPixelBuffer, region: CanvasRect) {
+        lock.withLock {
+            guard active else { return }
+            newest = (buffer, region)
+        }
+    }
+
+    func stop() {
+        lock.withLock { active = false; newest = nil; window = nil }
+        queue.async { [self] in
+            stopped = true
+            timer?.cancel()
+            timer = nil
+            engine = nil
+        }
+    }
+
+    /// Queue only.
+    private func tick() {
+        guard let engine, !stopped else { return }
+        let (win, frame): (CanvasRect?, (buffer: CVPixelBuffer, region: CanvasRect)?) = lock.withLock {
+            let f = newest
+            newest = nil
+            return (window, f)
+        }
+        var image: RuleImage?
+        var visible = win != nil
+        if let win, let frame {
+            switch Self.sample(frame.buffer, region: frame.region, window: win) {
+            case .image(let i): image = i
+            case .clipped: visible = false   // the window leaves the frame: not a picture of it
+            case .none: break
+            }
+        }
+        if let report = engine.tick(image: image, visible: visible, now: uptimeSeconds()) {
+            send(.appState(report.json()))
+        }
+    }
+
+    private enum Sampled { case image(RuleImage), clipped, none }
+
+    /// The window's part of `buffer` at one pixel per point.
+    private static func sample(_ buffer: CVPixelBuffer, region: CanvasRect, window win: CanvasRect) -> Sampled {
+        guard region.w > 0, region.h > 0, win.w > 0, win.h > 0 else { return .none }
+        let x0 = max(win.x, region.x), y0 = max(win.y, region.y)
+        let x1 = min(win.x + win.w, region.x + region.w), y1 = min(win.y + win.h, region.y + region.h)
+        guard x1 > x0, y1 > y0 else { return .clipped }
+        if x0 - win.x > 0.5 || y0 - win.y > 0.5 || (win.x + win.w) - x1 > 0.5 || (win.y + win.h) - y1 > 0.5 {
+            return .clipped
+        }
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(buffer) else { return .none }
+        let width = CVPixelBufferGetWidth(buffer), height = CVPixelBufferGetHeight(buffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
+        let scale = Double(width) / Double(region.w)
+        guard scale.isFinite, scale > 0 else { return .none }
+        let px0 = max(0, Int((Double(x0 - region.x) * scale).rounded(.down)))
+        let py0 = max(0, Int((Double(y0 - region.y) * scale).rounded(.down)))
+        let px1 = min(width, Int((Double(x1 - region.x) * scale).rounded(.up)))
+        let py1 = min(height, Int((Double(y1 - region.y) * scale).rounded(.up)))
+        guard px1 > px0, py1 > py0 else { return .none }
+        let bytes = UnsafeRawBufferPointer(start: base, count: bytesPerRow * height)
+        let crop = RuleRect(x: px0, y: py0, w: px1 - px0, h: py1 - py0)
+        guard let image = RuleImage.sample(bgra: bytes, width: width, height: height, bytesPerRow: bytesPerRow,
+                                           crop: crop, scale: scale) else { return .none }
+        return .image(image)
+    }
+}

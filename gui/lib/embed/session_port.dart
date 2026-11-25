@@ -1,11 +1,13 @@
 // The Dart side of the `rapp/session` method channel (macOS only): calls into the runner's
 // SessionPlugin, and the events it sends back. Arguments are maps; `sid` is the hub's sid.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'state_rules.dart' show stateRulesLimit;
 import 'voice_key_gate.dart';
 
 /// A window's kind on A, with the same names as RappCore's `WindowKind`.
@@ -386,6 +388,12 @@ class KeyTypedEvent extends SessionEvent {
   const KeyTypedEvent(super.sid);
 }
 
+/// The host's report of the app's state, read off its screen by the state rules (v16): the JSON as sent.
+class AppStateEvent extends SessionEvent {
+  const AppStateEvent(super.sid, this.json);
+  final String json;
+}
+
 class ClosedEvent extends SessionEvent {
   const ClosedEvent(super.sid, this.reason);
   final String reason;
@@ -548,6 +556,8 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
         return LatchUsedEvent(sid);
       case 'key_typed':
         return KeyTypedEvent(sid);
+      case 'app_state':
+        return AppStateEvent(sid, _as<String>(m['json']));
       case 'closed':
         return ClosedEvent(sid, _as<String>(m['reason']));
     }
@@ -668,6 +678,13 @@ abstract class SessionPort {
 
   /// Asks A to close the cover [id] of a [CoveredEvent] (A refuses system prompts itself).
   void dismissCover(Object sid, int id) => _send('dismiss_cover', {'sid': sid, 'id': id});
+
+  /// Gives the host the state rules for this session's app: a resolved pack's JSON, at most [stateRulesLimit] bytes
+  /// (a bigger one is not sent: the Linux session process drops the link on a bad command). '' means none.
+  void stateRules(Object sid, String json) {
+    if (utf8.encode(json).length > stateRulesLimit) return;
+    _send('state_rules', {'sid': sid, 'json': json});
+  }
 
   /// A line over the top of the session's own windows; '' for none (no-op without detach).
   void setBanner(Object sid, String text) => _send('set_banner', {'sid': sid, 'text': text});

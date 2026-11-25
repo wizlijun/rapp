@@ -133,6 +133,19 @@ u32  length    负载字节数，小端，最大 64 MiB（67 108 864）
 | 11 | SetStream | C→H | `u8 mode` · `u8 fps` · `f32 density` |
 | 12 | Size | H→C | `u16 width` · `u16 height`（A 实际内容区，pt） |
 
+**协议 v16 加的两条消息**（本表停在 v3；中间各版本见各自的规格，如《离开舞台暂停》§4.2。本节来自《状态规则》§14，线格式见该计划的 Wire format 一节）：
+
+| 类型 | 名字 | 方向 | 载荷 | 上限 |
+|---|---|---|---|---|
+| 43 | StateRules | C→H | `rest`：一包规则的 UTF-8 JSON，不带长度前缀（同 Text）；空载荷 = 这个会话不用规则 | 65536 字节 |
+| 44 | AppState | H→C | `rest`：一份报告的 UTF-8 JSON，不带长度前缀 | 4096 字节 |
+
+报告（AppState）的 JSON 键按字母排序：`appVersion`（被控端读到的 app 版本）、`by`（让这个状态成立的标志名，按名字排序）、`caps`（被控端的能力，如 `pixels`、`text`）、`counts`（每个计数标志命中几个，最多 32 个键）、`health`、`inferred`（总是 `true`）、`kind`、`pack`（用的哪一包）、`rev`、`state`（`working`、`done`、`blocked`、`idle` 或 `null`）、`sure`（`by` 不空且每个标志都是 `tested`）、`variants`（此刻盖上的变体名），以及只在 `health` 为 `invalid` 时才有的 `error`。`health`：`ok`、`switched`（自检后自动换了变体）、`unfit`（换遍了也对不上）、`invalid`（规则读不了）。超过 4096 字节时被控端先丢 `counts`。
+
+主控台只在 `state` 为 `blocked`、`sure` 为真、且 `health` 是 `ok` 时才把它算“需要你”（过期的 `unfit`/`switched`/`invalid` 也不亮“等你”灯，见《状态规则》）。
+
+A 只对 app 会话处理 43：终端和桌面会话不发也不收规则。Linux 被控端收到 43 只记一行日志，不回报告。43/44 是 v16 的新类型，两端版本要完全一致。
+
 字段取值：
 
 | 字段 | 合法值 | 不合法时 |

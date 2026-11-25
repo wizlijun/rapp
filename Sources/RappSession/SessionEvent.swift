@@ -88,6 +88,8 @@ public enum SessionEvent: Equatable {
     case appOpened(bundleID: String, name: String)
     /// A's keyboard focus is (true) or is no longer (false) in a password field (v13).
     case secureFocus(Bool)
+    /// A's app-state report (v16): UTF-8 JSON.
+    case appState(String)
     /// The link dropped (or A sent garbage): the last pictures stay; `closed` follows when the GUI ends the session.
     case disconnected(reason: String)
     /// The session ended and its pictures are released.

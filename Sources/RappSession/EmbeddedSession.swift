@@ -318,6 +318,8 @@ public final class EmbeddedSession {
             onEvent?(.appOpened(bundleID: bundleID, name: name))
         case let .secureFocus(on):
             onEvent?(.secureFocus(on))
+        case let .appState(json):
+            onEvent?(.appState(json))
         case .changed:
             // A paused session's picture changed: it counts as a frame for the activity lamp.
             frames += 1

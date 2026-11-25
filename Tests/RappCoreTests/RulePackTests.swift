@@ -1,0 +1,156 @@
+import XCTest
+@testable import RappCore
+
+final class RulePackTests: XCTestCase {
+    private func v(_ s: String) throws -> RuleValue { try RuleValue.parse(Data(s.utf8)) }
+
+    func testMergeByKeyNullDeletesArraysReplace() throws {
+        let base = try v(#"{"a":{"x":1,"y":2},"b":[1,2],"c":3}"#)
+        let patch = try v(#"{"a":{"y":null,"z":4},"b":[9],"d":{"e":null,"f":1}}"#)
+        XCTAssertEqual(base.merged(with: patch), try v(#"{"a":{"x":1,"z":4},"b":[9],"c":3,"d":{"f":1}}"#))
+    }
+
+    func testGenericChatDecodes() throws {
+        let p = try RulePack.decode(try v(genericChatJSON))
+        XCTAssertEqual(p.id, "generic-chat")
+        XCTAssertEqual(p.require, ["bottom"])
+        XCTAssertEqual(p.states.map(\.state), ["working", "idle"])
+        XCTAssertEqual(p.states[0].hold, 0.6); XCTAssertEqual(p.states[0].release, 2.0)
+        XCTAssertEqual(p.signals["stop"]?.detects, [.shape("square", min: 0)])
+        XCTAssertEqual(p.signals["rowBusy"]?.count, true)
+        guard case .blob(let b)? = p.regions["markers"], case .inline(.strip(let s)) = b.inside else { return XCTFail() }
+        XCTAssertEqual(s.of, .named("sidebar")); XCTAssertEqual(s.width, 40); XCTAssertEqual(b.pick, .all)
+        XCTAssertEqual(b.size, 6...20)
+    }
+
+    func testRevMustBeAnIntegerInRange() throws {
+        func decode(_ rev: String) throws -> RulePack {
+            try RulePack.decode(try v(#"{"format":"1.0","id":"x","rev":\#(rev)}"#))
+        }
+        XCTAssertEqual(try decode("0").rev, 0)
+        XCTAssertEqual(try decode("2147483647").rev, 2147483647)
+        XCTAssertEqual(try RulePack.decode(try v(#"{"format":"1.0","id":"x"}"#)).rev, 0)
+        for bad in ["2147483648", "-1", "1.5", "1e30", "\"7\""] {
+            XCTAssertThrowsError(try decode(bad), bad)
+        }
+    }
+
+    /// The pack file the GUI ships: every pack, with `extends` resolved the way the GUI does, decodes with no
+    /// unusable signal and no unknown region.
+    func testShippedAssetPacksAreAllUsable() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("gui/assets/state_rules.json")
+        let root = try v(String(contentsOf: url, encoding: .utf8))
+        let packs = root["packs"]?.arrayValue ?? []
+        XCTAssertGreaterThanOrEqual(packs.count, 4)
+        var byId: [String: RuleValue] = [:]
+        for p in packs { if let id = p["id"]?.stringValue { byId[id] = p } }
+        func resolved(_ id: String, depth: Int = 0) throws -> RuleValue {
+            let p = try XCTUnwrap(byId[id], id)
+            XCTAssertLessThan(depth, 8)
+            guard let base = p["extends"]?.stringValue else { return p }
+            var child = try XCTUnwrap(p.objectValue)
+            child["extends"] = nil
+            return try resolved(base, depth: depth + 1).merged(with: .object(child))
+        }
+        for id in byId.keys.sorted() {
+            let pack = try RulePack.decode(try resolved(id))
+            XCTAssertEqual(pack.id, id)
+            for (name, sig) in pack.signals { XCTAssertTrue(sig.usable, "\(id).\(name) unusable") }
+            for (name, r) in pack.regions { XCTAssertNotEqual(r, .unknown, "\(id).\(name) unknown region") }
+        }
+    }
+
+    func testShippedPacksDecode() throws {
+        for j in [chatgptDesktopJSON, claudeDesktopJSON, antigravityAppJSON] {
+            XCTAssertNoThrow(try RulePack.decode(try v(j)))
+        }
+    }
+
+    func testForwardCompatibility() throws {
+        let p = try RulePack.decode(try v(#"""
+        {"format":"1.7","id":"x","rev":2,"future":true,
+         "regions":{"a":{"box":{"top":0}},"b":{"hexagon":{}}},
+         "signals":{"s1":{"in":"a","detect":{"present":true}},"s2":{"in":"a","detect":{"smell":"rose"}},
+                    "s3":{"in":"b","detect":{"present":true}}},
+         "states":[{"state":"working","when":{"any":["s1"]}},{"state":"sleeping","when":{"any":["s1"]}},{"state":"idle"}]}
+        """#))
+        XCTAssertEqual(p.regions["b"], .unknown)
+        XCTAssertEqual(p.signals["s1"]?.usable, true)
+        XCTAssertEqual(p.signals["s2"]?.usable, false)
+        XCTAssertEqual(p.states.map(\.state), ["working", "idle"])
+    }
+
+    func testRejects() throws {
+        XCTAssertThrowsError(try RulePack.decode(try v(#"{"format":"2.0","id":"x"}"#))) {
+            XCTAssertEqual($0 as? RuleError, .unsupportedFormat("2.0"))
+        }
+        XCTAssertThrowsError(try RulePack.decode(try v(#"{"format":"1.0"}"#)))
+        XCTAssertThrowsError(try RulePack.parse(Data("{".utf8))) { XCTAssertEqual($0 as? RuleError, .badJSON) }
+        XCTAssertThrowsError(try RulePack.parse(Data("[]".utf8))) { XCTAssertEqual($0 as? RuleError, .badJSON) }
+        XCTAssertThrowsError(try RulePack.parse(Data(repeating: 0x20, count: ruleBytesLimit + 1))) {
+            XCTAssertEqual($0 as? RuleError, .tooLarge)
+        }
+    }
+
+    func testDetectForms() throws {
+        let p = try RulePack.decode(try v(#"""
+        {"format":"1.0","id":"x","regions":{"r":{"box":{"left":"10%","width":30}}},
+         "signals":{"a":{"in":"r","detect":{"shape":{"is":"dot","min":0.7},"color":{"h":[340,20],"l":[35,70]}}},
+                    "b":{"in":"r","detect":{"motion":{"window":0.4}},"status":"seen"},
+                    "c":{"in":"r","detect":{"text":["Worked for*"]},"needs":["text"],"status":"tested"},
+                    "d":{"in":"r","detect":{"color":"green"}}}}
+        """#))
+        XCTAssertEqual(p.signals["a"]?.detects.first, .shape("dot", min: 0.7))
+        XCTAssertEqual(p.signals["b"]?.detects, [.motion(window: 0.4, min: 0.02)])
+        XCTAssertEqual(p.signals["b"]?.status, .seen)
+        XCTAssertEqual(p.signals["c"]?.needs, ["text"])
+        XCTAssertEqual(p.signals["d"]?.detects, [.color(ColorRange.named("green")!)])
+        XCTAssertEqual(p.signals["a"]?.status, .untested)
+        guard case .box(let b)? = p.regions["r"] else { return XCTFail() }
+        XCTAssertEqual(b.left, .percent(10)); XCTAssertEqual(b.width, .points(30))
+        // Hue range that wraps through 0 survives decoding.
+        guard case .color(let c)? = p.signals["a"]?.detects.last else { return XCTFail() }
+        XCTAssertTrue(c.hueContains(350)); XCTAssertTrue(c.hueContains(10)); XCTAssertFalse(c.hueContains(180))
+    }
+
+    func testConditionForms() throws {
+        let p = try RulePack.decode(try v(#"""
+        {"format":"1.0","id":"x","states":[
+          {"state":"blocked","kind":"permission","when":{"all":["a",{"not":"b"}]}},
+          {"state":"done","when":{"weird":1}},{"state":"idle"}]}
+        """#))
+        XCTAssertEqual(p.states[0].when, .all([.signal("a"), .not(.signal("b"))]))
+        XCTAssertEqual(p.states[0].kind, "permission")
+        XCTAssertEqual(p.states[1].when, .never)
+        XCTAssertNil(p.states[2].when)
+    }
+
+    func testVariantsAndBadColor() throws {
+        let p = try RulePack.decode(try v(#"""
+        {"format":"1.0","id":"x","signals":{"u":{"in":"r","detect":{"color":"nonesuch"}}},
+         "variants":[{"name":"dark","when":{"theme":"dark"},"patch":{"a":1}},{"when":{"os":"macos"},"patch":{}}]}
+        """#))
+        XCTAssertEqual(p.signals["u"]?.usable, false)
+        XCTAssertEqual(p.variants.map(\.name), ["dark", "#1"])
+        XCTAssertEqual(p.variants[0].patch["a"], .number(1))
+        XCTAssertEqual(p.name, "x"); XCTAssertEqual(p.rev, 0)
+    }
+
+    func testHugeNumbersDoNotCrash() throws {
+        for rev in ["1e30", "-1e30", "1e308", "2.9"] { // a bad rev rejects the pack, never traps
+            XCTAssertThrowsError(try RulePack.decode(try v("{\"format\":\"1.0\",\"id\":\"x\",\"rev\":\(rev)}")))
+        }
+        let p = try RulePack.decode(try v(#"""
+        {"format":"1.0","id":"x","rev":1,
+         "regions":{"e":{"edge":{"from":"left","min":-1e30,"max":1e308}},
+                    "b":{"box":{"top":1e30,"width":"1e30%"}},
+                    "s":{"strip":{"of":"e","side":"left","width":1e308}},
+                    "o":{"blob":{"in":"e","size":[-1e30,1e30]}}},
+         "signals":{"a":{"in":"b","detect":{"motion":{"window":1e30,"min":-1e30},"color":{"h":[1e30,-1e30]}}}},
+         "states":[{"state":"working","hold":1e30,"release":-1e308}]}
+        """#))
+        XCTAssertEqual(p.rev, 1)
+        XCTAssertEqual(p.states.count, 1)
+    }
+}

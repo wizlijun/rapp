@@ -58,7 +58,8 @@ void main() {
   });
 
   /// Builds the state, opens [apps] (`id/app`) in order and shows the overview.
-  Future<void> boot(WidgetTester tester, {List<String> apps = const [], bool embed = true, TermSessionPort? termPort}) async {
+  Future<void> boot(WidgetTester tester,
+      {List<String> apps = const [], bool embed = true, TermSessionPort? termPort, String? stateRules}) async {
     tester.view.physicalSize = const Size(1194, 834);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -88,6 +89,7 @@ void main() {
       port: embed ? port : null,
       termPort: termPort,
       clock: () => epoch,
+      builtinStateRules: stateRules,
     );
     await tester.runAsync(() async {
       for (var i = 0; i < 8; i++) {
@@ -136,6 +138,16 @@ void main() {
     expect(inside('block-m1/a', find.text('48.0 KB/s')), findsOneWidget);
     final reason = s.entries.firstWhere((e) => e.app == 'b').reason!;
     expect(inside('block-m1/b', find.text('已断开：$reason')), findsOneWidget);
+  });
+
+  testWidgets('an inferred app state shows the word and 推断', (tester) async {
+    await boot(tester,
+        apps: ['m1/a'], stateRules: '{"version":1,"packs":[{"format":"1.0","id":"t","rev":1,"ids":["a"]}]}');
+    frame(1);
+    port.emit(const AppStateEvent(1, '{"state":"working","health":"ok","sure":false,"pack":"t","rev":1}'));
+    await show(tester);
+    expect(inside('block-m1/a', find.textContaining('在干活')), findsOneWidget);
+    expect(inside('block-m1/a', find.textContaining('推断')), findsOneWidget);
   });
 
   testWidgets('an opened terminal shows its program status in place of the traffic, every state', (tester) async {

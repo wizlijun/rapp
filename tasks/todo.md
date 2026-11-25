@@ -1102,3 +1102,26 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 5 旧版被控端：照旧显示 zsh
 - [ ] 6 总览「常用 · 终端」：写「新建」，点两次开出两个新终端；画面模式写「打开」，照旧
 - [ ] 7 同一台设备两个终端都在 `~/git/rapp`：先开的叫 `~/git/rapp`，后开的叫 `~/git/rapp · 2`；其中一个 `cd` 走后，另一个回到不带后缀（分支 `feat/term-title-dupes`）
+
+## 状态规则 R1–R4、R6（分支 `feat/app-state-rules`，2026-11-25）实机检查
+
+规格 `docs/superpowers/specs/2026-11-25-rapp-app-state-rules-design.md`；计划 `docs/superpowers/plans/2026-11-25-rapp-app-state-rules.md`。协议 v16（类型 43 `stateRules`、44 `appState`）。
+
+- [ ] 1 ChatGPT 做完一轮：灯从在干活回到空闲，行上显示完成 + 推断
+- [ ] 2 Claude 桌面端：在干活时灰点、做完绿点，灯跟着变
+- [ ] 3 Claude 要你确认时：灯变“等你”；`ask` 没验过时**不**进“需要你”
+- [ ] 4 关掉 `stateRules`（配置页选“关”）：重连后灯和以前一样
+- [ ] 5 在“我的”（`<数据目录>/shared/state_rules/`）里放一个只改一个数的补丁：配置页显示“我的（有补丁）”
+- [ ] 6 放一个故意对不上的包：大约 5 轮后配置页和会话菜单出现“状态规则可能过期”，不弹窗
+- [ ] 7 最小化 app 窗口一会儿：不会被判成对不上
+- [ ] 8 被控端日志里没有识别出的文字；报告里没有标题
+- [ ] 9 规则开着时 CPU：活动监视器里 rapp-host 比关掉规则时多不到 5%
+- [ ] 10 Linux 操作端连 macOS 被控端：灯一样会变（Linux 也发规则）
+- [x] 11 ✅ 已在本机回环验过（本机 Claude 7.37095.0）：日志那一行、`appState`、`invalid`、发 `""` 关掉规则，都和规格一致
+- [ ] 12 静止的 Claude 窗口：回环里窗口什么都没跑，却报了 working，因为 claude-desktop 包的 `rowGray` 数到 2 个灰点。到真机上看侧栏里被数的是哪个灰；不是 Claude 会话的灰点就在 rev 2 里重调这一包。没有屏幕证据，没有重调
+- [ ] 13 静止的 Claude 会话从 working 变 done 后，灯应停在 done，不能停在 working
+- [ ] 14 B 在这个会话上开着缩放或焦点面板时，状态停在最后一次读数，这是预期的；缩放关掉后，灯几秒内追上
+- [ ] 15 ChatGPT 的“Worked for”文字从没出现过，所以 `by` 里的 `workedFor` 未实测；到真机上找
+- [ ] 16 用 `/usr/bin/log stream --process rapp-host` 确认识别出的文字不出现在日志里（要写全路径，zsh 内建的 `log` 会盖住它）
+- [ ] 17 新启动的 rApp：Vision 预热期间（约 13 秒）文字标志还不生效，之后才生效；这段时间不出现任何错误
+- [ ] 18 移动一个静止的 Claude 窗口：灯不会闪一下“在干活”（移动后头一次取图可能还是移动前的画面）

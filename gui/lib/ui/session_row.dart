@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 
 import '../embed/traffic_label.dart' show formatRate;
+import 'term_status.dart' show programWord;
 import 'lamp.dart';
 import 'session_model.dart';
 import 'tokens.dart';
@@ -71,10 +72,14 @@ class SessionRow extends StatelessWidget {
     return path.isEmpty ? entry.device : '${entry.device} · $path';
   }
 
+  bool get _inferredShown => embedded && entry.reason == null && entry.inferred && entry.ps != null && entry.lamp != Lamp.connecting;
+
   /// The status text at the row's right (R22): the rate when active, 「空闲」, 「连接中」; empty
   /// when disconnected (its reason takes the second line) or when there is no data.
   String get _status {
     if (!embedded || entry.reason != null) return '';
+    final ps = entry.ps;
+    if (entry.inferred && ps != null && entry.lamp != Lamp.connecting) return programWord(ps);
     return switch (entry.lamp) {
       Lamp.active => entry.bytesPerSecond == null ? '' : formatRate(entry.bytesPerSecond!),
       Lamp.idle => '空闲',
@@ -96,6 +101,7 @@ class SessionRow extends StatelessWidget {
       // The state word is said once: 「空闲」 and 「连接中」 are both lamp and status.
       if (status != lampWord(entry.lamp)) lampWord(entry.lamp),
       if (status.isNotEmpty) status,
+      if (_inferredShown) '推断',
       if (second.isNotEmpty) second,
     ].join('，');
     final small = Theme.of(context).textTheme.bodySmall;
@@ -176,6 +182,11 @@ class SessionRow extends StatelessWidget {
                                 color: t.muted,
                               ),
                             ),
+                          ),
+                        if (_inferredShown)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 4),
+                            child: Text('推断', maxLines: 1, style: small?.copyWith(color: t.muted)),
                           ),
                       ],
                     ),

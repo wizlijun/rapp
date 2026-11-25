@@ -8,6 +8,7 @@ import 'dart:ui' show Offset, Size;
 import '../paths.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show Clipboard;
+import 'package:flutter/widgets.dart' show StringCharacters;
 
 import '../embed/phrases.dart';
 import '../embed/remote_session.dart';
@@ -25,6 +26,8 @@ import '../history/input_recorder.dart';
 import '../hub_client.dart';
 import '../permissions.dart';
 import '../embed/app_profile.dart';
+import '../embed/app_state.dart';
+import '../embed/state_rules.dart';
 import '../embed/composer_model.dart';
 import '../embed/modifier_latch.dart';
 import '../term/term_id.dart';
@@ -74,11 +77,12 @@ class HintRecord {
   bool get goes => device != null && app != null;
 }
 
-enum NeedKind { session, device, terminal }
+enum NeedKind { session, device, terminal, app }
 
 /// One thing waiting for the person: a disconnected session ([target] its record key) or a
 /// device that dropped ([target] its id), or a text terminal blocked on the person ([target] its session id,
-/// [device] its device, [title] its shown name). Newer [seq] first.
+/// [device] its device, [title] its shown name), or an app session whose screen shows a sure block ([target] its
+/// record key). Newer [seq] first.
 class NeedItem {
   const NeedItem(this.kind, this.target, this.text, this.seq, {this.reconnectWord = '重连', this.device, this.title});
   final String reconnectWord;
@@ -151,11 +155,15 @@ class MainState extends ChangeNotifier {
     this.doubleClick = const Duration(milliseconds: 500),
     DateTime Function()? clock,
     AppProfileStore? profiles,
+    StateRulesLibrary? stateRules,
+    String? builtinStateRules,
     UnlockStore? unlockStore,
     void Function(String line)? log,
     VoiceInput? voice,
     LlmApi? llmApi,
-  })  : resources = ResourcesState(clock: clock),
+  })  : _builtinStateRules = builtinStateRules,
+        stateRules = stateRules ?? StateRulesLibrary.parse(builtinStateRules, const {}),
+        resources = ResourcesState(clock: clock),
         voice = voice ??
             (defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.macOS
                 ? VoiceInput()
@@ -247,6 +255,13 @@ class MainState extends ChangeNotifier {
     final pp = profiles.problem;
     if (pp != null) hint = hint.isEmpty ? pp : '$hint；$pp';
     profiles.addListener(_onProfiles);
+    StateRulesLibrary.load(d, _builtinStateRules).then((lib) {
+      if (data.root == d.root) {
+        stateRules = lib;
+        _resendRules();
+        notifyListeners();
+      }
+    });
     for (final rs in remote.values) {
       rs.setProfile(profiles.resolve(rs.appId));
       _syncHidden(rs);
@@ -335,6 +350,10 @@ class MainState extends ChangeNotifier {
 
   /// My app profiles (`apps.json` in `shared/`) and the built-in ones; swapped by [relocate].
   late AppProfileStore profiles;
+
+  /// The built-in and my state rule packs (`shared/state_rules/`); swapped by [relocate].
+  StateRulesLibrary stateRules;
+  final String? _builtinStateRules;
   final void Function(String line) _log;
   final Map<Object, List<int>> _sentHidden = {};
   final Map<Object, int> _loggedHidden = {};
@@ -652,6 +671,7 @@ class MainState extends ChangeNotifier {
         openOrSwitch(n.device!, n.target, n.title!);
         notifyListeners();
       case NeedKind.session:
+      case NeedKind.app:
         corner = null;
         select(n.target);
       case NeedKind.device:
@@ -1148,6 +1168,16 @@ class MainState extends ChangeNotifier {
                   _termNeedSeq.putIfAbsent(key, () => ++_seq),
                   device: e.key, title: title);
             }(),
+      // An app whose screen shows a sure block waits for the person; a guess (or out-of-date rules) does not.
+      for (final r in _records.values)
+        if (r.phase == Phase.live && r.sid != null && remote[r.sid]?.inferredNeed == true)
+          () {
+            final key = 'app\n${r.key}';
+            seen.add(key);
+            return NeedItem(NeedKind.app, r.key,
+                '${r.appName} @ ${deviceName(r.id)}：${termAskWord(remote[r.sid]!.inferredPs!)}',
+                _termNeedSeq.putIfAbsent(key, () => ++_seq));
+          }(),
     ];
     _termNeedSeq.removeWhere((k, _) => !seen.contains(k));
     out.sort((a, b) => b.seq.compareTo(a.seq));
@@ -1274,6 +1304,7 @@ class MainState extends ChangeNotifier {
     // A terminal's name is the device's current one; the last one seen stays when the row is gone.
     final tn = isTermApp(r.app) ? termName(r.id, r.app) : null;
     if (tn != null) r.appName = tn;
+    final inferredPs = r.phase == Phase.live ? rs?.inferredPs : null;
     return SessionEntry(
       sid: sid,
       id: r.id,
@@ -1285,7 +1316,8 @@ class MainState extends ChangeNotifier {
       bytesPerSecond: r.phase == Phase.live ? rs?.bytesPerSecond : null,
       reason: r.phase == Phase.disconnected ? disconnectWord(r.reason) : null,
       takenOver: r.phase == Phase.disconnected && takenOver(r.reason),
-      ps: r.phase == Phase.disconnected ? null : _termPs(r.id, r.app),
+      ps: r.phase == Phase.disconnected ? null : (_termPs(r.id, r.app) ?? inferredPs),
+      inferred: inferredPs != null && !isTermApp(r.app),
     );
   }
 
@@ -1565,8 +1597,11 @@ class MainState extends ChangeNotifier {
       }
       return;
     }
+    if (e is AppStateEvent && !_appReportWanted(e)) return; // not from the rules now on this link
     final wasLocked = rs.screenLocked;
     _applyPortEvent(rs, e);
+    if (e is ReadyEvent) _sendRules(r, rs, e.sid);
+    if (e is AppStateEvent) _trackAppState(r, rs, e.sid);
     if (e is ComposerDraftEvent && e.action != null) _nativeAction(rs, e.action!);
     if (e is ComposerDraftEvent && (e.send || e.retry)) unawaited(_submitNative(rs, e));
     if (e is ScreenLockedEvent) {
@@ -1623,6 +1658,101 @@ class MainState extends ChangeNotifier {
   }
 
   Timer? _blockedTimer;
+
+  /// The rules sent on each live link (by sid); [rulesOf] reads them.
+  final Map<Object, ChosenRules> _rulesBySid = {};
+
+  /// The app sessions that went ready: the ones whose rules [_resendRules] keeps current (also when none were sent).
+  final Set<Object> _rulesReady = {};
+
+  /// The (state, kind) each link last reported, to queue only changes; the first report is the starting point.
+  final Map<Object, (String?, String?)> _appSeen = {};
+
+  /// What was sent to the host on [sid]'s link: null for none (a terminal, the desktop, `stateRules: off`, no pack).
+  ChosenRules? rulesOf(Object sid) => _rulesBySid[sid];
+
+  /// Test seam: whether [sid] is still in the rules maps (rules sent, ready, state seen).
+  @visibleForTesting
+  (bool, bool, bool) debugRulesBookkeeping(Object sid) =>
+      (_rulesBySid.containsKey(sid), _rulesReady.contains(sid), _appSeen.containsKey(sid));
+
+  /// [sid]'s link is gone for good: its rules bookkeeping goes with it.
+  void _forgetAppRules(Object sid) {
+    _rulesBySid.remove(sid);
+    _rulesReady.remove(sid);
+    _appSeen.remove(sid);
+  }
+
+  /// A report counts only while rules are on for the link and it says it came from them: the pack and rev that
+  /// were sent. (A report in flight when the rules went off or changed is late.) A report that names no pack
+  /// (unreadable pack, or the host's last shrink) counts when rules were sent.
+  bool _appReportWanted(AppStateEvent e) {
+    final chosen = _rulesBySid[e.sid];
+    if (chosen == null) return false;
+    final a = AppState.parse(e.json);
+    if (a == null) return false;
+    // The host's last shrink step drops pack and rev; the one before cuts pack to 64 characters (Swift's
+    // `prefix`, by grapheme clusters). Without a pack there is nothing to compare.
+    final pack = a.pack;
+    if (pack == null) return true;
+    return pack == chosen.id.characters.take(64).string && a.rev == chosen.rev;
+  }
+
+  /// An app session is ready: the host gets the rules for it (again on every new link; a text terminal and the
+  /// whole desktop have none). The library is read now, not cached: a relocate reloads it.
+  void _sendRules(SessionRecord r, RemoteSession rs, Object sid) {
+    final live = {for (final x in _records.values) ...[x.sid, x.lastSid]};
+    _rulesBySid.removeWhere((k, _) => !live.contains(k));
+    _rulesReady.removeWhere((k) => !live.contains(k));
+    _appSeen.removeWhere((k, _) => !live.contains(k));
+    if (isTermApp(r.app) || isDesktopApp(r.app) || _rulesBySid.containsKey(sid)) return;
+    _rulesReady.add(sid);
+    final chosen = stateRules.choose(r.app, rs.profile.stateRules);
+    final port = portOf(sid);
+    if (chosen == null || port == null) return;
+    _rulesBySid[sid] = chosen;
+    port.stateRules(sid, chosen.json);
+  }
+
+  /// The profile or the library changed: every live app session that was sent rules gets the new choice when it
+  /// differs from what the host holds ("" when it is now off or has no pack). Unchanged sessions get nothing.
+  void _resendRules() {
+    for (final rs in remote.values) {
+      final sid = rs.sid;
+      final old = _rulesBySid[sid];
+      if (!_rulesReady.contains(sid)) continue; // not ready yet (or a terminal, the desktop): ready sends them
+      final port = portOf(sid);
+      if (port == null || !_liveSid(sid)) continue;
+      final chosen = stateRules.choose(rs.appId, rs.profile.stateRules);
+      if (chosen?.json == old?.json) {
+        if (chosen != null) _rulesBySid[sid] = chosen; // same text, maybe a new rev or tally
+        continue;
+      }
+      if (chosen == null) {
+        _rulesBySid.remove(sid);
+      } else {
+        _rulesBySid[sid] = chosen;
+      }
+      // What was inferred under the old rules is not true of the new: clear it (a late report is dropped by
+      // [_appReportWanted]), so the lamp, the word and 需要你 fall back to what they are without rules.
+      rs.clearAppState();
+      _appSeen.remove(sid);
+      port.stateRules(sid, chosen?.json ?? '');
+    }
+  }
+
+  /// Queues a change of the inferred state in the status queue (marked inferred); a state-less report is no change.
+  void _trackAppState(SessionRecord r, RemoteSession rs, Object sid) {
+    final a = rs.appState;
+    final ps = rs.inferredPs;
+    if (a == null || ps == null) return;
+    final now = (a.state, a.kind);
+    final was = _appSeen[sid];
+    _appSeen[sid] = now;
+    if (was == null || was == now) return;
+    _queue(HintRecord('${r.appName} @ ${deviceName(r.id)}：${programWord(ps)}', _now(),
+        device: r.id, app: r.app, title: r.appName, lamp: programLamp(ps), inferred: true));
+  }
 
   /// Each record's latest host notice (by record key: a reconnect keeps it), and its expiry.
   final _notices = <String, ({HostNotice notice, Timer timer, int epoch})>{};
@@ -1783,6 +1913,7 @@ class MainState extends ChangeNotifier {
         if (start != null) resources.linkDown(start);
         _keepIn(r.lastSid, _endTidy(fresh));
         remote.remove(fresh)?.dispose();
+        _forgetAppRules(fresh);
         _sentFps.remove(fresh);
         _waiting.remove(fresh)?.timer.cancel();
         portOf(fresh)?.close(fresh);
@@ -2022,6 +2153,7 @@ class MainState extends ChangeNotifier {
     for (final sid in [r.sid, old]) {
       if (sid == null) continue;
       remote.remove(sid)?.dispose();
+      _forgetAppRules(sid);
       _unlockSeen.remove(sid);
       _lockEpoch.remove(sid);
       _sentFps.remove(sid);
@@ -2044,6 +2176,7 @@ class MainState extends ChangeNotifier {
   /// what was written in the old composer carries over (text only).
   void _dropOld(Object old, Object? fresh) {
     final gone = remote.remove(old);
+    _forgetAppRules(old);
     if (gone == null) return;
     final to = fresh == null ? null : remote[fresh];
     final tidy = _tidies.remove(old);
@@ -2238,6 +2371,7 @@ class MainState extends ChangeNotifier {
       final original = _endTidy(s.sid);
       if (original != null) remote[s.sid]?.composer.keepNow(original); // the record's draft keeps it
       remote.remove(s.sid)?.dispose();
+      _forgetAppRules(s.sid);
       _starts.remove(s.sid);
       _quiet.add(s.sid);
       hub!.close(s.sid);
@@ -2509,6 +2643,7 @@ class MainState extends ChangeNotifier {
       if (start != null) resources.linkDown(start);
       _keepIn(old, _endTidy(fresh));
       remote.remove(fresh)?.dispose();
+      _forgetAppRules(fresh);
       _sentFps.remove(fresh);
       _waiting.remove(fresh)?.timer.cancel();
       _quiet.add(fresh);
@@ -2805,6 +2940,7 @@ class MainState extends ChangeNotifier {
       rs.setProfile(profiles.resolve(rs.appId));
       _syncHidden(rs);
     }
+    _resendRules();
     _applyFps(); // focusPane may have changed
     if (profiles.problem == appsSaveProblem) hint = appsSaveProblem;
     notifyListeners();

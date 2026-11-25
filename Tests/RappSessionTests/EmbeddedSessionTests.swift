@@ -258,6 +258,15 @@ final class EmbeddedSessionTests: XCTestCase {
         XCTAssertTrue(events.contains(.secureFocus(true)))
     }
 
+    func testAppStateIsForwarded() {
+        let link = FakeLink()
+        var events: [SessionEvent] = []
+        let (_, q) = make(link) { events.append($0) }
+        link.feed(.appState("{}"))
+        q.sync {}
+        XCTAssertTrue(events.contains(.appState("{}")))
+    }
+
     func testInconsistentFrameClosesNotCrashes() throws {
         let link = FakeLink()
         var events = [SessionEvent]()

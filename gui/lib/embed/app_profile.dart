@@ -141,6 +141,7 @@ class AppProfile {
     this.input,
     this.composerAt,
     this.windows,
+    this.stateRules,
     this.tested,
   });
 
@@ -170,6 +171,9 @@ class AppProfile {
   /// Where the writing panel sits (its bottom centre); null: [defaultComposerAt].
   InputPoint? composerAt;
   List<WindowRule>? windows;
+
+  /// The state rules pack this app uses: `off`, a pack id, or null to find one by the app's id.
+  String? stateRules;
   bool? tested;
 
   bool matches(String appId) {
@@ -195,6 +199,7 @@ class AppProfile {
         input: input,
         composerAt: composerAt,
         windows: windows == null ? null : [...windows!],
+        stateRules: stateRules,
         tested: tested,
       );
 
@@ -217,6 +222,7 @@ class AppProfile {
         if (input != null) 'input': input!.toJson(),
         if (composerAt != null) 'composerAt': composerAt!.toJson(),
         if (windows != null) 'windows': [for (final w in windows!) w.toJson()],
+        if (stateRules != null) 'stateRules': stateRules,
         if (tested != null) 'tested': tested,
       };
 
@@ -272,6 +278,7 @@ class AppProfile {
       input: InputPoint.fromJson(j['input']),
       composerAt: InputPoint.fromJson(j['composerAt']),
       windows: windows,
+      stateRules: j['stateRules'] is String && (j['stateRules'] as String).trim().isNotEmpty ? (j['stateRules'] as String).trim() : null,
       tested: j['tested'] is bool ? j['tested'] as bool : null,
     );
   }
@@ -308,6 +315,7 @@ class ResolvedProfile {
     this.input,
     this.composerAt,
     this.windows = const [],
+    this.stateRules,
     this.tested = true,
   });
 
@@ -339,6 +347,9 @@ class ResolvedProfile {
   /// Where the writing panel sits; null: [defaultComposerAt].
   final InputPoint? composerAt;
   final List<WindowRule> windows;
+
+  /// `off`, a pack id, or null: find the pack by the app's id.
+  final String? stateRules;
   final bool tested;
 }
 
@@ -387,6 +398,7 @@ ResolvedProfile resolveProfile(String appId, {required List<AppProfile> mine, re
     input: pick((p) => p.input),
     composerAt: pick((p) => p.composerAt),
     windows: pick((p) => p.windows) ?? const [],
+    stateRules: pick((p) => p.stateRules),
     tested: pick((p) => p.tested) ?? true,
   );
 }

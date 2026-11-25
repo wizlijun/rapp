@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/app_profile.dart';
+import 'package:rapp/embed/app_state.dart';
+import 'package:rapp/embed/state_rules.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/pages/app_profile_page.dart';
 import 'package:rapp/ui/app_profile_store.dart';
@@ -22,13 +24,13 @@ void main() {
         AppProfile(ids: [_chrome], name: 'Google Chrome', mode: 'color16', density: 'adaptive', fps: 15, tested: tested),
       ]);
 
-  Future<void> open(WidgetTester tester, AppProfileStore store, {String? appId, String appName = ''}) async {
+  Future<void> open(WidgetTester tester, AppProfileStore store, {String? appId, String appName = '', RulesView? rules}) async {
     tester.view.physicalSize = const Size(1200, 2400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(wrap(Builder(
       builder: (c) => TextButton(
-        onPressed: () => openAppProfilePage(c, store, appId: appId, appName: appName),
+        onPressed: () => openAppProfilePage(c, store, appId: appId, appName: appName, rules: rules),
         child: const Text('go'),
       ),
     )));
@@ -255,5 +257,80 @@ void main() {
     for (final t in tester.widgetList<Text>(find.byType(Text))) {
       expect(t.data?.toLowerCase() ?? '', isNot(anyOf(contains('profile'), contains('regex'))));
     }
+  });
+
+  group('状态规则', () {
+    RulesView view({String health = 'ok', bool patched = false, String? appVersion, List<String> errors = const []}) => RulesView(
+          chosen: ChosenRules(
+              id: 'claude-desktop', rev: 1, layer: RulesLayer.builtin, patched: patched, json: '{}', tally: const SignalTally(1, 2, 0, 3)),
+          state: AppState(health: health, appVersion: appVersion),
+          errors: errors,
+        );
+
+    testWidgets('shows which pack, its rev and layer, how tested, and its health', (tester) async {
+      await open(tester, storeWith(), appId: _chrome, rules: view(appVersion: '7.1'));
+      expect(find.text('状态规则'), findsOneWidget);
+      expect(find.textContaining('claude-desktop'), findsOneWidget);
+      expect(find.textContaining('修订 1'), findsOneWidget);
+      expect(find.textContaining('内置'), findsOneWidget);
+      expect(find.textContaining('验过 1 · 见过 2 · 有人报过 0 · 未验 3'), findsOneWidget);
+      expect(find.textContaining('正常'), findsOneWidget);
+      expect(find.textContaining('app 版本：7.1'), findsOneWidget);
+      expect(find.text('状态规则可能过期'), findsNothing);
+      expect(find.textContaining('读不了'), findsNothing);
+    });
+
+    testWidgets('unfit, switched, invalid, patched and bad mine files', (tester) async {
+      await open(tester, storeWith(), appId: _chrome, rules: view(health: 'unfit', patched: true, errors: ['a.json: x', 'b.json: y']));
+      expect(find.textContaining('对不上'), findsOneWidget);
+      expect(find.text('状态规则可能过期'), findsOneWidget);
+      expect(find.textContaining('（有补丁）'), findsOneWidget);
+      expect(find.text('“我的”里有 2 个文件读不了'), findsOneWidget);
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      await open(tester, storeWith(), appId: _chrome, rules: view(health: 'switched'));
+      expect(find.textContaining('自动换了变体'), findsOneWidget);
+      expect(find.text('状态规则可能过期'), findsNothing);
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      await open(tester, storeWith(), appId: _chrome, rules: view(health: 'invalid'));
+      expect(find.textContaining('规则读不了'), findsOneWidget);
+      expect(find.text('状态规则可能过期'), findsOneWidget);
+    });
+
+    testWidgets('no session: says so', (tester) async {
+      await open(tester, storeWith(), appId: _chrome);
+      expect(find.text('会话没开，看不到用的是哪一包'), findsOneWidget);
+      expect(find.textContaining('验过'), findsNothing);
+    });
+
+    testWidgets('自动 / 关 / 指定 save as null, off, the pack id', (tester) async {
+      final store = storeWith();
+      await open(tester, store, appId: _chrome);
+      await tester.ensureVisible(find.byKey(const Key('rules-off')));
+      await tester.tap(find.byKey(const Key('rules-off')));
+      await tester.pump();
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.mineFor(_chrome)!.stateRules, 'off');
+
+      await open(tester, store, appId: _chrome);
+      await tester.ensureVisible(find.byKey(const Key('rules-pack')));
+      await tester.tap(find.byKey(const Key('rules-pack')));
+      await tester.pump();
+      await tester.enterText(find.byKey(const Key('rules-pack-field')), ' generic-chat ');
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.mineFor(_chrome)!.stateRules, 'generic-chat');
+
+      await open(tester, store, appId: _chrome);
+      expect(tester.widget<TextField>(find.byKey(const Key('rules-pack-field'))).controller!.text, 'generic-chat');
+      await tester.ensureVisible(find.byKey(const Key('rules-auto')));
+      await tester.tap(find.byKey(const Key('rules-auto')));
+      await tester.pump();
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.mineFor(_chrome)!.stateRules, isNull);
+    });
   });
 }

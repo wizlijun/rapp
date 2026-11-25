@@ -767,6 +767,12 @@ fn handle(l: &mut Live, desktop: &mut Desktop, input: Input) -> Result<()> {
                 l.send(&wire::text_packet(26, &message))?;
             }
         }
+        Input::StateRules => {
+            static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            if !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("state rules: not supported on this host");
+            }
+        }
         _ => {}
     }
     Ok(())

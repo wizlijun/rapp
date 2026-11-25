@@ -5,6 +5,8 @@ import 'package:flutter/services.dart' show KeyEvent;
 
 import '../platform_caps.dart';
 import 'app_profile.dart';
+import '../hub_client.dart' show TermPs;
+import 'app_state.dart';
 import 'composer_model.dart';
 import 'geometry.dart' show contentSize;
 import 'modifier_latch.dart';
@@ -168,6 +170,20 @@ class RemoteSession extends ChangeNotifier {
 
   /// A's screen is locked, as its host last said; null until told (an older host never says).
   bool? screenLocked;
+
+  /// What the host's state rules read off the app's screen on this link; null until it says, and after the link drops.
+  AppState? appState;
+
+  /// The program status the inferred state shows as: null without one, and for a block from rules that
+  /// may be out of date (they must not light a waiting lamp).
+  TermPs? get inferredPs {
+    final a = appState;
+    if (a == null || (a.stale && a.state == 'blocked')) return null;
+    return a.ps;
+  }
+
+  /// A sure block of rules that still fit: the only inferred state that is 需要你.
+  bool get inferredNeed => appState != null && !appState!.stale && appState!.state == 'blocked' && appState!.sure;
 
   /// A's input source as its host last said (null: an older host that never says).
   ({String id, String name, bool ascii})? inputSource;
@@ -458,6 +474,9 @@ class RemoteSession extends ChangeNotifier {
         screenLocked = e.locked;
       case SecureFocusEvent():
         secureFocus = e.on;
+      case AppStateEvent():
+        final a = AppState.parse(e.json);
+        if (a != null) appState = a; // a bad or oversized report is skipped
       case CoveredEvent():
       case AppOpenedEvent():
       case HostNoticeActionEvent():
@@ -472,8 +491,16 @@ class RemoteSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The rules changed or went off: what was inferred under them no longer stands.
+  void clearAppState() {
+    if (appState == null) return;
+    appState = null;
+    notifyListeners();
+  }
+
   /// The link is gone: no transfer or send round is running any more.
   void linkDown() {
+    appState = null; // a new link's host says it again
     focus = null;
     secureFocus = false; // a new link's host says it again when it is still so
     _focusWanted = false;

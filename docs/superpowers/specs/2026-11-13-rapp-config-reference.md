@@ -28,7 +28,7 @@
      ```
      $ROOT/
        README.md  .gitignore
-       shared/            所有设备共用（进 git）：apps.json  workspace.json
+       shared/            所有设备共用（进 git）：apps.json  workspace.json  state_rules/*.json（“我的”状态规则包）
        devices/<id>/      每台设备一份，只由这台设备写（进 git）：device.json  gui.json  inputs/<日期>.jsonl（写作面板发出去的话，《输入记录》§4、§5.1）
        agent/             用户和 agent 的内容（进 git），rapp 不动
        clipboard/         钉住的文字条目，一条一个 .md（进 git）
@@ -50,6 +50,7 @@
 | `$ROOT/shared/workspace.json` | B | GUI，可手改 | 无 | §2.3 |
 | `$ROOT/devices/<id>/gui.json` | B | GUI，可手改 | 无 | §2.4 |
 | `$ROOT/shared/apps.json` | B | GUI，可手改 | 无 | §2.5 |
+| `$ROOT/shared/state_rules/*.json` | B | 用户或 agent 手放 | 无 | §2.5 |
 | `$ROOT/local/term.json` | A | GUI 经 IPC 改开关，可手改 | 无 | §2.10 |
 | `$ROOT/local/shares.json` | A（分享方） | `rapp share` / `rapp unshare`（经 IPC），可手改 | 无 | §2.11 |
 | `$ROOT/devices/<id>/device.json` | A / B | 程序自管（rapp-service 写，没有机密） | 无 | §2.6 |
@@ -142,6 +143,8 @@ agent 规则：**不直接改这个文件**。加、删设备走 GUI 的设备�
 ### 2.5 `$ROOT/shared/apps.json`（我的 app 配置）
 
 格式和取值见《app 配置设计》§2，怎么写见《app 配置编写规范》。内置的一份在 `gui/assets/app_profiles.json`（随 GUI 发布，只在仓库里改；启动时由 `gui/lib/main.dart:82` 读出来）。没有机密。
+
+`stateRules`（没写或 `null` = 自动按 `ids` 挑包；`"off"` = 不用规则；其他字符串 = 指定的包名）：改了马上重发给已开的 app 会话，不用重连；终端和桌面会话从不发。规则包有两层：内置的在 `gui/assets/state_rules.json`（只在仓库里改），“我的”在 `<数据目录>/shared/state_rules/*.json`（`$ROOT/shared/` 下，进 git，没有机密，一个文件一包，手放）。同名时 `rev` 大的赢，一样大算“我的”；支持 `extends` 和补丁；读不了的文件被跳过，在配置页数着。规则的写法见《状态规则》`2026-11-25-rapp-app-state-rules-design.md`。
 
 `focusPane`（布尔，没写时 `true`）：`false` 时这个 app 选了「智能」预设也不按焦点分区，整窗保持彩色（配置页开关「智能时按焦点分区」；见《智能预设与焦点面板》）。
 

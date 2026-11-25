@@ -41,7 +41,7 @@ class _NeedsYouAnchorState extends State<NeedsYouAnchor> {
     final needs = _s.needs;
     final n = needs.length;
     final sessions = needs.any((x) => x.kind == NeedKind.session);
-    final terms = needs.any((x) => x.kind == NeedKind.terminal);
+    final terms = needs.any((x) => x.kind == NeedKind.terminal || x.kind == NeedKind.app);
     final lamp = sessions
         ? Lamp.disconnected
         : (terms ? Lamp.waiting : (n > 0 ? Lamp.offline : Lamp.active));
@@ -177,6 +177,12 @@ class _NeedsList extends StatelessWidget {
                     state.closeCorner();
                   }
                 : null,
+          )
+        else if (n.kind == NeedKind.app)
+          RappButton.secondary(
+            key: Key('need-look-${n.target}'),
+            label: '看看',
+            onPressed: () => state.goToNeed(n),
           )
         else if (session)
           RappButton.accent(

@@ -4,15 +4,25 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../embed/app_profile.dart';
+import '../embed/app_state.dart';
 import '../embed/session_port.dart';
+import '../embed/state_rules.dart';
 import '../ui/app_profile_store.dart';
 import '../ui/controls.dart';
 import '../ui/tokens.dart';
 
+/// What the live session of this app runs on: the pack sent to it, its latest report, and the unreadable files of 我的.
+class RulesView {
+  const RulesView({this.chosen, this.state, this.errors = const []});
+  final ChosenRules? chosen;
+  final AppState? state;
+  final List<String> errors;
+}
+
 Future<void> openAppProfilePage(BuildContext context, AppProfileStore store,
-        {String? appId, String appName = ''}) =>
+        {String? appId, String appName = '', RulesView? rules}) =>
     Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => AppProfilePage(store: store, appId: appId, appName: appName)),
+      MaterialPageRoute<void>(builder: (_) => AppProfilePage(store: store, appId: appId, appName: appName, rules: rules)),
     );
 
 const _modeLabels = {'duogray': '双色·灰度', 'duocolor': '双色·彩色', 'color16': '高彩'};
@@ -30,9 +40,12 @@ const _kindLabels = {
 const _actionLabels = {RuleAction.hide: '隐藏', RuleAction.noComposer: '不要输入区'};
 
 class AppProfilePage extends StatefulWidget {
-  const AppProfilePage({super.key, required this.store, this.appId, this.appName = ''});
+  const AppProfilePage({super.key, required this.store, this.appId, this.appName = '', this.rules});
 
   final AppProfileStore store;
+
+  /// Null when no session of this app is open.
+  final RulesView? rules;
   final String? appId;
   final String appName;
 
@@ -46,10 +59,13 @@ class _AppProfilePageState extends State<AppProfilePage> {
   late final AppProfile? _builtin;
   late final ResolvedProfile _base;
   late final List<String> _defaultIds;
-  late final TextEditingController _name, _ids;
+  late final TextEditingController _name, _ids, _pack;
   late List<Key> _keys;
   int _nextKey = 0;
   bool _idsMissing = false;
+
+  /// 指定 is picked (its box shows); the draft holds the name only once one is typed.
+  bool _packMode = false;
 
   @override
   void initState() {
@@ -63,6 +79,9 @@ class _AppProfilePageState extends State<AppProfilePage> {
     _base = resolveProfile(id ?? '', mine: const [], builtin: s.builtin);
     _name = TextEditingController(text: _draft.name ?? _base.name ?? '');
     _ids = TextEditingController(text: _draft.ids.join(', '));
+    final sr = _draft.stateRules;
+    _pack = TextEditingController(text: sr == null || sr == 'off' ? '' : sr);
+    _packMode = sr != null && sr != 'off';
     _keys = [for (var i = 0; i < _rules.length; i++) _newKey()];
   }
 
@@ -70,6 +89,7 @@ class _AppProfilePageState extends State<AppProfilePage> {
   void dispose() {
     _name.dispose();
     _ids.dispose();
+    _pack.dispose();
     super.dispose();
   }
 
@@ -109,6 +129,7 @@ class _AppProfilePageState extends State<AppProfilePage> {
       _draft.phrases == null &&
       _draft.input == null &&
       _draft.windows == null &&
+      _draft.stateRules == null &&
       _draft.tested == null &&
       _sameIds(_draft.ids, _defaultIds);
 
@@ -128,6 +149,75 @@ class _AppProfilePageState extends State<AppProfilePage> {
       widget.store.put(_draft, replacing: _orig);
     }
     Navigator.of(context).pop();
+  }
+
+  static const _healthWords = {'ok': '正常', 'switched': '自动换了变体', 'unfit': '对不上', 'invalid': '规则读不了'};
+
+  List<Widget> _rulesSection(RappTokens t) {
+    final d = _draft;
+    final v = widget.rules;
+    final mode = _packMode ? 'pack' : (d.stateRules == 'off' ? 'off' : 'auto');
+    Widget line(String text, {Key? key, bool muted = false}) => Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Text(text, key: key, style: TextStyle(color: muted ? t.muted : t.text)));
+    final c = v?.chosen, a = v?.state;
+    return [
+      _label(t, '状态规则'),
+      Wrap(spacing: 16, crossAxisAlignment: WrapCrossAlignment.center, children: [
+        RappChoice(
+            key: const Key('rules-auto'),
+            label: '自动',
+            selected: mode == 'auto',
+            onTap: () => _set(() {
+                  _packMode = false;
+                  d.stateRules = null;
+                })),
+        RappChoice(
+            key: const Key('rules-off'),
+            label: '关',
+            selected: mode == 'off',
+            onTap: () => _set(() {
+                  _packMode = false;
+                  d.stateRules = 'off';
+                })),
+        RappChoice(
+            key: const Key('rules-pack'),
+            label: '指定',
+            selected: mode == 'pack',
+            onTap: () => _set(() {
+                  _packMode = true;
+                  final p = _pack.text.trim();
+                  d.stateRules = p.isEmpty ? null : p;
+                })),
+        if (_packMode)
+          SizedBox(
+            width: 200,
+            child: TextField(
+              key: const Key('rules-pack-field'),
+              controller: _pack,
+              decoration: _deco(t, hint: '包名'),
+              onChanged: (x) => _set(() => d.stateRules = x.trim().isEmpty ? null : x.trim()),
+            ),
+          ),
+      ]),
+      if (v == null)
+        line('会话没开，看不到用的是哪一包', muted: true)
+      else ...[
+        if (c == null)
+          line('用的包：没有', key: const Key('rules-used'), muted: true)
+        else ...[
+          line('用的包：${c.id} · 修订 ${c.rev} · ${c.layer == RulesLayer.builtin ? '内置' : '我的'}${c.patched ? '（有补丁）' : ''}',
+              key: const Key('rules-used')),
+          line('验到：验过 ${c.tally.tested} · 见过 ${c.tally.seen} · 有人报过 ${c.tally.reported} · 未验 ${c.tally.untested}'),
+        ],
+        if (c != null && a != null) ...[
+          line('情况：${_healthWords[a.health] ?? '正常'}'),
+          if (a.health == 'unfit' || a.health == 'invalid') line('状态规则可能过期', muted: true),
+          if (a.appVersion != null && a.appVersion!.isNotEmpty) line('app 版本：${a.appVersion}'),
+        ],
+        if (v.errors.isNotEmpty) line('“我的”里有 ${v.errors.length} 个文件读不了', muted: true),
+      ],
+    ];
   }
 
   Widget _label(RappTokens t, String s) =>
@@ -403,6 +493,7 @@ class _AppProfilePageState extends State<AppProfilePage> {
                   label: '回到默认',
                   onPressed: () => _set(() => d.composerAt = null)),
           ]),
+          ..._rulesSection(t),
           _label(t, '窗口规则'),
           for (var i = 0; i < rules.length; i++) _ruleRow(t, i, rules[i], d.windows == null),
           Align(alignment: Alignment.centerLeft, child: RappButton.secondary(label: '加一条', onPressed: _add)),

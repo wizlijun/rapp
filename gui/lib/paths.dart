@@ -66,6 +66,8 @@ class DataDir {
 
   /// Shared between devices; holds `workspace.json` and `apps.json`.
   String get sharedDir => '$root/shared';
+  /// The user's own state rule packs and patches (`*.json`).
+  String get stateRulesDir => '$sharedDir/state_rules';
   String deviceDir(String id) => '$root/devices/$id';
   /// Unsent input drafts, private to this device.
   String get draftsDir => '$localDir/drafts';

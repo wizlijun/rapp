@@ -569,6 +569,9 @@ class _StreamMenuState extends State<StreamMenu> {
           enabled: widget.onMarkInput != null, onTap: () => _then(widget.onMarkInput!)),
       if (marked)
         _Item('清除输入区标记', enabled: widget.onClearInput != null, onTap: () => _then(widget.onClearInput!)),
+      // Rules that may be out of date: said in the menu, never as a pop-up.
+      if (_s.appState?.stale == true)
+        _Item(_s.appState!.health == 'switched' ? '状态规则自动换了变体' : '状态规则可能过期', enabled: false),
       _Item('app 配置…', enabled: widget.onOpenProfile != null, onTap: () => _then(widget.onOpenProfile!)),
     ];
   }

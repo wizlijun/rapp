@@ -83,6 +83,7 @@ fn host_messages() -> Vec<(u8, Vec<u8>)> {
         (39, opened),
         (40, vec![1]),
         (42, vec![]),
+        (44, b"{\"state\":\"done\"}".to_vec()),
         (
             4,
             frame(
@@ -115,6 +116,7 @@ fn kind(message: &Incoming) -> u8 {
         Incoming::AppOpened { .. } => 39,
         Incoming::SecureFocus(_) => 40,
         Incoming::Changed => 42,
+        Incoming::AppState(_) => 44,
     }
 }
 

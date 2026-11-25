@@ -143,6 +143,11 @@ fn command(v: &Value) -> Result<Vec<u8>> {
             ensure!(text.len() <= 1024 * 1024, "text too long");
             p::packet(5, text.as_bytes().to_vec())
         }
+        "state_rules" => {
+            let json = v["json"].as_str().context("missing json")?;
+            ensure!(json.len() <= p::STATE_RULES_LIMIT, "state rules too large");
+            p::state_rules(json)
+        }
         "paste" => {
             let mut b = number(v, "seq")?.to_le_bytes().to_vec();
             if let Some(text) = v["text"].as_str() {
@@ -389,6 +394,7 @@ fn read_loop(
             Incoming::AppOpened { bundle, name } => {
                 event(out, json!({"event":"app_opened","bundle":bundle,"name":name}))?
             }
+            Incoming::AppState(json) => event(out, json!({"event":"app_state","json":json}))?,
             Incoming::SecureFocus(on) => event(out, json!({"event":"secure_focus","on":on}))?,
             // A paused session's picture changed: a frame for the activity lamp, nothing to ack.
             Incoming::Changed => {
@@ -411,6 +417,17 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn state_rules_command() {
+        assert_eq!(command(&json!({"cmd":"state_rules","json":"{}"})).unwrap(), p::state_rules("{}"));
+        assert_eq!(command(&json!({"cmd":"state_rules","json":""})).unwrap(), p::state_rules(""));
+        assert!(command(&json!({"cmd":"state_rules"})).is_err());
+        assert!(command(&json!({"cmd":"state_rules","json":3})).is_err());
+        let ok = "x".repeat(p::STATE_RULES_LIMIT);
+        assert!(command(&json!({"cmd":"state_rules","json":ok})).is_ok());
+        let big = "x".repeat(p::STATE_RULES_LIMIT + 1);
+        assert!(command(&json!({"cmd":"state_rules","json":big})).is_err());
+    }
     #[test]
     fn input_packets_match_host_protocol() {
         assert_eq!(

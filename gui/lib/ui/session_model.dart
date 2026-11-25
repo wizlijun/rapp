@@ -24,10 +24,14 @@ class SessionEntry {
     this.reason,
     this.takenOver = false,
     this.ps,
+    this.inferred = false,
   });
 
   /// A text terminal's program status, from its live row; null when it reports none, is gone, or its device is offline.
   final TermPs? ps;
+
+  /// [ps] was read off an app's screen by state rules, not reported by a program.
+  final bool inferred;
 
   /// Disconnected because another device took it over: the button says 「拿回来」.
   final bool takenOver;
