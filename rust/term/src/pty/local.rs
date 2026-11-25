@@ -108,6 +108,9 @@ pub struct Status {
     /// The session's stable key: 16 lowercase hex characters made at start. A run of version 1 sends none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
+    /// What the program says about itself; none when it says nothing.
+    #[serde(default, deserialize_with = "super::ps::lenient", skip_serializing_if = "Option::is_none")]
+    pub ps: Option<super::ps::Ps>,
 }
 
 /// Why a socket gave no status.
@@ -281,6 +284,25 @@ mod tests {
     use tokio::io::{AsyncWriteExt, BufReader};
     use tokio::net::UnixListener;
 
+    #[test]
+    fn a_ps_this_build_cannot_read_is_no_ps_not_no_status() {
+        let base = |ps: &str| format!(r#"{{"v":2,"name":"a","command":"sh","cols":80,"rows":24,"activity":1,"viewers":0,"pid":7,"ps":{ps}}}"#);
+        for bad in [r#"{"state":"working","progress":999}"#, r#""x""#, r#"{"seq":1}"#, "null"] {
+            let s = serde_json::from_str::<Status>(&base(bad)).unwrap();
+            assert_eq!((s.ps, s.name.as_str(), s.pid), (None, "a", 7), "{bad}");
+        }
+        let s = serde_json::from_str::<Status>(&base(r#"{"state":"working"}"#)).unwrap();
+        assert_eq!(s.ps.unwrap().state, "working");
+    }
+
+    #[test]
+    fn status_without_ps_reads_and_unknown_fields_are_ignored() {
+        let old = r#"{"v":2,"name":"a","command":"sh","cols":80,"rows":24,"activity":1,"viewers":0,"pid":7}"#;
+        assert_eq!(serde_json::from_str::<Status>(old).unwrap().ps, None);
+        let newer = r#"{"v":2,"name":"a","command":"sh","cols":80,"rows":24,"activity":1,"viewers":0,"pid":7,"ps":{"state":"done","since":1,"stopped":1,"seq":1},"later":true}"#;
+        assert_eq!(serde_json::from_str::<Status>(newer).unwrap().ps.unwrap().state, "done");
+    }
+
     fn mode(p: &Path) -> u32 {
         std::fs::metadata(p).unwrap().permissions().mode() & 0o777
     }
@@ -365,6 +387,7 @@ mod tests {
                     pid: 2,
                     ticket: None,
                     key: None,
+                    ps: None,
                 };
                 w.write_all(format!("{}\n", serde_json::to_string(&st).unwrap()).as_bytes()).await.unwrap();
             }

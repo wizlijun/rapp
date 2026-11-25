@@ -123,7 +123,7 @@ class AppList {
 /// One terminal session of a device (`terms` event, spec §6). [host] is null on the device itself.
 class TermRow {
   const TermRow(this.id, this.name, this.command, this.host, this.panes, this.attached, this.activity, this.dead,
-      this.unread);
+      this.unread, {this.ps});
   final String id, name, command;
   final String? host;
   final int panes, attached;
@@ -131,6 +131,38 @@ class TermRow {
   /// Unix seconds of the last output.
   final int activity;
   final bool dead, unread;
+
+  /// The program status the session reports (OSC 7501); null when it reports none or something unrecognised.
+  final TermPs? ps;
+}
+
+/// What a program in a terminal session says it is doing (spec §5.5).
+class TermPs {
+  const TermPs(this.state, {this.kind, this.app, this.msg, this.progress, this.since = 0, this.stopped = 0, this.seq = 0});
+  final String state;
+  final String? kind, app, msg;
+
+  /// 0-100, else null.
+  final int? progress;
+  final int since, stopped, seq;
+}
+
+const _psStates = {'idle', 'working', 'done', 'error', 'blocked'};
+
+/// A row's `ps`: null unless it is a map with one of the five known states.
+TermPs? termPs(Object? v) {
+  if (v is! Map) return null;
+  final state = v['state'];
+  if (state is! String || !_psStates.contains(state)) return null;
+  final p = v['progress'];
+  return TermPs(state,
+      kind: _str(v['kind']),
+      app: _str(v['app']),
+      msg: _str(v['msg']),
+      progress: p is int && p >= 0 && p <= 100 ? p : null,
+      since: _int(v['since']),
+      stopped: _int(v['stopped']),
+      seq: _int(v['seq']));
 }
 
 /// The place sessions are listed from: the device itself (`host` null). An old device may also list SSH hosts; those
@@ -177,7 +209,8 @@ TermList _termList(Map<String, dynamic> m, String fallbackId) {
       for (final r in (m['terms'] as List? ?? const []).whereType<Map>())
         if (parseTermId('${r['id']}')?.backend == 'pty')
           TermRow('${r['id']}', '${r['name'] ?? ''}', '${r['command'] ?? ''}', _str(r['host']), _int(r['panes']),
-            _int(r['attached']), _int(r['activity']), r['dead'] == true, r['unread'] == true),
+            _int(r['attached']), _int(r['activity']), r['dead'] == true, r['unread'] == true,
+            ps: termPs(r['ps'])),
     ],
     hosts: [
       for (final h in (m['hosts'] as List? ?? const []).whereType<Map>())

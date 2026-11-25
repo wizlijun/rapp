@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:rapp/paths.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -531,6 +532,60 @@ void main() {
         matchesSemantics(label: '打开应用，mini', isButton: true, hasEnabledState: true, isEnabled: true, hasTapAction: true));
     handle.dispose();
   });
+
+  testWidgets('Linux: 打开应用 menu keeps desktop row height, hover pick, star + Esc and narrow bounds', (tester) async {
+    twoApps();
+    await boot(tester, apps: []);
+    tester.view.physicalSize = const Size(340, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    s.toggleOverview();
+    await tester.pumpWidget(wrap(SizedBox(width: 340, height: 800, child: Overview(state: s))));
+    await tester.pump();
+    await openMenu(tester);
+    final menuRect = tester.getRect(find.byKey(menu));
+    expect(menuRect.left, greaterThanOrEqualTo(8));
+    expect(menuRect.right, lessThanOrEqualTo(332));
+    expect(tester.getSize(find.byKey(const Key('open-apps-row-com.x.Notes'))).height, 32);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await tester.pump();
+    await mouse.moveTo(tester.getCenter(find.descendant(of: find.byKey(const Key('open-apps-row-com.x.Safari')), matching: find.text('Safari'))));
+    await tester.pump();
+    expect(
+      find.descendant(of: find.byKey(const Key('open-apps-row-com.x.Safari')), matching: find.text('打开')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const Key('open-apps-star-com.x.Safari')));
+    await tester.pump();
+    expect(s.isFavorite('m1', 'com.x.Safari'), isTrue);
+    expect(find.byKey(menu), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.byKey(menu), findsNothing);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
+  testWidgets('Linux desktop-only host: shows 屏幕 and 终端 without the bundle id field', (tester) async {
+    capsOf = {
+      'm1': {'graphical': true, 'desktop': true, 'applications': false, 'terminal': true, 'ports': true},
+    };
+    appsOf = {
+      'm1': [
+        {'app': 'desktop:', 'name': '桌面'},
+      ],
+    };
+    await boot(tester, apps: []);
+    s.hub!.termLists['m1'] = const TermList('m1');
+    await show(tester);
+    await openMenu(tester);
+    expect(find.text('屏幕'), findsOneWidget);
+    expect(find.byKey(const Key('open-apps-row-desktop:')), findsOneWidget);
+    expect(find.text('终端'), findsNWidgets(2));
+    expect(find.byKey(const Key('open-apps-row-terms:')), findsOneWidget);
+    expect(find.byKey(const Key('open-apps-bundle')), findsNothing);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 
   testWidgets('count taps', (tester) async {
     await boot(tester, apps: ['m1/a']);

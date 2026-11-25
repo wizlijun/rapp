@@ -40,11 +40,14 @@ class _NeedsYouAnchorState extends State<NeedsYouAnchor> {
     final needs = _s.needs;
     final n = needs.length;
     final sessions = needs.any((x) => x.kind == NeedKind.session);
-    final lamp = sessions ? Lamp.disconnected : (n > 0 ? Lamp.offline : Lamp.active);
+    final terms = needs.any((x) => x.kind == NeedKind.terminal);
+    final lamp = sessions
+        ? Lamp.disconnected
+        : (terms ? Lamp.waiting : (n > 0 ? Lamp.offline : Lamp.active));
     final open = _s.corner == Corner.needs;
     final radius = BorderRadius.circular(t.r);
     final back = n == 0 ? null : rowBackdrop(lamp, t);
-    final border = open ? t.text : (sessions ? t.accent : (n > 0 ? t.line : Colors.transparent));
+    final border = open ? t.text : (sessions || terms ? t.accent : (n > 0 ? t.line : Colors.transparent));
     return Semantics(
       button: true,
       selected: open,
@@ -149,7 +152,18 @@ class _NeedsList extends StatelessWidget {
       child: Row(children: [
         Expanded(child: Text(n.text, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.text))),
         const SizedBox(width: 8),
-        if (session)
+        if (n.kind == NeedKind.terminal)
+          RappButton.accent(
+            key: Key('need-open-${n.target}'),
+            label: '打开',
+            onPressed: state.hubUsable
+                ? () {
+                    state.openOrSwitch(n.device!, n.target, n.title!);
+                    state.closeCorner();
+                  }
+                : null,
+          )
+        else if (session)
           RappButton.accent(
             key: Key('need-reconnect-${n.target}'),
             label: n.reconnectWord,

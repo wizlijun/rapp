@@ -1,7 +1,8 @@
-//! `term.json`: whether terminal sessions are allowed. The `tmux` and `targets` of older versions are ignored.
+//! `term.json`: whether terminal sessions are allowed, and whether program status (`programStatus`) is read.
+//! The `tmux` and `targets` of older versions are ignored.
 
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// What every request says while terminal sessions are off.
 pub const OFF: &str = "terminal sessions are off";
@@ -12,12 +13,20 @@ pub const INVALID: &str = "term.json is invalid";
 #[serde(default)]
 pub struct TermConfig {
     pub allow: bool,
+    /// Answer the OSC 7501 probe and track program status.
+    #[serde(rename = "programStatus")]
+    pub program_status: bool,
 }
 
 impl Default for TermConfig {
     fn default() -> TermConfig {
-        TermConfig { allow: true }
+        TermConfig { allow: true, program_status: true }
     }
+}
+
+/// The `term.json` next to the `term` directory.
+pub fn beside(term_dir: &Path) -> PathBuf {
+    term_dir.parent().unwrap_or(term_dir).join("term.json")
 }
 
 /// Read `path`. No file is the default; a file that cannot be read or is not JSON is an error whose text says why
@@ -36,6 +45,21 @@ pub fn load(path: &Path) -> Result<TermConfig, String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn program_status_defaults_on_and_reads_camel_case() {
+        assert!(TermConfig::default().program_status);
+        let (_d, p) = write(r#"{"allow":true}"#);
+        assert!(load(&p).unwrap().program_status);
+        let (_d, p) = write(r#"{"programStatus":false}"#);
+        let c = load(&p).unwrap();
+        assert!(!c.program_status && c.allow);
+    }
+
+    #[test]
+    fn beside_is_next_to_the_term_dir() {
+        assert_eq!(beside(Path::new("/r/local/term")), PathBuf::from("/r/local/term.json"));
+    }
+
     fn write(text: &str) -> (tempfile::TempDir, std::path::PathBuf) {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("term.json");
@@ -47,7 +71,7 @@ mod tests {
     fn a_missing_file_is_the_default_and_the_default_allows() {
         let d = tempfile::tempdir().unwrap();
         let c = load(&d.path().join("term.json")).unwrap();
-        assert_eq!(c, TermConfig { allow: true });
+        assert_eq!(c, TermConfig { allow: true, program_status: true });
     }
 
     #[test]

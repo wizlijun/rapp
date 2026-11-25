@@ -865,6 +865,28 @@ void main() {
       expect(find.byKey(const Key('needs-scrim')), findsNothing);
     });
 
+    testWidgets('a blocked terminal in needs has 打开 that opens it and closes', (tester) async {
+      await tester.pumpWidget(wrap(ebar()));
+      es.hub!.termLists['111'] = const TermList('111', terms: [
+        TermRow('term:pty:a', 'a', 'claude', null, 1, 0, 0, false, false, ps: TermPs('blocked', kind: 'permission')),
+      ]);
+      es.notifyListeners();
+      await tester.pump();
+      expect(lampOf(tester), Lamp.waiting);
+      await tester.tap(find.byKey(const Key('needs-you')));
+      await tester.pump();
+      expect(find.text('a @ mini：等确认'), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('need-open-term:pty:a')), matching: find.text('打开')),
+          findsOneWidget);
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('need-open-term:pty:a')));
+        await flush();
+      });
+      await tester.pump();
+      expect(es.corner, isNull);
+      expect(es.currentKey, '111/term:pty:a');
+    });
+
     testWidgets('show on a device row opens the device panel', (tester) async {
       await tester.pumpWidget(wrap(ebar()));
       t.emit({'event': 'presence', 'id': '111', 'online': true});

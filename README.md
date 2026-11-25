@@ -35,6 +35,8 @@ Native support depends on the compositor and application: Hyprland's toplevel ex
 
 For direct connections, allow inbound **UDP 22028** (or the service's configured UDP port) from the intended peers. Do not open an entire `2202x` range: TCP 22029 is localhost-only IPC; TCP 28000–28999 are localhost-only port mappings carried over the existing rApp connection. Neither needs a LAN firewall exception. UDP 22026 belongs to a separately deployed relay, not a normal rApp device. The Linux Local page shows the actual UDP listener, offers a read-only check of recent UFW block logs, and provides a command restricted to one peer IP. A timeout or an empty log alone does not establish whether a firewall blocked the connection.
 
+Program status: in a text terminal started with `rapp-term run`, CLIs that report their state over OSC 7501 show it in the session list (working, waiting for approval, asking, error), and sessions waiting for you appear in 需要你. rApp only reads the reports and answers the CLI's probe; it never types into the CLI. This needs Claude Code ≥ 2.1.295, Codex ≥ 0.163.0 or agy ≥ 1.4.0 on the host. Set `"programStatus": false` in `local/term.json` to turn it off for new sessions.
+
 Upgrades preserve the data directory and saved hosts. The legacy relay configuration from 0.5.x is retired by the mainline migration; enter a current relay key to use the new relay. This is separate from preserving local data.
 
 ## Build
@@ -80,6 +82,8 @@ Thanks to the open-source projects that informed or support rApp:
 - [RustDesk](https://github.com/rustdesk/rustdesk) — device connection and self-hosted relay design references.
 - [Sunshine](https://github.com/SunshineStream/Sunshine) — a reference for streaming research.
 - [hurryvc](https://github.com/swigger/hurryvc) — the design reference for text terminals on macOS and Windows (pseudo-terminal plus screen-state sync).
+- [gascity](https://github.com/gastownhall/gascity) — the OSC 7501 probe answer and stream scanner in `rapp-term` are ported from its program-status relay, along with its recorded test captures (MIT, Copyright (c) 2026 Gas City Contributors).
+- [zellij](https://github.com/zellij-org/zellij) — the program-status report parser, limits and record table in `rapp-term` are ported from its OSC 7501 implementation (MIT, Copyright (c) 2020 Zellij contributors).
 - [Fcitx5](https://github.com/fcitx/fcitx5) — the input method behind rApp's smooth writing-panel input.
 - [Flutter](https://github.com/flutter/flutter) and [GTK](https://www.gtk.org/) — user interfaces.
 - [Tokio](https://github.com/tokio-rs/tokio), [Quinn](https://github.com/quinn-rs/quinn), and [rustls](https://github.com/rustls/rustls) — networking foundations.

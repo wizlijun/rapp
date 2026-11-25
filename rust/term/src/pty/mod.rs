@@ -3,6 +3,7 @@ pub mod grid;
 pub mod holder;
 pub mod launch;
 pub mod local;
+pub mod ps;
 pub mod view;
 
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -35,6 +36,8 @@ pub struct Shared {
     pub activity: AtomicU64,
     /// Which viewer's size the host window follows.
     pub fit: Mutex<fit::Fit>,
+    /// The program's own status, kept by the output pump.
+    pub ps: Mutex<Option<ps::Ps>>,
 }
 
 impl Meta {
@@ -57,6 +60,7 @@ impl Shared {
             pid: self.meta.pid,
             ticket: self.meta.ticket.clone(),
             key: Some(self.meta.key.clone()),
+            ps: self.ps.lock().unwrap_or_else(|e| e.into_inner()).clone(),
         }
     }
 }

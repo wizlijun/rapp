@@ -32,6 +32,7 @@ import '../term/term_session_port.dart';
 import '../term/term_wire.dart' show TermPane;
 import 'app_profile_store.dart';
 import 'lamp.dart';
+import 'term_status.dart' show termAskWord;
 import 'lifecycle.dart';
 import 'net_marker.dart' show weakRttMs;
 import 'pin_files.dart';
@@ -65,13 +66,15 @@ class HintRecord {
   final DateTime at;
 }
 
-enum NeedKind { session, device }
+enum NeedKind { session, device, terminal }
 
 /// One thing waiting for the person: a disconnected session ([target] its record key) or a
-/// device that dropped ([target] its id). Newer [seq] first.
+/// device that dropped ([target] its id), or a text terminal blocked on the person ([target] its session id,
+/// [device] its device, [title] its shown name). Newer [seq] first.
 class NeedItem {
-  const NeedItem(this.kind, this.target, this.text, this.seq, {this.reconnectWord = '重连'});
+  const NeedItem(this.kind, this.target, this.text, this.seq, {this.reconnectWord = '重连', this.device, this.title});
   final String reconnectWord;
+  final String? device, title;
   final NeedKind kind;
   final String target;
   final String text;
@@ -1045,8 +1048,12 @@ class MainState extends ChangeNotifier {
   /// Dropped devices and when (`_seq`) they dropped. A manual probe never touches it (R16).
   final Map<String, int> _offlineSince = {};
 
+  /// When (`_seq`) each blocked-terminal ask (device, session, ps.seq) was first seen; only orders [needs].
+  final Map<String, int> _termNeedSeq = {};
+
   /// Everything waiting for the person, newest first. Handled things leave on their own.
   List<NeedItem> get needs {
+    final seen = <String>{};
     final out = <NeedItem>[
       for (final r in _records.values)
         if (r.phase == Phase.disconnected)
@@ -1055,7 +1062,21 @@ class MainState extends ChangeNotifier {
       for (final h in hub?.hosts ?? const <HubHost>[])
         if (_seenOnline.contains(h.id) && _offlineSince.containsKey(h.id))
           NeedItem(NeedKind.device, h.id, '${deviceName(h.id)} 离线', _offlineSince[h.id]!),
+      // A device that dropped keeps its last list; its terminals cannot be opened, so they are not asks.
+      for (final e in hub?.termLists.entries ?? const <MapEntry<String, TermList>>[])
+        if (!_offlineSince.containsKey(e.key))
+         for (final r in e.value.terms)
+          if (!r.dead && r.ps?.state == 'blocked')
+            () {
+              final key = '${e.key}\n${r.id}\n${r.ps!.seq}';
+              seen.add(key);
+              final title = termDisplayName(r.name, r.host);
+              return NeedItem(NeedKind.terminal, r.id, '$title @ ${deviceName(e.key)}：${termAskWord(r.ps!)}',
+                  _termNeedSeq.putIfAbsent(key, () => ++_seq),
+                  device: e.key, title: title);
+            }(),
     ];
+    _termNeedSeq.removeWhere((k, _) => !seen.contains(k));
     out.sort((a, b) => b.seq.compareTo(a.seq));
     return out;
   }
@@ -1163,6 +1184,13 @@ class MainState extends ChangeNotifier {
   /// current one, else the one stored with it.
   String labelOf(AppRef a) => isTermApp(a.bundle) ? termTitle(termName(a.device, a.bundle) ?? a.name) : a.name;
 
+  /// A text terminal on [device] whose live row says its program waits for the person.
+  bool _termBlocked(String device, String app) {
+    if (!isTermApp(app)) return false;
+    final r = hub?.termLists[device]?.terms.where((r) => r.id == app).firstOrNull;
+    return r != null && !r.dead && r.ps?.state == 'blocked';
+  }
+
   SessionEntry _entryOf(SessionRecord r) {
     final sid = r.sid;
     final rs = sid == null ? null : remote[sid];
@@ -1176,7 +1204,7 @@ class MainState extends ChangeNotifier {
       appName: r.app == 'desktop:' ? _desktopName(r.id) : r.appName,
       device: deviceName(r.id),
       path: r.path,
-      lamp: recordLamp(r, rs),
+      lamp: r.phase != Phase.disconnected && _termBlocked(r.id, r.app) ? Lamp.waiting : recordLamp(r, rs),
       bytesPerSecond: r.phase == Phase.live ? rs?.bytesPerSecond : null,
       reason: r.phase == Phase.disconnected ? disconnectWord(r.reason) : null,
       takenOver: r.phase == Phase.disconnected && takenOver(r.reason),
@@ -1198,7 +1226,7 @@ class MainState extends ChangeNotifier {
           appName: appName(s.id, s.app),
           device: deviceName(s.id),
           path: s.path,
-          lamp: Lamp.active,
+          lamp: _termBlocked(s.id, s.app) ? Lamp.waiting : Lamp.active,
         );
         if (seen.add(e.key)) out.add(e);
       }

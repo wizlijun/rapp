@@ -11,6 +11,7 @@ import 'package:rapp/ui/devices_tab.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
+import 'package:rapp/ui/term_status.dart';
 import 'package:rapp/ui/tokens.dart';
 
 import '../fakes.dart';

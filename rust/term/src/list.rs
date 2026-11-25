@@ -14,4 +14,7 @@ pub struct TermRow {
     pub activity: u64,
     pub dead: bool,
     pub unread: bool,
+    /// What the program says about itself (OSC 7501); none when it says nothing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ps: Option<crate::pty::ps::Ps>,
 }

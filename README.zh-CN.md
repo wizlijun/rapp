@@ -57,6 +57,8 @@ RAPP_ALLOW_ADHOC=1 ./scripts/package-macos.sh
 
 Linux 0.14.13 在应用画面和文字终端支持本地按住说话：长按右 Alt 或语音按钮，松开发送、Esc 取消、Tab 编辑。首次使用下载约 142MB 的校验模型，录音不保存、不上传；识别语言跟随系统，需要 PulseAudio 或 PipeWire PulseAudio 服务。详见 [Linux 语音行为与验证边界](docs/superpowers/specs/2026-11-18-rapp-linux-voice-design.md)。
 
+程序状态：用 `rapp-term run` 开的文本终端里，通过 OSC 7501 报告状态的 CLI，其状态（在干活、等确认、在提问、出错）显示在会话列表里，等你处理的会话进“需要你”。rApp 只读报告、答 CLI 的探测，从不往 CLI 里输入。被控端上需要 Claude Code ≥ 2.1.295、Codex ≥ 0.163.0 或 agy ≥ 1.4.0。在 `local/term.json` 里写 `"programStatus": false` 可对新开的会话关掉。
+
 ## 许可证
 
 [GNU GPL v3](LICENSE)。
@@ -67,6 +69,8 @@ Linux 0.14.13 在应用画面和文字终端支持本地按住说话：长按右
 
 - [RustDesk](https://github.com/rustdesk/rustdesk)：设备连接与自建中继的设计参考。
 - [Sunshine](https://github.com/SunshineStream/Sunshine)：串流技术研究参考。
+- [gascity](https://github.com/gastownhall/gascity)：OSC 7501 探测回答和流式扫描器移植自它的程序状态中继，并带上它录下的测试录制文件（MIT，Copyright (c) 2026 Gas City Contributors）。
+- [zellij](https://github.com/zellij-org/zellij)：程序状态报告的解析、限制常量和记录表移植自它的 OSC 7501 实现（MIT，Copyright (c) 2020 Zellij contributors）。
 - [hurryvc](https://github.com/swigger/hurryvc)：macOS、Windows 上文本终端（伪终端加屏幕状态同步）的设计参考。
 - [Fcitx5](https://github.com/fcitx/fcitx5)：输入法，带来输入板流畅的输入体验。
 - [Flutter](https://github.com/flutter/flutter)、[GTK](https://www.gtk.org/)：用户界面。

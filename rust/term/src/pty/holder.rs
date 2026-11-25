@@ -4,14 +4,16 @@
 //!
 //! `run` ends only when the program exits, or on SIGHUP (the window was closed), SIGTERM, SIGINT or SIGQUIT sent
 //! to its pid (^C and ^\ typed in the window go to the program: the window is raw); never because of a viewer, a
-//! missing `serve` or a socket error. It answers none of the program's terminal queries (the window
-//! does). A viewer may ask the window to resize (`fit`), and the pty follows the window.
+//! missing `serve` or a socket error. It answers none of the program's terminal queries (the window does) except
+//! the OSC 7501 probe, which it answers itself while `programStatus` is on. A viewer may ask the window to resize
+//! (`fit`), and the pty follows the window.
 //!
 //! The exit code is the program's, 1 when the program was killed by a signal; 128 + the signal when `run` itself
 //! got SIGHUP (129), SIGINT (130), SIGQUIT (131) or SIGTERM (143).
 
 use super::fit::Window;
 use super::grid::Emu;
+use super::ps::{Fed, Tracker, MAX_REPLIES, PROBE_REPLY};
 use super::{local, view, Meta, Shared};
 use crate::id::{clean_name, default_name, session_name};
 use anyhow::{anyhow, Context};
@@ -48,6 +50,8 @@ pub struct RunOpts {
     pub ticket: Option<String>,
     /// Empty: the user's login shell.
     pub command: Vec<String>,
+    /// Answer the OSC 7501 probe and track the program's status (`programStatus` in term.json).
+    pub program_status: bool,
 }
 
 /// Standard input is not a terminal.
@@ -102,6 +106,7 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
         ended: watch::channel(false).0,
         activity: AtomicU64::new(now()),
         fit: Mutex::default(),
+        ps: Mutex::new(None),
     });
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path).with_context(|| format!("cannot listen on {}", path.display()))?;
@@ -147,7 +152,8 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
     let (drained_tx, drained) = oneshot::channel();
     let window = Arc::new(Mutex::new(Window::new(std::io::stdout()).tty(unsafe { libc::isatty(1) } == 1)));
     let (sh, win) = (shared.clone(), window.clone());
-    std::thread::spawn(move || pump_output(from_pty, &win, &sh, drained_tx, Emu::feed));
+    let tracker = opts.program_status.then(Tracker::default);
+    std::thread::spawn(move || pump_output(from_pty, &win, &sh, drained_tx, Emu::feed, tracker));
     let to_window = shared.input.clone();
     // It may stay blocked on a read when run ends; the process exits under it.
     std::thread::spawn(move || pump_keyboard(to_window));
@@ -270,6 +276,7 @@ fn pump_output<W: Write>(
     shared: &Shared,
     drained: oneshot::Sender<()>,
     feed: impl Fn(&mut Emu, &[u8]),
+    mut tracker: Option<Tracker>,
 ) {
     let mut b = vec![0u8; 64 * 1024];
     loop {
@@ -279,6 +286,25 @@ fn pump_output<W: Write>(
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(_) => break,
         };
+        // The probe's answer is queued before the window sees the chunk, so the window's own answers to whatever
+        // the program sent after the probe come behind it. The tracker is outside `guarded`: an emulator panic
+        // cannot stop it. At most MAX_REPLIES answers per chunk keeps an unread input queue bounded by the output.
+        if tracker.is_some() {
+            let at = now();
+            match track(&mut tracker, |t| t.feed(&b[..n], at)) {
+                Some(fed) => {
+                    if fed.probes > 0 {
+                        let _ = shared.input.send(PROBE_REPLY.repeat(fed.probes.min(MAX_REPLIES)));
+                    }
+                    if fed.changed {
+                        *shared.ps.lock().unwrap_or_else(|e| e.into_inner()) = tracker.as_ref().and_then(|t| t.ps().cloned());
+                    }
+                }
+                // The tracker panicked and is gone: the status stops, the output keeps flowing.
+                None if tracker.is_none() => *shared.ps.lock().unwrap_or_else(|e| e.into_inner()) = None,
+                None => {}
+            }
+        }
         // A window that is gone is no reason to stop: viewers still see the screen.
         {
             let mut w = window.lock().unwrap_or_else(|e| e.into_inner());
@@ -290,6 +316,19 @@ fn pump_output<W: Write>(
         shared.rev.send_modify(|r| *r += 1);
     }
     let _ = drained.send(());
+}
+
+/// Runs `f` on the tracker; if it panics the tracker is dropped (None) and so is the result. Nothing the program
+/// prints may stop `pump_output`, the only thread draining the pty.
+fn track(tracker: &mut Option<Tracker>, f: impl FnOnce(&mut Tracker) -> Fed) -> Option<Fed> {
+    let t = tracker.as_mut()?;
+    match std::panic::catch_unwind(AssertUnwindSafe(|| f(t))) {
+        Ok(v) => Some(v),
+        Err(_) => {
+            *tracker = None;
+            None
+        }
+    }
 }
 
 /// Runs `f` on the emulator; None when it panicked, and the emulator is then a fresh one of size `fresh`, or else of
@@ -438,16 +477,104 @@ mod tests {
     }
 
     fn shared(cols: u16, rows: u16) -> Shared {
-        Shared {
+        shared_with_input(cols, rows).0
+    }
+
+    fn shared_with_input(cols: u16, rows: u16) -> (Shared, mpsc::UnboundedReceiver<Vec<u8>>) {
+        let (input, rx) = mpsc::unbounded_channel();
+        let sh = Shared {
             emu: Mutex::new(Emu::new(cols, rows)),
             rev: watch::channel(0).0,
-            input: mpsc::unbounded_channel().0,
+            input,
             meta: Meta { key: "0123456789abcdef".into(), name: Mutex::new("t".into()), command: "sh".into(), pid: 1, ticket: None },
             viewers: AtomicU32::new(0),
             ended: watch::channel(false).0,
             activity: AtomicU64::new(0),
             fit: Mutex::default(),
+            ps: Mutex::new(None),
+        };
+        (sh, rx)
+    }
+
+    /// Before each write to the window, notes what is already queued for the program, then the write.
+    struct Ordered {
+        rx: mpsc::UnboundedReceiver<Vec<u8>>,
+        log: Vec<String>,
+    }
+
+    impl Write for Ordered {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            while let Ok(v) = self.rx.try_recv() {
+                self.log.push(format!("reply:{}", v.len()));
+            }
+            self.log.push("window".into());
+            Ok(b.len())
         }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn the_probe_answer_is_queued_before_the_window_sees_the_probe() {
+        let (sh, rx) = shared_with_input(30, 4);
+        let window = Mutex::new(Window::new(Ordered { rx, log: vec![] }));
+        let (tx, _d) = oneshot::channel();
+        let pty = Chunks(VecDeque::from([&b"\x1b]7501;?\x07\x1b[c"[..]]));
+        pump_output(pty, &window, &sh, tx, Emu::feed, Some(Tracker::default()));
+        assert_eq!(window.lock().unwrap().get_ref().log, ["reply:10", "window"]);
+    }
+
+    #[test]
+    fn a_panicking_tracker_is_dropped_and_output_keeps_flowing() {
+        let mut t = Some(Tracker::default());
+        assert!(track(&mut t, |_| panic!("tracker fell over")).is_none());
+        assert!(t.is_none());
+        assert!(track(&mut t, |t| t.feed(b"x", 1)).is_none());
+    }
+
+    #[test]
+    fn a_report_updates_shared_ps() {
+        let (sh, _rx) = shared_with_input(30, 4);
+        let window = Mutex::new(Window::new(Vec::new()));
+        let (tx, _d) = oneshot::channel();
+        let pty = Chunks(VecDeque::from([&b"\x1b]7501;state=blocked:kind=permission:app=claude-code\x07"[..]]));
+        pump_output(pty, &window, &sh, tx, Emu::feed, Some(Tracker::default()));
+        let ps = sh.status().ps.unwrap();
+        assert_eq!((ps.state.as_str(), ps.kind.as_deref()), ("blocked", Some("permission")));
+    }
+
+    #[test]
+    fn a_flood_of_probes_gets_64_answers() {
+        let (sh, mut rx) = shared_with_input(30, 4);
+        let window = Mutex::new(Window::new(Vec::new()));
+        let (tx, _d) = oneshot::channel();
+        let flood: &'static [u8] = Box::leak(b"\x1b]7501;?\x07".repeat(1000).into_boxed_slice());
+        pump_output(Chunks(VecDeque::from([flood])), &window, &sh, tx, Emu::feed, Some(Tracker::default()));
+        assert_eq!(rx.try_recv().unwrap().len(), 64 * PROBE_REPLY.len());
+        assert!(rx.try_recv().is_err());
+        assert_eq!(window.lock().unwrap().get_ref().as_slice(), flood); // the output was not stalled
+    }
+
+    #[test]
+    fn status_keeps_updating_when_the_emulator_panics() {
+        let (sh, _rx) = shared_with_input(30, 4);
+        let window = Mutex::new(Window::new(Vec::new()));
+        let (tx, _d) = oneshot::channel();
+        let pty = Chunks(VecDeque::from([&b"\x1b]7501;state=working\x07"[..]]));
+        pump_output(pty, &window, &sh, tx, |_: &mut Emu, _: &[u8]| panic!("the emulator fell over"), Some(Tracker::default()));
+        assert_eq!(sh.status().ps.unwrap().state, "working");
+    }
+
+    #[test]
+    fn off_means_byte_for_byte_today() {
+        let (sh, mut rx) = shared_with_input(30, 4);
+        let window = Mutex::new(Window::new(Vec::new()));
+        let (tx, _d) = oneshot::channel();
+        let bytes: &[u8] = b"\x1b]7501;?\x07\x1b]7501;state=working\x07hi";
+        pump_output(Chunks(VecDeque::from([bytes])), &window, &sh, tx, Emu::feed, None);
+        assert_eq!(window.lock().unwrap().get_ref().as_slice(), bytes);
+        assert!(rx.try_recv().is_err() && sh.status().ps.is_none());
     }
 
     #[test]
@@ -459,7 +586,7 @@ mod tests {
         pump_output(pty, &window, &sh, tx, |emu: &mut Emu, b: &[u8]| {
             assert!(!b.starts_with(b"boom"), "the emulator fell over");
             emu.feed(b);
-        });
+        }, None);
         assert_eq!(window.lock().unwrap().get_ref().as_slice(), b"one boom two");
         assert!(drained.try_recv().is_ok());
         // A fresh emulator, at the old size, with what came after.

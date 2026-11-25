@@ -340,6 +340,7 @@ mod tests {
             ended: watch::channel(false).0,
             activity: AtomicU64::new(0),
             fit: Mutex::default(),
+            ps: Mutex::new(None),
         };
         (Arc::new(sh), rx)
     }
