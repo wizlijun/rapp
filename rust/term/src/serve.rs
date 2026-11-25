@@ -527,6 +527,33 @@ pub fn is_session(s: &Status, id_name: &str) -> bool {
 
 /// The `pty` rows of `statuses`: one pane each, and attached by as many viewers as `run` counts.
 fn pty_rows(unread: &Mutex<Unread>, statuses: &[Status], now: u64) -> Vec<TermRow> {
+    let mut rows = status_rows(unread, statuses, now);
+    number_clashes(&mut rows, statuses);
+    rows
+}
+
+/// Titles that read the same as another row's name or title get ` · 2`, ` · 3` in the order the sessions were
+/// opened (by pid); a name is never changed and goes first, so a clash with one numbers only the titles.
+fn number_clashes(rows: &mut [TermRow], statuses: &[Status]) {
+    let mut groups: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
+    for (i, r) in rows.iter().enumerate() {
+        groups.entry(r.title.clone().unwrap_or_else(|| r.name.clone())).or_default().push(i);
+    }
+    for (text, mut ix) in groups {
+        if ix.len() < 2 {
+            continue;
+        }
+        ix.sort_by_key(|&i| (rows[i].title.is_some(), statuses[i].pid));
+        for (n, &i) in ix.iter().enumerate().skip(1) {
+            if rows[i].title.is_some() {
+                rows[i].title = Some(format!("{text} · {}", n + 1));
+            }
+        }
+    }
+}
+
+/// One row per status, in the same order.
+fn status_rows(unread: &Mutex<Unread>, statuses: &[Status], now: u64) -> Vec<TermRow> {
     let u = lock(unread);
     statuses
         .iter()
@@ -805,6 +832,48 @@ mod tests {
         assert_eq!(rows[0].title.as_deref(), Some("~/git/rapp"));
         assert!(serde_json::to_string(&rows[0]).unwrap().contains(r#""title":"~/git/rapp""#));
         assert!(!serde_json::to_string(&rows[1]).unwrap().contains("title"));
+    }
+
+    #[test]
+    fn clashing_titles_are_numbered_in_opening_order() {
+        let unread = Mutex::new(Unread::new(1000));
+        let st = |name: &str, pid: u32, title: Option<&str>| {
+            let mut s = status_with(None);
+            s.name = name.into();
+            s.pid = pid;
+            s.title = title.map(Into::into);
+            s
+        };
+        // Listed by name (zsh-10 before zsh-2), opened by pid: zsh 30, zsh-2 10, zsh-10 20.
+        let rows = pty_rows(
+            &unread,
+            &[
+                st("zsh", 30, Some("~/git/rapp")),
+                st("zsh-10", 20, Some("~/git/rapp")),
+                st("zsh-2", 10, Some("~/git/rapp")),
+                st("zsh-3", 40, Some("vim x")),
+                st("zsh-4", 50, None),
+            ],
+            1051,
+        );
+        let shown: Vec<_> = rows.iter().map(|r| r.title.clone().unwrap_or_else(|| r.name.clone())).collect();
+        assert_eq!(shown, ["~/git/rapp · 3", "~/git/rapp · 2", "~/git/rapp", "vim x", "zsh-4"]);
+    }
+
+    #[test]
+    fn a_title_that_clashes_with_a_name_is_numbered_and_the_name_stays() {
+        let unread = Mutex::new(Unread::new(1000));
+        let mut named = status_with(None);
+        named.name = "~/git/rapp".into();
+        named.pid = 99;
+        let mut titled = status_with(None);
+        titled.name = "zsh".into();
+        titled.pid = 1;
+        titled.title = Some("~/git/rapp".into());
+        let rows = pty_rows(&unread, &[named, titled], 1051);
+        assert_eq!(rows[0].name, "~/git/rapp");
+        assert_eq!(rows[0].title, None);
+        assert_eq!(rows[1].title.as_deref(), Some("~/git/rapp · 2"));
     }
 
     #[test]
