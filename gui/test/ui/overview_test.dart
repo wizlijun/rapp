@@ -197,7 +197,7 @@ void main() {
   testWidgets('常用 · 终端 says 新建 and opens a new terminal each tap', (tester) async {
     await boot(tester);
     TermList list() => TermList('m1',
-        terms: [TermRow('term:pty:a', 'a', 'zsh', null, 1, 0, 1, false, false)], hosts: [TermHost(null, launchers: const ['Terminal'])]);
+        terms: [TermRow('term:pty:a', 'a', 'zsh', null, 1, 0, 1, true, false)], hosts: [TermHost(null, launchers: const ['Terminal'])]);
     s.prefs.termOpen['m1'] = 'text';
     s.hub!.termLists['m1'] = list();
     final inner = t.onSend!;
@@ -228,6 +228,78 @@ void main() {
       await tester.pump();
     }
     expect(t.sent.where((m) => m['cmd'] == 'open_term').length, 2);
+  });
+
+  testWidgets('常用 · 终端 first says 打开 and reopens the running terminals, then says 新建', (tester) async {
+    final term = FakeTermSessionPort();
+    await boot(tester, termPort: term);
+    s.prefs.termOpen['m1'] = 'text';
+    s.hub!.termLists['m1'] = TermList('m1',
+        terms: [
+          TermRow('term:pty:a', 'a', 'zsh', null, 1, 0, 1, false, false),
+          TermRow('term:pty:b', 'b', 'zsh', null, 1, 0, 9, false, false),
+          TermRow('term:pty:c', 'c', 'zsh', null, 1, 0, 5, true, false),
+        ],
+        hosts: [TermHost(null, launchers: const ['Terminal'])]);
+    s.toggleFavorite('m1', termsEntry, termsEntryName);
+    await show(tester);
+    const key = Key('ov-favorite-m1/terms:');
+    expect(find.descendant(of: find.byKey(key), matching: find.text('打开')), findsOneWidget);
+    await tester.tap(find.byKey(key));
+    await tester.runAsync(() async {
+      for (var j = 0; j < 8; j++) {
+        await flush();
+      }
+    });
+    await tester.pump();
+    expect(s.entries.map((e) => e.app).toSet(), {'term:pty:a', 'term:pty:b'});
+    expect(s.currentKey, 'm1/term:pty:b');
+    expect(t.sent.where((m) => m['cmd'] == 'open_term'), isEmpty);
+    if (!s.overview) s.toggleOverview();
+    await tester.pump();
+    expect(find.descendant(of: find.byKey(key), matching: find.text('新建')), findsOneWidget);
+  });
+
+  testWidgets('常用 · 终端 tapped before the terminal list arrives waits for it, not the pixel Terminal', (tester) async {
+    final term = FakeTermSessionPort();
+    await boot(tester, termPort: term);
+    s.prefs.termOpen['m1'] = 'text';
+    s.hub!.termLists.remove('m1');
+    final inner = t.onSend!;
+    t.onSend = (m) {
+      if (m['cmd'] == 'terms') {
+        t.emit({
+          'event': 'terms', 'req': m['req'], 'id': m['id'],
+          'terms': [
+            {'id': 'term:pty:a', 'name': 'a', 'command': 'zsh', 'activity': 1, 'dead': false},
+          ],
+          'hosts': [{'host': null, 'launchers': ['Terminal']}],
+        });
+      } else {
+        inner(m);
+      }
+    };
+    s.toggleFavorite('m1', termsEntry, termsEntryName);
+    await show(tester);
+    await tester.tap(find.byKey(const Key('ov-favorite-m1/terms:')));
+    await tester.runAsync(() async {
+      for (var j = 0; j < 8; j++) {
+        await flush();
+      }
+    });
+    await tester.pump();
+    expect(s.entries.map((e) => e.app), ['term:pty:a']);
+  });
+
+  testWidgets('常用 · 终端 says 新建 when every running terminal is already open', (tester) async {
+    final term = FakeTermSessionPort();
+    await boot(tester, apps: ['m1/term:pty:a'], termPort: term);
+    s.prefs.termOpen['m1'] = 'text';
+    s.hub!.termLists['m1'] = TermList('m1',
+        terms: [TermRow('term:pty:a', 'a', 'zsh', null, 1, 0, 1, false, false)], hosts: [TermHost(null, launchers: const ['Terminal'])]);
+    s.toggleFavorite('m1', termsEntry, termsEntryName);
+    await show(tester);
+    expect(find.descendant(of: find.byKey(const Key('ov-favorite-m1/terms:')), matching: find.text('新建')), findsOneWidget);
   });
 
   testWidgets('常用 · 终端 says 打开 in pixels mode', (tester) async {
