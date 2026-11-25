@@ -163,7 +163,19 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
     let window = Arc::new(Mutex::new(win_obj));
     let (sh, win) = (shared.clone(), window.clone());
     let tracker = opts.program_status.then(Tracker::default);
-    std::thread::spawn(move || pump_output(from_pty, &win, &sh, drained_tx, Emu::feed, tracker));
+    // The output pump's own copy of the master, to look up the foreground group the moment a title arrives.
+    let fg_fd = pair.master.as_raw_fd().and_then(|fd| {
+        let d = unsafe { libc::dup(fd) };
+        // SAFETY: a descriptor `dup` just made, owned by nobody else.
+        (d >= 0).then(|| unsafe { <std::os::fd::OwnedFd as std::os::fd::FromRawFd>::from_raw_fd(d) })
+    });
+    let pid0 = child_pid.unwrap_or(0);
+    let fresh_fg = move |sh: &Shared| {
+        use std::os::fd::AsRawFd;
+        let g = fg_fd.as_ref().map(|fd| unsafe { libc::tcgetpgrp(fd.as_raw_fd()) }).filter(|&g| g > 0);
+        probe_fg(sh, g, pid0);
+    };
+    std::thread::spawn(move || pump_output(from_pty, &win, &sh, drained_tx, Emu::feed, tracker, fresh_fg));
     let to_window = shared.input.clone();
     // It may stay blocked on a read when run ends; the process exits under it.
     std::thread::spawn(move || pump_keyboard(to_window));
@@ -325,7 +337,9 @@ fn refresh_title<W: Write>(window: &Mutex<Window<W>>, shared: &Shared) {
 }
 
 /// The program's output: to the window first, with any resize a viewer asked for once it is between sequences, then
-/// to the emulator through `feed`. Says so on `drained` when the pty is done.
+/// to the emulator through `feed`. Says so on `drained` when the pty is done. `fresh_fg` probes the foreground
+/// program into `shared.fg` now: a title is credited to the program in front when it arrives, not to the one the
+/// last once-a-second probe saw.
 fn pump_output<W: Write>(
     mut pty: impl Read,
     window: &Mutex<Window<W>>,
@@ -333,6 +347,7 @@ fn pump_output<W: Write>(
     drained: oneshot::Sender<()>,
     feed: impl Fn(&mut Emu, &[u8]),
     mut tracker: Option<Tracker>,
+    fresh_fg: impl Fn(&Shared),
 ) {
     let mut b = vec![0u8; 64 * 1024];
     let mut titles = Some(super::title::Titles::default());
@@ -375,8 +390,9 @@ fn pump_output<W: Write>(
             let mut w = window.lock().unwrap_or_else(|e| e.into_inner());
             let _ = w.output(&b[..n]);
             let _ = w.resize_if_idle(&shared.fit);
-            // A new title from the program shows at once, not at the next tick.
+            // A new title from the program shows at once, not at the next tick, with the program in front now.
             if w.title_fresh() {
+                fresh_fg(shared);
                 let fg = shared.fg.lock().unwrap_or_else(|e| e.into_inner()).clone();
                 let _ = w.refresh_title(&fg, Instant::now());
             }
@@ -610,8 +626,27 @@ mod tests {
         let window = Mutex::new(Window::new(Vec::new()));
         let (tx, _d) = oneshot::channel();
         let pty = Chunks(VecDeque::from([&b"\x1b]1;~/git/rapp\x07"[..]]));
-        pump_output(pty, &window, &sh, tx, Emu::feed, None);
+        pump_output(pty, &window, &sh, tx, Emu::feed, None, |_: &Shared| {});
         assert_eq!(sh.status().title.as_deref(), Some("~/git/rapp"));
+    }
+
+    #[test]
+    fn a_title_is_credited_to_the_program_in_front_when_it_arrives() {
+        use super::super::fg::Fg;
+        let (sh, _rx) = shared_with_input(30, 4);
+        let fgd = |prog: &str, shell: bool| Fg { prog: Some(prog.into()), cwd: Some("/h/x".into()), shell, probed: true };
+        // The last once-a-second probe still saw the shell; vim has just started and sets its title.
+        *sh.fg.lock().unwrap() = fgd("zsh", true);
+        let window = Mutex::new(Window::new(Vec::new()).titles("/h".into()));
+        let (tx, _d) = oneshot::channel();
+        let pty = Chunks(VecDeque::from([&b"\x1b]0;notes.txt\x07"[..]]));
+        pump_output(pty, &window, &sh, tx, Emu::feed, None, |sh: &Shared| *sh.fg.lock().unwrap() = fgd("vim", false));
+        let mut w = window.lock().unwrap();
+        assert!(w.get_ref().ends_with("~/x · vim — notes.txt\x07".as_bytes()), "{:?}", String::from_utf8_lossy(w.get_ref()));
+        // The next tick's probe agrees: the title stays.
+        let at = Instant::now() + Duration::from_secs(2);
+        w.refresh_title(&fgd("vim", false), at).unwrap();
+        assert!(w.get_ref().ends_with("~/x · vim — notes.txt\x07".as_bytes()));
     }
 
     #[test]
@@ -620,7 +655,7 @@ mod tests {
         sh.meta.named.store(true, Ordering::Relaxed);
         let window = Mutex::new(Window::new(Vec::new()));
         let (tx, _d) = oneshot::channel();
-        pump_output(Chunks(VecDeque::from([&b"\x1b]0;vim\x07"[..]])), &window, &sh, tx, Emu::feed, None);
+        pump_output(Chunks(VecDeque::from([&b"\x1b]0;vim\x07"[..]])), &window, &sh, tx, Emu::feed, None, |_: &Shared| {});
         assert_eq!(sh.status().title, None);
     }
 
@@ -630,7 +665,7 @@ mod tests {
         let window = Mutex::new(Window::new(Ordered { rx, log: vec![] }));
         let (tx, _d) = oneshot::channel();
         let pty = Chunks(VecDeque::from([&b"\x1b]7501;?\x07\x1b[c"[..]]));
-        pump_output(pty, &window, &sh, tx, Emu::feed, Some(Tracker::default()));
+        pump_output(pty, &window, &sh, tx, Emu::feed, Some(Tracker::default()), |_: &Shared| {});
         assert_eq!(window.lock().unwrap().get_ref().log, ["reply:10", "window"]);
     }
 
@@ -648,7 +683,7 @@ mod tests {
         let window = Mutex::new(Window::new(Vec::new()));
         let (tx, _d) = oneshot::channel();
         let pty = Chunks(VecDeque::from([&b"\x1b]7501;state=blocked:kind=permission:app=claude-code\x07"[..]]));
-        pump_output(pty, &window, &sh, tx, Emu::feed, Some(Tracker::default()));
+        pump_output(pty, &window, &sh, tx, Emu::feed, Some(Tracker::default()), |_: &Shared| {});
         let ps = sh.status().ps.unwrap();
         assert_eq!((ps.state.as_str(), ps.kind.as_deref()), ("blocked", Some("permission")));
     }
@@ -677,7 +712,7 @@ mod tests {
         let window = Mutex::new(Window::new(Vec::new()));
         let (tx, _d) = oneshot::channel();
         let flood: &'static [u8] = Box::leak(b"\x1b]7501;?\x07".repeat(1000).into_boxed_slice());
-        pump_output(Chunks(VecDeque::from([flood])), &window, &sh, tx, Emu::feed, Some(Tracker::default()));
+        pump_output(Chunks(VecDeque::from([flood])), &window, &sh, tx, Emu::feed, Some(Tracker::default()), |_: &Shared| {});
         assert_eq!(rx.try_recv().unwrap().len(), 64 * PROBE_REPLY.len());
         assert!(rx.try_recv().is_err());
         assert_eq!(window.lock().unwrap().get_ref().as_slice(), flood); // the output was not stalled
@@ -689,7 +724,7 @@ mod tests {
         let window = Mutex::new(Window::new(Vec::new()));
         let (tx, _d) = oneshot::channel();
         let pty = Chunks(VecDeque::from([&b"\x1b]7501;state=working\x07"[..]]));
-        pump_output(pty, &window, &sh, tx, |_: &mut Emu, _: &[u8]| panic!("the emulator fell over"), Some(Tracker::default()));
+        pump_output(pty, &window, &sh, tx, |_: &mut Emu, _: &[u8]| panic!("the emulator fell over"), Some(Tracker::default()), |_: &Shared| {});
         assert_eq!(sh.status().ps.unwrap().state, "working");
     }
 
@@ -699,7 +734,7 @@ mod tests {
         let window = Mutex::new(Window::new(Vec::new()));
         let (tx, _d) = oneshot::channel();
         let bytes: &[u8] = b"\x1b]7501;?\x07\x1b]7501;state=working\x07hi";
-        pump_output(Chunks(VecDeque::from([bytes])), &window, &sh, tx, Emu::feed, None);
+        pump_output(Chunks(VecDeque::from([bytes])), &window, &sh, tx, Emu::feed, None, |_: &Shared| {});
         assert_eq!(window.lock().unwrap().get_ref().as_slice(), bytes);
         assert!(rx.try_recv().is_err() && sh.status().ps.is_none());
     }
@@ -713,7 +748,7 @@ mod tests {
         pump_output(pty, &window, &sh, tx, |emu: &mut Emu, b: &[u8]| {
             assert!(!b.starts_with(b"boom"), "the emulator fell over");
             emu.feed(b);
-        }, None);
+        }, None, |_: &Shared| {});
         assert_eq!(window.lock().unwrap().get_ref().as_slice(), b"one boom two");
         assert!(drained.try_recv().is_ok());
         // A fresh emulator, at the old size, with what came after.
