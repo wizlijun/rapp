@@ -207,6 +207,10 @@ struct Titles {
     home: PathBuf,
     /// The program's own title, as last seen.
     prog: Option<String>,
+    /// The foreground program the title belongs to; set at the first refresh after the title arrived.
+    owner: Option<String>,
+    /// A title arrived that no refresh has looked at yet.
+    fresh: bool,
     written: Option<String>,
     at: Option<Instant>,
 }
@@ -226,7 +230,7 @@ impl<W: Write> Window<W> {
 
     /// The window's title becomes `<dir> · <program>`; the program's own title is taken out of what it sees.
     pub fn titles(mut self, home: PathBuf) -> Self {
-        self.titles = Some(Titles { strip: OscStrip::default(), home, prog: None, written: None, at: None });
+        self.titles = Some(Titles { strip: OscStrip::default(), home, prog: None, owner: None, fresh: false, written: None, at: None });
         self
     }
 
@@ -242,6 +246,7 @@ impl<W: Write> Window<W> {
             Some(t) => {
                 if let Some(p) = t.strip.feed(bytes, &mut kept) {
                     t.prog = Some(p);
+                    t.fresh = true;
                 }
                 &kept[..]
             }
@@ -253,10 +258,21 @@ impl<W: Write> Window<W> {
         Ok(())
     }
 
+    /// True when the program set a title that `refresh_title` has not looked at yet.
+    pub fn title_fresh(&self) -> bool {
+        self.titles.as_ref().is_some_and(|t| t.fresh)
+    }
+
     /// Writes the title for `fg` if it changed, a second has passed since the last write and the stream is between
     /// sequences; otherwise a later call does it.
     pub fn refresh_title(&mut self, fg: &Fg, now: Instant) -> std::io::Result<()> {
         let Some(t) = self.titles.as_mut() else { return Ok(()) };
+        if t.fresh {
+            t.owner = fg.prog.clone();
+            t.fresh = false;
+        } else if t.prog.is_some() && (fg.shell || fg.prog != t.owner) {
+            t.prog = None;
+        }
         let Some(title) = compose(&t.home, fg, t.prog.as_deref()) else { return Ok(()) };
         let title: String = title.chars().filter(|c| !c.is_control()).collect();
         if t.written.as_deref() == Some(&title) || !self.seq.ground() {
@@ -311,6 +327,22 @@ mod tests {
         w.output(b"a\x1b]0;Fix bug\x07b").unwrap();
         w.refresh_title(&fgd("claude", false), t0).unwrap();
         assert_eq!(w.get_ref().as_slice(), "ab\x1b]0;~/x · claude — Fix bug\x07".as_bytes());
+    }
+
+    #[test]
+    fn a_program_title_goes_when_its_program_does() {
+        let t0 = Instant::now();
+        let mut w = titled();
+        w.output(b"\x1b]0;Fix bug\x07").unwrap();
+        assert!(w.title_fresh());
+        w.refresh_title(&fgd("claude", false), t0).unwrap();
+        assert!(!w.title_fresh());
+        assert!(w.get_ref().ends_with("claude — Fix bug\x07".as_bytes()));
+        w.refresh_title(&fgd("vim", false), ms(t0, 2000)).unwrap();
+        assert!(w.get_ref().ends_with("~/x · vim\x07".as_bytes()));
+        w.refresh_title(&fgd("zsh", true), ms(t0, 4000)).unwrap();
+        w.refresh_title(&fgd("claude", false), ms(t0, 6000)).unwrap();
+        assert!(w.get_ref().ends_with("~/x · claude\x07".as_bytes()));
     }
 
     #[test]

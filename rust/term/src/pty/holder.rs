@@ -361,8 +361,10 @@ fn pump_output<W: Write>(
             let _ = w.output(&b[..n]);
             let _ = w.resize_if_idle(&shared.fit);
             // A new title from the program shows at once, not at the next tick.
-            let fg = shared.fg.lock().unwrap_or_else(|e| e.into_inner()).clone();
-            let _ = w.refresh_title(&fg, Instant::now());
+            if w.title_fresh() {
+                let fg = shared.fg.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                let _ = w.refresh_title(&fg, Instant::now());
+            }
         }
         guarded(shared, None, |emu| feed(emu, &b[..n]));
         shared.activity.store(now(), Ordering::Relaxed);
