@@ -1,6 +1,6 @@
 # rapp GUI 客户端状态规则设计规格（可灵活适配）
 
-日期：2026-11-25。状态：**第 3 稿，已确认**（2026-11-25，§13 五件逐一问过用户）。可以写实施计划。
+日期：2026-11-25。状态：**第 3 稿，已确认**（2026-11-25，§13 五件逐一问过用户）。**已实现 R1–R4、R6，见计划**（`docs/superpowers/plans/2026-11-25-rapp-app-state-rules.md`），实机检查见 `tasks/todo.md`。
 
 - 上游：调研（`2026-11-25-rapp-app-working-state-research.md`，下称“调研”）、app 配置设计（`2026-11-13-rapp-app-profiles-design.md`）、沟通机制设计（`2026-11-12-rapp-conversation-design.md`）、焦点面板规格（`2026-11-16-rapp-focus-pane-rules.md`）、程序状态设计（`2026-11-25-rapp-program-status-design.md`，管终端里的 CLI）。
 - rapp 自己的代码读的是 2026-11-25 的 main。
