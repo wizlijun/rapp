@@ -22,12 +22,12 @@ final class AppStateWatcher {
     private let log: (String) -> Void
     private let queue = DispatchQueue(label: "rapp.state", qos: .utility)
 
-    /// Guards `active`, `window`, `pending` and `lastSample`, which the capture queue touches.
+    /// Guards `active`, `window` and `newest`, which the capture queue touches.
     private let lock = NSLock()
     private var active = false
     private var window: CanvasRect?
-    private var pending: RuleImage?
-    private var lastSample: TimeInterval = 0
+    /// The newest frame offered and not yet ticked; one retained buffer, replaced on every offer.
+    private var newest: (buffer: CVPixelBuffer, region: CanvasRect)?
 
     /// Queue only.
     private var engine: StateEngine?
@@ -50,7 +50,7 @@ final class AppStateWatcher {
             engine = nil
             timer?.cancel()
             timer = nil
-            lock.withLock { active = false; pending = nil }
+            lock.withLock { active = false; newest = nil }
             guard !json.isEmpty else { return }
 
             let bundleURL = app.bundleURL
@@ -78,52 +78,24 @@ final class AppStateWatcher {
         }
     }
 
-    /// The app's main window in canvas points; nil when there is none.
+    /// The app's main window in canvas points; nil when there is none. A change drops the pending frame.
     func setWindow(_ rect: CanvasRect?) {
         lock.withLock {
+            if rect != window { newest = nil }
             window = rect
-            if rect == nil { pending = nil }
         }
     }
 
-    /// Capture queue. Returns at once when no rules are set or the last sample is under 0.5 s old.
+    /// Capture queue. Keeps only the newest frame; the sampling is done on the watcher queue.
     func offer(_ buffer: CVPixelBuffer, region: CanvasRect) {
-        let now = uptimeSeconds()
-        let win: CanvasRect? = lock.withLock {
-            guard active, let window, now - lastSample >= Self.interval else { return nil }
-            return window
-        }
-        guard let win, region.w > 0, region.h > 0 else { return }
-
-        let x0 = max(win.x, region.x), y0 = max(win.y, region.y)
-        let x1 = min(win.x + win.w, region.x + region.w), y1 = min(win.y + win.h, region.y + region.h)
-        guard x1 > x0, y1 > y0 else { return }
-
-        CVPixelBufferLockBaseAddress(buffer, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
-        guard let base = CVPixelBufferGetBaseAddress(buffer) else { return }
-        let width = CVPixelBufferGetWidth(buffer), height = CVPixelBufferGetHeight(buffer)
-        let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
-        let scale = Double(width) / Double(region.w)
-        guard scale.isFinite, scale > 0 else { return }
-        let px0 = max(0, Int((Double(x0 - region.x) * scale).rounded(.down)))
-        let py0 = max(0, Int((Double(y0 - region.y) * scale).rounded(.down)))
-        let px1 = min(width, Int((Double(x1 - region.x) * scale).rounded(.up)))
-        let py1 = min(height, Int((Double(y1 - region.y) * scale).rounded(.up)))
-        guard px1 > px0, py1 > py0 else { return }
-        let crop = RuleRect(x: px0, y: py0, w: px1 - px0, h: py1 - py0)
-        let bytes = UnsafeRawBufferPointer(start: base, count: bytesPerRow * height)
-        guard let image = RuleImage.sample(bgra: bytes, width: width, height: height, bytesPerRow: bytesPerRow,
-                                           crop: crop, scale: scale) else { return }
         lock.withLock {
-            guard active, window != nil else { return }
-            lastSample = now
-            pending = image
+            guard active else { return }
+            newest = (buffer, region)
         }
     }
 
     func stop() {
-        lock.withLock { active = false; pending = nil; window = nil }
+        lock.withLock { active = false; newest = nil; window = nil }
         queue.async { [self] in
             stopped = true
             timer?.cancel()
@@ -135,13 +107,52 @@ final class AppStateWatcher {
     /// Queue only.
     private func tick() {
         guard let engine, !stopped else { return }
-        let (image, visible): (RuleImage?, Bool) = lock.withLock {
-            let p = pending
-            pending = nil
-            return (window == nil ? nil : p, window != nil)
+        let (win, frame): (CanvasRect?, (buffer: CVPixelBuffer, region: CanvasRect)?) = lock.withLock {
+            let f = newest
+            newest = nil
+            return (window, f)
+        }
+        var image: RuleImage?
+        var visible = win != nil
+        if let win, let frame {
+            switch Self.sample(frame.buffer, region: frame.region, window: win) {
+            case .image(let i): image = i
+            case .clipped: visible = false   // the window leaves the frame: not a picture of it
+            case .none: break
+            }
         }
         if let report = engine.tick(image: image, visible: visible, now: uptimeSeconds()) {
             send(.appState(report.json()))
         }
+    }
+
+    private enum Sampled { case image(RuleImage), clipped, none }
+
+    /// The window's part of `buffer` at one pixel per point.
+    private static func sample(_ buffer: CVPixelBuffer, region: CanvasRect, window win: CanvasRect) -> Sampled {
+        guard region.w > 0, region.h > 0, win.w > 0, win.h > 0 else { return .none }
+        let x0 = max(win.x, region.x), y0 = max(win.y, region.y)
+        let x1 = min(win.x + win.w, region.x + region.w), y1 = min(win.y + win.h, region.y + region.h)
+        guard x1 > x0, y1 > y0 else { return .clipped }
+        if x0 - win.x > 0.5 || y0 - win.y > 0.5 || (win.x + win.w) - x1 > 0.5 || (win.y + win.h) - y1 > 0.5 {
+            return .clipped
+        }
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(buffer) else { return .none }
+        let width = CVPixelBufferGetWidth(buffer), height = CVPixelBufferGetHeight(buffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
+        let scale = Double(width) / Double(region.w)
+        guard scale.isFinite, scale > 0 else { return .none }
+        let px0 = max(0, Int((Double(x0 - region.x) * scale).rounded(.down)))
+        let py0 = max(0, Int((Double(y0 - region.y) * scale).rounded(.down)))
+        let px1 = min(width, Int((Double(x1 - region.x) * scale).rounded(.up)))
+        let py1 = min(height, Int((Double(y1 - region.y) * scale).rounded(.up)))
+        guard px1 > px0, py1 > py0 else { return .none }
+        let bytes = UnsafeRawBufferPointer(start: base, count: bytesPerRow * height)
+        let crop = RuleRect(x: px0, y: py0, w: px1 - px0, h: py1 - py0)
+        guard let image = RuleImage.sample(bgra: bytes, width: width, height: height, bytesPerRow: bytesPerRow,
+                                           crop: crop, scale: scale) else { return .none }
+        return .image(image)
     }
 }
