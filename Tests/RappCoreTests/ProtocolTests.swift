@@ -123,6 +123,10 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(try decodeOne([43, 2, 0, 0, 0, 0x7B, 0x7D]), .stateRules("{}"))
         XCTAssertEqual(try decodeOne([44, 2, 0, 0, 0, 0x7B, 0x7D]), .appState("{}"))
         // Too large, and not UTF-8.
+        // encode checks the same limits as decode (an oversize one traps like the paste and password limits)
+        let atRules = String(repeating: " ", count: stateRulesLimit), atState = String(repeating: " ", count: appStateLimit)
+        XCTAssertEqual(try decodeOne(Message.stateRules(atRules).encoded()), .stateRules(atRules))
+        XCTAssertEqual(try decodeOne(Message.appState(atState).encoded()), .appState(atState))
         var big: [UInt8] = [43] + withUnsafeBytes(of: UInt32(stateRulesLimit + 1).littleEndian, Array.init)
         big += [UInt8](repeating: 0x20, count: stateRulesLimit + 1)
         XCTAssertThrowsError(try decodeOne(big))

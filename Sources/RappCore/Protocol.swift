@@ -311,9 +311,11 @@ public enum Message: Equatable {
             type = 42
         case let .stateRules(json):
             type = 43
+            precondition(json.utf8.count <= stateRulesLimit, "rules too large")
             w.bytes += Array(json.utf8)
         case let .appState(json):
             type = 44
+            precondition(json.utf8.count <= appStateLimit, "state too large")
             w.bytes += Array(json.utf8)
         }
         precondition(w.bytes.count <= maxMessageLength, "message too large")
