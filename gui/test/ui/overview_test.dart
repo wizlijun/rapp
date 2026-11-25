@@ -18,6 +18,7 @@ import 'dart:async';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/overview.dart';
 import 'package:rapp/ui/prefs.dart';
+import 'package:rapp/ui/terms_entry.dart';
 import 'package:rapp/ui/tokens.dart';
 
 import '../fakes.dart';
@@ -191,6 +192,50 @@ void main() {
     });
     await tester.pump();
     expect(s.entries.map((e) => e.app), contains('com.apple.Notes'));
+  });
+
+  testWidgets('常用 · 终端 says 新建 and opens a new terminal each tap', (tester) async {
+    await boot(tester);
+    TermList list(String mode) => TermList('m1',
+        terms: [TermRow('term:pty:a', 'a', 'zsh', null, 1, 0, 1, false, false)], hosts: [TermHost(null, launchers: const ['Terminal'])]);
+    s.hub!.termLists['m1'] = list('text');
+    final inner = t.onSend!;
+    var n = 0;
+    t.onSend = (m) {
+      if (m['cmd'] == 'open_term') {
+        t.emit({'event': 'term_created', 'req': m['req'], 'id': m['id'], 'term': 'term:pty:n${++n}'});
+      } else if (m['cmd'] == 'terms') {
+        t.emit({'event': 'terms', 'req': m['req'], 'id': m['id'], 'terms': [], 'hosts': [{'host': null, 'launchers': ['Terminal']}]});
+      } else {
+        inner(m);
+      }
+    };
+    s.toggleFavorite('m1', termsEntry, termsEntryName);
+    await show(tester);
+    const key = Key('ov-favorite-m1/terms:');
+    expect(find.descendant(of: find.byKey(key), matching: find.text('新建')), findsOneWidget);
+    expect(find.bySemanticsLabel('常用 终端，点按新建'), findsOneWidget);
+    for (var i = 0; i < 2; i++) {
+      if (!s.overview) s.toggleOverview();
+      await tester.pump();
+      await tester.tap(find.byKey(key));
+      await tester.runAsync(() async {
+        for (var j = 0; j < 6; j++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+    }
+    expect(t.sent.where((m) => m['cmd'] == 'open_term').length, 2);
+  });
+
+  testWidgets('常用 · 终端 says 打开 in pixels mode', (tester) async {
+    await boot(tester);
+    s.prefs.termOpen['m1'] = 'pixels';
+    s.hub!.termLists['m1'] = TermList('m1', hosts: [TermHost(null, launchers: const ['Terminal'])]);
+    s.toggleFavorite('m1', termsEntry, termsEntryName);
+    await show(tester);
+    expect(find.descendant(of: find.byKey(const Key('ov-favorite-m1/terms:')), matching: find.text('打开')), findsOneWidget);
   });
 
   testWidgets('zero counts are muted', (tester) async {

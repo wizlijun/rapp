@@ -2581,12 +2581,27 @@ class MainState extends ChangeNotifier {
       app == termsEntry ? _openTerms(id) : _open(id, app, appName);
 
   /// What the 终端 entry on [id] opens now: it follows the device's 打开方式 (spec §2.2).
-  TermsTarget _termsTargetOf(String id) => termsTarget(
-      mode: prefs.termOpenFor(id),
-      list: hub?.termLists[id] ?? TermList(id),
-      apps: probes[id]?.apps?.apps ?? const [],
-      graphical: probes[id]?.apps?.capabilities?['graphical'] != false &&
-          probes[id]?.apps?.capabilities?['applications'] != false);
+  TermsTarget _termsTargetOf(String id) => _targetWith(termsTarget, id);
+
+  /// Like [_termsTargetOf], but a text device that can launch terminals always makes a new one.
+  TermsTarget _termsNewTargetOf(String id) => _targetWith(termsNewTarget, id);
+
+  TermsTarget _targetWith(
+      TermsTarget Function({required String mode, required TermList list, required List<HubApp> apps, bool graphical}) f,
+      String id) =>
+      f(
+          mode: prefs.termOpenFor(id),
+          list: hub?.termLists[id] ?? TermList(id),
+          apps: probes[id]?.apps?.apps ?? const [],
+          graphical: probes[id]?.apps?.capabilities?['graphical'] != false &&
+              probes[id]?.apps?.capabilities?['applications'] != false);
+
+  /// A 常用 tile for the 终端 entry creates a new terminal (the tile says 「新建」).
+  bool favoriteCreates(AppRef f) => f.bundle == termsEntry && _termsNewTargetOf(f.device) is NewText;
+
+  /// Taps a 常用 tile: the 终端 entry makes a new terminal when it can, anything else opens or switches.
+  Future<void> openFavorite(AppRef f) =>
+      f.bundle == termsEntry ? _openTerms(f.device, target: _termsNewTargetOf(f.device)) : openOrSwitch(f.device, f.bundle, f.name);
 
   /// The key of the session [m] opens; null for a 终端 entry that opens a new text terminal.
   String? _openedKey(Member m) {
@@ -2600,9 +2615,9 @@ class MainState extends ChangeNotifier {
   }
 
   /// The 终端 entry; [select] and [quiet] as for [_open].
-  Future<void> _openTerms(String id, {bool select = true, bool quiet = false}) async {
+  Future<void> _openTerms(String id, {bool select = true, bool quiet = false, TermsTarget? target}) async {
     if (!hubUsable) return;
-    switch (_termsTargetOf(id)) {
+    switch (target ?? _termsTargetOf(id)) {
       case OpenTerm(:final app, :final name):
         return _open(id, app, name, select: select, quiet: quiet);
       case OpenPixels(:final bundle, :final name):

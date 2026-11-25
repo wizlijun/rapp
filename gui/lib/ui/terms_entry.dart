@@ -81,3 +81,14 @@ TermsTarget termsTarget({required String mode, required TermList list, required 
   final first = terminalAppsOf(apps).firstOrNull;
   return first == null ? const OpenPixels('com.apple.Terminal', 'Terminal') : OpenPixels(first.app, first.name);
 }
+
+/// What the overview's 常用 · 终端 opens: in text mode with local launchers always a new terminal, else [termsTarget].
+TermsTarget termsNewTarget({required String mode, required TermList list, required List<HubApp> apps, bool graphical = true}) {
+  if (mode == 'text' || !graphical) {
+    final local = list.hosts.where((h) => h.host == null).firstOrNull;
+    if (local != null && local.launchers.isNotEmpty) {
+      return NewText(local.shells?.where((s) => s.isDefault).firstOrNull?.path);
+    }
+  }
+  return termsTarget(mode: mode, list: list, apps: apps, graphical: graphical);
+}
