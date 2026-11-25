@@ -42,6 +42,14 @@ String programWord(TermPs ps) => switch (ps.state) {
       _ => '在干活',
     };
 
+/// The lamp of a program's state in the status queue: working is active, an ask waits, an error is a fault.
+Lamp programLamp(TermPs ps) => switch (ps.state) {
+      'working' => Lamp.active,
+      'blocked' => Lamp.waiting,
+      'error' => Lamp.disconnected,
+      _ => Lamp.idle,
+    };
+
 /// The line of a blocked program: what it waits for, then its message (plain text).
 String termAskWord(TermPs ps) {
   final word = switch (ps.kind) {
