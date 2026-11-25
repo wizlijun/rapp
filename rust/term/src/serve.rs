@@ -539,7 +539,14 @@ fn pty_rows(unread: &Mutex<Unread>, statuses: &[Status], now: u64) -> Vec<TermRo
             attached: s.viewers,
             activity: s.activity,
             dead: false,
-            unread: u.is_unread(&format!("{PTY}:{}", s.pid), s.activity, now),
+            unread: {
+                let key = format!("{PTY}:{}", s.pid);
+                match &s.ps {
+                    Some(ps) => u.is_unread_ps(&key, ps, now),
+                    None => u.is_unread(&key, s.activity, now),
+                }
+            },
+            ps: s.ps.clone(),
         })
         .collect()
 }
@@ -749,6 +756,44 @@ mod tests {
         }
     }
 
+    fn status_with(ps: Option<crate::pty::ps::Ps>) -> Status {
+        Status {
+            v: 1,
+            name: "w".into(),
+            command: "c".into(),
+            cols: 80,
+            rows: 24,
+            activity: 1050,
+            viewers: 0,
+            pid: 7,
+            ticket: None,
+            key: None,
+            ps,
+        }
+    }
+
+    #[test]
+    fn rows_carry_ps_and_unread_follows_it() {
+        let ps = crate::pty::ps::Ps {
+            state: "blocked".into(),
+            kind: None,
+            app: None,
+            msg: None,
+            progress: None,
+            since: 0,
+            stopped: 0,
+            seq: 1,
+        };
+        let unread = Mutex::new(Unread::new(1000));
+        // Still moving (activity 1 s ago): the old rule says no, blocked says yes.
+        let rows = pty_rows(&unread, &[status_with(Some(ps.clone())), status_with(None)], 1051);
+        assert!(rows[0].unread && rows[0].ps.as_ref() == Some(&ps));
+        assert!(!rows[1].unread && rows[1].ps.is_none());
+        let json = serde_json::to_string(&rows[0]).unwrap();
+        assert!(json.contains(r#""ps":{"state":"blocked""#), "{json}");
+        assert!(!serde_json::to_string(&rows[1]).unwrap().contains("\"ps\""));
+    }
+
     #[test]
     fn a_long_list_is_cut_to_one_line() {
         let row = |i: usize| TermRow {
@@ -761,6 +806,7 @@ mod tests {
             activity: 0,
             dead: false,
             unread: false,
+            ps: None,
         };
         let hosts = vec![HostRow { host: None, launchers: Vec::new(), shells: installed_shells() }];
         let list = TermList { terms: (0..1000).map(row).collect(), hosts };

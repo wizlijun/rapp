@@ -4,8 +4,9 @@
 //!
 //! `run` ends only when the program exits, or on SIGHUP (the window was closed), SIGTERM, SIGINT or SIGQUIT sent
 //! to its pid (^C and ^\ typed in the window go to the program: the window is raw); never because of a viewer, a
-//! missing `serve` or a socket error. It answers none of the program's terminal queries (the window
-//! does) except the OSC 7501 probe, which it answers itself while `programStatus` is on. A viewer may ask the window to resize (`fit`), and the pty follows the window.
+//! missing `serve` or a socket error. It answers none of the program's terminal queries (the window does) except
+//! the OSC 7501 probe, which it answers itself while `programStatus` is on. A viewer may ask the window to resize
+//! (`fit`), and the pty follows the window.
 //!
 //! The exit code is the program's, 1 when the program was killed by a signal; 128 + the signal when `run` itself
 //! got SIGHUP (129), SIGINT (130), SIGQUIT (131) or SIGTERM (143).
@@ -524,6 +525,7 @@ mod tests {
         pump_output(Chunks(VecDeque::from([flood])), &window, &sh, tx, Emu::feed, Some(Tracker::default()));
         assert_eq!(rx.try_recv().unwrap().len(), 64 * PROBE_REPLY.len());
         assert!(rx.try_recv().is_err());
+        assert_eq!(window.lock().unwrap().get_ref().as_slice(), flood); // the output was not stalled
     }
 
     #[test]

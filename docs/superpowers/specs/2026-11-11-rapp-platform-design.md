@@ -99,7 +99,7 @@ relay 在 A 的长连接上开一条流，发 `{"op":"relayed","token":T}`，然
   - `{"op":"list_apps"}` → `{"ok":true,"apps":[{"app":"com.apple.Safari","name":"Safari"}]}`，回完关流。
   - `{"op":"open","app":"com.apple.Safari"}` → `{"ok":true,"token":"<worker token>"}`，之后这条流双向传原始 v3 字节，直到有一方关闭。
   - 终端会话（细则见终端会话规格）：
-    - `{"op":"list_terms"}` → `{"ok":true,"terms":[TermRow…],"hosts":[{"host":null},{"host":"gpu1","target":"me@gpu1","tmux":"…"?,"error":"…"?}]}`，回完关流。`TermRow` = `{"id","host","name","command","panes","attached","activity","dead","unread"}`；`hosts` 第一项永远是本机（`host` 为 null），之后按 `term.json` 的顺序。
+    - `{"op":"list_terms"}` → `{"ok":true,"terms":[TermRow…],"hosts":[{"host":null},{"host":"gpu1","target":"me@gpu1","tmux":"…"?,"error":"…"?}]}`，回完关流。`TermRow` = `{"id","host","name","command","panes","attached","activity","dead","unread","ps"?}`（`ps` 是程序自己报的状态，没有就不带这个键，见程序状态规格 `2026-11-25-rapp-program-status-design.md` §5.5；`unread` 有 `ps` 时按 §5.6 算）；`hosts` 第一项永远是本机（`host` 为 null），之后按 `term.json` 的顺序。
     - `{"op":"watch_terms"}` → 先回一行和 `list_terms` 一样的回复，之后每次列表变了再发一行；列表每 2 秒问一次，只在变了时发；对方关流才停。
     - `{"op":"new_term","host":null|"gpu1","name":"x"?,"command":["claude"],"cols":120,"rows":40}` → `{"ok":true,"id":"term:tmux:x"}`。`host` 是 `term.json` 里的目标名，没有或为 null 是本机。
     - `{"op":"add_term_target","name":"gpu1","target":"me@gpu1","tmux":"/opt/homebrew/bin/tmux"?}` → `{"ok":true,"targets":[{"name","target","tmux"?}…]}`（加完以后的全部目标）。名字已有回 `name is taken`，已满 32 个回 `too many targets`。

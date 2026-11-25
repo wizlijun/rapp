@@ -1,4 +1,5 @@
-//! `term.json`: whether terminal sessions are allowed. The `tmux` and `targets` of older versions are ignored.
+//! `term.json`: whether terminal sessions are allowed, and whether program status (`programStatus`) is read.
+//! The `tmux` and `targets` of older versions are ignored.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
