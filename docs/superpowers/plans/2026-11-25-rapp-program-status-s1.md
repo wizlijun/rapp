@@ -453,7 +453,7 @@ git commit -m "feat(term): program status snapshot on Status"
 3. `guarded` 喂仿真器（现有）。
 4. `activity`、`rev`（现有，每块一次，所以状态变化也只通知一次）。
 
-`Tracker` 在 `pump_output` 自己的线程里，不进 `guarded`，仿真器 panic 不影响它。“排着队的回答最多 64 条”在这里落成“一块输出里最多答 64 次”【计划定的】：`shared.input` 是无界通道，数不出还没写进伪终端的条数；每块 64 KiB 的输出最多带出 64 × 9 字节的回答，程序再怎么只发探测不读输入，队列的增长也被输出量压住。
+`Tracker` 在 `pump_output` 自己的线程里，不进 `guarded`，仿真器 panic 不影响它。“排着队的回答最多 64 条”在这里落成“一块输出里最多答 64 次”【计划定的】：`shared.input` 是无界通道，数不出还没写进伪终端的条数；每块 64 KiB 的输出最多带出 64 × 10 字节的回答，程序再怎么只发探测不读输入，队列的增长也被输出量压住。
 
 - [ ] **Step 1: 写失败的测试**（`holder.rs` 的 `mod tests`；测试辅助 `shared()` 改成同时返回 input 的接收端）
 
@@ -468,7 +468,7 @@ impl Write for Ordered { /* write: while let Ok(v) = rx.try_recv() { log.push(fo
     let window = Mutex::new(Window::new(Ordered { rx, log: vec![] }));
     let (tx, _d) = oneshot::channel();
     pump_output(Chunks(VecDeque::from([&b"\x1b]7501;?\x07\x1b[c"[..]])), &window, &sh, tx, Emu::feed, Some(Tracker::default()));
-    assert_eq!(window.lock().unwrap().get_ref().log, ["reply:9", "window"]);
+    assert_eq!(window.lock().unwrap().get_ref().log, ["reply:10", "window"]);
 }
 #[test] fn a_report_updates_shared_ps() {
     let (sh, _rx) = shared_with_input(30, 4);
@@ -476,7 +476,7 @@ impl Write for Ordered { /* write: while let Ok(v) = rx.try_recv() { log.push(fo
 }
 #[test] fn a_flood_of_probes_gets_64_answers() {             // Review Focus 3
     let flood: &'static [u8] = Box::leak(b"\x1b]7501;?\x07".repeat(1000).into_boxed_slice());
-    /* 喂一块 flood → rx 里正好一条，长度 64 * 9 */
+    /* 喂一块 flood → rx 里正好一条，长度 64 * 10 */
 }
 #[test] fn status_keeps_updating_when_the_emulator_panics() {
     /* feed 闭包对每块都 panic；喂一块报告 working → sh.status().ps 的 state 是 "working" */
