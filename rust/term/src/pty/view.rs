@@ -335,12 +335,13 @@ mod tests {
             emu: Mutex::new(Emu::new(cols, rows)),
             rev: watch::channel(0).0,
             input,
-            meta: Meta { key: "0123456789abcdef".into(), name: Mutex::new("claude".into()), command: "/usr/bin/claude -c".into(), pid: 7, ticket: None },
+            meta: Meta { key: "0123456789abcdef".into(), name: Mutex::new("claude".into()), command: "/usr/bin/claude -c".into(), pid: 7, ticket: None, named: std::sync::atomic::AtomicBool::new(false) },
             viewers: AtomicU32::new(0),
             ended: watch::channel(false).0,
             activity: AtomicU64::new(0),
             fit: Mutex::default(),
             ps: Mutex::new(None),
+            title: Mutex::new(None),
         };
         (Arc::new(sh), rx)
     }

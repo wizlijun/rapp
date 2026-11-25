@@ -21,7 +21,7 @@ use portable_pty::{native_pty_system, CommandBuilder, ExitStatus, MasterPty, Pty
 use std::io::{Read, Write};
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncWriteExt, BufReader};
@@ -101,12 +101,13 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
         emu: Mutex::new(Emu::new(cols, rows)),
         rev: watch::channel(0).0,
         input,
-        meta: Meta { key: local::new_key(), name: Mutex::new(name), command, pid, ticket: opts.ticket.clone() },
+        meta: Meta { key: local::new_key(), name: Mutex::new(name), command, pid, ticket: opts.ticket.clone(), named: AtomicBool::new(opts.name.is_some()) },
         viewers: AtomicU32::new(0),
         ended: watch::channel(false).0,
         activity: AtomicU64::new(now()),
         fit: Mutex::default(),
         ps: Mutex::new(None),
+        title: Mutex::new(None),
     });
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path).with_context(|| format!("cannot listen on {}", path.display()))?;
@@ -279,6 +280,7 @@ fn pump_output<W: Write>(
     mut tracker: Option<Tracker>,
 ) {
     let mut b = vec![0u8; 64 * 1024];
+    let mut titles = Some(super::title::Titles::default());
     loop {
         let n = match pty.read(&mut b) {
             Ok(0) => break,
@@ -303,6 +305,14 @@ fn pump_output<W: Write>(
                 // The tracker panicked and is gone: the status stops, the output keeps flowing.
                 None if tracker.is_none() => *shared.ps.lock().unwrap_or_else(|e| e.into_inner()) = None,
                 None => {}
+            }
+        }
+        // Titles are kept whether or not the tracker runs. A panic there only ends the titles.
+        if let Some(t) = titles.as_mut() {
+            match std::panic::catch_unwind(AssertUnwindSafe(|| t.feed(&b[..n]).then(|| t.shown()))) {
+                Ok(Some(shown)) => *shared.title.lock().unwrap_or_else(|e| e.into_inner()) = shown,
+                Ok(None) => {}
+                Err(_) => titles = None,
             }
         }
         // A window that is gone is no reason to stop: viewers still see the screen.
@@ -413,6 +423,7 @@ async fn client(s: UnixStream, shared: Arc<Shared>, token: Arc<str>) {
             let reply = match head.name.as_deref().and_then(clean_name) {
                 Some(n) => {
                     *shared.meta.name.lock().unwrap_or_else(|e| e.into_inner()) = n;
+                    shared.meta.named.store(true, Ordering::Relaxed);
                     serde_json::json!({ "ok": true })
                 }
                 None => serde_json::json!({ "error": "invalid name" }),
@@ -486,12 +497,13 @@ mod tests {
             emu: Mutex::new(Emu::new(cols, rows)),
             rev: watch::channel(0).0,
             input,
-            meta: Meta { key: "0123456789abcdef".into(), name: Mutex::new("t".into()), command: "sh".into(), pid: 1, ticket: None },
+            meta: Meta { key: "0123456789abcdef".into(), name: Mutex::new("t".into()), command: "sh".into(), pid: 1, ticket: None, named: AtomicBool::new(false) },
             viewers: AtomicU32::new(0),
             ended: watch::channel(false).0,
             activity: AtomicU64::new(0),
             fit: Mutex::default(),
             ps: Mutex::new(None),
+            title: Mutex::new(None),
         };
         (sh, rx)
     }
@@ -513,6 +525,26 @@ mod tests {
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn a_title_reaches_the_status_even_with_program_status_off() {
+        let (sh, _rx) = shared_with_input(30, 4);
+        let window = Mutex::new(Window::new(Vec::new()));
+        let (tx, _d) = oneshot::channel();
+        let pty = Chunks(VecDeque::from([&b"\x1b]1;~/git/rapp\x07"[..]]));
+        pump_output(pty, &window, &sh, tx, Emu::feed, None);
+        assert_eq!(sh.status().title.as_deref(), Some("~/git/rapp"));
+    }
+
+    #[test]
+    fn a_hand_named_session_reports_no_title() {
+        let (sh, _rx) = shared_with_input(30, 4);
+        sh.meta.named.store(true, Ordering::Relaxed);
+        let window = Mutex::new(Window::new(Vec::new()));
+        let (tx, _d) = oneshot::channel();
+        pump_output(Chunks(VecDeque::from([&b"\x1b]0;vim\x07"[..]])), &window, &sh, tx, Emu::feed, None);
+        assert_eq!(sh.status().title, None);
     }
 
     #[test]
@@ -542,6 +574,24 @@ mod tests {
         pump_output(pty, &window, &sh, tx, Emu::feed, Some(Tracker::default()));
         let ps = sh.status().ps.unwrap();
         assert_eq!((ps.state.as_str(), ps.kind.as_deref()), ("blocked", Some("permission")));
+    }
+
+    #[tokio::test]
+    async fn a_rename_makes_the_session_hand_named_and_hides_its_title() {
+        let (sh, _rx) = shared_with_input(30, 4);
+        *sh.title.lock().unwrap() = Some("vim".into());
+        assert_eq!(sh.status().title.as_deref(), Some("vim"));
+        let sh = Arc::new(sh);
+        let (a, b) = UnixStream::pair().unwrap();
+        let task = tokio::spawn(client(a, sh.clone(), "tok".into()));
+        let (r, mut w) = b.into_split();
+        w.write_all(b"{\"op\":\"rename\",\"v\":1,\"name\":\"mine\"}\ntok\n").await.unwrap();
+        let mut line = String::new();
+        tokio::io::AsyncBufReadExt::read_line(&mut BufReader::new(r), &mut line).await.unwrap();
+        task.await.unwrap();
+        assert!(line.contains("\"ok\":true"), "{line}");
+        assert!(sh.meta.named.load(Ordering::Relaxed));
+        assert_eq!(sh.status().title, None);
     }
 
     #[test]

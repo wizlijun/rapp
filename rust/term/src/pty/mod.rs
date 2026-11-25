@@ -19,6 +19,8 @@ pub struct Meta {
     pub command: String,
     pub pid: u32,
     pub ticket: Option<String>,
+    /// True once the name was given by hand (`run --name` or a rename): the program's title is then not reported.
+    pub named: std::sync::atomic::AtomicBool,
 }
 
 /// What `run`'s tasks share: the emulator, how to reach the program, and who is watching.
@@ -39,6 +41,8 @@ pub struct Shared {
     pub fit: Mutex<fit::Fit>,
     /// The program's own status, kept by the output pump.
     pub ps: Mutex<Option<ps::Ps>>,
+    /// The title the program set (OSC 0/1/2), cleaned; kept by the output pump.
+    pub title: Mutex<Option<String>>,
 }
 
 impl Meta {
@@ -62,6 +66,7 @@ impl Shared {
             ticket: self.meta.ticket.clone(),
             key: Some(self.meta.key.clone()),
             ps: self.ps.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+            title: if self.meta.named.load(Ordering::Relaxed) { None } else { self.title.lock().unwrap_or_else(|e| e.into_inner()).clone() },
         }
     }
 }
