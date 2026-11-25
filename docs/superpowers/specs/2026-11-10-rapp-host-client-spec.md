@@ -142,6 +142,8 @@ u32  length    负载字节数，小端，最大 64 MiB（67 108 864）
 
 报告（AppState）的 JSON 键按字母排序：`appVersion`（被控端读到的 app 版本）、`by`（让这个状态成立的标志名，按名字排序）、`caps`（被控端的能力，如 `pixels`、`text`）、`counts`（每个计数标志命中几个，最多 32 个键）、`health`、`inferred`（总是 `true`）、`kind`、`pack`（用的哪一包）、`rev`、`state`（`working`、`done`、`blocked`、`idle` 或 `null`）、`sure`（`by` 不空且每个标志都是 `tested`）、`variants`（此刻盖上的变体名），以及只在 `health` 为 `invalid` 时才有的 `error`。`health`：`ok`、`switched`（自检后自动换了变体）、`unfit`（换遍了也对不上）、`invalid`（规则读不了）。超过 4096 字节时被控端先丢 `counts`。
 
+主控台只在 `state` 为 `blocked`、`sure` 为真、且 `health` 是 `ok` 时才把它算“需要你”（过期的 `unfit`/`switched`/`invalid` 也不亮“等你”灯，见《状态规则》）。
+
 A 只对 app 会话处理 43：终端和桌面会话不发也不收规则。Linux 被控端收到 43 只记一行日志，不回报告。43/44 是 v16 的新类型，两端版本要完全一致。
 
 字段取值：

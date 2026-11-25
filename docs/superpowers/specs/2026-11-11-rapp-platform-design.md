@@ -198,6 +198,8 @@ relay 在 A 的长连接上开一条流，发 `{"op":"relayed","token":T}`，然
 - 加 `--json` 时，stdin 读 JSON 行命令；stdin 关闭（EOF）就正常退出，退出码 0。
 - 退出码：0 正常、1 运行时错误、2 参数错误、3 缺权限、5 协议版本不符。
 
+**状态规则（协议 v16，2026-11-25）**：v16 加两条消息：下发规则（类型 43，client→host）和报推断状态（类型 44，host→client）。完整定义见《host 与 client 应用规格》（`2026-11-10-rapp-host-client-spec.md`）的 v16 补充和《状态规则》（`2026-11-25-rapp-app-state-rules-design.md`）。规格 §14 的“会话信息加能力和 `appVersion`”由报告里的 `caps` 和 `appVersion` 两个字段满足，hello 不变。
+
 **`rapp-host`**
 - `rapp-host serve --app <appID> (--token <t> | --token-env <VAR>) [--port 47800] [--bind 0.0.0.0] [--json]`
   - 事件：
