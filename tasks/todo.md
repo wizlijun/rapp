@@ -996,7 +996,7 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] macOS Latest 保留 v0.15.23；仓库下载快照更新。本轮不安装系统包、不重启服务、不部署静态站。
 - [ ] 实际物理输入法、触屏及 macOS 真机对端验收；详见 `docs/superpowers/plans/2026-11-25-linux-01524-parity.md`。
 
-## 快捷区按键重排（feat/key-bar-keys，2026-11-25，已合并到 main，未发版）
+## 快捷区按键重排（feat/key-bar-keys，2026-11-25，已发版 0.15.25）
 
 依据和排法：`docs/superpowers/specs/2026-11-25-rapp-key-bar-keys-research.md`。第一排 `Tab ⇧Tab Esc ⌃C ⌃ ⋯ ↑ ↓ ⌫ ⏎`，第二排 `⌘C ⌘V ⌥ (⌘) ← → ⌃O ⌃R ⌃T ⌃B ⌃L`。上面几节实机检查里写的旧键位（⋯ 在最右、⌫ 和「复制 粘贴」在第二排末尾、⌃D）以这里为准。
 
@@ -1021,7 +1021,7 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 10 点 ⌄：快捷区收起，框里的开关变暗；再点开关又出来。⌃ 亮着时点 ⌄ 也收。
 - [ ] 11 VoiceOver：⌄ 念「收起快捷区」。
 
-## 升级后开机冒出旧版 rApp（2026-11-25，分支 `fix/update-previous-inert`，等下次发版一起合）
+## 升级后开机冒出旧版 rApp（2026-11-25，分支 `fix/update-previous-inert`，已发版 0.15.25）
 
 原因：升级把旧版整个挪到 `~/rapp/local/previous/rapp.app` 留作回退。那份仍是登记过的 `.app`，系统按 bundle id 在登录时把它和新版一起打开（总览本机显示 0.15.20、旧的圆形快捷区按钮）。
 
