@@ -529,6 +529,31 @@ void main() {
       expect(hub.termLists['A']!.path, 'lan');
     });
 
+    test('terms rows carry ps only when it is well formed', () async {
+      t.emit({
+        'event': 'terms',
+        'id': 'P',
+        'terms': [
+          {'id': 'term:pty:a', 'ps': {'state': 'blocked', 'kind': 'permission', 'msg': 'approve Bash: ls', 'since': 5, 'stopped': 0, 'seq': 3}},
+          {'id': 'term:pty:b'},
+          {'id': 'term:pty:c', 'ps': {'state': 'sleeping'}},
+          {'id': 'term:pty:d', 'ps': 'x'},
+          {'id': 'term:pty:e', 'ps': {'state': 'working', 'progress': 150}},
+          {'id': 'term:pty:f', 'ps': {'state': 'working', 'progress': 42}},
+        ],
+        'hosts': [],
+      });
+      await Future<void>.delayed(Duration.zero);
+      final r = hub.termLists['P']!.terms;
+      final a = r[0].ps!;
+      expect((a.state, a.kind, a.msg, a.since, a.stopped, a.seq, a.progress), ('blocked', 'permission', 'approve Bash: ls', 5, 0, 3, null));
+      expect(r[1].ps, isNull);
+      expect(r[2].ps, isNull);
+      expect(r[3].ps, isNull);
+      expect(r[4].ps!.progress, isNull);
+      expect(r[5].ps!.progress, 42);
+    });
+
     test('openTerm sends open_term and answers the new id', () async {
       final f = hub.openTerm('d1', shell: '/bin/zsh', app: 'Terminal');
       final cmd = t.sent.last;

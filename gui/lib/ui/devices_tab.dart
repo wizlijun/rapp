@@ -14,6 +14,7 @@ import 'lifecycle.dart';
 import 'main_state.dart';
 import 'session_model.dart';
 import 'tab_chip.dart';
+import 'term_status.dart';
 import 'shares_section.dart';
 import 'terms_entry.dart';
 import 'tokens.dart';
@@ -643,24 +644,6 @@ class _AppRow extends StatelessWidget {
   }
 }
 
-/// The status line of a terminal row (the plan's rules).
-String termStatus(TermRow r, int nowSecs) {
-  if (r.dead) return '已退出';
-  if (r.unread) return '未读';
-  final idle = nowSecs - r.activity;
-  if (idle < 10) return '刚刚有输出';
-  if (idle < 60) return '不到 1 分钟没动静';
-  if (idle < 3600) return '${idle ~/ 60} 分钟没动静';
-  return '${idle ~/ 3600} 小时没动静';
-}
-
-Lamp termLamp(TermRow r, int nowSecs) {
-  if (r.dead) return Lamp.disconnected;
-  if (r.unread) return Lamp.waiting;
-  if (nowSecs - r.activity < 10) return Lamp.active;
-  return Lamp.idle;
-}
-
 class _TermRow extends StatelessWidget {
   const _TermRow({required this.row, required this.session, required this.enabled, required this.onOpen, this.onRename});
   final TermRow row;
@@ -708,7 +691,7 @@ class _TermRow extends StatelessWidget {
                   ),
                 ]),
                 Text(row.command, maxLines: 1, overflow: TextOverflow.ellipsis, style: _mono(t)),
-                Text(status, style: TextStyle(color: t.muted)),
+                Text(status, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.muted)),
               ],
             ),
           ),
