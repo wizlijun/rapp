@@ -81,5 +81,5 @@ public func colorDistance(_ a: (r: UInt8, g: UInt8, b: UInt8), _ b: (r: UInt8, g
     max(abs(Int(a.r) - Int(b.r)), abs(Int(a.g) - Int(b.g)), abs(Int(a.b) - Int(b.b)))
 }
 
-public let regionContrast = 16      // edge: a column differs from the reference by this much
+public let regionContrast = 10      // edge: a column differs from the reference by this much
 public let blobContrast = 24        // blob / shape foreground threshold

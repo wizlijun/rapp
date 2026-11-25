@@ -39,10 +39,9 @@ enum Canvas {
     }
 
     /// Sidebar 240 wide (when present), main column, an input box at the bottom, a stop-style button
-    /// at its right, and three dots on the sidebar's right side. All numbers follow the brief, except the
-    /// sidebar colours: (240) and (32) sit within 16 of the main column and would never pass `regionContrast`.
+    /// at its right, and three dots on the sidebar's right side. All numbers follow the brief.
     static func chatWindow(width: Int = 800, height: Int = 600, sidebar: Bool = true, dark: Bool = false) -> RuleImage {
-        let side: RGB = dark ? (36, 36, 36) : (232, 232, 232)
+        let side: RGB = dark ? (32, 32, 32) : (240, 240, 240)
         let main: RGB = dark ? (18, 18, 18) : (255, 255, 255)
         let box: RGB = dark ? (26, 26, 26) : (244, 244, 244)
         let ink: RGB = dark ? (240, 240, 240) : (0, 0, 0)
