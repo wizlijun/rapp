@@ -90,3 +90,54 @@ async fn an_unknown_service_is_named() {
     let r = say(&a, &key, &visitor(), json!({"op":"set_service","name":"nope","on":true})).await;
     assert_eq!(r["error"], "unknown service", "{r}");
 }
+
+// The app side: a hub asks a device to turn its state service on or off.
+
+fn hub_trusting(key: &rapp_wire::Key) -> tempfile::TempDir {
+    let home = tempfile::tempdir().unwrap();
+    rapp_net::config::write_json(&home.path().join("service.json"), &json!({"relay": "", "key": key.to_string()})).unwrap();
+    home
+}
+
+#[tokio::test]
+async fn hosts_event_names_this_app() {
+    let a = service().await;
+    let h = tempfile::tempdir().unwrap();
+    let mut hub = Hub::start(h.path(), a.bins.path());
+    let r = hub.call(json!({"cmd":"hosts"})).await;
+    assert_eq!(r["event"], "hosts", "{r}");
+    let me = r["me"].as_str().unwrap_or("");
+    assert!(me.len() == 64 && me.bytes().all(|b| b.is_ascii_hexdigit()), "{r}");
+    assert!(!r["name"].as_str().unwrap_or("").is_empty(), "{r}");
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn set_service_says_the_reply() {
+    let (a, key) = start_sharing(|h| services(h, free_port())).await;
+    let h = hub_trusting(&key);
+    let hosts = json!([{"id": a.id, "name": "a", "lan": [a_addr(&a.svc).to_string()]}]);
+    std::fs::write(h.path().join("hosts.json"), hosts.to_string()).unwrap();
+    let mut hub = Hub::start(h.path(), a.bins.path());
+    let r = hub.call(json!({"cmd":"set_service","id":a.id,"name":"state","on":true})).await;
+    assert_eq!((&r["event"], &r["id"], &r["reply"]["ok"], &r["reply"]["on"]), (&json!("service"), &json!(a.id), &json!(true), &json!(true)), "{r}");
+    wait_state(&a, true).await;
+    let r = hub.call(json!({"cmd":"set_service","id":a.id})).await;
+    assert_eq!(r["reply"]["on"], true, "{r}");
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn set_service_failure_carries_the_device_error() {
+    // A password connection is refused by the device with "not supported"; an old device's "unknown op" travels the same way.
+    let (a, _key) = start_sharing(|h| services(h, free_port())).await;
+    let h = tempfile::tempdir().unwrap();
+    let mut hub = Hub::start(h.path(), a.bins.path());
+    let id = format!("{}@{}", a.id, a_addr(&a.svc));
+    let r = hub.call(json!({"cmd":"add_host","id":id,"password":PASSWORD})).await;
+    assert_eq!(r["event"], "host_added", "{r}");
+    let r = hub.call(json!({"cmd":"set_service","id":a.id,"name":"state","on":true})).await;
+    assert_eq!(r["event"], "error", "{r}");
+    assert!(r["error"].as_str().unwrap_or("").contains("not supported"), "{r}");
+    hub.finish().await;
+}

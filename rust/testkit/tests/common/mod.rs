@@ -658,6 +658,14 @@ pub fn saved_hosts(home: &Path) -> Value {
     serde_json::from_slice(&std::fs::read(home.join("hosts.json")).unwrap()).unwrap()
 }
 
+/// A `hosts` event without this app's own `me` (fingerprint) and `name`, which differ per run; both must be there.
+pub fn hosts_rest(mut v: Value) -> Value {
+    let o = v.as_object_mut().unwrap();
+    assert!(o.remove("me").is_some_and(|m| m.as_str().is_some_and(|m| m.len() == 64)), "{o:?}");
+    assert!(o.remove("name").is_some_and(|n| n.is_string()), "{o:?}");
+    v
+}
+
 /// The next hub event that is not a presence line (nor a `path` event).
 pub async fn reply(hub: &mut Hub) -> Value {
     loop {
