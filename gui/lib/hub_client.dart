@@ -339,6 +339,19 @@ class _Pending {
   final completer = Completer<Map<String, dynamic>>();
 }
 
+typedef PortMap = ({String id, int port, int local, String? kind});
+
+/// Where this device reaches the rapp-state service through a share: the one with the smallest device id (the ids are
+/// fixed-width). Null when no share is of that kind.
+String? stateUrlFromPorts(List<PortMap> maps) {
+  PortMap? best;
+  for (final p in maps) {
+    if (p.kind != 'state') continue;
+    if (best == null || p.id.compareTo(best.id) < 0) best = p;
+  }
+  return best == null ? null : 'http://localhost:${best.local}';
+}
+
 class HubClient extends ChangeNotifier {
   HubClient(this._t) {
     _sub = _t.lines.listen(_onLine, onDone: _onDone);
@@ -351,6 +364,9 @@ class HubClient extends ChangeNotifier {
   var _nextReq = 1;
 
   List<HubHost> hosts = const [];
+
+  /// The share maps of the last `ports` event (the whole list each time); `kind` is `state` for the rapp-state service.
+  List<PortMap> portMaps = const [];
   bool alive = true;
 
   /// The hub's rApp version (the same install as this GUI), from its `hosts` events; null until
@@ -643,6 +659,12 @@ class HubClient extends ChangeNotifier {
         final ids = {for (final h in hosts) h.id};
         hostPaths.removeWhere((id, _) => !ids.contains(id));
         _paths.removeWhere((p) => !ids.contains(p.id));
+      case 'ports':
+        portMaps = [
+          for (final i in (m['maps'] as List? ?? const []))
+            if (i is Map && i['id'] != null && i['port'] is int && i['local'] is int)
+              (id: '${i['id']}', port: i['port'] as int, local: i['local'] as int, kind: i['kind'] is String ? i['kind'] as String : null),
+        ];
       case 'host_added':
         final id = '${m['id']}';
         // Added again: its route, LAN addresses and system stay until the next hosts list says otherwise.

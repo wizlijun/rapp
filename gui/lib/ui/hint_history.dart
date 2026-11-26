@@ -28,7 +28,7 @@ class HintAnchor extends StatelessWidget {
     final t = RappTokens.of(context);
     final text = showText ? state.hint : '';
     return LayoutBuilder(builder: (context, box) {
-      if (state.hintHistory.isEmpty || box.maxWidth < buttonWidth) {
+      if (state.queueRows.isEmpty || box.maxWidth < buttonWidth) {
         // Nothing said yet (or no room for the button): the bare line, as before, or nothing.
         return Align(
           alignment: Alignment.centerRight,
@@ -103,7 +103,7 @@ class HintHistoryList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
-    final records = state.hintHistory;
+    final records = state.queueRows;
     return SingleChildScrollView(
       key: const Key('hint-history'),
       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -116,6 +116,8 @@ class HintHistoryList extends StatelessWidget {
   }
 
   Widget _row(RappTokens t, HintRecord r, int i) {
+    final word = r.goes ? state.offlineWord(r.device!, r.app!) : null;
+    final fresh = state.queuedFresh(r);
     final line = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
@@ -130,7 +132,15 @@ class HintHistoryList extends StatelessWidget {
             Padding(padding: const EdgeInsets.only(top: 3), child: StatusLamp(r.lamp!, size: 12)),
             const SizedBox(width: 8),
           ],
-          Expanded(child: Text(r.text)),
+          Expanded(
+            child: Text(
+              word == null ? r.text : '${r.text} · $word',
+              style: TextStyle(
+                color: word == null ? null : t.muted,
+                fontWeight: fresh ? FontWeight.w600 : null,
+              ),
+            ),
+          ),
           if (r.inferred) ...[
             const SizedBox(width: 8),
             Text('推断', style: TextStyle(color: t.muted)),
@@ -138,10 +148,10 @@ class HintHistoryList extends StatelessWidget {
         ],
       ),
     );
-    if (!r.goes) return line;
+    if (!r.goes || word != null) return line;
     return Semantics(
       button: true,
-      label: '${clock(r.at)} ${r.text}${r.inferred ? '，推断' : ''}',
+      label: '${clock(r.at)} ${r.text}${r.inferred ? '，推断' : ''}${fresh ? '，新' : ''}',
       excludeSemantics: true,
       onTap: () => state.goToQueued(r),
       child: Material(

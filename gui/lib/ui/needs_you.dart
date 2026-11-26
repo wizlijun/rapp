@@ -152,7 +152,7 @@ class _NeedsList extends StatelessWidget {
       type: MaterialType.transparency,
       child: InkWell(
         key: Key('need-row-${n.target}'),
-        onTap: () => state.goToNeed(n),
+        onTap: n.greyWord != null ? null : () => state.goToNeed(n),
         child: _rowBody(t, n, session, where),
       ),
     );
@@ -160,6 +160,20 @@ class _NeedsList extends StatelessWidget {
 
   Widget _rowBody(RappTokens t, NeedItem n, bool session, String where) {
     if (n.kind == NeedKind.resource) return _resourceBody(t, n, where);
+    final grey = n.greyWord;
+    if (grey != null) {
+      // Cannot be followed (device offline, session dropped): counted, muted, no button.
+      return Container(
+        constraints: const BoxConstraints(minHeight: 48),
+        padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
+        alignment: Alignment.centerLeft,
+        child: Semantics(
+          label: '${n.text}，$grey',
+          excludeSemantics: true,
+          child: Text('${n.text} · $grey', maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.muted)),
+        ),
+      );
+    }
     return Container(
       constraints: const BoxConstraints(minHeight: 48),
       padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),

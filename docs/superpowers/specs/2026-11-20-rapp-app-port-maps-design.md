@@ -80,7 +80,7 @@ pub trait Carrier: Send + Sync + 'static {
 - 启动：读 app 主目录的 `maps.json`，先把上次的映射全部开好（`Maps::start`），然后马上按 `hosts.json` 问一遍各设备。
 - 每 60 秒问一遍；主机列表变化、网络恢复（netmon）时也马上问一遍。每次的结果和后台服务的 `hosts` 命令一样处理：记下别处在用的号（`saw`），按共享号 `ensure`，对方不再共享的就收回（`keep`）。
 - app 回到前台：Dart 在 `AppLifecycleState.resumed` 时发一条 hub 命令 `ports_relisten`。hub 把所有监听关掉再重开，然后马上问一遍。iOS 挂起时可能收回监听用的 socket，这样一回来就恢复。监听循环在 `accept` 出错时也要关掉重开，不能一直空转。
-- 每次映射有变化，hub 发一个事件 `{"event":"ports","maps":[{"id","port","local"}]}`，同时写进 hub 日志。现在 Dart 只记日志，不显示。
+- 每次映射有变化，hub 发一个事件 `{"event":"ports","maps":[{"id","port","local","kind"?}]}`（`kind` 是那台设备的分享表给这个端口的种类，例如 `"state"`；没有就不带），同时写进 hub 日志。现在 Dart 只记日志，不显示。
 
 ### 5.4 放行
 

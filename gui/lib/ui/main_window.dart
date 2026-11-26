@@ -11,6 +11,7 @@ import '../data_relocate.dart';
 import '../embed/rime_glue.dart';
 import '../pages/app_profiles_section.dart';
 import '../pages/ios_local_section.dart';
+import '../pages/state_section.dart';
 import '../pages/global_sections.dart';
 import '../pages/local_section.dart';
 import '../pages/rime_settings_section.dart';
@@ -234,6 +235,7 @@ class _MainWindowState extends State<MainWindow> {
           listenable: m,
           builder: (context, _) => SharesSection(key: const ValueKey('shares-local'), api: m, online: m.running),
         ),
+      if (state.stateSync != null) StateSection(sync: state.stateSync!),
       ListenableBuilder(
         listenable: widget.state,
         builder: (context, _) => AppProfilesSection(store: widget.state.profiles, openFolder: _openFolder),
@@ -390,6 +392,7 @@ class _MainWindowState extends State<MainWindow> {
                                           data: state.data,
                                           relocate: widget.relocator,
                                           hooks: widget.hooks,
+                                          stateSync: state.stateSync,
                                         ),
                                       ),
                                 // The shell never pops anything up for an update: just the dot (K27).

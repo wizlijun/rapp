@@ -25,6 +25,7 @@ import '../embed/traffic_label.dart' show segments;
 import '../history/input_history.dart';
 import '../history/input_recorder.dart';
 import '../hub_client.dart';
+import '../state/state_sync.dart';
 import '../load_model.dart';
 import '../service_client.dart' show ServiceMonitor;
 import '../permissions.dart';
@@ -74,10 +75,17 @@ enum Corner { stream, needs, session, remote, sessions, hints }
 /// device reported ([device] and [app] name its session, [title] its shown name, [lamp] its state).
 /// [inferred]: read off the screen by rules rather than reported by the program (GUI apps, not built yet).
 class HintRecord {
-  const HintRecord(this.text, this.at, {this.device, this.app, this.title, this.lamp, this.inferred = false});
+  const HintRecord(this.text, this.at,
+      {this.device, this.app, this.title, this.lamp, this.inferred = false, this.term = false, this.eid});
   final String text;
   final DateTime at;
   final String? device, app, title;
+
+  /// Written by [MainState._trackPrograms] from a device's terminal list (the local source of program rows).
+  final bool term;
+
+  /// The service's id for this row; null for every row the app made itself.
+  final String? eid;
   final Lamp? lamp;
   final bool inferred;
 
@@ -93,9 +101,16 @@ enum NeedKind { session, device, terminal, app, resource }
 /// record key), or a load warning (device-load §8: [target] `<device>\n<item>`, [device] its device, [title] the
 /// item). Newer [seq] first.
 class NeedItem {
-  const NeedItem(this.kind, this.target, this.text, this.seq, {this.reconnectWord = '重连', this.device, this.title});
+  const NeedItem(this.kind, this.target, this.text, this.seq,
+      {this.reconnectWord = '重连', this.device, this.title, this.at = 0, this.greyWord});
   final String reconnectWord;
   final String? device, title;
+
+  /// Unix seconds it was first seen (the service's `since` for a service need); newest first.
+  final int at;
+
+  /// Why it cannot be followed (设备离线 / 已断开); null when it can. A grey row is counted but does nothing.
+  final String? greyWord;
   final NeedKind kind;
   final String target;
   final String text;
@@ -185,6 +200,7 @@ class MainState extends ChangeNotifier {
     DeviceOs? localOs,
     LocalIme? localIme,
     this.monitor,
+    this.stateSync,
   })  : localOs = localOs ?? localDeviceOs(),
         _builtinStateRules = builtinStateRules,
         stateRules = stateRules ?? StateRulesLibrary.parse(builtinStateRules, const {}),
@@ -216,6 +232,7 @@ class MainState extends ChangeNotifier {
     if (defaultTargetPlatform == TargetPlatform.macOS || defaultTargetPlatform == TargetPlatform.linux) port?.setVoiceHotkey(prefs.voiceHotkey);
     hub?.addListener(_onHub);
     monitor?.addListener(_onMonitor);
+    stateSync?.addListener(_onStateSync);
     hub?.askNet();
     _lastError = hub?.lastError;
     _netLevel = hub?.net?.level;
@@ -684,6 +701,149 @@ class MainState extends ChangeNotifier {
 
   static const hintHistoryMax = 50;
 
+  /// The rapp-state service this app follows; null when it is not wired in.
+  final StateSync? stateSync;
+
+  /// Whether the queue and the needs follow the service: connected, or reconnecting (a refresh) with the last
+  /// snapshot still in hand, so coming back to the foreground does not flip them to the local view and back.
+  bool get _fromService {
+    final sync = stateSync;
+    if (sync == null) return false;
+    return sync.status == StateStatus.connected || (sync.status == StateStatus.connecting && sync.hasSnapshot);
+  }
+
+  /// [v] when it is a non-empty string, else null: a blank title is no title.
+  static String? _text(Object? v) => v is String && v.isNotEmpty ? v : null;
+
+  int _outageSeen = 0;
+
+  void _onStateSync() {
+    final sync = stateSync!;
+    if (sync.status == StateStatus.unreachable && sync.outage > _outageSeen) {
+      _outageSeen = sync.outage;
+      _queue(HintRecord('状态服务连不上，先用本机的', _now()));
+    }
+    _markPushedRows(sync);
+    notifyListeners();
+  }
+
+  /// The text terminal on show, or null: a GUI app session, no session, or a window nobody can see.
+  SessionEntry? get _shownTerm {
+    final r = current;
+    if (r == null || r.standby != null || !isTermApp(r.app) || !_mainVisible || backgrounded) return null;
+    return r;
+  }
+
+  /// The terminal last told to the service as seen, so one change of [currentKey] sends once.
+  String? _seenSent;
+
+  /// Tells the service the shown terminal was looked at; the one place every way of switching ends up in.
+  void _markCurrentSeen({bool again = false}) {
+    final sync = stateSync;
+    if (sync == null) return;
+    // Called on every notify: the session is only looked up when there is something to mark.
+    final key = currentKey;
+    if (key == null) {
+      _seenSent = null;
+      return;
+    }
+    if (!again && _seenSent == key) return;
+    final r = _shownTerm;
+    if (r == null) {
+      final c = current;
+      if (c == null || !isTermApp(c.app)) _seenSent = null;
+      return;
+    }
+    if (!again && _seenSent == r.key) return;
+    _seenSent = r.key;
+    sync.markSeen(r.id, r.app);
+  }
+
+  /// Queue rows (by `eid`) already looked at because their terminal was on show.
+  final Set<String> _rowsMarked = {};
+
+  /// A pushed row for the terminal on show is marked seen at once, once per row. A `seen` or `session`
+  /// push brings no new row, so it never comes back here as a mark.
+  void _markPushedRows(StateSync sync) {
+    final live = <String>{};
+    final r = _shownTerm;
+    var mark = false;
+    for (final row in sync.rows) {
+      final eid = row['eid'];
+      if (eid is! String) continue;
+      live.add(eid);
+      if (r == null || _rowsMarked.contains(eid) || row['session'] != r.app) continue;
+      final fp = row['fp'], rawId = row['id'];
+      final id = rawId is String ? rawId : (fp is String ? sync.idOf(fp) : null);
+      if (id != r.id) continue;
+      _rowsMarked.add(eid);
+      mark = true;
+    }
+    // However many new rows it has, the shown terminal is marked once.
+    if (mark) sync.markSeen(r!.id, r.app);
+    _rowsMarked.retainAll(live);
+  }
+
+  /// What the queue shows, newest first: [hintHistory] alone, or, while the service is connected, the app's own
+  /// lines plus the service's program rows.
+  List<HintRecord> get queueRows {
+    if (!_fromService) return hintHistory;
+    final all = [
+      ...hintHistory.where((r) => !r.term),
+      ...stateSync!.rows.map(_serviceRow).whereType<HintRecord>(),
+    ]..sort((a, b) => b.at.compareTo(a.at));
+    return all.take(hintHistoryMax).toList();
+  }
+
+  HintRecord? _serviceRow(Map<String, Object?> row) {
+    final sync = stateSync!;
+    final fp = row['fp'];
+    final rawId = row['id'];
+    final id = rawId is String ? rawId : (fp is String ? sync.idOf(fp) : null);
+    final name = id != null ? deviceName(id) : '${row['device'] ?? ''}';
+    final at = row['at'];
+    final when = DateTime.fromMillisecondsSinceEpoch((at is num ? at : 0).toInt() * 1000);
+    final eid = row['eid'] is String ? row['eid'] as String : null;
+    switch (row['t']) {
+      case 'state':
+        final ps = termPs(row);
+        if (ps == null) return null;
+        final nm = _text(row['title']) ?? _text(row['name']);
+        final host = row['host'];
+        final title = termDisplayName(nm is String ? nm : '', host is String ? host : null);
+        final known = id != null && (hub?.hosts.any((h) => h.id == id) ?? false);
+        final session = row['session'];
+        return HintRecord('$title @ $name：${programWord(ps)}', when,
+            device: known ? id : null,
+            app: known && session is String ? session : null,
+            title: title,
+            lamp: programLamp(ps),
+            eid: eid);
+      case 'gap':
+        return HintRecord('$name 有一段状态没收到', when, eid: eid);
+      default:
+        return null;
+    }
+  }
+
+  /// Why a queued line about [termId] on [device] cannot be followed, in the word the list shows; null when it can.
+  String? offlineWord(String device, String termId) {
+    if (_offlineSince.containsKey(device) || probes[device]?.lamp == Lamp.offline) return '设备离线';
+    if (_records['$device/$termId']?.phase == Phase.disconnected) return '已断开';
+    return null;
+  }
+
+  /// Whether a service row is one the person has not looked at yet.
+  bool queuedFresh(HintRecord r) {
+    final eid = r.eid;
+    final sync = stateSync;
+    if (eid == null || sync == null) return false;
+    for (final row in sync.rows) {
+      if (row['eid'] == eid) return sync.fresh(row);
+    }
+    return false;
+  }
+
   /// The status queue: every line the hint showed this run and every program status change, newest first,
   /// at most [hintHistoryMax].
   final List<HintRecord> hintHistory = [];
@@ -714,8 +874,9 @@ class MainState extends ChangeNotifier {
         _psSeen[k] = now;
         if (first || was == now) continue;
         final title = termDisplayName(r.shown, r.host);
+        if (_fromService) continue;
         _queue(HintRecord('$title @ ${deviceName(device)}：${programWord(ps)}', _now(),
-            device: device, app: r.id, title: title, lamp: programLamp(ps)));
+            device: device, app: r.id, title: title, lamp: programLamp(ps), term: true));
       }
       _psSeen.removeWhere((k, _) => k.startsWith('$device\n') && !live.contains(k));
     }
@@ -723,7 +884,7 @@ class MainState extends ChangeNotifier {
 
   /// A tap on a queued line about a session: that session, opened if it is not, and the list closes.
   void goToQueued(HintRecord r) {
-    if (!r.goes) return;
+    if (!r.goes || offlineWord(r.device!, r.app!) != null) return;
     corner = null;
     openOrSwitch(r.device!, r.app!, r.title ?? r.app!);
     notifyListeners();
@@ -732,6 +893,7 @@ class MainState extends ChangeNotifier {
   /// A tap on a 需要你 row: a blocked terminal opens (or comes up), a dropped session comes on stage
   /// (its reconnect is there), a dropped device shows its panel.
   void goToNeed(NeedItem n) {
+    if (n.greyWord != null) return;
     switch (n.kind) {
       case NeedKind.terminal:
         if (!hubUsable) return;
@@ -945,6 +1107,7 @@ class MainState extends ChangeNotifier {
       markingInput = null;
       _followCurrentKey();
     }
+    _markCurrentSeen();
     _noteLastTerm();
     if (embeds) _entries = _mapEntries();
     // The session list has nothing to show once the last session is gone.
@@ -1258,6 +1421,7 @@ class MainState extends ChangeNotifier {
     if (v == _mainVisible) return;
     _mainVisible = v;
     _applyFps();
+    if (v) _markCurrentSeen(again: true);
   }
 
   /// Sends each started session's effective rate when it differs from the last one sent: the
@@ -1407,6 +1571,49 @@ class MainState extends ChangeNotifier {
   /// When (`_seq`) each blocked-terminal ask (device, session, ps.seq) was first seen; only orders [needs].
   final Map<String, int> _termNeedSeq = {};
 
+  /// When (Unix seconds) each need was first seen, same keys as [_termNeedSeq] plus `sess\n…` and `dev\n…`.
+  final Map<String, int> _needAt = {};
+
+  int _firstSeen(String key) => _needAt.putIfAbsent(key, () => _now().millisecondsSinceEpoch ~/ 1000);
+
+  /// The service's `since` for the need of terminal [session] on [id], else null.
+  int? _serviceSince(String id, String session) {
+    final sync = stateSync;
+    if (sync == null || !_fromService) return null;
+    for (final n in sync.needs) {
+      final nid = n['id'] is String ? n['id'] as String : (n['fp'] is String ? sync.idOf(n['fp'] as String) : null);
+      if (nid == id && n['session'] == session) {
+        final since = n['since'];
+        return since is num ? since.toInt() : null;
+      }
+    }
+    return null;
+  }
+
+  /// Blocked terminals of devices this app does not read itself (dropped, or not listed), from the service.
+  Iterable<NeedItem> _serviceNeeds() sync* {
+    final sync = stateSync!;
+    final local = {...?hub?.termLists.keys}..removeAll(_offlineSince.keys);
+    final hosts = {for (final h in hub?.hosts ?? const <HubHost>[]) h.id};
+    for (final n in sync.needs) {
+      final fp = n['fp'];
+      final rawId = n['id'];
+      final id = rawId is String ? rawId : (fp is String ? sync.idOf(fp) : null);
+      final session = n['session'];
+      if (id == null || session is! String || !hosts.contains(id) || local.contains(id)) continue;
+      final ps = termPs({'state': 'blocked', 'kind': n['kind'], 'app': n['app'], 'msg': n['msg']});
+      if (ps == null) continue;
+      final row = fp is String ? sync.session(fp, session) : null;
+      final nm = _text(row?['title']) ?? _text(row?['name']) ?? _text(n['title']) ?? _text(n['name']) ?? session;
+      final host = row?['host'] ?? n['host'];
+      final title = termDisplayName(nm, host is String ? host : null);
+      final since = n['since'];
+      final seq = n['seq'];
+      yield NeedItem(NeedKind.terminal, session, '$title @ ${deviceName(id)}：${termAskWord(ps)}', seq is num ? seq.toInt() : 0,
+          device: id, title: title, at: since is num ? since.toInt() : 0, greyWord: offlineWord(id, session));
+    }
+  }
+
   /// Everything waiting for the person, newest first. Handled things leave on their own.
   List<NeedItem> get needs {
     final seen = <String>{};
@@ -1414,10 +1621,11 @@ class MainState extends ChangeNotifier {
       for (final r in _records.values)
         if (r.phase == Phase.disconnected)
           NeedItem(NeedKind.session, r.key, '${r.appName} @ ${deviceName(r.id)} 已断开：${disconnectWord(r.reason)}', r.seq,
-              reconnectWord: reconnectLabel(r.reason)),
+              reconnectWord: reconnectLabel(r.reason), at: _firstSeen('sess\n${r.key}')),
       for (final h in hub?.hosts ?? const <HubHost>[])
         if (_seenOnline.contains(h.id) && _offlineSince.containsKey(h.id))
-          NeedItem(NeedKind.device, h.id, '${deviceName(h.id)} 离线', _offlineSince[h.id]!),
+          NeedItem(NeedKind.device, h.id, '${deviceName(h.id)} 离线', _offlineSince[h.id]!,
+              at: _firstSeen('dev\n${h.id}')),
       // A device that dropped keeps its last list; its terminals cannot be opened, so they are not asks.
       for (final e in hub?.termLists.entries ?? const <MapEntry<String, TermList>>[])
         if (!_offlineSince.containsKey(e.key))
@@ -1429,7 +1637,7 @@ class MainState extends ChangeNotifier {
               final title = termDisplayName(r.shown, r.host);
               return NeedItem(NeedKind.terminal, r.id, '$title @ ${deviceName(e.key)}：${termAskWord(r.ps!)}',
                   _termNeedSeq.putIfAbsent(key, () => ++_seq),
-                  device: e.key, title: title);
+                  device: e.key, title: title, at: _serviceSince(e.key, r.id) ?? _firstSeen(key));
             }(),
       // An app whose screen shows a sure block waits for the person; a guess (or out-of-date rules) does not.
       for (final r in _records.values)
@@ -1439,7 +1647,7 @@ class MainState extends ChangeNotifier {
             seen.add(key);
             return NeedItem(NeedKind.app, r.key,
                 '${r.appName} @ ${deviceName(r.id)}：${termAskWord(remote[r.sid]!.inferredPs!)}',
-                _termNeedSeq.putIfAbsent(key, () => ++_seq));
+                _termNeedSeq.putIfAbsent(key, () => ++_seq), at: _firstSeen(key));
           }(),
       // A load warning on an online device (device-load §8), unless snoozed; a rise comes first again.
       for (final MapEntry(key: id, value: l) in deviceLoads.entries)
@@ -1450,11 +1658,19 @@ class MainState extends ChangeNotifier {
               seen.add(key);
               return NeedItem(NeedKind.resource, '$id\n${w.item}', '${loadDeviceName(id)} ${w.text}',
                   _termNeedSeq.putIfAbsent(key, () => ++_seq),
-                  device: id, title: w.item);
+                  device: id, title: w.item, at: _firstSeen(key));
             }(),
     ];
+    if (_fromService) out.addAll(_serviceNeeds());
+    for (final r in _records.values) {
+      if (r.phase == Phase.disconnected) seen.add('sess\n${r.key}');
+    }
+    for (final h in hub?.hosts ?? const <HubHost>[]) {
+      if (_seenOnline.contains(h.id) && _offlineSince.containsKey(h.id)) seen.add('dev\n${h.id}');
+    }
     _termNeedSeq.removeWhere((k, _) => !seen.contains(k));
-    out.sort((a, b) => b.seq.compareTo(a.seq));
+    _needAt.removeWhere((k, _) => !seen.contains(k));
+    out.sort((a, b) => b.at != a.at ? b.at.compareTo(a.at) : b.seq.compareTo(a.seq));
     return out;
   }
 
@@ -2898,6 +3114,7 @@ class MainState extends ChangeNotifier {
   Future<void> enterBackground({Future<void> Function()? begin, Future<void> Function()? end}) async {
     if (backgrounded) return;
     backgrounded = true;
+    stateSync?.pause();
     final epoch = ++_backgroundEpoch;
     try {
       await begin?.call();
@@ -2964,6 +3181,9 @@ class MainState extends ChangeNotifier {
     // iOS took the hub's socket while the app was away: a new one, and every device asked again.
     h?.netChanged();
     h?.pausePresence(false);
+    // After the hub has its network again: on iOS the service is reached through the hub's port map.
+    stateSync?.refresh();
+    _markCurrentSeen(again: true);
     bool closedByBackground(SessionRecord r) => r.phase == Phase.disconnected && r.reason == 'background';
     final cur = currentRecord;
     final list = [
@@ -5208,6 +5428,7 @@ class MainState extends ChangeNotifier {
     resources.dispose();
     hub?.removeListener(_onHub);
     monitor?.removeListener(_onMonitor);
+    stateSync?.removeListener(_onStateSync);
     profiles.removeListener(_onProfiles);
     _portSub?.cancel();
     _termSub?.cancel();

@@ -503,6 +503,17 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi {
 
   Future<List<Map<String, dynamic>>> history({int limit = 50}) => _need().history(limit: limit);
 
+  /// The address of the rapp-state service this machine's service knows of; null when there is none or on any error.
+  Future<String?> stateUrl() async {
+    try {
+      final r = await _need().request({'cmd': 'state'});
+      final u = r['url'];
+      return u is String ? u : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> checkPermissions({bool prompt = false}) async {
     await _need().permissions(prompt: prompt);
     await refresh();

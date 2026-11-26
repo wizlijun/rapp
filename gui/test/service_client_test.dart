@@ -89,6 +89,7 @@ class FakeService {
               'set_update' ||
               'set_auto_lock' ||
               'gui_windows' ||
+              'state' ||
               'permissions_reset':
           s.write('${jsonEncode(replies[m['cmd']] ?? {'ok': true})}\n');
         case 'shares' || 'share' || 'unshare':
@@ -295,6 +296,20 @@ void main() {
       expect(await c.history(limit: 7), svc.history);
       expect(svc.received.last, {'cmd': 'history', 'limit': 7});
       await c.close();
+    });
+
+    test('stateUrl reads url from the state reply', () async {
+      final m = ServiceMonitor(readToken: () async => 'tok-1', port: svc.port, retry: const Duration(milliseconds: 20))..start();
+      addTearDown(m.dispose);
+      for (var i = 0; i < 100 && !m.running; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      svc.replies['state'] = {'ok': true, 'url': 'http://localhost:28003'};
+      expect(await m.stateUrl(), 'http://localhost:28003');
+      svc.replies['state'] = {'ok': true, 'url': null};
+      expect(await m.stateUrl(), isNull);
+      svc.replies['state'] = {'ok': false, 'error': 'no'};
+      expect(await m.stateUrl(), isNull);
     });
 
     test('a wrong token makes requests fail instead of hanging', () async {

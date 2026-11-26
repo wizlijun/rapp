@@ -39,7 +39,23 @@ pub(crate) struct HubPorts {
     /// A listener ended (`OnDead`): open them again.
     dead: Notify,
     /// The table as last told (event and log).
-    told: Mutex<Option<Vec<Map>>>,
+    told: Mutex<Option<Vec<Value>>>,
+    /// What kind each device's shares said they were, by (device, port).
+    kinds: Mutex<HashMap<(String, u16), String>>,
+}
+
+/// The table as told in the `ports` event: each map with its `kind` when the device's share list
+/// gave one.
+pub(crate) fn told(maps: &[Map], kinds: &HashMap<(String, u16), String>) -> Vec<Value> {
+    maps.iter()
+        .map(|m| {
+            let mut v = json!({"id": m.id, "port": m.port, "local": m.local});
+            if let Some(k) = kinds.get(&(m.id.clone(), m.port)) {
+                v["kind"] = json!(k);
+            }
+            v
+        })
+        .collect()
 }
 
 impl Carrier for HubPorts {
@@ -75,6 +91,7 @@ pub(crate) fn start(hub: &Arc<Hub>, (first, count): (u16, u16)) -> Arc<HubPorts>
         poke: Notify::new(),
         dead: Notify::new(),
         told: Default::default(),
+        kinds: Default::default(),
     });
     let known = rapp_ports::known_ids(&ports.home);
     ports.taken(ports.maps.start(known.as_deref(), &ports.serve()));
@@ -147,6 +164,15 @@ impl HubPorts {
                 seen.insert(id.clone(), rapp_ports::numbers(&items));
                 seen.iter().filter(|(k, _)| **k != id).flat_map(|(_, v)| v.iter().copied()).collect()
             };
+            {
+                let mut kinds = self.kinds.lock().unwrap();
+                kinds.retain(|(d, _), _| *d != id);
+                for it in &items {
+                    if let (Some(port), Some(kind)) = (it["port"].as_u64().and_then(|p| u16::try_from(p).ok()), it["kind"].as_str()) {
+                        kinds.insert((id.clone(), port), kind.to_string());
+                    }
+                }
+            }
             let wants = rapp_ports::wants(&items);
             self.maps.keep(&id, &wants.iter().map(|(port, _)| *port).collect::<Vec<u16>>());
             rapp_ports::ensure_all(&self.maps, &id, &wants, &avoid, &[], &serve).await;
@@ -156,15 +182,14 @@ impl HubPorts {
 
     /// The `ports` event and log line, when the table is not what was told last.
     async fn tell(&self, hub: &Hub) {
-        let now = self.maps.list();
+        let maps = told(&self.maps.list(), &self.kinds.lock().unwrap());
         {
             let mut told = self.told.lock().unwrap();
-            if told.as_ref() == Some(&now) {
+            if told.as_ref() == Some(&maps) {
                 return;
             }
-            *told = Some(now.clone());
+            *told = Some(maps.clone());
         }
-        let maps: Vec<Value> = now.iter().map(|m| json!({"id": m.id, "port": m.port, "local": m.local})).collect();
         self.log.event(Lvl::Info, "ports", json!({"maps": maps}));
         hub.emit(json!({"event": "ports", "maps": maps}), &None).await;
     }
@@ -226,6 +251,16 @@ pub(crate) async fn run(hub: Arc<Hub>, ports: Arc<HubPorts>) {
 mod tests {
     use super::*;
     use tokio::time::Instant;
+
+    #[test]
+    fn told_maps_carry_kind_when_known() {
+        let maps = vec![Map { id: "222".into(), port: 8102, local: 28003, wanted: None }, Map { id: "222".into(), port: 3000, local: 28000, wanted: None }];
+        let kinds = HashMap::from([(("222".to_string(), 8102), "state".to_string())]);
+        assert_eq!(
+            told(&maps, &kinds),
+            vec![json!({"id":"222","port":8102,"local":28003,"kind":"state"}), json!({"id":"222","port":3000,"local":28000})]
+        );
+    }
 
     #[test]
     fn listeners_dying_one_after_another_are_opened_again_ever_later() {
