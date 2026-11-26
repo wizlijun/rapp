@@ -47,6 +47,8 @@ pub use protocol::{
     DISPOSITION,
 };
 pub use quantize::{quantize, DUO_BLOCK};
+// The one entry point (plan B Task 19 calls it `rapp_host_core::run`); `run::run` still works.
+pub use run::{run, WorkerIo};
 pub use tile::{EncodeReport, FrameEncoder, TILE_SIZE};
 
 // Later tasks' main names (Task 7 geometry). Tasks 7–19 may add their own

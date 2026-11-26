@@ -117,7 +117,7 @@
 任务 14
 - 用容量为 1 的槽代替 sync_channel。
 - 在采集线程上量化。
-- 没有加 `Session::tables()`。
+- 没有加 `Session::tables()`，第四批也不加：计划说它给任务 15 用，可任务 15 的代码就在 `session` 模块里，直接读 `self.table`、`self.raw`。加一个公开访问器只会把会话内部状态露出去，没有调用方。
 - resize 留到任务 15 做。
 - fps 不取整到档位：查过 Swift，它也不取整。协议解码只收 30/15/5/1（setStream 还收 0，表示暂停；Protocol.swift:676-684），省流梯子把上限压到 min(上限, 5)。Rust 的 `.max(1)`（capture.rs 两处）只是防御，到不了。第四批加了测试 `set_stream_fps_must_be_a_tier`：合法档位会话照常，fps 7 以 `bad data from client: fps must be 30, 15, 5, 1 or 0` 结束会话。
 - harness 新增 `auto_ack`、`frames`、`last_frame`、`hello_at`。
@@ -164,7 +164,7 @@
 - 摘要测试跳过点开头的隐藏文件。
 
 任务 19
-- 计划写 `rapp_host_core::run(...)`，实际路径是 `rapp_host_core::run::run`。crate 根没有重新导出它（lib.rs:35 只有 `pub mod run;`），我没改 lib.rs。
+- 计划写 `rapp_host_core::run(...)`。第四批在 lib.rs 里加了 `pub use run::{run, WorkerIo};`，两种写法都能用（模块 `run` 和函数 `run` 不在同一个命名空间）；harness 和 `fake_host_core.rs` 仍写 `rapp_host_core::run::{run, WorkerIo}`，不用改。
 - stdin 外面包了一层 `BufReader`，因为 `WorkerIo.stdin` 要求 `BufRead + Send`（run.rs:24）。
 - “停止共享” 用的是服务的空闲关闭：worker_idle 设为 200 ms，会话结束后服务关掉 stdin。测试没有走 IPC 的 unshare。
 - 多写了一个测试 `an_unknown_app_starts_a_worker_that_refuses_the_hello`。
