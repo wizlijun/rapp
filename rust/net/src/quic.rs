@@ -345,7 +345,33 @@ mod sys {
     }
 }
 
-#[cfg(not(unix))]
+/// The Windows dual-stack pieces, through `socket2`.
+#[cfg(windows)]
+mod sys {
+    use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+    use std::net::{Ipv6Addr, SocketAddr, ToSocketAddrs};
+
+    /// An IPv6 UDP socket on `[::]:0` that also takes IPv4 (as v4-mapped addresses), non-blocking.
+    pub fn bind_dual() -> std::io::Result<std::net::UdpSocket> {
+        let s = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
+        s.set_only_v6(false)?;
+        s.bind(&SockAddr::from(SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))))?;
+        let sock: std::net::UdpSocket = s.into();
+        sock.set_nonblocking(true)?;
+        Ok(sock)
+    }
+
+    /// The first IPv6 address the resolver gives for `host:port` that is not v4-mapped.
+    pub fn getaddrinfo_v6(host: &str, port: &str) -> Option<SocketAddr> {
+        let port: u16 = port.parse().ok()?;
+        (host, port)
+            .to_socket_addrs()
+            .ok()?
+            .find(|a| matches!(a, SocketAddr::V6(v6) if v6.ip().to_ipv4_mapped().is_none()))
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 mod sys {
     pub fn bind_dual() -> std::io::Result<std::net::UdpSocket> {
         Err(std::io::Error::other("dual-stack endpoint is not supported here"))
@@ -600,7 +626,27 @@ mod tests {
         assert_eq!(a.to_string(), "[::ffff:127.0.0.1]:9");
     }
 
-    #[cfg(unix)]
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn dual_stack_takes_v4_and_v6() {
+        let s = sys::bind_dual().unwrap();
+        let port = s.local_addr().unwrap().port();
+        let s = tokio::net::UdpSocket::from_std(s).unwrap();
+        let v4 = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        v4.send_to(b"4", ("127.0.0.1", port)).unwrap();
+        let v6 = std::net::UdpSocket::bind("[::1]:0").unwrap();
+        v6.send_to(b"6", ("::1", port)).unwrap();
+        let mut got = Vec::new();
+        let mut buf = [0u8; 8];
+        for _ in 0..2 {
+            let (n, _) = tokio::time::timeout(Duration::from_secs(2), s.recv_from(&mut buf)).await.expect("a datagram").unwrap();
+            got.push(buf[..n].to_vec());
+        }
+        got.sort();
+        assert_eq!(got, vec![b"4".to_vec(), b"6".to_vec()]);
+    }
+
+    #[cfg(any(unix, windows))]
     #[test]
     fn getaddrinfo_v6_never_returns_a_v4_mapped_address() {
         assert_eq!(sys::getaddrinfo_v6("127.0.0.1", "9"), None);
