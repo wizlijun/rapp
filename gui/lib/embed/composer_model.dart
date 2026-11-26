@@ -899,7 +899,7 @@ class ComposerModel extends ChangeNotifier {
     final made = <Outgoing, Outgoing>{
       for (final o in [...old._failed, ?old._inFlight])
         if (o.parts.skip(o.sent).whereType<String>().join() case final t when t.isNotEmpty)
-          o: Outgoing([t], voice: o.voice)..failure = o.failure ?? '没有发出去',
+          o: Outgoing([t], voice: o.voice, phrase: o.phrase, command: o.command)..failure = o.failure ?? '没有发出去',
     };
     _failed.insertAll(0, made.values);
     // The AI mark (or the heard words) goes with the draft it belongs to, not onto a draft of this composer's own.
