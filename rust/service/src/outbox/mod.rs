@@ -1,11 +1,15 @@
 //! The outbox's pure logic: the session-list diff, the event envelope and the 200-event cache.
-//! No I/O here; the watcher and the sender are wired on top of this.
+//! `send` speaks HTTP to the state service; `pump` is the one task that feeds and sends.
 
 mod cache;
 mod diff;
+mod pump;
+mod send;
 
 pub use cache::{Cache, CACHE_MAX};
 pub use diff::Diff;
+pub use pump::{backoff, pump, PumpEnd, Stats, BATCH_MAX};
+pub use send::{connect, Conn, Dial, DialErr, Posted};
 
 /// Who the events are from.
 #[derive(Clone, Debug)]
