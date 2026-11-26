@@ -1026,6 +1026,61 @@ void main() {
       expect(es.corner, isNull);
     });
 
+    testWidgets('Linux: status queue and needs-you show titled duplicate terminal and jump on tap', (tester) async {
+      await tester.pumpWidget(wrap(ebar()));
+      Future<void> emitPs(Map<String, Object?> ps) async {
+        t.emit({
+          'event': 'terms',
+          'id': '111',
+          'terms': [
+            {
+              'id': 'term:pty:a',
+              'name': 'zsh-2',
+              'title': '~/git/rapp · 2',
+              'command': 'claude',
+              'activity': 1,
+              'dead': false,
+              'ps': ps,
+            },
+          ],
+          'hosts': [],
+        });
+        await tester.runAsync(flush);
+        await tester.pump();
+      }
+
+      await emitPs({'state': 'working', 'seq': 1});
+      await emitPs({'state': 'blocked', 'kind': 'permission', 'msg': 'approve Bash: ls', 'seq': 2});
+      await tester.tap(find.byKey(const Key('hint-button')));
+      await tester.pump();
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('hint-history')),
+          matching: find.text('~/git/rapp · 2 @ mini：等确认 · approve Bash: ls'),
+        ),
+        findsOneWidget,
+      );
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('queue-0')));
+        await flush();
+      });
+      await tester.pump();
+      expect(es.corner, isNull);
+      expect(es.currentKey, '111/term:pty:a');
+      await openApp(tester, 'Safari');
+      expect(es.currentKey, '111/Safari');
+      await tester.tap(find.byKey(const Key('needs-you')));
+      await tester.pump();
+      expect(find.text('~/git/rapp · 2 @ mini：等确认 · approve Bash: ls'), findsOneWidget);
+      await tester.runAsync(() async {
+        await tester.tap(find.text('~/git/rapp · 2 @ mini：等确认 · approve Bash: ls'));
+        await flush();
+      });
+      await tester.pump();
+      expect(es.corner, isNull);
+      expect(es.currentKey, '111/term:pty:a');
+    }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
     testWidgets('a pinned clip of an ended session offers no 插入 when its sid comes back (S6-4b)', (tester) async {
       await tester.pumpWidget(wrap(ebar()));
       await openApp(tester, 'Safari');

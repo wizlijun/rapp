@@ -2728,6 +2728,10 @@ class MainState extends ChangeNotifier {
   /// Like [_termsTargetOf], but a text device that can launch terminals always makes a new one.
   TermsTarget _termsNewTargetOf(String id) => _targetWith(termsNewTarget, id);
 
+  bool _hasGraphicalApps(String id) =>
+      probes[id]?.apps?.capabilities?['graphical'] != false &&
+      probes[id]?.apps?.capabilities?['applications'] != false;
+
   TermsTarget _targetWith(
       TermsTarget Function({required String mode, required TermList list, required List<HubApp> apps, bool graphical}) f,
       String id) =>
@@ -2735,8 +2739,7 @@ class MainState extends ChangeNotifier {
           mode: prefs.termOpenFor(id),
           list: hub?.termLists[id] ?? TermList(id),
           apps: probes[id]?.apps?.apps ?? const [],
-          graphical: probes[id]?.apps?.capabilities?['graphical'] != false &&
-              probes[id]?.apps?.capabilities?['applications'] != false);
+          graphical: _hasGraphicalApps(id));
 
   /// Devices whose existing text terminals the 常用 · 终端 tile has reopened since launch.
   final _termsRestored = <String>{};
@@ -2785,9 +2788,10 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Right after launch a device's terminal list may not have arrived; text mode asks for it before
-  /// choosing what to open, so a tap then does not fall back to the pixel Terminal app.
-  bool _termListMissing(String id) => hub != null && !hub!.termLists.containsKey(id) && prefs.termOpenFor(id) == 'text';
+  /// Right after launch a device's terminal list may not have arrived; text mode (and any host without
+  /// graphical app sharing) asks for it before choosing what to open, so a tap does not miss running sessions.
+  bool _termListMissing(String id) =>
+      hub != null && !hub!.termLists.containsKey(id) && (prefs.termOpenFor(id) == 'text' || !_hasGraphicalApps(id));
 
   Future<void> _awaitTermList(String id) async {
     try {
