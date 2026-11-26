@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:clock/clock.dart';
 import 'package:flutter/foundation.dart';
 
 /// One slow thing being waited for: what it is (「正在新建终端…」), on what, since when.
@@ -27,7 +28,7 @@ class Waits extends ChangeNotifier {
     this.failFor = const Duration(seconds: 4),
     this.askFor = const Duration(seconds: 8),
     DateTime Function()? now,
-  }) : _now = now ?? DateTime.now;
+  }) : _now = now ?? clock.now;
 
   final Duration showAfter, failFor, askFor;
   final DateTime Function() _now;
