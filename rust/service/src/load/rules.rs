@@ -165,6 +165,14 @@ impl History {
             }
             self.held.push(h);
         }
+        // An item with no reading this sample keeps what it held. Only a disk that is gone from the list loses it.
+        let disks = &self.ring.back().map(|s| s.disks.as_slice()).unwrap_or_default();
+        for h in old {
+            let gone = h.key.split_once(':').is_some_and(|(_, mount)| !disks.iter().any(|d| d.mount == mount));
+            if !gone {
+                self.held.push(h);
+            }
+        }
     }
 
     fn level_of(&self, key: &str) -> Level {
@@ -216,7 +224,7 @@ impl History {
         ];
         for (key, text, get) in loads {
             if get(s).is_some() {
-                let busy = self.run_start(|x| get(x).is_some_and(|p| p >= 90.0)).is_some_and(|t| now - t >= SUSTAIN_S);
+                let busy = self.run_start(|x| get(x).is_some_and(|p| p >= 90.0)).is_some_and(|t| now.saturating_sub(t) >= SUSTAIN_S);
                 put(key, if busy { Level::Warn } else { Level::Normal }, text.into(), None);
             }
         }
@@ -248,8 +256,8 @@ impl History {
             let hot = self.run_start(|x| x.heat.as_ref().is_some_and(|h| h.level >= HeatLevel::Hot));
             let (level, text) = match h.level {
                 HeatLevel::Serious | HeatLevel::Critical => (Level::Danger, "过热，系统正在降频".into()),
-                HeatLevel::Hot if hot.is_some_and(|t| now - t >= SUSTAIN_S) => {
-                    (Level::Warn, format!("偏热已持续 {} 分钟", (now - hot.unwrap_or(now)) / 60))
+                HeatLevel::Hot if hot.is_some_and(|t| now.saturating_sub(t) >= SUSTAIN_S) => {
+                    (Level::Warn, format!("偏热已持续 {} 分钟", now.saturating_sub(hot.unwrap_or(now)) / 60))
                 }
                 _ => (Level::Normal, String::new()),
             };
@@ -664,4 +672,50 @@ mod tests {
         h.push(s);
         assert_eq!(h.snapshot(true), want);
     }
+    fn at(mut s: Sample, t: u64) -> Sample {
+        s.at = t;
+        s
+    }
+
+    #[test]
+    fn clock_stepping_back_does_not_panic_or_warn() {
+        let mut h = History::new();
+        let busy = |t| at(Sample { cpu: Some(Cpu { pct: 99.0, cores: 4, load1: None }), heat: Some(Heat { level: HeatLevel::Hot, celsius: None }), ..Default::default() }, t);
+        h.push(busy(T0 + 1000));
+        h.push(busy(T0 + 10)); // the wall clock went back
+        h.push(at(pct_disk(8.0), T0 + 5));
+        assert!(h.warnings().iter().all(|w| w.item != "cpu" && w.item != "heat"), "{:?}", h.warnings());
+    }
+
+    #[test]
+    fn held_disk_warning_survives_an_unreadable_sample() {
+        let mut h = History::new();
+        h.push(at(pct_disk(8.0), T0));
+        assert_eq!(level(&h, "disk:/"), Level::Warn);
+        let mut d = disk(100 * GB, 0);
+        d.unreadable = true;
+        h.push(at(with_disk(d), T0 + 5));
+        assert_eq!(level(&h, "disk:/"), Level::Warn);
+    }
+
+    #[test]
+    fn held_cpu_warning_survives_a_missed_reading() {
+        let mut h = History::new();
+        for i in 0..=61 {
+            h.push(at(Sample { cpu: Some(Cpu { pct: 95.0, cores: 4, load1: None }), ..Default::default() }, T0 + i * 5));
+        }
+        assert_eq!(level(&h, "cpu"), Level::Warn);
+        h.push(at(Sample::default(), T0 + 62 * 5));
+        assert_eq!(level(&h, "cpu"), Level::Warn);
+    }
+
+    #[test]
+    fn a_disappearing_disk_drops_its_state() {
+        let mut h = History::new();
+        h.push(at(pct_disk(8.0), T0));
+        assert_eq!(level(&h, "disk:/"), Level::Warn);
+        h.push(at(Sample::default(), T0 + 5));
+        assert_eq!(level(&h, "disk:/"), Level::Normal);
+    }
+
 }

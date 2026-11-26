@@ -4,13 +4,52 @@
 pub(crate) mod linux;
 #[cfg(target_os = "macos")]
 pub(crate) mod mac;
+pub mod disks;
 pub mod rules;
 pub mod sample;
+pub mod task;
 
 pub use rules::{History, Level, Warning, KEEP};
 pub use sample::{
     Battery, CoverKind, Covered, Cpu, Disk, FakeSampler, Heat, HeatLevel, Mem, Pressure, Sample, Sampler,
 };
+
+/// How the sampler runs (`LoadOpts::system()` in the real service; the testkit sets a fake).
+#[derive(Clone)]
+pub struct LoadOpts {
+    pub every: std::time::Duration,
+    pub sampler: std::sync::Arc<dyn Fn() -> Box<dyn Sampler> + Send + Sync>,
+    /// How long one disk may take to answer before it is `unreadable` for this sample.
+    pub disk_wait: std::time::Duration,
+}
+
+impl LoadOpts {
+    pub fn system() -> Self {
+        LoadOpts {
+            every: std::time::Duration::from_secs(5),
+            sampler: std::sync::Arc::new(system_sampler),
+            disk_wait: std::time::Duration::from_secs(2),
+        }
+    }
+}
+
+/// What the sampler task keeps: the 1 h history, and a counter bumped after each push.
+pub struct Load {
+    pub hist: std::sync::Mutex<History>,
+    pub tick: tokio::sync::watch::Sender<u64>,
+}
+
+impl Load {
+    pub fn new() -> Self {
+        Load { hist: Default::default(), tick: tokio::sync::watch::channel(0).0 }
+    }
+}
+
+impl Default for Load {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
