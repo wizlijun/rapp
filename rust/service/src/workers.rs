@@ -103,6 +103,23 @@ pub fn capabilities(state: &State) -> Value {
     caps
 }
 
+/// What this device is, for the system mark under its column in B's overview: `macos`, `windows`, `omarchy`,
+/// `linux`, else `unknown`. Omarchy is known by its shell config, a system path whoever runs the service.
+pub fn os_name() -> &'static str {
+    static OS: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    OS.get_or_init(|| os_from(std::env::consts::OS, std::path::Path::new("/usr/share/omarchy/shell").exists()))
+}
+
+pub(crate) fn os_from(target: &str, omarchy: bool) -> &'static str {
+    match target {
+        "macos" => "macos",
+        "windows" => "windows",
+        "linux" if omarchy => "omarchy",
+        "linux" => "linux",
+        _ => "unknown",
+    }
+}
+
 fn client_only_linux(state: &State) -> bool {
     cfg!(target_os = "linux") && host_bin(state).is_err()
 }
@@ -388,4 +405,25 @@ fn transcribe(state: &State, app: &str, ev: &str, v: &Value) {
     }
     let lvl = if ev == "rejected" { Lvl::Warn } else { Lvl::Info };
     state.log.event(lvl, ev, fields);
+}
+
+#[cfg(test)]
+mod os_tests {
+    use super::{os_from, os_name};
+
+    #[test]
+    fn os_from_maps_targets() {
+        assert_eq!(os_from("macos", false), "macos");
+        assert_eq!(os_from("windows", false), "windows");
+        assert_eq!(os_from("linux", false), "linux");
+        assert_eq!(os_from("linux", true), "omarchy");
+        assert_eq!(os_from("macos", true), "macos");
+        assert_eq!(os_from("freebsd", false), "unknown");
+    }
+
+    #[test]
+    fn os_name_is_this_build() {
+        assert_eq!(os_name(), os_name());
+        assert!(["macos", "windows", "linux", "omarchy"].contains(&os_name()), "{}", os_name());
+    }
 }
