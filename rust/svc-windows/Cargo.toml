@@ -1,0 +1,10 @@
+[package]
+name = "rapp-svc-windows"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+# The Windows supervisor (spec §5.3). A shell until phase C.
+[[bin]]
+name = "rapp-svc"
+path = "src/main.rs"

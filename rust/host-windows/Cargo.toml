@@ -1,0 +1,15 @@
+[package]
+name = "rapp-host-windows"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+# The Windows host (spec §5.3). The bin is `rapp-host-windows`, not `rapp-host`: `host-linux` already
+# owns that target name in this workspace. `scripts/stage-windows.ps1` stages it as `rapp-host.exe`.
+[lib]
+name = "rapp_host_windows"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rapp-host-windows"
+path = "src/main.rs"
