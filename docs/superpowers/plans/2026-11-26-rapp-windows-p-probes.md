@@ -127,7 +127,7 @@ Expected: corpus files written.
 Run: `cargo run --release --no-default-features --features <backend>` for each of the four.
 Expected: a table of backend × item → identical / differs at offset N.
 
-- [ ] **Step 4: Verdict.** Pass = one backend is identical on every item. Record which, with exact crate versions and features. If none: the standard for the deflate layer becomes “Swift's decoder inflates host-core's output to identical bytes” (spec §14.2, §16 C1), every other layer stays byte-exact; record which backend is closest and smallest to build.
+- [ ] **Step 4: Verdict.** Pass = one backend is identical on every item. Record which, with exact crate versions and features. If none: the standard for the deflate layer becomes “Swift's decoder inflates host-core's output to identical bytes” (spec §14.2, §16 C1), every other layer stays byte-exact; record which backend is closest and smallest to build. Either way also record, for the chosen backend, that its C-style interface crate (`libz-sys`, `libz-ng-sys` or `libz-rs-sys`) provides `deflateCopy`, and run the corpus once more through that interface directly (not through `flate2`) to confirm the same bytes: `host-core` links the backend that way, because it has to copy a stream and must not change the workspace's `flate2` features (plan B, Task 3).
 
 - [ ] **Step 5: Record and commit.** Probe branch: `probe(windows-c1): deflate byte-identity`. Results page section C1 on the docs branch.
 
@@ -136,7 +136,7 @@ Expected: a table of backend × item → identical / differs at offset N.
 ### Task 3: G1 — does the Flutter app start on Windows (level 1)
 
 **Files (branch `probe/windows-g1`):**
-- Create: `gui/windows/` by `flutter create --platforms=windows .` inside `gui/` (probe branch only; the product runner is created in plan A)
+- Use: `gui/windows/` as it is in the repository (`CMakeLists.txt`, `flutter/`, `runner/` are already there; it has never been built). Only if it fails to configure with the current Flutter, regenerate it on the probe branch with `flutter create --platforms=windows .` inside `gui/` and write down what differed — plan A applies exactly those differences to the product tree
 - Create: `probes/windows/g1/NOTES.md` (per-plugin table)
 
 - [ ] **Step 1: Plugin table.** For every dependency in `gui/pubspec.yaml`, write whether it is a plugin, and whether its `pubspec.yaml` declares `flutter: plugin: platforms: windows`. List the ones that do not.

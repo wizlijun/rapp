@@ -221,7 +221,7 @@
 | crate | 状态 | 放什么 | 不放什么 |
 |---|---|---|---|
 | `rust/host-core` | **新建** | 被控端里和系统无关的一切：协议编解码（被控端方向）、量化、瓦片编码、滚动复制、分片发送、会话循环、接管、省流阶梯、暂停、取景、窗口表后处理、焦点面板规则、状态规则、剪贴板和传输的规则、worker 的命令行和事件、平台接口（trait） | 任何系统调用。只用 `std` 的网络、文件、线程、时间。 |
-| `rust/host-windows` | **新建**，产出 `rapp-host.exe` | Windows 的采集、输入、窗口枚举和分类、剪贴板、输入法、锁屏、启动应用、文字识别、控件树；安全桌面帮手这个运行方式 | 协议字节、编码、会话逻辑。它只实现 `host-core` 的平台接口。 |
+| `rust/host-windows` | **新建**，产出 `rapp-host.exe`（Cargo 里的目标名是 `rapp-host-windows`，装进版本目录时改名【我定的】：`host-linux` 已经有一个叫 `rapp-host` 的目标，同一个 workspace 里重名，Mac 上的构建产物会互相覆盖，而 `host-linux` 这次不动） | Windows 的采集、输入、窗口枚举和分类、剪贴板、输入法、锁屏、启动应用、文字识别、控件树；安全桌面帮手这个运行方式 | 协议字节、编码、会话逻辑。它只实现 `host-core` 的平台接口。 |
 | `rust/svc-windows` | **新建**，产出 `rapp-svc.exe` | 监督 `rapp-service`；系统服务方式下跨会话启动进程、发 Ctrl+Alt+Del；下载、校验、切换升级包；安装和卸载时对系统的全部改动（`install` / `uninstall`，§12） | 协议、采集、会话。它连网只为取升级清单和升级包。 |
 | `rust/service` | 改 | 加 Windows 的缝：单实例、退出、缓存目录、worker 启动方式、`--prelogin` | —— |
 | `rust/term` | 改 | 加 Windows 的 holder、本机传输、启动器、前台程序、清理 | —— |
@@ -229,7 +229,7 @@
 | `rust/speech-linux` | 改（目录名不动） | 加 Windows 的录音；识别部分共用 | —— |
 | `rust/client-core` | 基本不动 | `rapp-session` 在 Windows 上编过即可 | —— |
 | `rust/wire`、`conn`、`ports` | 预计不用改 | —— | —— |
-| `rust/relay`、`host-linux`、`client-gtk`、`hub-ffi` | 不碰 | Windows 的门禁里排除（§14.3） | —— |
+| `rust/relay`、`host-linux`、`client-gtk`、`hub-ffi` | 不碰（例外：`relay/src/audit.rs` 三处 `#[cfg(unix)]`，§14.3） | Windows 的门禁里排除（§14.3） | —— |
 
 `speech-linux` 不改名【我定的】：改目录名会动到另一台机器维护的 Linux 打包脚本，收益只是名字好看。
 
@@ -880,7 +880,7 @@ unix 上的规矩是“目录 0700、文件 0600”。Rust 里真正设权限的
   - **只在 `Sources/rapp-host/` 里有的，出不了样本**：握手和接管的先后、会话主循环里各种消息的处理顺序（`Server.swift`）、解锁时“打字、等、再看锁没锁”的整套编排（`Server.swift`、`UnlockTyper.swift`）、粘贴的步骤（`Paster.swift`）、窗口跟踪循环什么时候重发窗口表（`WindowTracker.swift`）、关掉遮挡的重试（`CoverCloser.swift`）。这些和 macOS 的系统接口写在一起，不改 Swift 就单独调不了。**不为了出样本去改 Swift**（U10）：改 macOS 被控端要过门禁、发版，有回归风险，而且和“新平台不改已有平台”相反。
 - **第二类靠三样东西代替样本**：
   1. **一张对照表**，放在 `rust/host-core/` 里（一份 Markdown）。每一行：Swift 的文件和行号范围 → 这段规定了什么行为 → `host-core` 里哪个模块实现 → 哪条测试钉住。搬一段写一行。没有测试的行不算搬完。
-  2. **假平台整会话测试**：`host-core` 配假平台，对面是**真的 Rust 控制端代码**（`rapp-testkit`），把握手、接管、暂停恢复、解锁（成功、密码错、没锁时收到）、粘贴、传文件、窗口增减、遮挡各走一遍。控制端解得了、状态走得对，才算过。
+  2. **假平台整会话测试**：`host-core` 配假平台，对面是**真的 Rust 控制端代码**（`rapp-client-core` 的协议读写和解码器；测试台放在 `rapp-testkit`，B 段新建），把握手、接管、暂停恢复、解锁（成功、密码错、没锁时收到）、粘贴、传文件、窗口增减、遮挡各走一遍。控制端解得了、状态走得对，才算过。
   3. **实机验收**：Mac 控制 Windows，§15.3 逐行过（D、F 段的完成标准）。
 - **Swift 那边以后改了怎么办**【我定的】。第一类不用管：样本一重新生成，`host-core` 没跟上门禁就红。第二类没有这道保险，所以对照表里记下它引用的每个 Swift 文件当时的内容摘要，Mac 门禁里加一条测试核对。有人改了 `Server.swift` 这类文件，这条测试就红，提醒他看一眼 `host-core` 要不要跟着改；看过以后更新摘要（要改就一起改，不用改就在对照表里那一行写一句为什么）。代价是 Mac 上改被控端的人每次多这一步；换来的是两份被控端不会不知不觉走岔。这条测试只读文件、算摘要，不拖慢门禁。
 - 逐字节做不到的地方（比如压缩后端的输出确实不同），退一步的标准是“Swift 的解码器解 `host-core` 的输出，得到的像素完全相同”，并且在文档里记下是哪一处、为什么。
@@ -889,7 +889,7 @@ unix 上的规矩是“目录 0700、文件 0600”。Rust 里真正设权限的
 另外三层测试：
 
 - **`host-windows` 里不带 `cfg` 的纯逻辑**（键位表、窗口分类、显示器 id、文件名改写）：单元测试，Mac 上也跑。
-- **用假平台跑整个会话**：`host-core` 的平台接口配一个假实现（固定的帧、固定的窗口），用 `rapp-testkit` 现成的假控制端连上来走完整流程。Mac 上也跑。
+- **用假平台跑整个会话**：`host-core` 的平台接口配一个假实现（固定的帧、固定的窗口），用 `rapp-client-core` 现成的协议读写和解码器搭一个控制端连上来走完整流程（测试台放在 `rapp-testkit`，B 段新建；`rapp-testkit` 现在的假程序不说画面协议）。Mac 上也跑。
 - **只能在 Windows 上跑的**：采集、输入、锁屏、帮手、服务、终端、安装和升级。分两种：能自动化的写成脚本放进 Windows 的门禁；不能的（登录界面、UAC、远程桌面）写成 §16、§17 里的实机检查表，每次发版前不重跑，改到相关代码时跑。
 
 ### 14.3 两边的门禁
@@ -898,7 +898,7 @@ unix 上的规矩是“目录 0700、文件 0600”。Rust 里真正设权限的
 
 **Windows 的门禁**（Windows 机器上的集成 session、首发后的发版 session 用，功能 session 在 Windows 机器上开发时也用）：
 
-1. `cargo test --workspace --no-fail-fast`，排除 `rapp-relay`、`rapp-host-linux`、`rapp-client-gtk`、`rapp-hub-ffi`（这四个 Windows 上不编）。
+1. `cargo test --workspace --no-fail-fast`，排除 `rapp-relay`、`rapp-host-linux`、`rapp-client-gtk`、`rapp-hub-ffi`（这四个的测试 Windows 上不跑）。排除管不到依赖：`rapp-conn`、`rapp-testkit` 的测试要在进程里起一个中继，所以 `rapp-relay` 的**库**在 Windows 上还是会被编译。为此 `rust/relay/src/audit.rs` 里三处 unix 专用的写法加 `#[cfg(unix)]`（只为编过，Linux 上的代码不变，中继仍然不为 Windows 构建、不在 Windows 上发）——用户 2026-11-26 同意。
 2. `cargo clippy` 同样的范围，`-D warnings`。
 3. `flutter analyze`、`flutter test`。
 4. 构建和包的自检（§12.6）。
