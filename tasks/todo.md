@@ -1201,3 +1201,33 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] [Linux v0.15.36](https://github.com/wizlijun/rapp/releases/tag/v0.15.36) 已发布（源码 `5b9ce64e`，`--latest=false`）；两包 41 文件逐字节一致、14 个 ELF 依赖完整、`BUILD-INFO.json`、协议 v16 版本校验与隔离网络命名空间服务/CLI/端口共享测试通过；三个远端附件大小与 SHA256 与本地一致，macOS Latest 保留 `v0.15.35`。
 - [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01536-parity.md`。
 - [ ] 实机验收：Linux 连接 macOS 0.15.35 验证协议 v16 状态规则推断显示；Linux 本地验证 `Ctrl+Shift+T`/`Ctrl+Shift+W`、宿主终端 `<目录> · <程序>` 标题与总览本机列「正在被接入」。
+
+## 文本终端恢复（规格：docs/superpowers/specs/2026-11-26-rapp-term-restore-design.md，计划：docs/superpowers/plans/2026-11-26-rapp-term-restore.md）
+
+已完成（任务 1–9）：
+
+- [x] 1 shell 钩子（zsh/bash/fish）与 OSC 7502 上报
+- [x] 2 快照存盘、命令过滤、清理
+- [x] 3 快照的删除规则
+- [x] 4 serve `restore` / `forget`、`term_saved`
+- [x] 5 `rapp-term run --restore`（沿用旧 key、环境激活、命令预填）
+- [x] 6 `rapp term restore` 命令行
+- [x] 7 「新建」沿用上一个终端的目录（`from: "last"`）
+- [x] 8 GUI 恢复列表与入口
+- [x] 9 testkit 端到端测试
+
+实机检查（规格 §7）：
+
+- [ ] 1 开 3 个终端：一个在 venv 里跑 claude，一个在 conda 环境里空着，一个在别的目录跑 `npm run dev`。重启电脑，在 rApp 里恢复：目录、环境（提示符前的 `(venv)`、`(ml)`）、填好的命令都对，没有一个自己跑起来。
+- [ ] 2 同上，改在被控 Mac 上敲 `rapp term restore`。
+- [ ] 3 敲 `exit` 结束的、在 rApp 里点「结束终端」的，不在恢复列表里。
+- [ ] 4 点 Terminal 的红色关闭按钮关掉的，在恢复列表里，勾掉就不恢复。
+- [ ] 5 在终端 A（`~/git/x`）里点总览「新建」：新终端在 `~/git/x`；在设备页点「新建 · bash」：bash，在 `~/git/x`。
+- [ ] 6 重启 rApp 后什么都不看，直接点「新建」：在最近有输入的那个终端的目录。
+- [ ] 7 自己的 `~/.zshrc` 里的提示符（oh-my-zsh、starship 之类）、补全、别名在 rApp 开的终端里和直接开 Terminal 一样。
+- [ ] 8 在 rApp 开的终端里再敲 `zsh`、`tmux`：读的是用户自己的配置。
+- [ ] 9 `KEY=xxx claude` 跑着时重启，恢复后填的是 `claude --continue`，`saved/` 里搜不到 `xxx`；`claude --api-key sk-abc…` 跑着时重启，恢复后只填 `claude`，`saved/` 里搜不到 `sk-`。
+- [ ] 10 恢复后不按回车再重启一次，命令还能填回来。
+- [ ] 11 只关窗口（不重启）后，总览按钮仍说「新建」；设备页有「上次没关的 1 个终端」。
+- [ ] 12 macOS 自己的「重新登录时重新打开窗口」：重启后 Terminal 会不会把 rapp 的旧标签页重开成普通 shell，和恢复出来的混在一起（规格 §8）。
+- [ ] 13 Terminal.app ⌘Q 实验（会关掉本机所有 Terminal 窗口，先确认没有别的会话在用）：开一个 rapp 文字终端，⌘Q 退出 Terminal 再打开。看标签页回不回来，回来的是同目录的普通 shell 还是重跑 `.command`；再看 rApp 恢复同一个终端后会不会出现两份。结果写进规格 §8。已知 `NSQuitAlwaysKeepsWindows` 没设（系统默认，退出时关闭窗口）。

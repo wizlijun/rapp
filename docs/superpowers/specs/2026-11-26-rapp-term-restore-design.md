@@ -70,8 +70,10 @@ A 用不上的 shell（钩子没装上，或者 `sh`、`nu` 这类没写钩子�
 「新建」（总览「常用 · 终端」、设备页每个 shell 的「新建」）按这个顺序选「旁边的终端」：
 
 1. **当前的终端**：舞台上正显示这台设备的文本终端时，就是它。
-2. **上一个终端**：这台主控台本次运行里最后看过、这台设备上还活着的文本终端。GUI 在内存里按设备记一个 term id，不写盘【我定的】。
-3. **被控端自己挑**：1、2 都没有时，GUI 发 `from: "last"`，serve 依次取：最近有输入的那个还活着的 holder（holder 已有 `activity`，这里要的是**输入**时间，见 §8）；没有就取最近一份快照（§4.3）的目录；都没有就用家目录。
+2. **上一个终端**：这台主控台本次运行里最后看过、这台设备上还活着（仍在列表里）的文本终端。GUI 在内存里按设备记一个 term id，不写盘【我定的】。
+
+GUI 实际的取源顺序是：这台设备舞台上当前的文本终端，否则最后看过且仍在列表里的那个，否则发 `from: 'last'`【计划里改的】。
+3. **被控端自己挑**：1、2 都没有时，GUI 发 `from: "last"`，serve 依次取：最近有输入的那个还活着的 holder（holder 的 `activity` 是输出时间，这里要的是**输入**时间：`Shared` 新增 `input_at`，每次按键或观看端输入时更新，`Status` 新增 `input`（Unix 秒，0 或不带表示从没有）；不与 CLI 升级的 `activity` 事件共用（那个分支还没合）【计划里改的】）；没有就取最近一份快照（§4.3）的目录；都没有就用家目录。
 4. 找到的终端目录已不存在时，往下一级找，不报错（`source_of` 已经过滤 `is_dir`）。
 
 - **shell 照按钮来**：点「新建 · zsh」还是 zsh，只借目录。所以 serve 的 `open` 在请求里明写了 `shell` 时，用请求里的 shell、`from` 那边的目录；没写 shell 时（⌘T）两样都沿用，和现在一样。
@@ -85,17 +87,18 @@ A 用不上的 shell（钩子没装上，或者 `sh`、`nu` 这类没写钩子�
 
 | shell | 怎么让它先读 rapp 的配置 |
 |---|---|
-| zsh | `ZDOTDIR` 指向 rapp 的目录，原值存进 `RAPP_ZDOTDIR`。rapp 的 `.zshenv` 立刻把 `ZDOTDIR` 改回原值，再 source 用户的 `.zshenv`；`.zprofile`、`.zshrc`、`.zlogin` 同理。钩子在 `.zshrc` 的末尾、用户的 `.zshrc` 之后挂上。这是 Ghostty 和 VS Code 的做法 |
+| zsh | `ZDOTDIR` 指向 rapp 的目录，原值存进 `RAPP_ZDOTDIR`。只需要一个 `.zshenv`（Ghostty 的做法）：它把 `ZDOTDIR` 改回原值，source 用户的 `.zshenv`，交互时装一个一次性的 `precmd`，在用户的 `.zshrc` 之后才加真正的钩子。之后 zsh 自己从用户的 `ZDOTDIR` 读 `.zprofile`、`.zshrc`、`.zlogin`【计划里改的】（P4；原先写的是 rapp 的 `.zprofile`/`.zshrc`/`.zlogin` 各转一遍） |
 | bash | 照 VS Code 的做法：用 `--init-file` 让 bash 读 rapp 的文件，rapp 的文件按登录 shell 的顺序 source `/etc/profile`、`~/.bash_profile`（或 `~/.bash_login`、`~/.profile`），再挂钩子（`PROMPT_COMMAND` 和 `DEBUG` trap）。具体参数由计划在本机 bash 3.2 和 Homebrew bash 5 上核对 |
 | fish | `fish -l -C 'source <rapp 的文件>'`：`-C` 在用户的配置之后执行 |
 | 其他 | 不装，退到 B |
 
 钩子文件由 rapp-term 在启动时写到 `$ROOT/local/term/shell/`（0700），内容来自编进二进制的文本；版本不对就重写【我定的】。
 
-**报什么**：用一个私有 OSC，终端不显示它，holder 吞掉不转给 Terminal 窗口【我定的：编号 7502，名字 `rapp-shell`】。
+**报什么**：用一个私有 OSC，终端不显示它，**透传给 Terminal 窗口**，和 OSC 7501 现在一样：Terminal.app 和 holder 的 `Emu` 都忽略不认识的 OSC，吞掉没有好处，还要多写一个输出过滤器【计划里改的】（P1；原先写的是「holder 吞掉」）【我定的：编号 7502，名字 `rapp-shell`】。
 
-- 出提示符时（zsh `precmd`、bash `PROMPT_COMMAND`、fish `fish_prompt` 事件）：`ESC ] 7502 ; state ; <base64(JSON)> BEL`，JSON 是 `{"cwd": …, "venv": $VIRTUAL_ENV, "conda": $CONDA_PREFIX, "conda_name": $CONDA_DEFAULT_ENV}`，空的不写。紧接着报 `OSC 133;A`（用户的主题已经报了也不要紧，holder 只用它判断提示符出来了）。
-- 执行命令前（zsh `preexec`、bash `DEBUG` trap 的第一次、fish `fish_preexec`）：`ESC ] 7502 ; run ; <base64(命令原文)> BEL`。
+- 出提示符时（zsh `precmd`、bash `PROMPT_COMMAND`、fish `fish_prompt` 事件）：`ESC ] 7502 ; state ; cwd=<b64> ; venv=<b64> ; conda=<b64> ; conda_name=<b64> BEL`，是字段不是 JSON，空的字段不写，每个值是 UTF-8 字节的标准 base64（shell 脚本没法可靠地转义路径里的字符）【计划里改的】（P2；原先是 base64(JSON)）。只在内容比上次报的有变化时才报 `state`（省掉每个提示符的 fork）【计划里改的】（P3）；`OSC 133;A` 每个提示符都写（用户的主题已经报了也不要紧，holder 只用它判断提示符出来了）。
+- 执行命令前（zsh `preexec`、bash `DEBUG` trap 的第一次、fish `fish_preexec`）：`ESC ] 7502 ; run ; <b64> BEL`，`<b64>` 是命令原文的 base64。
+- bash 里用户已经有 `DEBUG` trap（bash-preexec 之类）时，我们的钩子不去碰它，只报 `state`，并在 `state` 里加 `norun=<b64 "1">`，表示这个 shell 不会报 `run`【计划里改的】。**钩子没装上或带了 `norun` 时，恢复时填的命令退到前台进程的 argv（退到 B）**【计划里改的】。
 - 回到提示符就意味着命令结束了，holder 把「在跑的命令」清空。
 
 **不能漏**：
@@ -108,7 +111,7 @@ A 用不上的 shell（钩子没装上，或者 `sh`、`nu` 这类没写钩子�
 
 **存哪**：`$ROOT/local/term/saved/<key>.json`，`key` 是 holder 的 `meta.key`（每个 holder 唯一）。目录 0700、文件 0600，写法是先写临时文件再改名。
 
-**内容**：
+**内容**（快照里没有 `app`：`restore` 像 `open` 一样带 `app`，GUI 用 `prefs.termAppFor`，CLI 不带、由 serve 取第一个启动器）【计划里改的】（P5）：
 
 ```json
 {
@@ -123,7 +126,6 @@ A 用不上的 shell（钩子没装上，或者 `sh`、`nu` 这类没写钩子�
   "conda_name": "ml",
   "cmd": "claude --dangerously-skip-permissions",  // 在跑的命令，空着就没有
   "prog": "claude",         // 给列表看的程序名
-  "app": "Terminal",
   "started": 1764123456,    // holder 起来的时间，恢复时按这个排序
   "saved": 1764130000
 }
@@ -150,7 +152,7 @@ A 用不上的 shell（钩子没装上，或者 `sh`、`nu` 这类没写钩子�
 |---|---|---|
 | shell 自己退出（敲 `exit`、程序结束后 shell 也退了，`End::Exited`） | 删 | 用户主动结束（反目标第 3 条） |
 | rApp 里「结束终端」/ ⌘W（`shared.end`） | 删 | 同上 |
-| 外来的 SIGHUP/SIGTERM/SIGINT/SIGQUIT（关窗口、退出 Terminal、注销、关机、`kill`） | 留 | 关机和关窗口分不出来；留着，由恢复列表让用户勾掉 |
+| 外来的 SIGHUP/SIGTERM/SIGINT/SIGQUIT（关窗口、退出 Terminal、注销、关机、`kill`） | 留。子进程被信号杀死的一律留快照；干净退出（`End::Exited`）要多等 150 ms，看有没有迟到的 hup/term/int/quit，没有才删【计划里改的】 | 关机和关窗口分不出来；留着，由恢复列表让用户勾掉 |
 | holder 被 SIGKILL、崩溃、断电 | 留 | 来不及删，正好要恢复 |
 | 恢复成功（新 holder 起来了） | 留，同一个 `key` 接着写 | 新 holder 沿用旧 `key`（§4.5） |
 | 用户在恢复列表里点「清掉」 | 删 | |
@@ -212,6 +214,8 @@ rapp term restore --forget   # 全部清掉
 ```
 
 - 本机命令行可以显示目录：在本机打印，不出设备。
+- 经 hub 来的调用一律给 `restore_terms` 明写 `keys`；CLI 先用一次本机 `term_saved` 把它们算出来，所以没有可恢复的终端时，`rapp term restore` 打印「没有可以恢复的终端」并以 0 退出【计划里改的】。
+- CLI 的参数：`rapp term restore 2`，全是数字的是从 1 开始的序号；其他的是名字，精确匹配，同名的快照全部选中；`--forget` 不接受参数【计划里改的】。
 - 路径和 GUI 一样：CLI → 服务的 `Op` → serve 的新请求 `restore`。只对本机，不对别的设备【我定的】。
 
 ### 4.7 线上和本地协议的改动
@@ -264,12 +268,16 @@ rapp term restore --forget   # 全部清掉
 9. `KEY=xxx claude` 跑着时重启，恢复后填的是 `claude --continue`，`saved/` 里搜不到 `xxx`；`claude --api-key sk-abc…` 跑着时重启，恢复后只填 `claude`，`saved/` 里搜不到 `sk-`。
 11. 恢复后不按回车再重启一次，命令还能填回来。
 12. 只关窗口（不重启）后，总览按钮仍说「新建」；设备页有「上次没关的 1 个终端」。
-10. macOS 自己的「重新登录时重新打开窗口」：重启后 Terminal 会不会把 rapp 的旧标签页重开成普通 shell，和恢复出来的混在一起（§8）。
+10. macOS 自己的「重新登录时重新打开窗口」：重启后 Terminal 会不会把 rapp 的旧标签页重开成普通 shell，和恢复出来的混在一起（§8）。**⌘Q 再开 Terminal 的情形还没实测过**：标签页会不会回来、回来的是同目录的普通 shell 还是重跑 `.command`。
 
 ## 8. 留给实现的
 
-- **重启后 Terminal 自己恢复的窗口**：Terminal.app 开着「恢复窗口」时，重启后会把旧标签页重开成普通 shell（不重跑 `.command`）。要先在本机查清楚它会不会这样做；会的话，最省事的做法是什么（比如 `.command` 的窗口不参与 Terminal 自己的恢复，或者 sweep 认出这些旧标签页并关掉）。查完再定，结果补进本节。
-- **「最近有输入」**：holder 现在的 `activity` 是输出时间。§4.1 第 3 步要的是用户输入的时间，CLI 升级规格里 serve 也要发 `activity` 事件。实现时看能不能共用，不能就在 holder 的 status 里加一个 `input` 时间。
+- **重启后 Terminal 自己恢复的窗口**（计划 P7；本机只查了设置，没做会关掉用户窗口的实验）：
+  - 已观察：`defaults read com.apple.Terminal NSQuitAlwaysKeepsWindows` 和 `defaults read NSGlobalDomain NSQuitAlwaysKeepsWindows` 都没设，走系统默认，「退出应用时关闭窗口」是开着的。
+  - **还没观察**：⌘Q 或重启后再开 Terminal，rapp 的标签页会不会回来；回来的话是同一目录里的普通 shell，还是重新跑了那个 `.command`。没有做，因为退出 Terminal 会关掉本机上所有人（包括别的会话）的 Terminal 窗口；已列为 todo 里一项没勾的实机检查。
+  - 风险：Terminal 自己重开一个窗口，rapp 又恢复同一个终端，同一个终端就出现两份。
+  - 最省事的缓解想法（只是想法，没做）：恢复时 sweep 一遍 Terminal 里没有 holder 的 rapp 旧标签页并关掉，或让 `.command` 的窗口不参与 Terminal 自己的恢复。
+- **「最近有输入」**：已定，在 holder 的 status 里加 `input` 时间，不与 CLI 升级的 `activity` 共用（§4.1）【计划里改的】。
 - **bash 的装法细节**：`--init-file` 和登录 shell 不能同时用；要在 bash 3.2（macOS 自带）上确认 `DEBUG` trap 拿到的是整行命令。
 - **claude 各自的会话**：能否知道每个终端里 claude 用的是哪个会话（例如 `~/.claude/projects/<目录>/` 下的会话文件和进程的对应关系），从而填 `claude --resume <id>` 而不是 `--continue`。查不到就先用 `--continue`，记作已知限制。
 - **iTerm**：恢复时开标签页的方式按现有 launch 走（iTerm 的标签页还没做，可能开成多个窗口）。
