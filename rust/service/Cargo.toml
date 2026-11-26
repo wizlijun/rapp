@@ -26,7 +26,8 @@ rapp-update.workspace = true
 rapp-term.workspace = true
 rustls.workspace = true
 
-[target.'cfg(target_os = "linux")'.dependencies]
+# Linux: the pty helpers; every unix: stopping the companion services when the service stops.
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [dev-dependencies]

@@ -24,6 +24,10 @@ name = "fake-rapp-term"
 path = "src/bin/fake-rapp-term.rs"
 
 [[bin]]
+name = "test-rapp-state"
+path = "src/bin/test-rapp-state.rs"
+
+[[bin]]
 name = "measure-forward"
 path = "src/bin/measure_forward.rs"
 
@@ -38,6 +42,8 @@ tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rapp-net.workspace = true
+# Only for the `test-rapp-state` binary; rApp itself never depends on it.
+rapp-state = { path = "../../services/state" }
 
 [dev-dependencies]
 quinn.workspace = true

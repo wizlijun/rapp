@@ -197,9 +197,8 @@ pub fn forget(state: &State, id: &str, from: &str) -> bool {
     change(state, id, None, None, from)
 }
 
-/// `Sinks::set_local`, logged when it changed anything. For the companion that runs this
-/// device's own state service (it is not wired in yet).
-#[allow(dead_code)]
+/// `Sinks::set_local`, logged when it changed anything. The companion (`crate::companion`) calls
+/// it with the port of this device's own state service once it answers, and None when it stops.
 pub fn set_local(state: &State, port: Option<u16>) -> bool {
     let was = state.sinks.local();
     let changed = state.sinks.set_local(port);
@@ -278,7 +277,8 @@ pub fn ipc(state: &State) -> Value {
 pub fn tell_plan(hosts: &[String], sinks: &[(String, u16)], told: &Told) -> Vec<(String, Vec<Say>)> {
     let mut plan = Vec::new();
     for host in hosts {
-        let knows: &[Say] = told.get(host).map(Vec::as_slice).unwrap_or_default();
+        // A host is never told of its own sink: not `on`, and so not `off` either.
+        let knows: Vec<&Say> = told.get(host).into_iter().flatten().filter(|(id, _, _)| id != host).collect();
         let want: Vec<&(String, u16)> = sinks.iter().filter(|(id, _)| id != host).collect();
         let mut say: Vec<Say> = knows
             .iter()
@@ -295,8 +295,11 @@ pub fn tell_plan(hosts: &[String], sinks: &[(String, u16)], told: &Told) -> Vec<
     plan
 }
 
-/// `host` now knows `(id, port, on)`.
+/// `host` now knows `(id, port, on)`. A host's own sink is not bookkept: it is never told of it.
 fn note(told: &mut Told, host: &str, id: &str, port: u16, on: bool) {
+    if host == id {
+        return;
+    }
     let knows = told.entry(host.to_string()).or_default();
     knows.retain(|(k, _, _)| k != id);
     if on {
@@ -483,5 +486,11 @@ mod tests {
         // Once `off` is told, nothing is left to say.
         note(&mut told, "111111111", "222222222", 8102, false);
         assert!(tell_plan(&hosts, &[], &told).is_empty());
+        // A host never hears of its own sink, either way: 222222222 told of its own (it said so
+        // itself) and that sink gone is nothing to say to 222222222.
+        let mut told = Told::new();
+        told.insert("222222222".into(), vec![on("222222222", 8102)]);
+        assert!(tell_plan(&hosts[1..], &[], &told).is_empty());
+        assert!(tell_plan(&hosts[1..], &[s("222222222", 8102)], &told).is_empty());
     }
 }

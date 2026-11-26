@@ -71,9 +71,18 @@ impl Conn {
         }
     }
 
+    /// `GET path`: the status and up to `max` bytes of the body (more is an error).
+    pub async fn get(&mut self, path: &str, max: usize) -> Result<(u16, Bytes), &'static str> {
+        self.ask_up_to(Method::GET, path, Bytes::new(), max).await
+    }
+
     /// One request; the status and up to [`REPLY_MAX`] of the body (read to the end so the
     /// connection can carry the next request).
     async fn ask(&mut self, method: Method, path: &str, body: Bytes) -> Result<(u16, Bytes), &'static str> {
+        self.ask_up_to(method, path, body, REPLY_MAX).await
+    }
+
+    async fn ask_up_to(&mut self, method: Method, path: &str, body: Bytes, max: usize) -> Result<(u16, Bytes), &'static str> {
         let req = Request::builder()
             .method(method)
             .uri(path)
@@ -84,7 +93,7 @@ impl Conn {
         self.tx.ready().await.map_err(|_| "io")?;
         let res = self.tx.send_request(req).await.map_err(|_| "io")?;
         let status = res.status().as_u16();
-        let body = Limited::new(res.into_body(), REPLY_MAX).collect().await.map_err(|_| "io")?.to_bytes();
+        let body = Limited::new(res.into_body(), max).collect().await.map_err(|_| "io")?.to_bytes();
         Ok((status, body))
     }
 }

@@ -102,6 +102,7 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
                     "share" => crate::share_cmds::share(state, &cmd).await,
                     "unshare" => crate::share_cmds::unshare(state, &cmd).await,
                     "hosts" => hosts(state).await,
+                    "state" => crate::companion::ipc(state, &cmd).await,
                     "pipe" => match pipe(state, &cmd).await {
                         Ok((p, path)) => {
                             piped = Some(p);
@@ -148,11 +149,6 @@ fn handle(state: &State, cmd: &Value) -> Value {
         "update_dismiss" => update::dismiss(state, cmd["version"].as_str().unwrap_or("")),
         "set_update" => update::set(state, cmd["auto_update"].as_bool(), cmd["check_updates"].as_bool()),
         "term" => crate::term::settings(state),
-        "state" => {
-            let mut r = crate::sink::ipc(state);
-            r["outbox"] = crate::outbox::status(state);
-            r
-        }
         "set_term" => crate::term::set(state, cmd),
         "labels" | "set_label" | "reset_label" => crate::labels::ipc(state, cmd),
         "history" => {

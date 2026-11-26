@@ -4,6 +4,7 @@ mod activity;
 pub mod autolock;
 mod channel;
 mod cm;
+mod companion;
 pub mod config;
 mod data;
 mod forward;
@@ -212,6 +213,7 @@ impl Service {
             numbers: numbers::Numbers::new(),
             sinks,
             outbox: outbox::Outbox::new(),
+            companions: companion::Companions::new(),
             own: own::Own::new(opts.own_ports),
             probed: probe::Probed::default(),
             forwards: forward::Forwards::new(),
@@ -249,6 +251,7 @@ impl Service {
             spawn_forward_sums(state.clone(), opts.forward_sum_every),
             sink::spawn(state.clone()),
             outbox::spawn(state.clone()),
+            companion::spawn(state.clone()),
         ];
         if let Some(data) = opts.data {
             let name = state.cfg.lock().unwrap().name.clone();
@@ -289,6 +292,7 @@ impl Service {
         for t in &self.tasks {
             t.abort();
         }
+        self.state.companions.stop_all();
         self.state.maps.stop();
         self.state.own.stop();
         self.state.outbound.close();

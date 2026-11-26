@@ -6,11 +6,11 @@
 mod cache;
 mod diff;
 mod pump;
-mod send;
+pub(crate) mod send;
 
 pub use cache::Cache;
 pub use diff::Diff;
-pub use pump::{pump, PumpEnd, Stats};
+pub use pump::{backoff, pump, PumpEnd, Stats};
 pub use send::{Dial, DialErr};
 
 use crate::pipe::{self, PipeErr};

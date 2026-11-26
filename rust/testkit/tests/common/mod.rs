@@ -28,13 +28,15 @@ pub const WAIT: Duration = Duration::from_secs(10);
 /// and `share_set.rs` sit below it.
 pub const TEST_PORTS: (u16, u16) = (29800, 100);
 
-/// A temp dir with `rapp-host` / `rapp-client` symlinked to the fake workers.
+/// A temp dir with `rapp-host` / `rapp-client` / `rapp-term` symlinked to the fake workers, and
+/// `rapp-state` to the real state service.
 pub fn bins() -> TempDir {
     let dir = tempfile::tempdir().unwrap();
     for (name, target) in [
         ("rapp-host", env!("CARGO_BIN_EXE_fake-rapp-host")),
         ("rapp-client", env!("CARGO_BIN_EXE_fake-rapp-client")),
         ("rapp-term", env!("CARGO_BIN_EXE_fake-rapp-term")),
+        ("rapp-state", env!("CARGO_BIN_EXE_test-rapp-state")),
     ] {
         std::os::unix::fs::symlink(target, dir.path().join(name)).unwrap();
     }
