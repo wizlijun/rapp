@@ -93,6 +93,8 @@ async fn with_terminals_off_nothing_starts() {
         json!({"op":"watch_terms"}),
         json!({"op":"open_term","app":"Terminal"}),
         json!({"op":"rename_term","term":"term:pty:work","name":"n"}),
+        json!({"op":"restore_terms","keys":["k"]}),
+        json!({"op":"forget_terms","keys":["k"]}),
     ] {
         assert_eq!(req(&conn, op.clone()).await, json!({"ok":false,"error":OFF}), "{op}");
     }
@@ -214,6 +216,33 @@ async fn end_term_reaches_the_worker() {
     assert_eq!(r, json!({"ok":true,"id":"term:pty:opened"}));
     let sent = term_requests(a.bins.path(), "open");
     assert_eq!(sent[0]["from"], json!("term:pty:k"));
+}
+
+#[tokio::test]
+async fn restore_and_forget_terms_reach_the_worker() {
+    let a = service().await;
+    let (_ep, conn) = b(&a).await;
+    let r = req(&conn, json!({"op":"restore_terms","keys":["k-secret"],"app":"Terminal"})).await;
+    assert_eq!(r, json!({"ok":true,"ids":["term:pty:r1","term:pty:r2"]}));
+    assert_eq!(term_requests(a.bins.path(), "restore"), [json!({"op":"restore","keys":["k-secret"],"app":"Terminal"})]);
+    let r = req(&conn, json!({"op":"forget_terms","keys":["k-secret","j-secret"]})).await;
+    assert_eq!(r, json!({"ok":true,"forgot":2}));
+    assert_eq!(term_requests(a.bins.path(), "forget"), [json!({"op":"forget","keys":["k-secret","j-secret"]})]);
+    let logged = wait_log(a.home.path(), "request", |v| v["op"] == "restore_terms" && v["result"] == "ok").await;
+    assert_eq!(logged["keys"], 1, "{logged}");
+    wait_log(a.home.path(), "request", |v| v["op"] == "forget_terms" && v["keys"] == 2).await;
+    assert!(!service_log_text(a.home.path()).contains("-secret"));
+}
+
+/// `saved` is serve's local request (it returns cmd and cwd): no peer reaches it.
+#[tokio::test]
+async fn a_peer_cannot_ask_for_saved() {
+    let a = service().await;
+    let (_ep, conn) = b(&a).await;
+    let r = req(&conn, json!({"op":"saved"})).await;
+    assert_eq!(r["ok"], false, "{r}");
+    assert!(r["error"].as_str().unwrap().contains("unknown op"), "{r}");
+    assert!(!term_log(a.bins.path()).unwrap_or_default().contains("saved"));
 }
 
 /// Opens `term` and passes the worker token through: the stream is then the worker's view (`hello` first).

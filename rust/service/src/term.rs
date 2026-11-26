@@ -69,6 +69,10 @@ pub async fn request<S: AsyncRead + AsyncWrite + Unpin + Send>(
             Op::OpenTerm { shell, from, app } => {
                 answer(ask(state, &json!({"op": "open", "shell": shell, "from": from, "app": app})).await)
             }
+            Op::RestoreTerms { keys, app } => {
+                answer(ask(state, &json!({"op": "restore", "keys": keys, "app": app})).await)
+            }
+            Op::ForgetTerms { keys } => answer(ask(state, &json!({"op": "forget", "keys": keys})).await),
             Op::EndTerm { term } => answer(ask(state, &json!({"op": "end", "term": term})).await),
             Op::RenameTerm { term, name } => answer(ask(state, &json!({"op": "rename", "term": term, "name": name})).await),
             _ => err("unknown op"),
@@ -83,7 +87,15 @@ fn log_fields(op: &Op) -> Value {
     match op {
         Op::ListTerms => json!({"op": "list_terms"}),
         Op::WatchTerms => json!({"op": "watch_terms"}),
-        Op::OpenTerm { app, from, .. } => json!({"op": "open_term", "app": app, "from": from.is_some()}),
+        // `from` is a term id unless it is serve's "last": only its kind is logged.
+        Op::OpenTerm { app, from, .. } => match from.as_deref() {
+            None => json!({"op": "open_term", "app": app}),
+            Some("last") => json!({"op": "open_term", "app": app, "from": "last"}),
+            Some(_) => json!({"op": "open_term", "app": app, "from": "term"}),
+        },
+        // Only how many: a key names a saved terminal.
+        Op::RestoreTerms { keys, .. } => json!({"op": "restore_terms", "keys": keys.len()}),
+        Op::ForgetTerms { keys } => json!({"op": "forget_terms", "keys": keys.len()}),
         Op::EndTerm { .. } => json!({"op": "end_term"}),
         Op::RenameTerm { .. } => json!({"op": "rename_term"}),
         _ => json!({}),
@@ -151,7 +163,7 @@ async fn start(state: &Arc<State>) -> Result<(u16, String, Counted<'_>)> {
 }
 
 /// A one-line request (`list`, `new`) to the worker.
-async fn ask(state: &Arc<State>, req: &Value) -> Result<Value> {
+pub(crate) async fn ask(state: &Arc<State>, req: &Value) -> Result<Value> {
     let (port, token, _counted) = start(state).await?;
     first(port, &token, req).await.map(|(_, v)| v)
 }
@@ -411,7 +423,29 @@ mod tests {
     #[test]
     fn open_term_logs_only_the_app() {
         let op = Op::OpenTerm { shell: Some("zsh".into()), from: None, app: "iTerm".into() };
-        assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm","from":false}));
+        assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm"}));
+    }
+
+    #[test]
+    fn open_term_logs_from_kind() {
+        let op = Op::OpenTerm { shell: None, from: Some("last".into()), app: "iTerm".into() };
+        assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm","from":"last"}));
+        let op = Op::OpenTerm { shell: None, from: Some("term:pty:secret".into()), app: "iTerm".into() };
+        let f = log_fields(&op);
+        assert_eq!(f, json!({"op":"open_term","app":"iTerm","from":"term"}));
+        assert!(!f.to_string().contains("secret"));
+    }
+
+    #[test]
+    fn restore_terms_forwarded_and_logged_without_keys_values() {
+        let op = Op::RestoreTerms { keys: vec!["key-secret".into()], app: Some("Terminal".into()) };
+        let f = log_fields(&op);
+        assert_eq!(f, json!({"op":"restore_terms","keys":1}));
+        assert!(!f.to_string().contains("secret"));
+        let op = Op::ForgetTerms { keys: vec!["a-secret".into(), "b".into()] };
+        let f = log_fields(&op);
+        assert_eq!(f, json!({"op":"forget_terms","keys":2}));
+        assert!(!f.to_string().contains("secret"));
     }
 
     #[test]
@@ -420,14 +454,6 @@ mod tests {
         let f = log_fields(&op);
         assert_eq!(f, json!({"op":"end_term"}));
         assert!(!f.to_string().contains("secret"));
-    }
-
-    #[test]
-    fn open_term_log_from_is_bool() {
-        let op = Op::OpenTerm { shell: None, from: Some("term:pty:secret".into()), app: "iTerm".into() };
-        assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm","from":true}));
-        let op = Op::OpenTerm { shell: None, from: None, app: "iTerm".into() };
-        assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm","from":false}));
     }
 
     #[test]

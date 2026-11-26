@@ -168,6 +168,24 @@ fn conn(mut s: TcpStream, token: &str, config_path: &str) {
             };
             send(&mut s, &v);
         }
+        Some(verb @ ("restore" | "forget")) => {
+            let v = match cfg {
+                Err(e) => json!({"error":e}),
+                Ok(_) => {
+                    log(&format!("{verb} {req}"));
+                    if verb == "restore" {
+                        json!({"ok":true,"ids":["term:pty:r1","term:pty:r2"]})
+                    } else {
+                        json!({"ok":true,"forgot":req["keys"].as_array().map_or(0, Vec::len)})
+                    }
+                }
+            };
+            send(&mut s, &v);
+        }
+        Some("saved") => {
+            log("saved");
+            send(&mut s, &json!({"ok":true,"saved":[]}));
+        }
         Some("view") => view(s, r, &req, cfg.err()),
         _ => {
             send(&mut s, &json!({"error":"bad request"}));

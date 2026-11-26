@@ -222,6 +222,8 @@ pub async fn serve_value(state: &Arc<State>, mut s: Pipe, v: Value, peer: Peer) 
             | Op::WatchTerms
             | Op::OpenTerm { .. }
             | Op::RenameTerm { .. }
+            | Op::RestoreTerms { .. }
+            | Op::ForgetTerms { .. }
             | Op::EndTerm { .. }),
         ) => crate::term::request(state, &mut s, &peer, op).await,
         Ok(Op::Open { app, .. }) if rapp_term::id::is_term(&app) => crate::term::open(state, &mut s, &app, peer).await,

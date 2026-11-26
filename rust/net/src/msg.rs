@@ -42,6 +42,18 @@ pub enum Op {
     },
     /// End terminal session `term`.
     EndTerm { term: String },
+    /// Restore saved terminals (those of `keys`; none given: all of them), opened with `app`.
+    RestoreTerms {
+        #[serde(default)]
+        keys: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        app: Option<String>,
+    },
+    /// Forget saved terminals (those of `keys`; none given: all of them).
+    ForgetTerms {
+        #[serde(default)]
+        keys: Vec<String>,
+    },
     /// Give terminal session `term` the name `name`.
     RenameTerm { term: String, name: String },
     /// The ports this device shares with the caller.
@@ -155,6 +167,24 @@ mod tests {
         let op = Op::EndTerm { term: "term:pty:k".into() };
         assert_eq!(serde_json::to_value(&op).unwrap(), json!({"op":"end_term","term":"term:pty:k"}));
         assert_eq!(serde_json::from_value::<Op>(json!({"op":"end_term","term":"term:pty:k"})).unwrap(), op);
+    }
+
+    #[test]
+    fn restore_and_forget_terms_roundtrip() {
+        let v = json!({"op":"restore_terms","keys":["k"],"app":"Terminal"});
+        let op = Op::RestoreTerms { keys: vec!["k".into()], app: Some("Terminal".into()) };
+        assert_eq!(serde_json::to_value(&op).unwrap(), v);
+        assert_eq!(serde_json::from_value::<Op>(v).unwrap(), op);
+        let bare = serde_json::from_value::<Op>(json!({"op":"restore_terms"})).unwrap();
+        assert_eq!(bare, Op::RestoreTerms { keys: vec![], app: None });
+        assert_eq!(serde_json::to_value(&bare).unwrap(), json!({"op":"restore_terms","keys":[]}));
+        let f = json!({"op":"forget_terms","keys":["a","b"]});
+        let op = Op::ForgetTerms { keys: vec!["a".into(), "b".into()] };
+        assert_eq!(serde_json::to_value(&op).unwrap(), f);
+        assert_eq!(serde_json::from_value::<Op>(f).unwrap(), op);
+        assert_eq!(serde_json::from_value::<Op>(json!({"op":"forget_terms"})).unwrap(), Op::ForgetTerms { keys: vec![] });
+        // `saved` is local to serve and no Op.
+        assert!(serde_json::from_value::<Op>(json!({"op":"saved"})).is_err());
     }
 
     #[test]

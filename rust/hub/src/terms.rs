@@ -107,6 +107,8 @@ fn event(op: &Op, id: &str, r: &Value) -> Value {
     match op {
         Op::RenameTerm { term, .. } => json!({"event":"term_renamed","id":id,"term":term}),
         Op::EndTerm { term } => json!({"event":"term_ended","id":id,"term":term}),
+        Op::RestoreTerms { .. } => json!({"event":"terms_restored","id":id,"terms":r["ids"]}),
+        Op::ForgetTerms { .. } => json!({"event":"terms_forgotten","id":id}),
         _ => json!({"event":"term_created","id":id,"term":r["id"]}),
     }
 }
@@ -216,6 +218,15 @@ mod tests {
         let op = Op::EndTerm { term: "term:pty:k".into() };
         let e = event(&op, "d1", &json!({"ok": true}));
         assert_eq!(e, json!({"event":"term_ended","id":"d1","term":"term:pty:k"}));
+    }
+
+    #[test]
+    fn restore_and_forget_terms_are_answered_with_their_events() {
+        let op = Op::RestoreTerms { keys: vec![], app: None };
+        let e = event(&op, "d1", &json!({"ok": true, "ids": ["term:pty:a", "term:pty:b"]}));
+        assert_eq!(e, json!({"event":"terms_restored","id":"d1","terms":["term:pty:a","term:pty:b"]}));
+        let op = Op::ForgetTerms { keys: vec!["k".into()] };
+        assert_eq!(event(&op, "d1", &json!({"ok": true, "forgot": 1})), json!({"event":"terms_forgotten","id":"d1"}));
     }
 
     #[test]

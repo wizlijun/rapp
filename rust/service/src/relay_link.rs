@@ -365,8 +365,8 @@ async fn serve_relayed(state: Arc<State>, stream: Pipe, from: String, prio: Prio
             prio.set(state.forward_priority);
             pipe = state.pacer.wrap(pipe);
         }
-        // EndTerm is no session: it is left out on purpose.
-        Ok(Op::Open { .. } | Op::OpenTerm { .. }) => _session = Some(state.pacer.session()),
+        // EndTerm and ForgetTerms are no session: they are left out on purpose.
+        Ok(Op::Open { .. } | Op::OpenTerm { .. } | Op::RestoreTerms { .. }) => _session = Some(state.pacer.session()),
         _ => {}
     }
     if let Err(e) = serve_value(&state, pipe, v, peer.clone()).await {
