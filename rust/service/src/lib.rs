@@ -12,6 +12,8 @@ mod ipc;
 mod labels;
 mod maps;
 mod numbers;
+#[allow(dead_code, unused_imports)] // wired in Task 9
+mod outbox;
 mod own;
 mod pace;
 mod peer;
