@@ -144,6 +144,19 @@ void main() {
     expect(tester.widget<WaitCard>(find.byType(WaitCard)).waits, same(e.state.waits));
   });
 
+  testWidgets('wait_card_survives_side_panel: opening the side panel keeps the same card', (tester) async {
+    final e = DesktopEnv();
+    addTearDown(e.dispose);
+    await tester.pumpWidget(wrap(
+      MainWindow(state: e.state, monitor: monitor, control: null, fullscreen: fs),
+      disableAnimations: true,
+    ));
+    final before = tester.state(find.byType(WaitCard));
+    e.state.showPanel(PanelTab.devices);
+    await tester.pump();
+    expect(tester.state(find.byType(WaitCard)), same(before));
+  });
+
   testWidgets('two asks open one unlock dialog and the password is sent', (tester) async {
     final e = DesktopEnv();
     addTearDown(e.dispose);

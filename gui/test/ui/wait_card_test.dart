@@ -44,6 +44,19 @@ void main() {
     expect(find.byKey(_card), findsNothing);
   });
 
+  testWidgets('wait_card_ticks_after_rebuild: a card built anew mid-wait (side panel opened) keeps counting', (tester) async {
+    Widget card(Key k) => SizedBox(width: 800, height: 600, child: WaitCard(key: k, waits: w));
+    await tester.pumpWidget(wrap(card(const Key('a'))));
+    unawaited(w.run('正在新建终端…', () => Completer<void>().future));
+    await tester.pump(const Duration(milliseconds: 1400));
+    expect(find.text('1 秒'), findsOneWidget);
+    await tester.pumpWidget(wrap(card(const Key('b'))));
+    for (final n in ['2 秒', '3 秒', '4 秒']) {
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text(n), findsOneWidget);
+    }
+  });
+
   testWidgets('wait_card_lets_taps_through: a tap on the card reaches what is under it', (tester) async {
     var taps = 0;
     await tester.pumpWidget(wrap(stage(onTap: () => taps++)));

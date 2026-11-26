@@ -410,7 +410,7 @@ class _MainWindowState extends State<MainWindow> {
                             ),
                           ),
                         // On top of everything on the stage (the side panel too: a shell opens from there).
-                        Positioned.fill(child: WaitCard(waits: state.waits)),
+                        Positioned.fill(key: const Key('wait-card-layer'), child: WaitCard(waits: state.waits)),
                       ]);
                     },
                   ),

@@ -24,6 +24,7 @@ class _WaitCardState extends State<WaitCard> {
   void initState() {
     super.initState();
     widget.waits.addListener(_changed);
+    _keepTicking();
   }
 
   @override
@@ -32,6 +33,7 @@ class _WaitCardState extends State<WaitCard> {
     if (old.waits != widget.waits) {
       old.waits.removeListener(_changed);
       widget.waits.addListener(_changed);
+      _keepTicking();
     }
   }
 
@@ -43,14 +45,18 @@ class _WaitCardState extends State<WaitCard> {
   }
 
   void _changed() {
-    // The seconds tick only while something is shown.
+    _keepTicking();
+    setState(() {});
+  }
+
+  /// The seconds tick only while something is shown, including on a card built anew mid-wait.
+  void _keepTicking() {
     if (widget.waits.shown.isEmpty) {
       _tick?.cancel();
       _tick = null;
     } else {
       _tick ??= Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
     }
-    setState(() {});
   }
 
   @override
