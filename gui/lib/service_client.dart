@@ -387,6 +387,8 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi {
     if (_disposed || (_cmd == null && _sub == null)) return;
     _closeAll();
     status = null;
+    // The next service may be a newer one (an upgrade restarts it): ask it about labels afresh.
+    labelsUnsupported = false;
     error = 'service not running';
     notifyListeners();
     _schedule();

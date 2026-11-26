@@ -108,7 +108,7 @@
 ### 4.4 hub 和 GUI 的数据层
 
 - hub：每台 host 一个 `watch_labels`，和终端 watch 同时开同时停（`presence.rs` 上线 `ensure_watch` 那里），发 `{"event":"labels","id","rev","labels"}`；`set_label`/`reset_label` 是 GUI 命令，回 `label_set`/`label_reset`。
-- GUI `hub_client.dart`：`labels[id] = LabelTable(rev, map)`，`rev` 比手上的小就丢；`unsupported` 记下，菜单项据此隐藏。
+- GUI `hub_client.dart`：`labels[id] = LabelTable(rev, map)`，`rev` 比手上的小就丢；但每条 watch 的第一张表带 `first: true`，不管 rev 都收（设备可能换了新的 `labels.json`、rev 从 0 重来，presence 停掉 watch 时又不发事件）；`unsupported` 记下，菜单项据此隐藏。
 - 本机：`service_client.dart` 加 `labels()`、`setLabel`、`resetLabel`；本机表放在 `MainState.localLabels`。
 - `SessionEntry` 加 `label`（`Label?`：title、note），在 `_entryOf`/`_mapEntries` 里从 `labels[device][app]` 填。
 - **`SessionEntry.title`**：有非空的标注标题就用它，否则照旧（`termTitle` / App 名）。这样所有读 `title` 的地方自动一致。

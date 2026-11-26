@@ -418,6 +418,11 @@ void main() {
       expect((m2.labels, m2.labelsUnsupported), (null, true));
       await m2.refresh();
       expect(old.received.where((r) => r['cmd'] == 'labels'), hasLength(1));
+      // Upgraded in place: the restarted service knows labels, and the monitor asks it again.
+      old.labels = {'a': {'title': '新', 'note': ''}};
+      old.dropAll();
+      await until(() => m2.labels != null);
+      expect((m2.labels!.labels['a'], m2.labelsUnsupported), (const SessionLabel(title: '新'), false));
       await old.stop();
       m2.dispose();
     });

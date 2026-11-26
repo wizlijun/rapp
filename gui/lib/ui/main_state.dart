@@ -1509,7 +1509,8 @@ class MainState extends ChangeNotifier {
     }
     // Sessions run by rapp-client (no port) are not moved: their next reconnect takes the new link.
     final old = _entries;
-    final oldGroups = groups;
+    // Only open sessions: a standby card is never the one to move to.
+    final oldGroups = _openGroups;
     _entries = _mapEntries();
     final newKeys = {for (final e in _entries) e.key};
 
@@ -2276,7 +2277,8 @@ class MainState extends ChangeNotifier {
     _rerouteEnd(r, false);
     _batchEnded.remove(r.key);
     _stopRetry(r);
-    final oldGroups = groups;
+    // Only open sessions: a standby card is never the one to move to.
+    final oldGroups = _openGroups;
     final old = r.lastSid;
     if (old != null) portOf(old)?.close(old); // reconnected but not swapped yet: the old session is still open
     // Before a swap the old session is the one on show, the one written in. A waiting tidy's
@@ -4242,7 +4244,8 @@ class MainState extends ChangeNotifier {
 
   /// Favourites with no session (pending or open), in favourite order.
   List<AppRef> get idleFavorites {
-    final open = {for (final e in _entries) e.key};
+    // A labelled one that is not open already has its card (standing at the end of its group): not twice.
+    final open = {for (final e in _entries) e.key, for (final e in standbyEntries) e.key};
     return [
       for (final f in workspace.favorites)
         if (!open.contains(f.key)) f,

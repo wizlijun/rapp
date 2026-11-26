@@ -209,7 +209,7 @@ class _OpenAppsMenuState extends State<_OpenAppsMenu> {
                 final p = state.probes[id];
                 final apps = p?.apps;
                 final groups = deviceAppGroups(apps, state.hub?.termLists[id]);
-                final shown = filterAppGroups(groups, _filter.text);
+                final shown = filterAppGroups(groups, _filter.text, shownAs: (a) => state.titleOf(id, a.app, a.name));
                 _rows = [for (final g in shown) ...g.apps];
                 final applications =
                     apps?.capabilities?['graphical'] != false && apps?.capabilities?['applications'] != false;

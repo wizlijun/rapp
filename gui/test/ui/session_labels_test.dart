@@ -337,4 +337,52 @@ void main() {
       expect(find.byKey(const Key('local-label-com.apple.Safari')), findsNothing);
     },
   );
+
+  testWidgets('ending the current session moves to the next open one, never to a card that is not open', (
+    tester,
+  ) async {
+    await boot(tester, apps: ['a', 'c']);
+    await table(1, {
+      'b': {'title': '查资料', 'note': ''},
+    });
+    expect(s.currentKey, 'm1/c');
+    // c is last of the open ones; b (not open) stands after it.
+    await tester.runAsync(() async {
+      t.emit({'event': 'closed', 'sid': 2, 'reason': 'app quit'});
+      for (var i = 0; i < 4; i++) {
+        await flush();
+      }
+    });
+    expect(s.entries.map((e) => e.app), ['a']);
+    expect(s.currentKey, 'm1/a');
+  });
+
+  testWidgets('a labelled favourite that is not open shows once: its card, not also under 常用', (tester) async {
+    await boot(tester);
+    s.toggleFavorite('m1', 'b', 'b');
+    s.toggleFavorite('m1', 'd', 'd');
+    await table(1, {
+      'b': {'title': '查资料', 'note': ''},
+    });
+    expect(s.listed.map((e) => e.app), ['b']);
+    expect(s.idleFavorites.map((f) => f.bundle), ['d']);
+  });
+
+  testWidgets('an older table is dropped, unless it is the first of a new watch (the device started over)', (
+    tester,
+  ) async {
+    await boot(tester);
+    await table(5, {
+      'b': {'title': '旧', 'note': ''},
+    });
+    await table(0, {});
+    expect(s.labelFor('m1', 'b')?.title, '旧');
+    t.emit({'event': 'labels', 'id': 'm1', 'rev': 0, 'labels': <String, Object>{}, 'first': true});
+    await settle(tester);
+    expect(s.labelFor('m1', 'b'), isNull);
+    await table(1, {
+      'b': {'title': '新', 'note': ''},
+    });
+    expect(s.labelFor('m1', 'b')?.title, '新');
+  });
 }

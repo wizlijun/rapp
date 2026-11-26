@@ -1241,6 +1241,9 @@ macOS、Linux、Duo、iPad 各一遍。
   - [ ] 钉住：标注表里的 `term:pty:<key>` 交给 serve，holder 在 shell 退出 /「结束终端」时不删钉住的快照，改记 `ended`
   - [ ] `HostRow.saved` 加 `pinned`、`ended`；`ended` 的不进「恢复上次的终端」，钉住的不参加 30 天 / 50 个清理，`ForgetTerms` 跳过
   - [ ] 「启动」有快照时用 `RestoreTerms{keys:[key]}` 恢复原目录；还原标注时解除钉住，已 `ended` 的快照删掉
+- 小项（审查时看到，不急）：
+  - [ ] 状态队列那几行（`_trackPrograms`、`termDisplayName`）和「已结束 …」提示还用默认名，没用标注标题
+  - [ ] 设备关了终端会话时，有标注的终端仍显示「已停止 · 启动」，点了会失败；应隐藏或说明
 - 实机检查：
   - [ ] 1. A 上给一个终端改标题和备注，B、iPad 上同一张卡马上变；B 改回来，A 也变
   - [ ] 2. 退出重开 GUI、重启被控端服务：标注还在

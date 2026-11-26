@@ -465,7 +465,8 @@ class HubClient extends ChangeNotifier {
     }
     final t = LabelTable.fromJson(m);
     final had = labels[id];
-    if (had != null && t.rev < had.rev && !_labelsAfresh.contains(id)) return;
+    // An older table is a late one, unless the watch started over (`first`: the device may have a fresh file).
+    if (had != null && t.rev < had.rev && m['first'] != true && !_labelsAfresh.contains(id)) return;
     _labelsAfresh.remove(id);
     labelsUnsupported.remove(id);
     labels[id] = t;

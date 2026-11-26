@@ -74,16 +74,28 @@ async fn watch(hub: Arc<Hub>, host: Host, delay: Option<Duration>) {
 
 async fn follow(hub: &Hub, host: &Host, listed: &mut bool) -> Result<std::convert::Infallible> {
     let (mut s, mut r, _) = hub.request(host, &Op::WatchLabels).await?;
+    let mut first = true;
     loop {
         *listed = true;
-        hub.emit(json!({"event":"labels","id":host.id,"rev":r["rev"],"labels":r["labels"]}), &None).await;
+        hub.emit(table_event(&host.id, &r, first), &None).await;
+        first = false;
         r = check(read_json(&mut s).await?)?;
     }
 }
 
+/// One table the watch brought. `first`: the first of this stream, which the GUI takes whatever its rev (the
+/// device may have restarted with a fresh `labels.json`, and a watch stopped by presence says nothing when it ends).
+fn table_event(id: &str, r: &Value, first: bool) -> Value {
+    let mut e = json!({"event":"labels","id":id,"rev":r["rev"],"labels":r["labels"]});
+    if first {
+        e["first"] = json!(true);
+    }
+    e
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ended_event, event, Next};
+    use super::{ended_event, event, table_event, Next};
     use rapp_net::msg::Op;
     use serde_json::json;
 
@@ -93,6 +105,13 @@ mod tests {
         assert_eq!(event(&op, "d1", &json!({"ok":true,"rev":3})), json!({"event":"label_set","id":"d1","app":"term:pty:k","rev":3}));
         let op = Op::ResetLabel { app: "a".into() };
         assert_eq!(event(&op, "d1", &json!({"ok":true,"rev":4})), json!({"event":"label_reset","id":"d1","app":"a","rev":4}));
+    }
+
+    #[test]
+    fn only_the_first_table_of_a_stream_is_marked_first() {
+        let r = json!({"ok":true,"rev":0,"labels":{}});
+        assert_eq!(table_event("d1", &r, true), json!({"event":"labels","id":"d1","rev":0,"labels":{},"first":true}));
+        assert_eq!(table_event("d1", &r, false), json!({"event":"labels","id":"d1","rev":0,"labels":{}}));
     }
 
     #[test]
