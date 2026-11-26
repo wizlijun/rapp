@@ -75,6 +75,8 @@ struct State {
     cover: Option<(Rect, bool)>,
     elevated: Option<Rect>,
     focus_chain: Option<Vec<Rect>>,
+    /// Host seconds each focus query takes (`set_focus_delay`).
+    focus_delay: Option<f64>,
     keyboard_moved: bool,
     secure: bool,
     opened: Option<OpenedApp>,
@@ -223,6 +225,7 @@ impl FakePlatform {
             cover: None,
             elevated: None,
             focus_chain: None,
+            focus_delay: None,
             keyboard_moved: false,
             secure: false,
             opened: None,
@@ -400,6 +403,12 @@ impl FakePlatform {
         let mut s = self.st();
         s.focus_chain = chain;
         s.keyboard_moved = true;
+    }
+
+    /// Each focus query takes `delay` host seconds before it answers (None: at once). The
+    /// state lock is not held while it waits.
+    pub fn set_focus_delay(&self, delay: Option<f64>) {
+        self.st().focus_delay = delay;
     }
 
     pub fn set_secure(&self, on: bool) {
@@ -796,9 +805,16 @@ impl ControlOps for FakeControls {
         _query: &Query,
         _window: &RawWindow,
         _deadline: QueryDeadline,
-        _clock: &dyn Clock,
+        clock: &dyn Clock,
     ) -> Result<Vec<Rect>, PanelMiss> {
-        lock_state(&self.0).focus_chain.clone().ok_or(PanelMiss::Blocked)
+        let (chain, delay) = {
+            let s = lock_state(&self.0);
+            (s.focus_chain.clone(), s.focus_delay)
+        };
+        if let Some(d) = delay {
+            clock.sleep(d);
+        }
+        chain.ok_or(PanelMiss::Blocked)
     }
     fn keyboard_changed(&mut self) -> bool {
         std::mem::take(&mut lock_state(&self.0).keyboard_moved)

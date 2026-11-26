@@ -55,7 +55,7 @@ pub struct CaptureHandle {
     /// The newest picture not yet taken by the session (capacity 1, latest wins).
     slot: Arc<Mutex<Option<Quantized>>>,
     /// The newest picture as captured (Swift `latest`), for the state rules' sampler.
-    pub latest: Arc<Mutex<Option<Frame>>>,
+    pub latest: Arc<Mutex<Option<Arc<Frame>>>>,
     stop: Arc<AtomicBool>,
 }
 
@@ -127,7 +127,7 @@ struct Loop {
     capture: Box<dyn Capture>,
     params: Arc<Mutex<CaptureParams>>,
     slot: Arc<Mutex<Option<Quantized>>>,
-    latest: Arc<Mutex<Option<Frame>>>,
+    latest: Arc<Mutex<Option<Arc<Frame>>>>,
     stop: Arc<AtomicBool>,
     alive: Arc<AtomicBool>,
     clock: Arc<dyn Clock>,
@@ -199,7 +199,7 @@ impl Loop {
                             captured,
                             fresh: true,
                         });
-                        *locked(&self.latest) = Some(frame);
+                        *locked(&self.latest) = Some(Arc::new(frame));
                         if let Some(q) = q {
                             if !self.running() || !self.deliver(q) {
                                 return;

@@ -666,3 +666,309 @@ fn disconnect_mid_frame_cleans_up() {
     assert!(platform.frame_calls() <= calls + 1, "the capture thread is still polling");
     let _next = ready(&host, 0);
 }
+
+// MARK: - Task 15: input, covers, focus pane, state rules
+
+use rapp_host_core::platform::OpenedApp;
+use rapp_testkit::fake_platform::{COVER_APP, COVER_PID};
+
+const DOWN: u8 = 0;
+const UP: u8 = 1;
+const LEFT: u8 = 0;
+
+/// A ready controller and the id of the first window in its table.
+fn with_window(host: &Host) -> (Controller, u32) {
+    let mut c = ready(host, 0);
+    let id = match c.wait_for(|m| matches!(m, Incoming::Windows(l) if !l.is_empty())) {
+        Incoming::Windows(l) => l[0].id,
+        _ => unreachable!(),
+    };
+    (c, id)
+}
+
+/// Waits (5 s real time at most) until the fake's log satisfies `pred`; returns the log.
+fn wait_log(platform: &FakePlatform, pred: impl Fn(&[String]) -> bool) -> Vec<String> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let log = platform.log();
+        if pred(&log) {
+            return log;
+        }
+        assert!(Instant::now() < deadline, "fake log never matched: {log:?}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn click(c: &mut Controller, window: u32, x: f32, y: f32) {
+    c.send(&client::mouse(DOWN, LEFT, window, x, y, 1));
+    c.send(&client::mouse(UP, LEFT, window, x, y, 1));
+}
+
+fn presses(log: &[String]) -> usize {
+    log.iter().filter(|l| l.starts_with("mouse down")).count()
+}
+
+#[test]
+fn typed_text_arrives_in_20_unit_chunks() {
+    let (platform, host) = serve();
+    let (mut c, _) = with_window(&host);
+    platform.clear_log();
+    let start = Instant::now();
+    c.send(&client::packet(5, "a".repeat(45).into_bytes()));
+    let log = wait_log(&platform, |l| l.iter().filter(|x| x.starts_with("text ")).count() >= 3);
+    let chunks: Vec<&String> = log.iter().filter(|x| x.starts_with("text ")).collect();
+    assert_eq!(chunks, ["text 20", "text 20", "text 5"], "{log:?}");
+    // 5 ms of host time after each chunk: at least two gaps before the last one went out.
+    assert!(start.elapsed() >= host_time(0.010), "{:?}", start.elapsed());
+    host.wait_event("input");
+}
+
+#[test]
+fn keys_and_buttons_released_at_session_end() {
+    let (platform, host) = serve();
+    let (mut c, id) = with_window(&host);
+    c.send(&client::key(36, 0, true));
+    c.send(&client::mouse(DOWN, LEFT, id, 100.0, 100.0, 1));
+    wait_log(&platform, |l| l.iter().any(|x| x == "key 36 down") && presses(l) == 1);
+    c.close();
+    ended_event(&host);
+    let log = wait_log(&platform, |l| l.iter().any(|x| x.starts_with("release ")));
+    assert!(log.iter().any(|x| x == "release keys=[36] buttons=[left]"), "{log:?}");
+}
+
+#[test]
+fn click_count_reaches_the_platform() {
+    let (platform, host) = serve();
+    let (mut c, id) = with_window(&host);
+    c.send(&client::mouse(DOWN, LEFT, id, 100.0, 100.0, 2));
+    let log = wait_log(&platform, |l| presses(l) == 1);
+    let press = log.iter().find(|l| l.starts_with("mouse down")).unwrap();
+    // Window point (100, 100) on a window at (240, 100) of a display at the origin.
+    assert_eq!(press, "mouse down left 340,200 2", "{log:?}");
+}
+
+#[test]
+fn yield_blocks_then_releases() {
+    let (platform, host) = serve();
+    let (mut c, id) = with_window(&host);
+    platform.clear_log();
+    host.command(r#"{"cmd":"yield","by":"Mac"}"#);
+    std::thread::sleep(Duration::from_millis(50));
+    click(&mut c, id, 100.0, 100.0);
+    c.wait_for(|m| matches!(m, Incoming::InputBlocked(by) if by == "Mac"));
+    assert_eq!(host.wait_event("input_blocked")["by"], "Mac");
+    assert_eq!(presses(&platform.log()), 0, "{:?}", platform.log());
+    std::thread::sleep(host_time(1.5));
+    click(&mut c, id, 100.0, 100.0);
+    wait_log(&platform, |l| presses(l) == 1);
+}
+
+#[test]
+fn elevated_window_reports_input_blocked() {
+    let (platform, host) = serve();
+    let (mut c, id) = with_window(&host);
+    platform.clear_log();
+    platform.set_elevated(Some(rapp_host_core::Rect::new(240.0, 100.0, 800.0, 600.0)));
+    click(&mut c, id, 100.0, 100.0);
+    c.wait_for(|m| matches!(m, Incoming::InputBlocked(by) if by == "elevated"));
+    assert_eq!(host.wait_event("input_blocked")["by"], "elevated");
+    // 0.2 s later: still inside the 0.5 s notice gap.
+    std::thread::sleep(host_time(0.2));
+    click(&mut c, id, 100.0, 100.0);
+    let quiet = c.quiet_for(host_time(0.15), |m| !matches!(m, Incoming::InputBlocked(_)));
+    assert!(quiet.is_ok(), "{quiet:?}");
+    // 0.6 s after the first: a new notice.
+    std::thread::sleep(host_time(0.3));
+    click(&mut c, id, 100.0, 100.0);
+    c.wait_for(|m| matches!(m, Incoming::InputBlocked(by) if by == "elevated"));
+    assert!(!platform.log().iter().any(|l| l.starts_with("mouse ")), "{:?}", platform.log());
+}
+
+#[test]
+fn cover_is_announced_every_5s_and_dismissed() {
+    let (platform, host) = serve();
+    let (mut c, id) = with_window(&host);
+    let cover = rapp_host_core::Rect::new(300.0, 150.0, 200.0, 200.0);
+    // Not a regular app: may not be closed from B.
+    platform.set_cover(Some((cover, false)));
+    click(&mut c, id, 100.0, 100.0);
+    match c.wait_for(|m| matches!(m, Incoming::Covered { .. })) {
+        Incoming::Covered { id: pid, name, bundle, dismissable } => {
+            assert_eq!((pid, name.as_str(), bundle.as_str(), dismissable), (COVER_PID as u32, "Cover", COVER_APP, false));
+        }
+        _ => unreachable!(),
+    }
+    // The press never reached the app under the cover.
+    assert_eq!(presses(&platform.log()), 0, "{:?}", platform.log());
+    // Once per cover every 5 s.
+    click(&mut c, id, 100.0, 100.0);
+    let quiet = c.quiet_for(host_time(1.0), |m| !matches!(m, Incoming::Covered { .. }));
+    assert!(quiet.is_ok(), "{quiet:?}");
+    c.send(&client::dismiss_cover(COVER_PID as u32));
+    std::thread::sleep(host_time(0.5));
+    assert!(!platform.log().iter().any(|l| l.starts_with("close_cover")), "{:?}", platform.log());
+    // A regular app's cover, after the 5 s: announced as dismissable and closed on request.
+    platform.set_cover(Some((cover, true)));
+    std::thread::sleep(host_time(5.0));
+    click(&mut c, id, 100.0, 100.0);
+    c.wait_for(|m| matches!(m, Incoming::Covered { dismissable: true, .. }));
+    c.send(&client::dismiss_cover(COVER_PID as u32));
+    wait_log(&platform, |l| l.iter().any(|x| x == &format!("close_cover {COVER_PID}")));
+}
+
+#[test]
+fn app_opened_after_input_only() {
+    let (platform, host) = serve();
+    let (mut c, id) = with_window(&host);
+    let other = || OpenedApp { id: "com.other.app".into(), name: "Other".into(), pid: 5000, regular: true };
+    // Without input from B: not news.
+    platform.open_other_app(other());
+    let quiet = c.quiet_for(host_time(1.0), |m| !matches!(m, Incoming::AppOpened { .. }));
+    assert!(quiet.is_ok(), "{quiet:?}");
+    click(&mut c, id, 100.0, 100.0);
+    wait_log(&platform, |l| presses(l) == 1);
+    platform.open_other_app(other());
+    match c.wait_for(|m| matches!(m, Incoming::AppOpened { .. })) {
+        Incoming::AppOpened { bundle, name } => assert_eq!((bundle.as_str(), name.as_str()), ("com.other.app", "Other")),
+        _ => unreachable!(),
+    }
+    // More than 2 s after the input: not news again.
+    std::thread::sleep(host_time(2.5));
+    platform.open_other_app(other());
+    let quiet = c.quiet_for(host_time(1.0), |m| !matches!(m, Incoming::AppOpened { .. }));
+    assert!(quiet.is_ok(), "{quiet:?}");
+}
+
+#[test]
+fn secure_focus_follows_the_platform() {
+    let (platform, host) = serve();
+    let (mut c, _) = with_window(&host);
+    platform.set_secure(true);
+    c.wait_for(|m| matches!(m, Incoming::SecureFocus(true)));
+    // Unchanged: nothing more.
+    let quiet = c.quiet_for(host_time(0.5), |m| !matches!(m, Incoming::SecureFocus(_)));
+    assert!(quiet.is_ok(), "{quiet:?}");
+    platform.set_secure(false);
+    c.wait_for(|m| matches!(m, Incoming::SecureFocus(false)));
+}
+
+/// The left half of the fake window below its title row, in global points, and the same
+/// panel in window points.
+fn left_panel() -> (rapp_host_core::Rect, rapp_host_core::Rect) {
+    let global = rapp_host_core::Rect::new(240.0, 128.0, 400.0, 572.0);
+    let window = rapp_host_core::Rect::new(0.0, 28.0, 400.0, 572.0);
+    (global, window)
+}
+
+fn focus_rects(m: &Incoming) -> Option<(u32, Vec<client::Rect>)> {
+    match m {
+        Incoming::FocusRegion { window, rects } => Some((*window, rects.clone())),
+        _ => None,
+    }
+}
+
+/// `rects` is the one panel, rounded out by at most 8 points on each edge.
+fn is_panel(rects: &[client::Rect], want: rapp_host_core::Rect) -> bool {
+    let [r] = rects else { return false };
+    let near = |a: f64, b: f64| (a - b).abs() <= 8.0;
+    near(f64::from(r.x), want.min_x())
+        && near(f64::from(r.y), want.min_y())
+        && near(f64::from(r.x + r.w), want.max_x())
+        && near(f64::from(r.y + r.h), want.max_y())
+}
+
+#[test]
+fn focus_region_after_click() {
+    let (platform, host) = serve();
+    let (mut c, id) = with_window(&host);
+    let (global, window) = left_panel();
+    // What the session computes from the chain: the panel pick of the window-point chain.
+    let pick = rapp_host_core::focus::panel(&[window], rapp_host_core::Size::new(800.0, 600.0)).expect("a panel");
+    assert_eq!(pick.rect, window);
+    platform.set_focus_chain(Some(vec![global]));
+    c.send(&client::stream(0, 15, 1.0, false, true));
+    std::thread::sleep(host_time(1.5));
+    click(&mut c, id, 100.0, 200.0);
+    let m = c.wait_for(|m| focus_rects(m).is_some_and(|(w, r)| w == id && !r.is_empty()));
+    let (_, rects) = focus_rects(&m).unwrap();
+    assert!(is_panel(&rects, pick.rect), "{rects:?}");
+}
+
+#[test]
+fn slow_focus_query_is_abandoned() {
+    let (platform, host) = serve();
+    let (mut c, id) = with_window(&host);
+    let (global, window) = left_panel();
+    platform.set_focus_chain(Some(vec![global]));
+    // 0.2 s per query against a 0.05 s budget: every answer comes too late.
+    platform.set_focus_delay(Some(0.2));
+    c.send(&client::stream(0, 15, 1.0, false, true));
+    std::thread::sleep(host_time(1.5));
+    click(&mut c, id, 100.0, 200.0);
+    let quiet = c.quiet_for(host_time(1.0), |m| !focus_rects(m).is_some_and(|(_, r)| !r.is_empty()));
+    assert!(quiet.is_ok(), "{quiet:?}");
+    assert!(!c.is_closed());
+    c.send(&client::ping(9));
+    c.wait_for(|m| matches!(m, Incoming::Pong(9)));
+    // A fast platform again: the next query is answered.
+    platform.set_focus_delay(None);
+    click(&mut c, id, 120.0, 220.0);
+    let m = c.wait_for(|m| focus_rects(m).is_some_and(|(w, r)| w == id && !r.is_empty()));
+    assert!(is_panel(&focus_rects(&m).unwrap().1, window), "{:?}", c.seen);
+}
+
+/// `genericChatJSON` (`Tests/RappCoreTests/RuleFixtures.swift:3-25`), verbatim.
+const GENERIC_CHAT: &str = r#"{
+  "format": "1.0", "id": "generic-chat", "name": "聊天类通用", "rev": 1, "updated": "2026-11-25",
+  "ids": [],
+  "regions": {
+    "sidebar": {"edge": {"from": "left", "min": 160, "max": 420}},
+    "main":    {"box": {"rightOf": "sidebar", "top": 0, "right": 0, "bottom": 0}},
+    "bottom":  {"box": {"in": "main", "bottom": 0, "height": 160}},
+    "button":  {"blob": {"in": "bottom", "round": true, "size": [24, 48], "pick": "rightmost"}},
+    "markers": {"blob": {"in": {"strip": {"of": "sidebar", "side": "right", "width": 40}}, "size": [6, 20], "pick": "all"}},
+    "tail":    {"box": {"in": "main", "above": "bottom", "height": 240}}
+  },
+  "signals": {
+    "stop":    {"in": "button",  "detect": {"shape": "square"}, "status": "untested"},
+    "rowBusy": {"in": "markers", "detect": {"motion": {"window": 0.4}}, "count": true, "status": "untested"}
+  },
+  "states": [
+    {"state": "working", "when": {"any": ["stop", "rowBusy"]}, "hold": 0.6, "release": 2.0},
+    {"state": "idle"}
+  ],
+  "require": ["bottom"]
+}"#;
+
+#[test]
+fn state_rules_report() {
+    let (_platform, host) = serve();
+    let (mut c, _) = with_window(&host);
+    c.send(&client::state_rules(GENERIC_CHAT));
+    let m = c.wait_for(|m| matches!(m, Incoming::AppState(s) if s.contains("generic-chat")));
+    let Incoming::AppState(text) = m else { unreachable!() };
+    let report: Value = serde_json::from_str(&text).expect("appState JSON");
+    assert_eq!(report["pack"], "generic-chat", "{report}");
+    assert_eq!(report["rev"], 1, "{report}");
+    assert_eq!(report["inferred"], true, "{report}");
+    assert_ne!(report["health"], "invalid", "{report}");
+    assert!(text.len() <= rapp_host_core::protocol::APP_STATE_LIMIT, "{} bytes", text.len());
+    // Rules that cannot be read: one invalid report with the engine's text.
+    c.send(&client::state_rules("{not json"));
+    let m = c.wait_for(|m| matches!(m, Incoming::AppState(s) if s.contains("invalid")));
+    let Incoming::AppState(text) = m else { unreachable!() };
+    let report: Value = serde_json::from_str(&text).expect("appState JSON");
+    assert_eq!(report["error"], "bad json", "{report}");
+}
+
+#[test]
+fn oversized_rules_are_rejected_with_swift_text() {
+    let (_platform, host) = serve();
+    let (mut c, _) = with_window(&host);
+    // One byte over `stateRulesLimit` (Protocol.swift:474): the decoder refuses it.
+    let big = vec![b' '; rapp_host_core::protocol::STATE_RULES_LIMIT + 1];
+    c.send(&client::packet(43, big));
+    c.wait_for(|m| is_error(m, "bad data from client: rules too large"));
+    assert_eq!(ended_event(&host)["reason"], "bad data from client: rules too large");
+    assert!(c.closes_within(Duration::from_secs(5)));
+}

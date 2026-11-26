@@ -1,7 +1,7 @@
 //! One client session (`Server.swift:233-1300`, `Session`). All state lives on the session
 //! thread; see `session/mod.rs` for the threads around it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,22 +11,26 @@ use std::sync::Arc;
 use crate::cli::{check_hello, input_blocked_notice, taken_over_error, WorkerEvent};
 use crate::desktop::{desktop_table, desktop_target, desktop_title, ordered_displays, DesktopTarget};
 use crate::geometry::{window_title, Rect, Size};
-use crate::input::{InputYield, YieldDecision, INPUT_REPORT_EVERY};
+use crate::hints::CoverNotices;
+use crate::input::{HeldInput, InputYield, YieldDecision, INPUT_REPORT_EVERY};
 use crate::pacing::{save_ladder_steps, save_ladder_stream, PacedSender, SenderOutput, StreamSpec};
 use crate::pause::PauseOutbox;
 use crate::platform::{
     Capture, ClipboardOps, ControlOps, DisplayInfo, InputOps, InputSource, InputSourceOps, LockOps, OpenError,
     Parts, RawWindow, Target, TargetOps, WindowOps,
 };
-use crate::protocol::{CanvasRect, Message, MessageParser, Mode, WindowInfo};
+use crate::protocol::{CanvasRect, Message, MessageParser, Mode, MouseButton, WindowInfo};
 use crate::state::detectors::TextReader;
 use crate::wintable::{capture_region, region_change};
 
 use super::intake::{bad_data_reason, read_timeout, READ_SLICE};
 use super::server::{Inner, SessionHandle};
+use super::hints::{AppStateHandle, FocusPane};
 use super::tracker::window_table;
 use super::{hold, shared, Event, Job, Shared};
 
+/// A cover is announced at most this often per owner (`CoverNotices(every: 5)`).
+pub const COVER_NOTICE_EVERY: f64 = 5.0;
 /// How often the window table is polled (spec §3.2).
 pub const POLL_EVERY: f64 = 0.1;
 /// The stats and backstop tick.
@@ -49,6 +53,10 @@ pub enum Timer {
     Settle,
     LockWait,
     InputSource,
+    /// The focus tracker's 0.1 s timer, while the focus pane exists.
+    FocusTick,
+    /// The opened-app and password-field polls (`hints`).
+    Hints,
 }
 
 /// The platform handles a session uses after its target opened. Each is shared so a
@@ -128,6 +136,29 @@ pub struct Session {
 
     pub(crate) timers: BTreeMap<Timer, f64>,
 
+    // Input (`session/input.rs`).
+    /// The target opened: input reaches it (Swift's `injector != nil`).
+    pub(crate) input_on: bool,
+    /// Keys and buttons posted down and not yet up, released at the end.
+    pub(crate) held: HeldInput,
+    /// Buttons whose press was dropped: their drags and up are dropped too.
+    pub(crate) dropped_buttons: HashSet<MouseButton>,
+    /// A covered scroll burst does not raise again before this.
+    pub(crate) scroll_raise_after: f64,
+    pub(crate) blocked_notice_at: Option<f64>,
+    pub(crate) blocked_event_at: Option<f64>,
+    /// When B last sent input that may open things (`opens_things`), for `appOpened`.
+    pub(crate) last_input_at: Option<f64>,
+
+    // Hints, focus pane, state rules (`session/hints.rs`).
+    pub(crate) hints_on: bool,
+    pub(crate) cover_notices: CoverNotices,
+    pub(crate) sent_secure: bool,
+    pub(crate) focus: Option<FocusPane>,
+    pub(crate) app_state: Option<AppStateHandle>,
+    /// Rules that came before the state thread started.
+    pub(crate) pending_rules: Option<String>,
+
     pub(crate) bytes_this_second: usize,
     pub(crate) frames_this_second: i64,
     pub(crate) last_width: usize,
@@ -198,6 +229,19 @@ impl Session {
             input_source_on: false,
             sent_input_source: None,
             timers: BTreeMap::new(),
+            input_on: false,
+            held: HeldInput::new(),
+            dropped_buttons: HashSet::new(),
+            scroll_raise_after: 0.0,
+            blocked_notice_at: None,
+            blocked_event_at: None,
+            last_input_at: None,
+            hints_on: false,
+            cover_notices: CoverNotices::new(COVER_NOTICE_EVERY),
+            sent_secure: false,
+            focus: None,
+            app_state: None,
+            pending_rules: None,
             bytes_this_second: 0,
             frames_this_second: 0,
             last_width: 0,
@@ -335,6 +379,8 @@ impl Session {
                 self.schedule(Timer::InputSource, INPUT_SOURCE_EVERY);
                 self.send_input_source(false);
             }
+            Timer::FocusTick => self.focus_tick(),
+            Timer::Hints => self.hints_tick(),
         }
     }
 
@@ -984,6 +1030,9 @@ impl Session {
         self.timers.clear();
         // Each part stops what it started (Tasks 14-17 add theirs here).
         self.stop_capture();
+        // Nothing B pressed stays pressed on A (`releaseAll`).
+        self.release_all_input();
+        self.stop_hints();
         if self.started {
             hold(&self.lock).stay_awake(false);
         }

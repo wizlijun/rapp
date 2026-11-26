@@ -8,6 +8,8 @@
 //! session state: they post an `Event` back.
 
 pub mod capture;
+mod hints;
+mod input;
 pub mod intake;
 pub mod server;
 pub mod session;
