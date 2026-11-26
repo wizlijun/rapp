@@ -82,7 +82,7 @@
 | 用量 | `/usage`（别名 `/cost`、`/stats`） | `/usage`（`/status` 看会话配置和剩余上下文） | `/stats` | `/usage`（别名 `/quota`） | 无斜杠命令（文档只列了键 ⌃X 然后 S 看状态） |
 | 搜历史（筛选） | 键 ⌃R | 键 ⌃R（实测出现 `reverse-i-search:`） | 键 ⌃R | 无（⌃R 在 agy 里是打开 Artifact Review） | 无（⌃R 在 opencode 里是改会话名） |
 
-**核对结果（2026-11-26）：** 上表已逐格对照官方文档；与记忆版的差异：Gemini 的恢复是 `/resume`（`/chat resume <tag>` 是载入检查点）；agy 整列是官方文档填的；opencode 的「压缩」「用量」文档里只有键（leader 键默认 ⌃X），第一版按「没有」处理，按钮灰掉。opencode 的 `/models`、`/new`、`/sessions` 来自 TUI 页；该页没列 `/compact`，所以不假定它存在。Codex 的 `/help` 不存在（实测回「Unrecognized command」），所以内置表里不要有「帮助」。
+**核对结果（2026-11-26）：** 上表已由 Task 0 逐格对照官方文档核实过（不再是「要实测」），且与代码里的 `builtinCmds` 一致；Gemini CLI 已于 2026-06-18 被 agy（Antigravity）取代，Gemini 这一列保留给仍在用它的用户；与记忆版的差异：Gemini 的恢复是 `/resume`（`/chat resume <tag>` 是载入检查点）；agy 整列是官方文档填的；opencode 的「压缩」「用量」文档里只有键（leader 键默认 ⌃X），第一版按「没有」处理，按钮灰掉。opencode 的 `/models`、`/new`、`/sessions` 来自 TUI 页；该页没列 `/compact`，所以不假定它存在。Codex 的 `/help` 不存在（实测回「Unrecognized command」），所以内置表里不要有「帮助」。
 
 出处（均查于 2026-11-26）：
 
@@ -92,9 +92,9 @@
 - agy（Antigravity CLI）：https://antigravity.google/docs/cli/reference
 - opencode：https://opencode.ai/docs/tui/ 、https://opencode.ai/docs/keybinds/
 
-## 8. 发出去之前要实测的
+## 8. 发出去之前的实测（已于 2026-11-26 做完）
 
-- **粘贴进去的斜杠命令能不能执行。** 文字终端发文字用的是括号粘贴，回车另外发（文本终端设计）。要在 Claude Code、Codex 上实测：粘贴的 `/clear` 加回车，是真的执行了命令，还是被当成一句普通的话发给了模型；回车会不会被自动补全菜单吃掉。如果不行，命令就改成逐字按键发，不走粘贴【留给实现者实测后决定，结果写回这一节】。
+- **粘贴进去的斜杠命令能不能执行。** 文字终端发文字用的是括号粘贴，回车另外发（文本终端设计）。当时要在 Claude Code、Codex 上实测（结果见下）：粘贴的 `/clear` 加回车，是真的执行了命令，还是被当成一句普通的话发给了模型；回车会不会被自动补全菜单吃掉。如果不行，命令就改成逐字按键发，不走粘贴【留给实现者实测后决定，结果写回这一节】。
 - 打开选择器的命令，比如 `/model`、`/resume`：发出去后工具会弹出一个列表，接下来用户用第一排的 ↑ ↓ ⏎ 选。这是预期的行为，不需要再做什么。
 - **实测结果（2026-11-26，macOS，pty 40x120，空目录）：粘贴可行。** 做法：写 `ESC[200~/help ESC[201~`，等 300 ms，再单独写 `\r`。三个工具都在启动时发了 `ESC[?2004h`（开了括号粘贴）。
   - Claude Code 2.1.332：粘贴 `/help` 加回车，打开了帮助面板；粘贴 `/model` 加回车，弹出「Select model」选择器。粘贴后补全菜单已经显示，但回车执行的是输入的命令，没有被菜单吃掉或补成别的。首次启动要先过「信任此文件夹」。

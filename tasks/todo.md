@@ -1263,3 +1263,19 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] 补充 `TargetPlatform.linux` 侧栏统一卡片/常用终端回归用例（`gui/test/ui/side_panel_test.dart`）及打包启动器/集成断言（`scripts/test-linux-launcher.py`、`scripts/test-linux-bundle.py`）；Flutter 3.50.0 全量 3282 项通过（4 跳过），Rust 全套 clippy `-D warnings` 与测试通过。
 - [x] [Linux v0.15.42](https://github.com/wizlijun/rapp/releases/tag/v0.15.42) 已发布（源码 `018e8d3b`，`--latest=false`）；两包 41 文件逐字节一致、14 个 ELF 依赖完整、`BUILD-INFO.json` 与隔离网络命名空间测试通过；三个远端附件大小与 SHA256 与本地一致，保留 macOS Latest。
 - [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01542-parity.md`。
+
+## 常用语条命令（feat/strip-commands，2026-11-26）实机检查（规格 `docs/superpowers/specs/2026-11-26-rapp-strip-commands-design.md` §13）
+
+- 默认常用语改成 7 条短的（继续 · 按你推荐来 · 进度 · 全做完别问我 · 先写方案别改代码 · 跑下测试 · 提交并推送）；只有新用户和点「恢复默认」的人会看到，老用户的列表不动
+- [ ] 1. 文字终端里开 Claude Code：条上前面是 6 个命令按钮；点「新对话」，Claude Code 真的清空并开始新对话
+- [ ] 2. 同一个终端退出到 zsh：命令按钮消失，条上只剩常用语，画面高度不变
+- [ ] 3. 开 Codex：「新对话」发的是 `/new`；Codex 没有的意图按钮是灰的，点了提示原因
+- [ ] 4. 「换模型」：弹出模型列表，用 ↑ ↓ ⏎ 能选中
+- [ ] 5. 「搜历史」：Claude Code 和 Codex 里进入 ⌃R 搜索
+- [ ] 6. 1 秒内连点两次命令，只发一次；断网冻结时命令按钮也是灰的
+- [ ] 7. 命令不进输入历史：↑ 翻不到 `/clear`，历史列表里也没有
+- [ ] 8. 管理页：拖动让命令和常用语交叉排序，条上的顺序跟着变；新建一个命令「审查」（Codex `/review`），在 Codex 里能用
+- [ ] 9. 改内置命令在某个工具上的写法后能生效；「恢复这一项」和「恢复默认」都能用
+- [ ] 10. 老用户升级：原来的常用语还在，6 个命令出现在最前面，只插一次
+- [ ] 11. App 会话（远程 iTerm2 里跑 claude）：不出现命令按钮
+- [ ] 12. macOS、Linux 的 PC 按键区上同样能用
