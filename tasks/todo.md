@@ -1395,3 +1395,15 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 3 展开后进一个 app 再回全景，仍是展开的；重开 rApp 又是折叠的
 - [ ] 4 Mac / Linux：本机列和以前一样，没有竖条、没有 ‹
 - [ ] 5 VoiceOver 念「展开 本机」「折叠 本机」
+
+## 新建文本终端被授权框卡住（分支 `fix/term-consent`，2026-11-26）
+
+用户：「在新建文本终端时，总会被权限框卡住。应该立即识别出来提醒用户有权限框，跳过去点确认才能继续。否则用户会一直点新建无反应。」原因：被控 Mac 用 AppleScript 驱动「终端」和 System Events，macOS 弹「“rApp”想要控制…」时脚本一直等；10 秒后被掐掉、再等 10 秒才提示，掐掉时授权框可能跟着没了，下次又卡。改成：开窗口前先用 `AEDeterminePermissionToAutomateTarget` 不弹框地问；要问就马上弹框（线程等用户回答），立即回 `ASKING`；GUI 提示「弹出了授权框，点「允许」，点完再新建」，远程设备自动切到它的桌面。
+
+- [x] `consent` 单测 5 条、`overview_test` 新增 3 条（去掉跳转后确实失败）；clippy、cargo 全量（`net_follows_the_relay` 负载偶发，单跑通过）、flutter analyze 通过；flutter 全量只剩 `linux_detach_test` 2 条（main 上同样失败）
+- [ ] 1 被控 Mac 上撤掉授权（`tccutil reset AppleEvents`，再重启 rApp 服务），在另一台设备点新建：1 秒内提示「授权框」，并切到那台 Mac 的桌面，能看到授权框
+- [ ] 2 点「允许」（可能连着两个：终端、System Events），再点新建：终端正常开成新标签
+- [ ] 3 授权框还没点时连点新建：一直是同样的提示，不会堆出多个授权框
+- [ ] 4 点「不允许」后再新建：开成一个新窗口（不是标签），不卡
+- [ ] 5 在 Mac 本机给本机新建：只提示，不切桌面，授权框就在本机屏幕上
+- [ ] 6 「恢复所选」碰到授权框也是同样的提示和切桌面

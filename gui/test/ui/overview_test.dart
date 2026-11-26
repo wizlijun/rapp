@@ -322,6 +322,57 @@ void main() {
     expect(MainState.newTermWords(TimeoutException('x')), '新建终端没有回应，请稍后再试');
   });
 
+  const asking = 'macOS is asking on that Mac whether rApp may control Terminal: answer it there, then open again';
+
+  testWidgets('a permission prompt on the host is said at once', (tester) async {
+    await boot(tester);
+    expect(MainState.newTermWords(HubException(asking)), contains('授权框'));
+    expect(MainState.newTermWords(HubException(asking)), contains('点「允许」'));
+  });
+
+  Future<void> newTermAsked(WidgetTester tester) async {
+    s.prefs.termOpen['m1'] = 'text';
+    s.hub!.termLists['m1'] = TermList('m1', hosts: [TermHost(null, launchers: const ['Terminal'])]);
+    final inner = t.onSend!;
+    t.onSend = (m) {
+      if (m['cmd'] == 'open_term') {
+        t.emit({'event': 'error', 'req': m['req'], 'error': asking});
+      } else if (m['cmd'] == 'terms') {
+        t.emit({'event': 'terms', 'req': m['req'], 'id': m['id'], 'terms': [], 'hosts': [{'host': null, 'launchers': ['Terminal']}]});
+      } else {
+        inner(m);
+      }
+    };
+    await tester.runAsync(() async {
+      final done = s.newTermFromRestore('m1');
+      for (var j = 0; j < 6; j++) {
+        await flush();
+      }
+      await done;
+      for (var j = 0; j < 6; j++) {
+        await flush();
+      }
+    });
+    await tester.pump();
+  }
+
+  testWidgets('a permission prompt on the host brings up its desktop to answer it', (tester) async {
+    await boot(tester);
+    await newTermAsked(tester);
+    expect(s.hint, contains('授权框'));
+    expect(s.hint, endsWith('已切到它的桌面'));
+    expect(t.sent.where((m) => m['cmd'] == 'open').map((m) => m['app']), ['desktop:']);
+  });
+
+  testWidgets('a permission prompt on a host without a desktop is only said', (tester) async {
+    capsOf['m1'] = {'graphical': false};
+    await boot(tester);
+    await newTermAsked(tester);
+    expect(s.hint, contains('授权框'));
+    expect(s.hint, isNot(contains('桌面')));
+    expect(t.sent.where((m) => m['cmd'] == 'open'), isEmpty);
+  });
+
   testWidgets('常用 · 终端 first says 打开 and reopens the running terminals, then says 新建', (tester) async {
     final term = FakeTermSessionPort();
     await boot(tester, termPort: term);

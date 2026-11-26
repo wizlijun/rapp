@@ -730,6 +730,7 @@ impl Worker {
             Ok(Ok(l)) => l == launch::Launched::CutOff,
             Ok(Err(e)) if e.to_string() == launch::NO_DESKTOP => return Err(launch::NO_DESKTOP.into()),
             Ok(Err(e)) if e.to_string() == launch::START_TIMEOUT => return Err(launch::START_TIMEOUT.into()),
+            Ok(Err(e)) if e.to_string() == launch::ASKING => return Err(launch::ASKING.into()),
             _ => return Err("could not open the terminal window".into()),
         };
         let end = tokio::time::Instant::now() + OPEN_WAIT;
