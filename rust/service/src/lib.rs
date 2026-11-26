@@ -12,7 +12,6 @@ mod ipc;
 mod labels;
 mod maps;
 mod numbers;
-#[allow(dead_code, unused_imports)] // wired in Task 9
 mod outbox;
 mod own;
 mod pace;
@@ -212,6 +211,7 @@ impl Service {
             maps,
             numbers: numbers::Numbers::new(),
             sinks,
+            outbox: outbox::Outbox::new(),
             own: own::Own::new(opts.own_ports),
             probed: probe::Probed::default(),
             forwards: forward::Forwards::new(),
@@ -248,6 +248,7 @@ impl Service {
             relay_link::spawn(state.clone(), opts.advertise_lan),
             spawn_forward_sums(state.clone(), opts.forward_sum_every),
             sink::spawn(state.clone()),
+            outbox::spawn(state.clone()),
         ];
         if let Some(data) = opts.data {
             let name = state.cfg.lock().unwrap().name.clone();

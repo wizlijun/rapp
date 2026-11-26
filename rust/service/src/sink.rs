@@ -151,6 +151,12 @@ impl Sinks {
         all
     }
 
+    /// How many sinks are known: this device's own one and the others'.
+    pub fn known(&self) -> usize {
+        let inner = self.inner.lock().unwrap();
+        usize::from(inner.local.is_some()) + inner.remote.len()
+    }
+
     /// The sink to send to: the one with the smallest device ID.
     pub fn dest(&self, own_id: Option<&str>) -> Option<Dest> {
         self.candidates(own_id).into_iter().next().map(|(_, d)| d)
@@ -167,7 +173,7 @@ fn is_id(id: &str) -> bool {
     id.len() == 9 && id.bytes().all(|b| b.is_ascii_digit())
 }
 
-fn own_id(state: &State) -> Option<String> {
+pub(crate) fn own_id(state: &State) -> Option<String> {
     state.cfg.lock().unwrap().id.clone()
 }
 

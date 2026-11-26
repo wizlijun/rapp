@@ -148,7 +148,11 @@ fn handle(state: &State, cmd: &Value) -> Value {
         "update_dismiss" => update::dismiss(state, cmd["version"].as_str().unwrap_or("")),
         "set_update" => update::set(state, cmd["auto_update"].as_bool(), cmd["check_updates"].as_bool()),
         "term" => crate::term::settings(state),
-        "state" => crate::sink::ipc(state),
+        "state" => {
+            let mut r = crate::sink::ipc(state);
+            r["outbox"] = crate::outbox::status(state);
+            r
+        }
         "set_term" => crate::term::set(state, cmd),
         "labels" | "set_label" | "reset_label" => crate::labels::ipc(state, cmd),
         "history" => {
