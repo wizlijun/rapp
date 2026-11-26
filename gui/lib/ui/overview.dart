@@ -287,23 +287,17 @@ class _CountCell extends StatelessWidget {
   }
 }
 
-/// The 本机 column without a local service: folded to a strip until tapped; open for the rest of this run.
-class _LocalFold extends StatefulWidget {
+/// The 本机 column without a local service: folded to a strip until tapped; open for the rest of this run
+/// ([MainState.localColumnOpen]).
+class _LocalFold extends StatelessWidget {
   const _LocalFold({required this.state, required this.col});
   final MainState state;
   final DeviceColumn col;
 
   @override
-  State<_LocalFold> createState() => _LocalFoldState();
-}
-
-class _LocalFoldState extends State<_LocalFold> {
-  bool _open = false;
-
-  @override
-  Widget build(BuildContext context) => _open
-      ? _Column(state: widget.state, col: widget.col, onFold: () => setState(() => _open = false))
-      : _FoldedColumn(col: widget.col, onOpen: () => setState(() => _open = true));
+  Widget build(BuildContext context) => state.localColumnOpen
+      ? _Column(state: state, col: col, onFold: () => state.openLocalColumn(false))
+      : _FoldedColumn(col: col, onOpen: () => state.openLocalColumn(true));
 }
 
 const _foldedWidth = 56.0;
@@ -375,6 +369,12 @@ class _Column extends StatelessWidget {
     // 余力 (device-load §7), read where 需要你 reads it.
     final load = state.columnLoad(id, local: monitor, offline: col.offline);
     final loadNow = columnLoadNow(state.hub, monitor, id);
+    final title = Text(
+      col.name,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(fontWeight: FontWeight.w600, color: col.offline ? t.muted : t.text),
+    );
     return SizedBox(
       key: Key('column-${id ?? 'local'}'),
       width: _colWidth,
@@ -382,16 +382,12 @@ class _Column extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Expanded(
-                child: Text(
-                  col.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontWeight: FontWeight.w600, color: col.offline ? t.muted : t.text),
-                ),
-              ),
-              if (onFold != null)
+            if (onFold == null)
+              title
+            else
+              Row(children: [
+                Expanded(child: title),
+                // A touch-sized target (this column only folds on iPad/Duo).
                 Semantics(
                   button: true,
                   label: '折叠 ${col.name}',
@@ -401,10 +397,10 @@ class _Column extends StatelessWidget {
                     key: Key('column-${id ?? 'local'}-fold'),
                     borderRadius: BorderRadius.circular(t.r),
                     onTap: onFold,
-                    child: Icon(Icons.chevron_left, size: 18, color: t.muted),
+                    child: SizedBox.square(dimension: 44, child: Icon(Icons.chevron_left, size: 18, color: t.muted)),
                   ),
                 ),
-            ]),
+              ]),
             const SizedBox(height: 2),
             Row(children: [
               OsMark(col.os, key: Key('os-mark-${id ?? 'local'}')),

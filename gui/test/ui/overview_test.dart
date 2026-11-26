@@ -1336,6 +1336,29 @@ void main() {
       expect(find.byKey(const Key('column-local-fold')), findsOneWidget);
     });
 
+    testWidgets('stays open after leaving the overview and coming back', (tester) async {
+      await boot(tester);
+      await show(tester);
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      // Leaving 全景 unmounts the overview (the stage takes its place); coming back mounts a fresh one.
+      await tester.pumpWidget(wrap(const SizedBox()));
+      await tester.pumpWidget(wrap(SizedBox(width: 1194, height: 700, child: Overview(state: s))));
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsNothing);
+      expect(find.byKey(const Key('column-local-fold')), findsOneWidget);
+    });
+
+    testWidgets('the fold button is a touch-sized target', (tester) async {
+      await boot(tester);
+      await show(tester);
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      final size = tester.getSize(find.byKey(const Key('column-local-fold')));
+      expect(size.height, greaterThanOrEqualTo(44));
+      expect(size.width, greaterThanOrEqualTo(44));
+    });
+
     testWidgets('a local service keeps the column open, with no fold button', (tester) async {
       await boot(tester);
       s.toggleOverview();

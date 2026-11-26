@@ -16,13 +16,13 @@ iPad / Duo 上本机不跑 host 服务，总览「本机」列只有名字、灯
 
 ## 做法（只有一种合理做法）
 
-在 `gui/lib/ui/overview.dart` 的 `_Column` 里加折叠形态，展开状态放在一个小的有状态 widget 里，
-只在本次运行内保持。不放进 `MainState`（没有别处要读它），也不放 prefs（用户没要求记住）。
+在 `gui/lib/ui/overview.dart` 的 `_Column` 里加折叠形态。展开状态是 `MainState.localColumnOpen`，
+只在内存里、不存盘：离开全景去用 app 会卸掉总览，放在 widget 自己的 State 里会每次回来都重新折叠。
 
 - **折叠形态**：宽约 56px 的竖条，`panelBox` 边框，自上而下：系统图标（`OsMark`）、状态灯、
   名字「本机」（单行，过长省略）。整条可点，语义标签「展开 本机」。key `column-local`，
   折叠条本身 key `column-local-folded`。
-- **展开形态**：和现在一样，列头名字右侧多一个小的折回按钮（key `column-local-fold`，
+- **展开形态**：和现在一样，列头名字右侧多一个折回按钮（点按区 44×44）（key `column-local-fold`，
   语义「折叠 本机」）。
 - 默认折叠；点开后在本次运行内保持展开，直到再点折回。
 
