@@ -233,11 +233,14 @@ impl Dial for StateDial {
     }
 }
 
-/// `not shared` / `not allowed`: the service is gone. The rest is for now only.
+/// `not shared`: the service is gone (spec §7.2). The rest is for now only.
 fn dial_err(e: PipeErr) -> DialErr {
     match e {
-        PipeErr::Refused(why) if why == "not shared" || why == "not allowed" => DialErr::Gone,
+        PipeErr::Refused(why) if why == "not shared" => DialErr::Gone,
         PipeErr::Offline => DialErr::Down("offline"),
+        // "not allowed": the share is there but this device is not on its allow list. That is
+        // about this device only, so it is not Gone: forgetting would make every device told of
+        // the sink forget it too, the allowed ones included. Tried again after the backoff.
         PipeErr::Refused(_) => DialErr::Down("refused"),
         _ => DialErr::Down("io"),
     }
@@ -357,7 +360,7 @@ mod tests {
     fn a_gone_share_is_gone_and_the_rest_is_down() {
         use crate::pipe::PipeErr;
         assert_eq!(dial_err(PipeErr::Refused("not shared".into())), DialErr::Gone);
-        assert_eq!(dial_err(PipeErr::Refused("not allowed".into())), DialErr::Gone);
+        assert_eq!(dial_err(PipeErr::Refused("not allowed".into())), DialErr::Down("refused"));
         assert_eq!(dial_err(PipeErr::Offline), DialErr::Down("offline"));
         assert_eq!(dial_err(PipeErr::Refused("limit".into())), DialErr::Down("refused"));
         assert_eq!(dial_err(PipeErr::Other("x".into())), DialErr::Down("io"));
