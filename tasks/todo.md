@@ -1399,7 +1399,20 @@ macOS、Linux、Duo、iPad 各一遍。
   - [ ] 连上之后 hello 刚到 watch 就断（iOS hub 端口重建晚于 refresh，或 Mac 睡醒超过 45 秒空闲）仍会记一行“状态服务连不上”
   - [ ] 设置里手填地址：别处改了 `local/state.json` 的地址，输入框不跟着变；手机上点模式时，失焦会先存一次手填地址（结果对，只是多存一次）
   - [ ] 监视器已连上、但服务的 `state` 回复当时为空时，要等 60 秒才再找
-- [ ] P3：桌面和代报（`/v1/desk`、“别处开着”那一组、GUI 客户端推断状态代报、远程开启用设备间新请求 `SetService`）。计划还没写；写之前先问用户规格 §17 第 6 条
+- [x] P3：桌面和代报（`/v1/desk`、“别处开着”那一组、GUI 客户端推断状态代报、远程开启用设备间新请求 `SetService`、设备页“状态服务”开关）。分支 `feat/rapp-state-p3`，计划 `docs/superpowers/plans/2026-11-26-rapp-state-p3.md`
+- [ ] P3 实机检查：
+  - [ ] 1. Mac 上开 3 个会话，iPad 的会话面板“别处开着”列出这 3 个，卡片写 `<那台设备名> · 在 <Mac> 上开着`，点一个在 iPad 上打开
+  - [ ] 2. Mac 上 Claude 桌面端等确认，iPad 的“需要你”里有它，带“（推断）”，点了在 iPad 打开
+  - [ ] 3. Mac 和 iPad 都开着同一个 Claude，iPad 关掉后 iPad 的“需要你”里它还在（Mac 报的）
+  - [ ] 4. iPad 设备页把另一台设备的“状态服务”打开，那台 `rapp state` 显示开着，再关掉
+  - [ ] 5. 对一台 0.15.51 及更早的设备，开关不出现
+  - [ ] 6. 杀掉 Mac 上的 rApp 再打开，上次留下的推断行被清掉
+- [ ] P3 遗留：
+  - [ ] 退出 app 时不发空桌面，别处会留着“在 <它> 上开着”，直到它下次打开或 30 天
+  - [ ] 不确定的 `blocked` 不代报（已报过的确定 `blocked` 变不确定时发 `gone` 撤回）
+  - [ ] 没有 hub 的 `me`（旧 hub）时，这台 app 自己的桌面可能短暂出现在“别处开着”里
+  - [ ] `stateHost` 遇到任何错误、以及状态还没加载时都返回 null，设备页就不显示“已经有一个在 … 上”
+  - [ ] app 退出或睡眠后，它推断并代报的「在等你」会一直留在别的设备上，直到这个 app 再打开；要是在那台设备本机已经答过，这条就过时了
 - [ ] P4：`rapp emit`（IPC 的 `emit`、命令行、`RAPP_TERM`）。计划还没写
 - [ ] 规格 §18 第 1、2、5 条仍没验证：设备时钟差；发件箱对终端 `watch_terms` 的开销和会话从关到开的跟随；Windows 上 `rapp-service` 的现状
 
@@ -1439,3 +1452,22 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），将 Linux / Omarchy `x86_64` 产物构建并挂载至已发布的 [v0.15.51](https://github.com/wizlijun/rapp/releases/tag/v0.15.51) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
 - [x] 对齐 macOS `0.15.51`（`feat/rapp-state-p2`）：Linux 桌面端 `main.dart` / `GlobalSections` / `StateSection`（`0600` 权限保存 `local/state.json`）与 `StateSync`（本机或端口映射发现 `rapp-state`、`/v1/watch` SSE 实时流与 `/v1/seen` 多端已读同步、离线回退本机队列）完整生效；补充 `gui/test/pages/state_section_test.dart`（`TargetPlatform.linux` 下 `GlobalSections` 与 `0600` 权限断言）及 `scripts/test-linux-bundle.py`（IPC `state.url` 与 `/v1/watch` SSE `hello` 端到端断言）。
 - [x] `v0.15.51`（源码 `87ace3f2`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01551-parity.md`。
+
+## 等候卡片（分支 `feat/wait-card`，2026-11-26）
+
+用户：「在文本终端上按 cmd+T 时，等候时间很长，导致用户以为失效了。请在用户按下快捷键后，到需要权限交互或者打开新的文本终端之间，增加一个等候窗口……设置为全局的功能，类似的这种交互都可以出现。」做法：`Waits`（`gui/lib/ui/waits.dart`）+ 舞台最上层的 `WaitCard`（`gui/lib/ui/wait_card.dart`）。⌘T、总览/常用「新建」、「恢复」、待机「启动」、设备页开 shell 都接上了；⌘T 碰到授权框现在也会切到被控 Mac 的桌面（以前只出一行字）。设计 `docs/superpowers/specs/2026-11-26-rapp-wait-card-design.md`，计划 `docs/superpowers/plans/2026-11-26-rapp-wait-card.md`。
+
+- [x] `waits_test` 7 条、`wait_card_test` 4 条、term_main / overview / main_window 新增 4 条（授权切桌面、点击穿透、挂载都做过"去掉就失败"）；flutter analyze 通过；flutter 全量只剩 `linux_detach_test` 2 条（main 上同样失败）
+- [ ] 1 在被控 Mac 的文本终端里按 ⌘T：0.3 秒内舞台中央偏上出现「正在新建终端…」卡片，下面是设备名和「在『…』旁边」，秒数在走；新终端打开时卡片消失
+- [ ] 2 连按 3 次 ⌘T：卡片显示「还有 2 个排队」，每开出一个减一
+- [ ] 3 被控 Mac 上 `tccutil reset AppleEvents` 后按 ⌘T：卡片变成橙色的授权提示，停 8 秒，并切到那台 Mac 的桌面
+- [ ] 4 总览「新建」、「恢复所选」、设备页开 shell（侧栏开着时也看得见卡片）都出卡片
+- [ ] 5 卡片出现时照常能在终端里打字、点卡片下面的东西
+- [ ] 6 浅色、深色主题和远端画面上都看得清；iPad 窄屏不超出舞台
+- [ ] 7 （放大后，`fix/wait-card-big`）卡片宽 360–560、主字 18、转圈 22；授权提示整句三行内显示完，不再出现「…」
+
+## Linux 0.15.55 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），将 Linux / Omarchy `x86_64` 产物构建并挂载至已发布的 [v0.15.55](https://github.com/wizlijun/rapp/releases/tag/v0.15.55) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.52`–`0.15.55`（含 Linux `0.15.54` `fix/linux-terminal-paste`）：放大版非阻塞 `WaitCard` 舞台等候卡片（`Ctrl+Shift+T` 排队计数与远端 Mac 授权自动切桌面）、`rapp-host-linux` 终端窗口 `Ctrl+Shift+V` 中文粘贴与 Wayland 选区往返同步、以及 `rapp-state` 第 3 步（`PUT /v1/desk/<fp>` 会话面板「别处开着」一键接力、`StateOut` 应用状态规则代报与「需要你」`推断` 标记、`Op::SetService` 节点间控制及设备页 `StateServiceRow` 开关）；补充 `scripts/test-linux-bundle.py`、`gui/test/term/term_main_test.dart`、`gui/test/ui/state_service_row_test.dart` 与 `gui/test/ui/wait_card_test.dart` Linux 侧回归校验。
+- [x] `v0.15.55`（源码 `1038f30b`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01555-parity.md`。

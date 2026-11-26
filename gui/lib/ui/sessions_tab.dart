@@ -21,6 +21,7 @@ class SessionsTab extends StatelessWidget {
       builder: (context, _) {
         final groups = state.groups;
         final idle = state.idleFavorites;
+        final elsewhere = state.elsewhereEntries;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -67,6 +68,14 @@ class SessionsTab extends StatelessWidget {
                           keyPrefix: 'session',
                           showDevice: state.grouping != Grouping.device,
                         ),
+                      ),
+                  ],
+                  if (elsewhere.isNotEmpty) ...[
+                    const SessionGroupTitle('别处开着', key: Key('group-elsewhere')),
+                    for (final e in elsewhere)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: SessionBlock(state: state, entry: e, keyPrefix: 'elsewhere'),
                       ),
                   ],
                   if (idle.isNotEmpty) ...[

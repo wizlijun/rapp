@@ -10,6 +10,7 @@ mod link;
 mod netmon;
 mod ports;
 mod presence;
+mod services;
 mod session;
 mod load;
 mod terms;
@@ -271,7 +272,9 @@ impl Hub {
     }
 
     fn hosts_event(&self) -> Value {
-        json!({"event":"hosts","hosts":self.hosts.summary(),"version":env!("CARGO_PKG_VERSION")})
+        // `me` is this app's own fingerprint, so the GUI can tell which listed device is itself.
+        let me = self.at_home().1.fp.to_string();
+        json!({"event":"hosts","hosts":self.hosts.summary(),"me":me,"name":self.name,"version":env!("CARGO_PKG_VERSION")})
     }
 
     async fn command(self: &Arc<Self>, line: &str) {
@@ -449,6 +452,7 @@ impl Hub {
                 terms::command(self, c, v).await?
             }
             Some(c @ ("set_label" | "reset_label")) => labels::command(self, c, v).await?,
+            Some("set_service") => services::command(self, v).await?,
             _ => bail!("unknown cmd"),
         }))
     }

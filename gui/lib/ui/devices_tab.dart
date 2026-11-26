@@ -5,6 +5,7 @@ import '../hub_client.dart';
 import '../pages/app_profile_page.dart';
 import '../permissions.dart';
 import '../shares.dart';
+import '../state/service_switch.dart';
 import '../term/term_id.dart';
 import 'add_device_form.dart';
 import 'controls.dart';
@@ -17,6 +18,7 @@ import 'tab_chip.dart';
 import 'term_restore_dialog.dart';
 import 'term_status.dart';
 import 'shares_section.dart';
+import 'state_service_row.dart';
 import 'terms_entry.dart';
 import 'tokens.dart';
 
@@ -32,7 +34,8 @@ class DevicesTab extends StatefulWidget {
       required this.state,
       required this.local,
       this.localBadge = false,
-      this.shares});
+      this.shares,
+      this.serviceSwitch});
   final MainState state;
 
   /// The 本机 content, assembled by the caller.
@@ -43,6 +46,9 @@ class DevicesTab extends StatefulWidget {
 
   /// Asked for each device's shared ports; null leaves the 端口 section out.
   final SharesApi? shares;
+
+  /// Turns each device's 状态服务 on or off; null leaves the row out.
+  final ServiceSwitchApi? serviceSwitch;
 
   @override
   State<DevicesTab> createState() => _DevicesTabState();
@@ -314,6 +320,13 @@ class _DevicesTabState extends State<DevicesTab> {
       for (final a in ordered)
         if (a.app != 'desktop:') _appRow(context, id, a),
       if (widget.shares != null) SharesSection(key: ValueKey('shares-$id'), api: widget.shares!, to: id),
+      if (widget.serviceSwitch != null)
+        StateServiceRow(
+            key: ValueKey('state-service-$id'),
+            api: widget.serviceSwitch!,
+            to: id,
+            nameOf: state.deviceName,
+            localId: state.localLoadId),
       const SizedBox(height: 8),
       if (applications) Row(
         children: [
@@ -527,7 +540,8 @@ class _DevicesTabState extends State<DevicesTab> {
       _shellErrors.remove(id);
     });
     try {
-      await state.openText(id, shell: path, from: state.newTermSource(id));
+      await state.waits.run('正在打开终端…', () => state.openText(id, shell: path, from: state.newTermSource(id)),
+          detail: state.deviceName(id), words: MainState.newTermWords, asks: MainState.consentError);
     } catch (e) {
       if (mounted) setState(() => _shellErrors[id] = e is HubException ? e.message : '$e');
     } finally {

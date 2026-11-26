@@ -12,7 +12,7 @@ use std::{
 use wayland_client::{
     delegate_noop,
     protocol::{wl_registry, wl_seat},
-    Connection, Dispatch, Proxy, QueueHandle,
+    Connection, Dispatch, EventQueue, Proxy, QueueHandle,
 };
 use wayland_protocols_wlr::data_control::v1::client::{
     zwlr_data_control_device_v1::{self, ZwlrDataControlDeviceV1 as Device},
@@ -59,7 +59,7 @@ pub(super) fn run(
                     if saved.is_none() {
                         saved = Some((snapshot(&conn, &state)?, Instant::now()));
                     }
-                    write(&conn, &q, &mut state, &device, data)?;
+                    write(&mut queue, &q, &mut state, &device, data)?;
                     saved.as_mut().unwrap().1 = Instant::now();
                     Ok(())
                 })();
@@ -94,7 +94,7 @@ pub(super) fn run(
             .is_some_and(|(_, t)| t.elapsed() >= Duration::from_secs(2))
         {
             if state.source.is_some() {
-                write(&conn, &q, &mut state, &device, saved.take().unwrap().0)?;
+                write(&mut queue, &q, &mut state, &device, saved.take().unwrap().0)?;
             } else {
                 saved = None;
             }
@@ -115,7 +115,7 @@ pub(super) fn run(
     }
     if state.source.is_some() {
         if let Some((data, _)) = saved {
-            write(&conn, &q, &mut state, &device, data)?;
+            write(&mut queue, &q, &mut state, &device, data)?;
         }
         // Give a running clipboard manager a chance to retain restored data.
         let end = Instant::now() + Duration::from_millis(200);
@@ -173,7 +173,7 @@ fn snapshot(conn: &Connection, state: &State) -> Result<Data> {
     Ok(data)
 }
 fn write(
-    conn: &Connection,
+    queue: &mut EventQueue<State>,
     q: &QueueHandle<State>,
     state: &mut State,
     device: &Device,
@@ -190,7 +190,9 @@ fn write(
     device.set_selection(Some(&source));
     state.source = Some(source);
     state.changed = false;
-    conn.flush()?;
+    // Ensure the compositor processes selection ownership before the host
+    // injects the paste shortcut on its separate Wayland connection.
+    queue.roundtrip(state)?;
     Ok(())
 }
 impl Dispatch<wl_registry::WlRegistry, ()> for State {

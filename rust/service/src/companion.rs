@@ -9,12 +9,14 @@
 //! the companion made it, only unmarked when the user had shared the port (`take_back`).
 //! `rapp-service` never links `rapp-state`: it only starts the program.
 
+use crate::forward::{admit, Caller};
 use crate::outbox::send;
 use crate::sharing::{self, Allow, By};
 use crate::sink;
-use crate::state::State;
+use crate::state::{Peer, State};
 use rapp_net::line::err;
 use rapp_net::log::Lvl;
+use rapp_net::msg::Op;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
@@ -603,8 +605,57 @@ pub async fn status(state: &Arc<State>, name: &str) -> Value {
     r
 }
 
-/// IPC `{"cmd":"state","name"?,"on"?}`: with `on`, `set`; without, `status`.
+/// Answers `set_service` from another device with one JSON line, then closes the stream. The
+/// same rule as `share`: only a key-trusted device may. The reply is `set`'s, or `status`'s
+/// when `on` is left out.
+pub async fn serve(state: &Arc<State>, mut s: rapp_conn::Pipe, op: Op, peer: Peer) -> anyhow::Result<()> {
+    let reply = answer(state, &op, &peer).await;
+    rapp_net::line::write_json(&mut s, &reply).await?;
+    s.shutdown().await?;
+    Ok(())
+}
+
+async fn answer(state: &Arc<State>, op: &Op, peer: &Peer) -> Value {
+    let Op::SetService { name, on } = op else { return err("unknown op") };
+    let fields = |extra: Value| {
+        let mut f = By::Remote(peer).fields(extra);
+        f["name"] = json!(name);
+        f["on"] = json!(on);
+        f
+    };
+    if let Err(d) = admit(&Caller { fp: peer.fp.as_ref(), server: false }, true) {
+        state.log.event(Lvl::Warn, "service_refused", fields(json!({"reason": d.as_str()})));
+        return err(d.as_str());
+    }
+    match on {
+        None => status(state, name).await,
+        Some(on) => {
+            let r = set(state, name, *on).await;
+            state.log.event(Lvl::Info, "service_set", fields(json!({"result": r["error"].as_str().unwrap_or("ok")})));
+            r
+        }
+    }
+}
+
+/// IPC `{"cmd":"state","to"?,"name"?,"on"?}`: with `on`, `set`; without, `status`. A `to` that
+/// is another device sends it `SetService` and returns its reply.
 pub async fn ipc(state: &Arc<State>, cmd: &Value) -> Value {
+    match crate::share_cmds::target(state, cmd) {
+        Err(e) => return e,
+        Ok(Some((id, _))) => {
+            let (name, on) = match (&cmd["name"], &cmd["on"]) {
+                (Value::Null | Value::String(_), Value::Null | Value::Bool(_)) => {
+                    (cmd["name"].as_str().unwrap_or("state").to_string(), cmd["on"].as_bool())
+                }
+                _ => return err("bad request"),
+            };
+            return match crate::share_cmds::ask_there(state, &id, &Op::SetService { name, on }).await {
+                Ok((reply, _)) => reply,
+                Err(e) => e,
+            };
+        }
+        Ok(None) => {}
+    }
     let name = cmd["name"].as_str().unwrap_or("state");
     match &cmd["on"] {
         Value::Null => status(state, name).await,

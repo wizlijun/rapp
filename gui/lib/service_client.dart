@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import 'labels.dart';
+import 'state/service_switch.dart';
 import 'load_model.dart';
 import 'shares.dart';
 import 'update.dart';
@@ -299,7 +300,7 @@ class ServiceConnection {
 
 /// Keeps a live view of the service: connects (retrying), subscribes,
 /// and re-reads status on every `changed` event.
-class ServiceMonitor extends ChangeNotifier implements SharesApi {
+class ServiceMonitor extends ChangeNotifier implements SharesApi, ServiceSwitchApi {
   ServiceMonitor({
     required this.readToken,
     this.port = servicePort,
@@ -567,6 +568,23 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi {
       for (final s in (r['shared'] as List? ?? const []))
         if (s is Map) Shared(port: (s['port'] as num).toInt(), warn: s['warn']?.toString()),
     ];
+  }
+
+  @override
+  Future<Map<String, Object?>> stateService({String? to, bool? on}) async =>
+      Map<String, Object?>.from(await _remoteRequest({'cmd': 'state', 'to': ?to, 'on': ?on}));
+
+  @override
+  Future<String?> stateHost() async {
+    try {
+      final r = await _need().request({'cmd': 'state'});
+      final o = r['outbox'];
+      final d = o is Map ? o['dest'] : null;
+      if (d is! Map) return null;
+      if (d['id'] is String) return d['id'] as String;
+      if (d['local'] != null) return status?.id;
+    } catch (_) {}
+    return null;
   }
 
   @override

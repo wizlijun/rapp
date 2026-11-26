@@ -152,6 +152,50 @@ void main() {
       expect((await f).events, isEmpty);
     });
 
+    test('hosts carry fp and the app\'s own me', () async {
+      t.emit({
+        'event': 'hosts',
+        'hosts': [{'id': '1', 'name': 'm', 'fp': 'ab'}],
+        'me': 'cd',
+        'name': 'iPad',
+      });
+      await pumpEventQueue();
+      expect(hub.hosts.first.fp, 'ab');
+      expect(hub.meFp, 'cd');
+      expect(hub.meName, 'iPad');
+    });
+
+    test('stateService sends set_service and returns the reply', () async {
+      final f = hub.stateService(to: '111', on: true);
+      expect(t.sent.last, {'cmd': 'set_service', 'id': '111', 'name': 'state', 'on': true, 'req': anything});
+      t.emit({'event': 'service', 'id': '111', 'req': t.sent.last['req'], 'reply': {'ok': true, 'on': true, 'port': 8102}});
+      expect(await f, {'ok': true, 'on': true, 'port': 8102});
+      final g = hub.stateService(to: '111');
+      expect(t.sent.last.containsKey('on'), isFalse);
+      t.emit({'event': 'service', 'id': '111', 'req': t.sent.last['req'], 'reply': {'ok': true}});
+      await g;
+      expect(() => hub.stateService(), throwsArgumentError);
+    });
+
+    test('an old device\'s unknown op reaches the caller', () async {
+      final f = hub.stateService(to: '111', on: true);
+      t.emit({'event': 'error', 'req': t.sent.last['req'], 'error': 'unknown op'});
+      await expectLater(f, throwsA(isA<HubException>().having((e) => e.message, 'message', contains('unknown op'))));
+    });
+
+    test('stateHost is the smallest state share id', () async {
+      expect(await hub.stateHost(), isNull);
+      t.emit({
+        'event': 'ports',
+        'maps': [
+          {'id': '333', 'port': 8102, 'local': 28005, 'kind': 'state'},
+          {'id': '222', 'port': 8102, 'local': 28003, 'kind': 'state'},
+        ],
+      });
+      await pumpEventQueue();
+      expect(await hub.stateHost(), '222');
+    });
+
     test('logs on an old peer throws unknown op', () async {
       final f = hub.logs(id: '111', query: const LogQuery());
       t.emit({'event': 'error', 'req': t.sent.last['req'], 'error': 'unknown op'});
