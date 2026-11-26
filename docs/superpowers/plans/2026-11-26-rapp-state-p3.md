@@ -51,7 +51,7 @@
 - **代报事件**（app 发，`POST /v1/events`）
   - 信封：`"v":1,"fp":<被控设备指纹>,"id":<被控设备 9 位 ID>,"epoch":<这次启动的随机串>,"n":<从 1 递增>,"at":<秒>,"src":"app","via":<app 指纹>`。**不带 `device`**：设备名由设备自己报，不让 app 起的名字盖掉它。
   - `state`：`session` = app 标识（包名，即会话 key 的后半段），`name` = 这台 app 上显示的名字，`state`，`blocked` 时带 `kind`，有就带 `app`（规则包 id）。
-  - `gone`：`session`。只在会话真的关掉（记录删掉）或规则换了、推断清空时发；连接断开**不发**（§8.2：合上 Mac 以后它多半还在等）。
+  - `gone`：`session`。会话真的关掉（记录删掉）、规则换了（推断清空）、或报过的状态不再成立（确定的 `blocked` 变成不确定）时发；连接断开**不发**（§8.2：合上 Mac 以后它多半还在等）。
   - `snap`：每台被控设备一条，`sessions` 每项是 `state` 那几个字段加 `since`。
   - 不确定的 `blocked`（`RemoteSession.inferredNeed` 为假）不报；报的是 `inferredPs`，没有推断时视同 `gone`。
 - **app 一侧的常数**

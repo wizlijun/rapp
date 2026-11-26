@@ -33,6 +33,7 @@ import 'overview.dart';
 import 'side_panel.dart';
 import 'stage.dart';
 import 'shares_section.dart';
+import 'state_service_row.dart';
 import 'tokens.dart';
 import 'top_bar.dart';
 
@@ -235,6 +236,11 @@ class _MainWindowState extends State<MainWindow> {
           listenable: m,
           builder: (context, _) => SharesSection(key: const ValueKey('shares-local'), api: m, online: m.running),
         ),
+      ListenableBuilder(
+        listenable: m,
+        builder: (context, _) => StateServiceRow(
+            key: const ValueKey('state-service-local'), api: m, nameOf: state.deviceName, localId: m.status?.id),
+      ),
       if (state.stateSync != null) StateSection(sync: state.stateSync!),
       ListenableBuilder(
         listenable: widget.state,
@@ -403,6 +409,7 @@ class _MainWindowState extends State<MainWindow> {
                                     local: _local(),
                                     localBadge: caps.onlineUpdate && updateBadge(widget.monitor?.status?.update),
                                     shares: caps.showsPorts ? widget.monitor : null,
+                                    serviceSwitch: widget.monitor ?? state.hub,
                                   ),
                                 ),
                               ),
