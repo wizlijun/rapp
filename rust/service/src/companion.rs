@@ -572,6 +572,11 @@ pub(crate) fn sink_url(chosen: Option<&sink::Dest>, local_of: impl Fn(&str, u16)
     }
 }
 
+/// The local port of the map for `port` of device `id`, when there is one.
+fn mapped(maps: &crate::maps::Maps, id: &str, port: u16) -> Option<u16> {
+    maps.list().into_iter().find(|m| m.id == id && m.port == port).map(|m| m.local)
+}
+
 /// The IPC `state` reply of `name`: on, port, share number, running, why not, what it holds,
 /// the sinks known and the outbox.
 pub async fn status(state: &Arc<State>, name: &str) -> Value {
@@ -581,8 +586,12 @@ pub async fn status(state: &Arc<State>, name: &str) -> Value {
     let stored = if running { stored(port).await } else { None };
     let url = match sink::chosen(state) {
         Some(sink::Dest::Remote { id, port }) => {
-            let got = crate::maps::ensure_all(state, &id, &[(port, None)]).await;
-            sink_url(Some(&sink::Dest::Remote { id: id.clone(), port }), |_, _| got.first().copied().flatten())
+            // An existing map is only read: `ensure` would reset the number the sharer gave it.
+            let mut local = mapped(&state.maps, &id, port);
+            if local.is_none() {
+                local = crate::maps::ensure_all(state, &id, &[(port, None)]).await.first().copied().flatten();
+            }
+            sink_url(Some(&sink::Dest::Remote { id, port }), |_, _| local)
         }
         other => sink_url(other.as_ref(), |_, _| None),
     };
@@ -616,6 +625,19 @@ mod tests {
         assert_eq!(sink_url(Some(&r), |id, p| (id == "222" && p == 8102).then_some(28003)).as_deref(), Some("http://localhost:28003"));
         assert_eq!(sink_url(Some(&r), |_, _| None), None);
         assert_eq!(sink_url(None, |_, _| Some(1)), None);
+    }
+
+    #[tokio::test]
+    async fn looking_up_a_map_leaves_its_wanted_number_alone() {
+        let home = tempfile::tempdir().unwrap();
+        let (maps, _) = crate::maps::Maps::load(home.path(), 29700, 10);
+        let serve = |_l: tokio::net::TcpListener, _p: u16| tokio::spawn(async {});
+        assert_eq!(maps.ensure("222", 8102, Some(29703), &[], &[], &serve), Some(29703));
+        let before = maps.list();
+        assert_eq!(mapped(&maps, "222", 8102), Some(29703));
+        assert_eq!(mapped(&maps, "222", 9), None);
+        assert_eq!(maps.list(), before);
+        assert_eq!(before[0].wanted, Some(29703));
     }
 
     #[test]
