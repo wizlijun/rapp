@@ -373,17 +373,21 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .composeReplay(sid):
       // The caret is in the panel and the picture blurred (Dart sent `picture_focus(nil)` first):
       // the held keys now reach Flutter's text input, and B's IME, in the order they were typed.
-      let events = hold.take(sid: sid, now: ProcessInfo.processInfo.systemUptime)
+      // Taken on the replay turn, not now: the hold keeps catching keys typed in between, so they
+      // replay in order instead of slipping ahead through the normal route.
       #if os(macOS)
-      // On the next runloop turn: the panel's text field must have taken the caret first.
       DispatchQueue.main.async { [weak self] in
         guard let self else { return }
+        let events = self.hold.take(sid: sid, now: ProcessInfo.processInfo.systemUptime)
         self.replaying = true
         for e in events { NSApp.sendEvent(e) }
         self.replaying = false
       }
       #else
-      DispatchQueue.main.async { [weak self] in self?.replay(events) }
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        self.replay(self.hold.take(sid: sid, now: ProcessInfo.processInfo.systemUptime))
+      }
       #endif
       result(nil)
     #if os(macOS)
