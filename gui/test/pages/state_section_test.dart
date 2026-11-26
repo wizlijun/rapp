@@ -2,9 +2,13 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/pages/global_sections.dart';
 import 'package:rapp/pages/state_section.dart';
+import 'package:rapp/paths.dart';
+import 'package:rapp/service_client.dart';
 import 'package:rapp/state/state_config.dart';
 import 'package:rapp/state/state_sync.dart';
+import 'package:rapp/ui/tokens.dart';
 
 import '../fakes.dart';
 
@@ -116,5 +120,31 @@ void main() {
     sync.notifyListeners();
     await t.pump();
     expect(find.text('已连上 http://localhost:28003'), findsOneWidget);
+  });
+
+  testWidgets('GlobalSections on Linux shows LinuxUpdateSection, StateSection and 0600 state.json', (t) async {
+    final monitor = ServiceMonitor(readToken: () async => null);
+    addTearDown(monitor.dispose);
+    await t.pumpWidget(MaterialApp(
+      theme: themeDataFor(RappTheme.matrix, platform: TargetPlatform.linux),
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: GlobalSections(
+            monitor: monitor,
+            data: DataDir(dir.path),
+            stateSync: sync,
+            platform: TargetPlatform.linux,
+            openPage: (_) async {},
+          ),
+        ),
+      ),
+    ));
+    expect(find.text('版本与升级'), findsOneWidget);
+    expect(find.text('状态服务'), findsOneWidget);
+    expect(find.text('数据目录'), findsOneWidget);
+    await t.tap(find.text('关'));
+    await t.pump();
+    final mode = File('${dir.path}/state.json').statSync().mode & 0x1ff;
+    expect(mode, 0x180);
   });
 }

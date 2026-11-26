@@ -24,6 +24,7 @@ import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/sessions_tab.dart';
 import 'package:rapp/ui/stage.dart';
 import 'package:rapp/ui/top_bar.dart';
+import 'package:rapp/ui/wait_card.dart';
 import 'package:rapp/ui/workspace_store.dart' show AppRef;
 
 import '../fakes.dart';
@@ -661,6 +662,41 @@ void main() {
       expect(s.currentKey, '111/term:pty:n3');
     });
 
+    testWidgets('wait_card_counts_queued_presses: queued ⌘T presses count down on the wait card', (tester) async {
+      t.emit(listOf(shell: true));
+      await tester.pumpWidget(wrap(window()));
+      await openTerm(tester, two);
+      final gates = [Completer<void>(), Completer<void>(), Completer<void>()];
+      hubAnswers(list: listOf(shell: true), gates: gates);
+      await tester.runAsync(() async {
+        for (var i = 0; i < 3; i++) {
+          unawaited(s.newTermFrom('111', app));
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+      });
+      expect(s.waits.shown.first.what, '正在新建终端…');
+      expect(s.waits.shown.first.detail, startsWith(s.deviceName('111')));
+      expect(s.waits.moreLine, '还有 2 个排队');
+      await tester.runAsync(() async {
+        gates[0].complete();
+        for (var k = 0; k < 6; k++) {
+          await flush();
+        }
+      });
+      expect(s.waits.moreLine, '还有 1 个排队');
+      for (final g in gates.skip(1)) {
+        await tester.runAsync(() async {
+          g.complete();
+          for (var k = 0; k < 6; k++) {
+            await flush();
+          }
+        });
+      }
+      expect(s.waits.shown, isEmpty);
+      expect(s.waits.outcome, isNull);
+      await settle(tester);
+    });
+
     testWidgets('a new terminal on a device with no terminal window says so and opens nothing', (tester) async {
       t.emit(listOf(shell: true));
       await tester.pumpWidget(wrap(window()));
@@ -1061,6 +1097,82 @@ void main() {
       await settle(tester);
       expect(t.sent.where((m) => m['cmd'] == 'open_term').single['from'], app);
       await tester.pump(const Duration(seconds: 1));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
+    testWidgets('Ctrl+Shift+T on Linux shows the wait card with queued count while slow', (tester) async {
+      await tester.pumpWidget(wrap(Stack(children: [
+        window(),
+        Positioned.fill(child: WaitCard(waits: s.waits)),
+      ])));
+      t.emit(listOf(shell: true, fg: 'zsh'));
+      await openTerm(tester, two);
+      final gates = [Completer<void>(), Completer<void>()];
+      hubAnswers(list: listOf(shell: true), gates: gates);
+
+      Future<void> ctrlShiftT() async {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyT);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      }
+
+      await ctrlShiftT();
+      await ctrlShiftT();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byKey(const Key('wait-card')), findsOneWidget);
+      expect(find.text('正在新建终端…'), findsOneWidget);
+      expect(find.text('mini · 在「work」旁边'), findsOneWidget);
+      expect(find.text('还有 1 个排队'), findsOneWidget);
+
+      for (final g in gates) {
+        await tester.runAsync(() async {
+          g.complete();
+          for (var k = 0; k < 6; k++) {
+            await flush();
+          }
+        });
+      }
+      await settle(tester);
+      expect(find.byKey(const Key('wait-card')), findsNothing);
+      await tester.pump(const Duration(seconds: 2));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
+    testWidgets('Ctrl+Shift+T on Linux shows consent on the wait card and switches to a remote Mac desktop',
+        (tester) async {
+      await tester.pumpWidget(wrap(Stack(children: [
+        window(),
+        Positioned.fill(child: WaitCard(waits: s.waits)),
+      ])));
+      t.emit(listOf(shell: true, fg: 'zsh'));
+      await openTerm(tester, two);
+      final prev = t.onSend;
+      t.onSend = (m) {
+        if (m['cmd'] == 'open_term') {
+          t.emit({
+            'event': 'error',
+            'req': m['req'],
+            'error': 'macOS is asking on that Mac whether rApp may control Terminal',
+          });
+          return;
+        }
+        prev?.call(m);
+      };
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyT);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await settle(tester);
+
+      expect(find.byKey(const Key('wait-card')), findsOneWidget);
+      expect(s.waits.outcome?.asks, isTrue);
+      expect(s.hint, endsWith('已切到它的桌面'));
+      expect(t.sent.where((m) => m['cmd'] == 'open' && m['app'] == 'desktop:'), isNotEmpty);
+      s.endSession('111/desktop:', quiet: true);
+      await tester.pump(const Duration(seconds: 9));
+      expect(find.byKey(const Key('wait-card')), findsNothing);
     }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 
     testWidgets('Ctrl+Shift+W ends a terminal off the mac and confirms when a program is running', (tester) async {

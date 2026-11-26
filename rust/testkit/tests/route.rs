@@ -396,7 +396,8 @@ async fn a_forced_password_host_without_a_fingerprint_goes_over_the_relay() {
     let saved = json!([{"id":a.id,"name":"a","password":PASSWORD,"lan":[],"route":"relay"}]);
     rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
     let mut hub = Hub::start(home.path(), a.bins.path());
-    let r = hub.call(json!({"cmd":"apps","id":a.id})).await;
+    let (fp, r) = hub.call_learning_fp(json!({"cmd":"apps","id":a.id}), &a.id).await;
+    assert!(fp.as_str().is_some_and(|f| f.len() == 64), "the app hears the fingerprint: {fp}");
     assert_eq!((&r["event"], &r["path"]), (&json!("apps"), &json!("relay")), "{r}");
     // The relay writes a stream down when it ends.
     let deadline = tokio::time::Instant::now() + WAIT;

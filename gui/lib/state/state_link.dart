@@ -162,6 +162,30 @@ class StateLink {
     return out.stream;
   }
 
+  /// Posts [events] (one JSON object per line). Any 2xx is success; another status throws `StateLinkError(status)`.
+  Future<void> postEvents(List<Map<String, Object?>> events) =>
+      _send('POST', _uri('/v1/events'), '${events.map(jsonEncode).join('\n')}\n', 'application/x-ndjson');
+
+  /// Puts this app's desk [body] under fingerprint [fp]. A service without the desk route answers 404.
+  Future<void> putDesk(String fp, Map<String, Object?> body) =>
+      _send('PUT', _uri('/v1/desk/${Uri.encodeComponent(fp)}'), jsonEncode(body), 'application/json');
+
+  Future<void> _send(String method, Uri url, String body, String contentType) async {
+    final c = _client();
+    try {
+      await _run(() async {
+        final req = await c.openUrl(method, url);
+        req.headers.contentType = ContentType.parse(contentType);
+        req.write(body);
+        final res = await req.close();
+        await res.drain<void>();
+        if (res.statusCode < 200 || res.statusCode >= 300) throw StateLinkError(res.statusCode);
+      });
+    } finally {
+      _release(c);
+    }
+  }
+
   /// Aborts every request in flight (they fail with `StateLinkError(0)`, a watch ends). Safe to call twice.
   void close() {
     _closed = true;

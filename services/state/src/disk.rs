@@ -89,15 +89,30 @@ mod tests {
     #[test]
     fn saved_and_loaded_are_the_same() {
         let d = tempfile::tempdir().unwrap();
-        let s = filled();
+        let mut s = filled();
+        s.put_desk("appA", &serde_json::json!({"device":"iPad","sessions":[{"id":"111111111","app":"x","name":"X"}]}), 5).unwrap();
         assert!(save(d.path(), &s).unwrap() > 0);
         let (back, why) = load(d.path());
         let back = back.unwrap();
         assert_eq!(why, None);
         assert_eq!(back.state(), s.state());
+        assert_eq!(back.state()["desks"], s.state()["desks"]);
+        assert_eq!(back.state()["desks"][0]["fp"], "appA");
         assert_eq!(back.queue(None, 50).unwrap(), s.queue(None, 50).unwrap());
         let (none, why) = load(&d.path().join("none"));
         assert!(none.is_none() && why.is_none());
+    }
+
+    #[test]
+    fn an_old_file_without_desks_loads() {
+        let d = tempfile::tempdir().unwrap();
+        let mut v = serde_json::to_value(filled()).unwrap();
+        assert!(v.as_object_mut().unwrap().remove("desks").is_some());
+        fs::write(d.path().join("state.json"), v.to_string()).unwrap();
+        let (s, why) = load(d.path());
+        assert_eq!(why, None);
+        assert_eq!(s.unwrap().state()["desks"], serde_json::json!([]));
+        assert!(!d.path().join("state.json.bad").exists());
     }
 
     #[test]

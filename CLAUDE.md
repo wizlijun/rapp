@@ -12,7 +12,7 @@
 ### 其他 session（做功能的）
 
 1. 在分支上开发，最好用 `.worktrees/` 下的 worktree；不要把任务直接提交到 main。
-2. 完成且自测通过后，**合并到本机 checkout（`/Users/bruce/git/rapp`）的 `main` 即可**：
+2. 完成且自测通过后，**合并到自己这台机器的本机 `main` 即可**（Mac 上是 `/Users/bruce/git/rapp`；Windows 机器上的路径等机器装好后填在这里）：
    - 先 `git merge main` 到自己的分支解决冲突，再在 main 上 `git merge --no-ff <branch>`；
    - 提交信息用 `merge: <中文说明>（<branch>）`。
 3. **不要**做这些事，它们归发版 session：
@@ -20,6 +20,7 @@
    - 打 tag、`git push`、建 GitHub release；
    - 改 `website/releases.json`、部署网站、给 iPhone 装包。
 4. 合并后可以删掉自己的 worktree 和分支。如果合并的东西暂时不能发，在 main 上留言写进 `tasks/todo.md`，或者别合并。
+5. Windows 相关：改了 `cfg(windows)` 里的代码，要在 Windows 机器上过了 Windows 的门禁（`scripts/check-windows.ps1`）再合并；给协议加被控端行为时，`host-core` 和它的样本在同一个提交里改；改了 `Sources/rapp-host/` 里被 `host-core` 对照表引用的文件，同一个提交里看 `host-core` 要不要跟着改，并更新对照表里的摘要。
 
 ### 发版 session
 
@@ -28,6 +29,7 @@
   - `docs(website): snapshot …`
   - 发版时合并 origin/main 产生的 `merge:` 提交
 - 只改文档（`*.md`、`docs/`、`tasks/`）不发版，攒到下一次代码改动。只影响 Linux 的改动（`cfg(target_os = "linux")` 等）也不发 macOS 版。
+- 只影响 Windows 的改动（`rust/host-windows/`、`rust/svc-windows/`、`gui/windows/`、`scripts/` 里 Windows 的脚本、`cfg(windows)` 里的代码）也不发 macOS 版，但要过门禁并立刻推到 `origin/main`，Windows 机器等着用。只改文档的合并同样立刻推。改到共用代码（`rust/host-core/`、`rapp-service` 这些 crate 里不带 `cfg(windows)` 的部分、共用的 Dart）照常算 macOS 的改动。
 - **版本号协调**：另一台机器的 Linux 也往 `origin/main` 推送，也会占用补丁号。选版本号之前先 `git fetch origin`、合并 origin/main，取 `max(本地 tag, 远端 tag, pubspec)` + 1。pubspec 的 build 号（`+N`）每次加 1。
 - gate 和打包都在专用的 detached worktree `.worktrees/release` 里做，先切到要发的那个提交。不要在主 checkout 里做：别的 session 随时会往里合并，测试跑到一半代码就变了。
 - 发版步骤：
@@ -38,3 +40,9 @@
   5. 更新 `website/releases.json`，部署网站：`node website/build.mjs && npx --yes wrangler@4.135.0 deploy --config website/wrangler.jsonc`。
   6. 推送：先 fetch，先推 main，再推 tag。
   7. iOS：iPhone Duo 能连上时，用 `scripts/build-ios.sh device --install <udid>` 装上同版本。连不上就记下来，等它能连上再装。
+
+### Windows 集成 session（首发前）
+
+- Windows 机器上常开一个 session：本机 `main` 有新合并，就 `git fetch origin`、合并 `origin/main`、跑 Windows 的门禁、推到 `origin/main`；推被拒就再 fetch、合并、重跑。
+- 首发前它只是**集成** session：不改版本号、不打 tag、不建 release、不动 `website/releases.json`。要给自己人装，就按需打内部 zip。
+- 冲突由后推的一方解决；不强推。

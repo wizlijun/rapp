@@ -108,6 +108,36 @@ async fn wrong_method_is_405() {
 }
 
 #[tokio::test]
+async fn desk_answers_204_and_400_and_shows_in_state_and_watch() {
+    let addr = start(Config::default()).await;
+    let mut rx = watch(addr).await;
+    assert_eq!(recv(&mut rx).await["what"], "hello");
+    let body = json!({"device":"iPad","sessions":[{"fp":"devA","id":"111111111","app":"term:pty:1","name":"rapp"}]}).to_string();
+    assert_eq!(put(addr, "/v1/desk/appA", &body).await.0, 204);
+    assert_eq!(recv(&mut rx).await["what"], "desk");
+    assert_eq!(get(addr, "/v1/state").await.1["desks"][0]["fp"], "appA");
+    assert_eq!(put(addr, "/v1/desk/appA", "{}").await, (400, Some(json!({"error":"bad request"}))));
+    assert_eq!(put(addr, "/v1/desk/", &body).await.0, 400);
+    assert_eq!(put(addr, &format!("/v1/desk/{}", "f".repeat(129)), &body).await.0, 400);
+    assert_eq!(get(addr, "/v1/desk/appA").await.0, 405);
+}
+
+#[tokio::test]
+async fn a_desk_name_stays_out_of_the_log() {
+    let lines: Arc<Mutex<Vec<String>>> = Arc::default();
+    let sink = lines.clone();
+    let log = Log::new(move |v| sink.lock().unwrap().push(v.to_string()));
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    tokio::spawn(serve_with_log(Config::default(), l, log));
+    let body = json!({"device":"SECRET-DEVICE","sessions":[{"id":"111111111","app":"x","name":"SECRET-NAME"}]}).to_string();
+    assert_eq!(put(addr, "/v1/desk/appA", &body).await.0, 204);
+    let all = lines.lock().unwrap().join("\n");
+    assert!(!all.contains("SECRET"), "{all}");
+    assert!(all.contains(r#""event":"desk""#) && all.contains(r#""sessions":1"#), "{all}");
+}
+
+#[tokio::test]
 async fn the_log_has_counts_not_text() {
     let lines: Arc<Mutex<Vec<String>>> = Arc::default();
     let sink = lines.clone();
