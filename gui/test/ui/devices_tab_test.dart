@@ -992,6 +992,8 @@ void main() {
     expect(tester.widget<Text>(find.byKey(const Key('new-shell-error'))).data, 'this shell is not found any more');
     expect(shellButton(tester, 'new-shell-bash').onPressed, isNotNull);
     expect(find.byKey(const Key('new-text-term')), findsNothing);
+    // Past the wait card's timers.
+    await tester.pump(const Duration(seconds: 9));
   });
 
   Future<void> showWork(WidgetTester tester, {List<Map<String, dynamic>>? shells = shellsZshBash}) async {

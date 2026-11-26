@@ -36,6 +36,7 @@ import 'shares_section.dart';
 import 'state_service_row.dart';
 import 'tokens.dart';
 import 'top_bar.dart';
+import 'wait_card.dart';
 
 /// iOS has no file manager to open a folder in: the share sheet instead.
 Future<void> _openFolder(String dir) async {
@@ -415,6 +416,8 @@ class _MainWindowState extends State<MainWindow> {
                               ),
                             ),
                           ),
+                        // On top of everything on the stage (the side panel too: a shell opens from there).
+                        Positioned.fill(key: const Key('wait-card-layer'), child: WaitCard(waits: state.waits)),
                       ]);
                     },
                   ),

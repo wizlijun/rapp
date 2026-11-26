@@ -661,6 +661,41 @@ void main() {
       expect(s.currentKey, '111/term:pty:n3');
     });
 
+    testWidgets('wait_card_counts_queued_presses: queued ⌘T presses count down on the wait card', (tester) async {
+      t.emit(listOf(shell: true));
+      await tester.pumpWidget(wrap(window()));
+      await openTerm(tester, two);
+      final gates = [Completer<void>(), Completer<void>(), Completer<void>()];
+      hubAnswers(list: listOf(shell: true), gates: gates);
+      await tester.runAsync(() async {
+        for (var i = 0; i < 3; i++) {
+          unawaited(s.newTermFrom('111', app));
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+      });
+      expect(s.waits.shown.first.what, '正在新建终端…');
+      expect(s.waits.shown.first.detail, startsWith(s.deviceName('111')));
+      expect(s.waits.moreLine, '还有 2 个排队');
+      await tester.runAsync(() async {
+        gates[0].complete();
+        for (var k = 0; k < 6; k++) {
+          await flush();
+        }
+      });
+      expect(s.waits.moreLine, '还有 1 个排队');
+      for (final g in gates.skip(1)) {
+        await tester.runAsync(() async {
+          g.complete();
+          for (var k = 0; k < 6; k++) {
+            await flush();
+          }
+        });
+      }
+      expect(s.waits.shown, isEmpty);
+      expect(s.waits.outcome, isNull);
+      await settle(tester);
+    });
+
     testWidgets('a new terminal on a device with no terminal window says so and opens nothing', (tester) async {
       t.emit(listOf(shell: true));
       await tester.pumpWidget(wrap(window()));

@@ -1446,3 +1446,22 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] 对齐 macOS `0.15.45`–`0.15.50`：补齐 `scripts/linux/rapp` 对 `term`、`state`、`load` 三个顶层 CLI 子命令的分发；修复 `rust/term/src/pty/fg.rs` Linux `execve` 测试竞态；补充 `TargetPlatform.linux` 下终端恢复（`term_restore_test.dart`）与常用语条按工具发命令（`phrase_strip_cmds_test.dart`）回归用例；扩充 `scripts/test-linux-launcher.py` 与 `scripts/test-linux-bundle.py` 端到端校验（覆盖 `rapp term restore --list/--forget`、`rapp state on/off` + `rapp-state` 伴随服务、`LinuxSampler` + `rapp load --json` / `rapp load pick --json`）。
 - [x] [v0.15.45](https://github.com/wizlijun/rapp/releases/tag/v0.15.45)（源码 `47f5046a`）与 [v0.15.50](https://github.com/wizlijun/rapp/releases/tag/v0.15.50)（源码 `e8b1627d`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致。
 - [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01545-parity.md`、`docs/superpowers/plans/2026-11-26-linux-01546-parity.md` 与 `docs/superpowers/plans/2026-11-26-linux-01550-parity.md`。
+
+## Linux 0.15.51 版本跟随对齐与发布（2026-11-26）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），将 Linux / Omarchy `x86_64` 产物构建并挂载至已发布的 [v0.15.51](https://github.com/wizlijun/rapp/releases/tag/v0.15.51) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.51`（`feat/rapp-state-p2`）：Linux 桌面端 `main.dart` / `GlobalSections` / `StateSection`（`0600` 权限保存 `local/state.json`）与 `StateSync`（本机或端口映射发现 `rapp-state`、`/v1/watch` SSE 实时流与 `/v1/seen` 多端已读同步、离线回退本机队列）完整生效；补充 `gui/test/pages/state_section_test.dart`（`TargetPlatform.linux` 下 `GlobalSections` 与 `0600` 权限断言）及 `scripts/test-linux-bundle.py`（IPC `state.url` 与 `/v1/watch` SSE `hello` 端到端断言）。
+- [x] `v0.15.51`（源码 `87ace3f2`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01551-parity.md`。
+
+## 等候卡片（分支 `feat/wait-card`，2026-11-26）
+
+用户：「在文本终端上按 cmd+T 时，等候时间很长，导致用户以为失效了。请在用户按下快捷键后，到需要权限交互或者打开新的文本终端之间，增加一个等候窗口……设置为全局的功能，类似的这种交互都可以出现。」做法：`Waits`（`gui/lib/ui/waits.dart`）+ 舞台最上层的 `WaitCard`（`gui/lib/ui/wait_card.dart`）。⌘T、总览/常用「新建」、「恢复」、待机「启动」、设备页开 shell 都接上了；⌘T 碰到授权框现在也会切到被控 Mac 的桌面（以前只出一行字）。设计 `docs/superpowers/specs/2026-11-26-rapp-wait-card-design.md`，计划 `docs/superpowers/plans/2026-11-26-rapp-wait-card.md`。
+
+- [x] `waits_test` 7 条、`wait_card_test` 4 条、term_main / overview / main_window 新增 4 条（授权切桌面、点击穿透、挂载都做过"去掉就失败"）；flutter analyze 通过；flutter 全量只剩 `linux_detach_test` 2 条（main 上同样失败）
+- [ ] 1 在被控 Mac 的文本终端里按 ⌘T：0.3 秒内舞台中央偏上出现「正在新建终端…」卡片，下面是设备名和「在『…』旁边」，秒数在走；新终端打开时卡片消失
+- [ ] 2 连按 3 次 ⌘T：卡片显示「还有 2 个排队」，每开出一个减一
+- [ ] 3 被控 Mac 上 `tccutil reset AppleEvents` 后按 ⌘T：卡片变成橙色的授权提示，停 8 秒，并切到那台 Mac 的桌面
+- [ ] 4 总览「新建」、「恢复所选」、设备页开 shell（侧栏开着时也看得见卡片）都出卡片
+- [ ] 5 卡片出现时照常能在终端里打字、点卡片下面的东西
+- [ ] 6 浅色、深色主题和远端画面上都看得清；iPad 窄屏不超出舞台
+- [ ] 7 （放大后，`fix/wait-card-big`）卡片宽 360–560、主字 18、转圈 22；授权提示整句三行内显示完，不再出现「…」

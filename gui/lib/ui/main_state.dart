@@ -62,6 +62,7 @@ import 'session_model.dart';
 import 'terms_entry.dart';
 import 'tokens.dart';
 import 'unlock.dart';
+import 'waits.dart';
 import 'workspace_store.dart';
 
 export 'lifecycle.dart' show hubWord, hubWords;
@@ -1894,7 +1895,8 @@ class MainState extends ChangeNotifier {
     try {
       final launchers = hub?.termLists[e.id]?.hosts.where((h) => h.host == null).firstOrNull?.launchers ?? const <String>[];
       if (launchers.isEmpty) throw StateError('这台设备没有可用的终端窗口');
-      final term = await hub!.openTerm(e.id, app: prefs.termAppFor(e.id, launchers), labelFrom: e.app);
+      final term = await _waitTerm(e.id, '正在新建终端…',
+          () => hub!.openTerm(e.id, app: prefs.termAppFor(e.id, launchers), labelFrom: e.app));
       try {
         await hub?.terms(e.id);
       } catch (_) {}
@@ -3619,7 +3621,7 @@ class MainState extends ChangeNotifier {
     }
 
     try {
-      final ids = await hub!.restoreTerms(device, keys, app: _launcherOf(device));
+      final ids = await _waitTerm(device, '正在恢复终端…', () => hub!.restoreTerms(device, keys, app: _launcherOf(device)));
       if (_disposed) return;
       stage(ids);
       hint = '已恢复 ${ids.length} 个终端';
@@ -3716,7 +3718,7 @@ class MainState extends ChangeNotifier {
           return;
         }
         try {
-          await openText(id, shell: shell, from: newTermSource(id));
+          await _waitTerm(id, '正在新建终端…', () => openText(id, shell: shell, from: newTermSource(id)));
         } catch (e) {
           if (_disposed) return;
           hint = newTermWords(e);
@@ -3731,6 +3733,19 @@ class MainState extends ChangeNotifier {
   /// The host refused a new terminal because macOS is asking there whether rApp may control Terminal.
   @visibleForTesting
   static bool isConsentAsk(String message) => message.contains('whether rApp may control Terminal');
+
+  /// Whether the failed terminal open [e] is macOS asking on the host (the wait card keeps that up longer).
+  static bool consentError(Object e) => e is HubException && isConsentAsk(e.message);
+
+  /// The slow things being waited for, which the wait card over the stage shows.
+  final Waits waits = Waits();
+
+  /// [f] on the wait card as [what] on [device] (with [detail] after the device's name), in the words a failed
+  /// terminal open is said in.
+  Future<T> _waitTerm<T>(String device, String what, Future<T> Function() f, {String? detail}) => waits.run(what, f,
+      detail: detail == null ? deviceName(device) : '${deviceName(device)} · $detail',
+      words: newTermWords,
+      asks: consentError);
 
   /// After a terminal open on [id] failed with [e]: when macOS is asking on that device, its desktop comes up so the
   /// prompt can be answered there — not for this machine (the prompt is on this screen) nor a device without one.
@@ -3752,7 +3767,6 @@ class MainState extends ChangeNotifier {
   final Set<String> _newingText = {};
 
   /// What the hint says when opening a new text terminal failed with [e].
-  @visibleForTesting
   static String newTermWords(Object e) => switch (e) {
         StateError(:final message) => message,
         // macOS on the host would have stopped the Terminal tab script to ask: the prompt is up there now.
@@ -3813,17 +3827,24 @@ class MainState extends ChangeNotifier {
   /// ⌘T: a new text terminal on [device] beside [term], switched to once made. Presses queue: each opens after the
   /// one before it is made (or failed, or waited [newTermTimeout] for). A failure is the hint, as opening one from
   /// the overview says it.
-  Future<void> newTermFrom(String device, String term) => _newTerms = _newTerms.then((_) async {
-        if (_disposed) return;
-        try {
-          if (!hubUsable) throw StateError('这台设备没有可用的终端窗口');
-          await openText(device, from: term).timeout(newTermTimeout);
-        } catch (e) {
-          if (_disposed) return;
-          hint = newTermWords(e);
-          notifyListeners();
-        }
-      });
+  ///
+  /// Each press is on the wait card from the moment it is pressed, so the queued ones count there.
+  Future<void> newTermFrom(String device, String term) {
+    final turn = _newTerms.then((_) async {
+      if (_disposed) return;
+      if (!hubUsable) throw StateError('这台设备没有可用的终端窗口');
+      await openText(device, from: term).timeout(newTermTimeout);
+    });
+    final shown = termRowOf('$device/$term')?.shown;
+    final done = _waitTerm(device, '正在新建终端…', () => turn, detail: shown == null ? null : '在「$shown」旁边')
+        .catchError((Object e) {
+      if (_disposed) return;
+      hint = newTermWords(e);
+      _showConsentPrompt(device, e);
+      notifyListeners();
+    });
+    return _newTerms = done;
+  }
 
   /// The device's list row of the text terminal on record [key]; null for any other record, or when it is not
   /// listed.
@@ -5616,6 +5637,7 @@ class MainState extends ChangeNotifier {
     _voiceEnds.close();
     composerZoom.dispose();
     stageSide.dispose();
+    waits.dispose();
     appLatch.dispose();
     resources.removeListener(notifyListeners);
     resources.dispose();

@@ -1,0 +1,130 @@
+# rApp Windows 版：边界和交接
+
+写于 2026-11-26。给接手验证、调试和后续实现的人（或 agent）看。先读这一份，再读你要做的那一段的计划。
+
+## 1. 有哪些文档，各管什么
+
+| 文档 | 管什么 |
+|---|---|
+| `docs/superpowers/specs/2026-11-26-rapp-windows-design.md` | 总体设计。用户已批准（2026-11-26）。说“做成什么样、为什么” |
+| `docs/superpowers/plans/2026-11-26-rapp-windows-p-probes.md` | P 段：探针。在 Windows 实机上先试的事，结果写进 `…-windows-probe-results.md` |
+| `…-windows-a-foundation.md` | A 段：地基。现有 crate 在 Windows 上编得过、Windows 门禁、空壳 crate |
+| `…-windows-b-host-core.md` | B 段：`rust/host-core`，被控端里不认识操作系统的那一半，在 Mac 上对着 Swift 验 |
+| `…-windows-c-controller.md` | C 段：控制端（Flutter Windows 外壳、`rapp-svc user`、管道协议） |
+| `…-windows-d-host-user.md` | D 段：被控端（用户方式），`rust/host-windows` |
+| `…-windows-e-terminal.md` | E 段：文本终端（ConPTY） |
+| `…-windows-f-system-service.md` | F 段：系统服务、帮手、登录前、解锁、Ctrl+Alt+Del |
+| `…-windows-g-install-upgrade.md` | G 段：安装、升级、退回、卸载、打包 |
+| `…-windows-h-release.md` | H 段：语音、输入法、任务栏、总验收、总审计、首发 |
+| `docs/superpowers/plans/notes/2026-11-26-windows-*-draft-notes.md` | 代码草稿的说明：写了什么、没写什么、哪些没验证、发现的计划错误。**在各自的代码分支上**，不在 main 上 |
+
+每份计划的开头都有：这一段的**硬约束**（Global Constraints）、**重点审查的输入**（Review Focus，每条都挂到了某个任务的测试上）、**文件表**、**组件选择表**（Component choices：用哪个系统接口、哪个库、钉哪个版本）。C–H 六份是在探针跑之前写的，所以各有一张“探针结果不一样时改哪里”的表。
+
+## 2. 现在到哪了
+
+| 段 | 计划 | 代码 | 在哪 | 状态 |
+|---|---|---|---|---|
+| P 探针 | 有 | 没有 | —— | 没跑。要一台 Windows 11 和一台 Server 2022（实机或虚拟机） |
+| A 地基 | 有 | **草稿** | 分支 `feat/windows-foundation`，worktree `.worktrees/windows-foundation` | 没编译、没测试、没在 Windows 上碰过 |
+| B 主机核心 | 有 | **草稿**，分两个分支 | `feat/windows-host-core`（任务 1–6，之后接 13–19）；`feat/windows-host-core-rules`（任务 7–12） | 同上；Swift 样本文件一个都还没生成 |
+| C–H | 有 | 没有 | —— | 等接手的人按计划做 |
+
+所有代码草稿都从 main 的 `7ed6c7e4` 分出来，**没有合并进 main**。草稿的每个提交标题都带 `(草稿，未编译未验证)`。
+
+## 3. 草稿是怎么写出来的，能信多少
+
+草稿由 Opus 5.5 照计划写，规矩是：**只写代码，不编译，不跑任何测试、格式化和检查工具**。所以：
+
+- **能信的**：结构、模块划分、文件位置、函数名和签名照计划；核心算法是照着 Swift 源文件逐个分支移过来的，不是空壳（要求是不许留 `todo!()`、空函数体）。组件选择都在计划的表里定死了，草稿照着用。
+- **不能信的**：编不编得过；和 Swift 的输出是不是一个字节不差；Windows 系统调用的参数对不对；`Cargo.lock`（**没有重新生成**，新加的依赖还没进去）；样本文件（`rust/host-core/tests/fixtures/` 是空的，要跑 Swift 生成）。
+- **每个分支上的说明文件是准的那一份**：写了哪些、哪个算法完整、哪里是猜的、哪里和计划对不上。接手先读它。
+
+## 4. 边界
+
+### 4.1 三条模块边界（规格 §5.3，改这些要回来问用户）
+
+1. **`host-core` 不认识操作系统。** 里面没有 `cfg(windows)`、`cfg(unix)`、`target_os`、`libc`、`windows` 系列 crate。操作系统只通过 `platform.rs` 的那组接口进来。`tests/boundary.rs` 守着。
+2. **`host-windows` 不产生也不解析协议字节。** 它只实现 `host-core` 的平台接口。
+3. **只有 `rapp-svc` 跨登录会话、跨权限启动进程。** 而且只在 `rust/svc-windows/src/elevate.rs` 一个文件里（计划 F）。
+
+### 4.2 不许动的
+
+- `Sources/`（Swift）、`rust/host-linux/`、`rust/client-gtk/`、`rust/hub-ffi/`：不改。Swift 是对照的基准，草稿和它不一致时**以 Swift 为准，改 Rust**。
+- 中继（`rust/relay/`）：只批准了 `audit.rs` 里三处 `#[cfg(unix)]`。再多要问用户。登录 VPS 也要用户同意。
+- 协议：不为 Windows 加消息，不升协议号。控制面只加可选字段，而且只在 Windows 上出现。
+- macOS、Linux、iOS 的行为：不变。每条缝都是“加一支”，unix 那一支的代码差异为零；Mac 门禁的命令一个字不改。
+- `docs/archives/`：不读不搜。
+- 版本号、tag、推送、release、官网部署：归发版 session，功能 session 不碰。
+
+### 4.3 各段之间约好的接口（名字在哪定的，谁在用）
+
+| 接口 | 定在哪 | 谁用 |
+|---|---|---|
+| 平台接口（采集、输入、窗口、剪贴板、锁屏……的 trait） | 计划 B 任务 13，`host-core/src/platform.rs` | D 实现，B 的假平台实现 |
+| worker 命令行、事件、退出码 | 计划 B 任务 9，`host-core/src/cli.rs`；规格 §6.1 | `rapp-service`、D |
+| 版本目录的布局、旁边的程序怎么找 | 计划 A（`rapp_net::proc`、`stage-windows.ps1`）；规格 §5.1 | 全部 |
+| `rapp-svc` 管道的请求和回答（`Request`、`Status`、`Response`、`client::request`） | 计划 C 任务 7，`svc-windows/src/proto.rs`、`client.rs` | F 实现其中五个请求，G 实现三个并给 `Status` 加三个可选字段、给 `ApplyUpdate` 加 `confirm` |
+| 帮手的帧格式（`HELPER_V`、`ToHelper`、`FromHelper`） | 计划 F 任务 4 | `rapp-host` 和 `rapp-host secure-helper` |
+| `PlatformCaps`（界面里的平台差别） | 计划 C | C、D、H；界面里 `Platform.isWindows` 的次数不许比现在多 |
+| `Switcher`（`rapp-service` 的升级怎么交给 `rapp-svc`） | 计划 G 任务 6 | `rapp-service`；macOS 上是 `None`，原路不变 |
+| `install::Item`、`System`（安装时对系统的每一项改动） | 计划 G 任务 2 | 安装、卸载、切换；Inno Setup 脚本里不许有这些 |
+| 门禁和打包脚本的名字、日志最后一行 `EXIT=<0\|1>` | 计划 A 任务 8、计划 G 任务 7 | 集成 session、发版 session |
+
+改这张表里任何一个名字或签名：在定它的那份计划里改，并在同一个提交里改用到它的计划。
+
+## 5. 接手以后按这个顺序做
+
+**0. 先读**：规格 §0.2（用户定的十一件事）、§5.3、§19.1；这一份；要做的那一段的计划；那个分支上的说明文件。
+
+**1. `CLAUDE.md` 的四条先加上**（规格 §14.5 第 1–4 条）。**第一行 Windows 代码合并进 main 之前必须做**，否则 Mac 发版 session 会为每一次只动 Windows 的合并发一个 macOS 版。文字要用户点头，给用户看一次再提交。计划 A 任务 1。
+
+**2. 探针**（计划 P），在 Windows 实机上。一级探针先跑（G1、G2、H1、H3、H5、S1、S2、S4、T1、T5、C1）：它们的结果能推翻结构。每个结果写进探针结果文件；和计划假设不一样的，照那份计划开头的表改计划，再动代码。表里写了“回来问用户”的（S1、S2、H1 的退路、I1 的退路）必须问。
+
+**3. A 段草稿（`feat/windows-foundation`）**，在 Mac 上：
+   1. `git merge main`；读说明文件。
+   2. 重新生成 `Cargo.lock`（`cargo metadata` 或一次 `cargo build`；**不改版本号**）。
+   3. `cargo build`、`cargo test --workspace --no-fail-fast`、`cargo clippy --workspace --all-targets -- -D warnings`、`swift test`、`flutter analyze`、`flutter test`。修到全绿。修的时候守住：unix 那一支的行为不变（拿 main 上同一条测试对）。
+   4. 到 Windows 机器上：`scripts\check-windows.ps1`（计划 A 任务 8），修到 `EXIT=0`。
+   5. 计划 A 每个任务的“实机检查”逐条做，结果写进 `tasks/todo.md`。
+   6. 两个门禁都绿了再合并（`merge: …（feat/windows-foundation）`，文字见计划 A）。
+
+**4. B 段草稿**，在 Mac 上：
+   1. 把 `feat/windows-host-core-rules` 合进 `feat/windows-host-core`（冲突只会在 `src/lib.rs` 的导出和 `Cargo.toml` 的依赖上）。
+   2. 任务 3（压缩）要先有探针 C1 的结论。
+   3. 生成样本：`RAPP_WRITE_FIXTURES=1 swift test`（每个任务里写了各自的 `--filter`），然后不带那个变量再跑一遍（比对方式）。生成器只调用 `Sources/RappCore/` 的代码；Swift 符号在测试里看不到时，照计划 B 任务 2 的办法绕，**不改 Swift 的访问级别**。
+   4. `cargo test -p rapp-host-core`。红的地方：以 Swift 为准改 Rust。做不到一个字节不差的，按计划 B“Fixture rules”最后一条处理并写进 `PORTING.md`。
+   5. 任务 13–19（会话、假平台、`fake-host-core`、对照表）如果草稿还没写完，按计划补。
+   6. 用真的控制端连 `fake-host-core` 试一次（计划 B 任务 19）。
+   7. `host-core` 是共用代码：过完整的 Mac 门禁，合并后照常发 macOS 版。Mac 门禁不能明显变慢（`host-core` 的测试加会话测试 60 秒以内）。
+
+**5. C → D → E → F → G → H**，照计划做。依赖（规格 §17.2）：C 要 A 和探针 G2；D 要 A、B 和 H1、H3、H5；E 要 A 和 T1、T5（界面那一半要 C）；F 要 D（管道协议来自 C）和 S1、S2；G 要 C、F 和 S4、I1；H 要全部。C 和 D 可以两个人同时做。F 段做完要换一个没写这段代码的人审规格 §18.2。
+
+**6. 首发**（计划 H 任务 7）：发之前问用户两件事（`CLAUDE.md` 后两条的文字；现在发不发）。不标 Latest。
+
+## 6. 验证和调试时的规矩
+
+- **草稿和 Swift 不一致**：改 Rust。**草稿和计划不一致**：看 Swift 和规格谁对；计划错了就改计划，写在同一个提交里，并在那一段的说明文件“计划错误”一节记一行。
+- **计划留给实现的人定的**（规格 §19.1 第一张单子）：自己定，写进计划。**不留的**（第二张单子，以及 §4.1、§4.2）：停下来问用户。
+- **验证过的提交不再带“草稿”字样。** 草稿提交留在历史里不改写；修的提交用平常的标题（`fix(...)`、`test(...)`）。分支上最后一个草稿之后至少要有一个提交写明“在 Mac 上过了门禁”或“在 Windows 上过了门禁”，合并说明里也写。
+- 每加一个配置项、环境变量、注册表值、文件，同一个提交里改 `config-reference`。
+- 新加的依赖：合并说明里写名字、版本、许可证。
+- 日志里绝不出现：密码、PIN、token、密钥、打的字、剪贴板内容。
+- Mac 上：`grep` 是 ugrep，用 `/usr/bin/grep`；没有 `timeout`；按路径提交，不用 `git add -A`、不用 `git stash`、不跑 `cargo fmt --all`；flutter 在 `~/development/flutter/bin`，跑完测试把 `pubspec.lock` 还原。
+
+## 7. 计划里我替用户定了、和规格字面不完全一样的地方
+
+接手的人不用再问，但要知道。第 1、2 条用户 2026-11-26 已经点头，规格 §7.5、§12.3 的文字也跟着改了；第 3–5 条是规格留给实现的人定的。
+
+1. **Ctrl+Alt+Del 不提前置灰**（计划 F）。规格 §7.5 写的是“做不到时置灰”。计划里改成：照常能点，被控端发不出去时回 `inputBlocked`（`by = "sas"`），控制端显示“这台电脑现在收不到 Ctrl+Alt+Del”。原因：能不能发要到那一刻才知道（策略随时可能被改）。
+2. **升级地址的覆盖两种方式都只从注册表读**（计划 G 决定 4）。规格 §12.3 只对系统服务方式这么要求；计划里用户方式也一样（读 `HKCU`），Windows 上不读 `service.json` 的 `update_url`。原因：一条规则，少一条可以被别的程序改写的路。
+3. **静默安装带系统服务时必须给 `/OWNER`**（计划 G 决定 5），不给就失败、什么都不改。
+4. **认领机主的时间窗是 10 分钟**（计划 F）。
+5. **第一版语音只用默认录音设备；麦克风被关用注册表里的隐私开关加打开失败两头判断**（计划 H 决定 1–2）。
+
+## 8. 还没人做、容易漏的
+
+- Windows 机器、虚拟机快照、集成 session 都还没有（计划 A 任务 1）。
+- `update-windows` 这个固定 release 首发时才建（计划 H 任务 7）。
+- 规格 §19.2 列的旧文档里的旧话，归做 A 段的人改（计划 A 任务 9），只改文档。
+- 规格里的【未验证】要在首发前全部换成探针结果（计划 H 任务 6）。
+- 首发以后才做的：`host-linux` 换到 `host-core` 上（U9）、代码签名证书（U4）、虚拟显示器（U3）、arm64。

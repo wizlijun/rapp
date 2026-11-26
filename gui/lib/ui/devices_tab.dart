@@ -540,7 +540,8 @@ class _DevicesTabState extends State<DevicesTab> {
       _shellErrors.remove(id);
     });
     try {
-      await state.openText(id, shell: path, from: state.newTermSource(id));
+      await state.waits.run('正在打开终端…', () => state.openText(id, shell: path, from: state.newTermSource(id)),
+          detail: state.deviceName(id), words: MainState.newTermWords, asks: MainState.consentError);
     } catch (e) {
       if (mounted) setState(() => _shellErrors[id] = e is HubException ? e.message : '$e');
     } finally {
