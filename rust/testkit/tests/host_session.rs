@@ -267,6 +267,8 @@ fn ready_payload() -> Vec<u8> {
     p
 }
 
+/// A has no menu bar on Windows, so a pick is dropped as Swift drops a pick of an item A no
+/// longer has (`Server.swift:488-494`): one log line, no answer to B, the session goes on.
 #[test]
 fn menu_pick_is_ignored() {
     let (_platform, host) = serve();
@@ -274,8 +276,18 @@ fn menu_pick_is_ignored() {
     c.send(&client::menu_pick(&[0, 1]));
     c.send(&client::ping(7));
     c.wait_for(|m| matches!(m, Incoming::Pong(7)));
-    assert!(!c.seen.iter().any(|s| s.starts_with("Error")), "{:?}", c.seen);
+    wait_text(&host, "dropped a pick of a menu item A no longer has", 1);
+    // Nothing answers the pick: only the stream's own messages arrive afterwards.
+    let answer = |m: &Incoming| {
+        matches!(m, Incoming::Error(_) | Incoming::Menus(_) | Incoming::InputBlocked(_) | Incoming::Pasted { .. } | Incoming::Covered { .. })
+    };
+    c.quiet_for(host_time(2.0), |m| !answer(m)).expect("a pick is not answered");
+    // The session is still there: it answers the next ping.
+    c.send(&client::ping(8));
+    c.wait_for(|m| matches!(m, Incoming::Pong(8)));
+    assert!(!c.seen.iter().any(|s| s.starts_with("Error") || s.starts_with("error")), "{:?}", c.seen);
     assert!(!host.saw(|e| e["event"] == "session" && e["state"] == "ended"));
+    assert_eq!(count_text(&host, "dropped a pick of a menu item A no longer has"), 1);
 }
 
 #[test]

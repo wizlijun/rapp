@@ -112,7 +112,7 @@
 - takeover 和 stop 最多等 2 秒的 ack。
 - yield 测试通过 `input` 事件确认输入被接受。
 - 输入法每 0.25 秒轮询一次。
-- menuPick 不处理，也不走闸门。
+- menuPick 走闸门（和 Swift `Server.swift:415` 一样），过了闸门就按 Swift“A 已经没有这个菜单项”的分支只写一行日志（`:490-494`），不回 B 任何消息，会话继续（第四批补上）。
 
 任务 14
 - 用容量为 1 的槽代替 sync_channel。

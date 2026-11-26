@@ -438,8 +438,11 @@ impl Session {
                 self.apply_region(&table);
             }
             Message::StateRules(json) => self.state_rules(json),
-            // Windows has no menu bar to show (spec §6.9), and `weak` is a client-to-client hint.
-            Message::MenuPick(_) | Message::MenuBar(_) | Message::Weak(_) => {}
+            // Windows has no menu bar to show (spec §6.9), so every pick names an item A does not
+            // have: Swift's answer to that (`Server.swift:488-494`) is this log line and nothing else.
+            Message::MenuPick(_) => self.inner.out.log("dropped a pick of a menu item A no longer has"),
+            // `menuBar` goes from A to B, and `weak` is a client-to-client hint.
+            Message::MenuBar(_) | Message::Weak(_) => {}
             Message::Ready { .. }
             | Message::Error(_)
             | Message::Frame { .. }
@@ -1073,8 +1076,7 @@ impl Session {
     }
 }
 
-/// The messages that pass the yield gate (`Server.swift:414`). `menuPick` is in Swift's
-/// list too; here it is not handled at all.
+/// The messages that pass the yield gate (`Server.swift:415`), in Swift's order.
 fn gated(m: &Message) -> bool {
     matches!(
         m,
@@ -1084,6 +1086,7 @@ fn gated(m: &Message) -> bool {
             | Message::Scroll { .. }
             | Message::Paste { .. }
             | Message::Focus(_)
+            | Message::MenuPick(_)
             | Message::SetStream { .. }
             | Message::SetView { .. }
             | Message::Resize { .. }
