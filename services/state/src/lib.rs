@@ -5,12 +5,13 @@ pub mod event;
 pub mod store;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
 
-pub use http::serve;
+pub use http::{serve, serve_with_log};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -54,14 +55,40 @@ pub fn parse_args(args: &[String]) -> Result<Config, String> {
     Ok(cfg)
 }
 
-/// One JSON line on stderr: `{"at":<unix>,"event":"<name>",…}`. `fields` must be an object (or null).
-pub fn log(event: &str, fields: Value) {
-    let at = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let mut line = json!({"at": at, "event": event});
+fn unix_now() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+fn log_line(event: &str, fields: Value) -> Value {
+    let mut line = json!({"at": unix_now(), "event": event});
     if let (Some(l), Value::Object(f)) = (line.as_object_mut(), fields) {
         l.extend(f);
     }
-    eprintln!("{line}");
+    line
+}
+
+/// Where log lines go. The default writes JSON lines to stderr; tests collect them.
+#[derive(Clone)]
+pub struct Log(Arc<dyn Fn(&Value) + Send + Sync>);
+
+impl Log {
+    pub fn new(f: impl Fn(&Value) + Send + Sync + 'static) -> Log {
+        Log(Arc::new(f))
+    }
+
+    pub fn stderr() -> Log {
+        Log::new(|line| eprintln!("{line}"))
+    }
+
+    /// One JSON line: `{"at":<unix>,"event":"<name>",…}`. `fields` must be an object (or null).
+    pub fn emit(&self, event: &str, fields: Value) {
+        (self.0)(&log_line(event, fields));
+    }
+}
+
+/// One JSON line on stderr: `{"at":<unix>,"event":"<name>",…}`. `fields` must be an object (or null).
+pub fn log(event: &str, fields: Value) {
+    Log::stderr().emit(event, fields);
 }
 
 /// The stderr line another task parses to recognise "port already in use".
