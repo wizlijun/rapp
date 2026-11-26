@@ -1384,3 +1384,14 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] P3：桌面和代报（`/v1/desk`、“别处开着”那一组、GUI 客户端推断状态代报、远程开启用设备间新请求 `SetService`）。计划还没写；写之前先问用户规格 §17 第 6 条
 - [ ] P4：`rapp emit`（IPC 的 `emit`、命令行、`RAPP_TERM`）。计划还没写
 - [ ] 规格 §18 第 1、2、5 条仍没验证：设备时钟差；发件箱对终端 `watch_terms` 的开销和会话从关到开的跟随；Windows 上 `rapp-service` 的现状
+
+## 总览本机列折叠（分支 `feat/overview-fold-local`，2026-11-26，合并 bf06a8a6）
+
+用户：「作为 pad 或 duo 终端，本机是没有 host 服务的……请默认折叠这种没有 host 会话的列。只显示个图标加标题，尽量少的占横向空间。点开后再展开。」范围选「只折没有 host 的本机」。规格 `docs/superpowers/specs/2026-11-26-overview-fold-local-design.md`。
+
+- [x] `overview_test` 新增 6 条；ui 1478 通过；全量只剩 `linux_detach_test` 2 条（worktree 里没编 `rapp-session`，改动前同样失败）；整分支评审 2 项重要已修
+- [ ] 1 iPad / Duo：总览「本机」列是约 56 宽的小竖条（系统图标、灯、「本机」），右边的设备列紧挨着
+- [ ] 2 点竖条展开成原来的样子；列头右边 ‹ 折回，手指好点
+- [ ] 3 展开后进一个 app 再回全景，仍是展开的；重开 rApp 又是折叠的
+- [ ] 4 Mac / Linux：本机列和以前一样，没有竖条、没有 ‹
+- [ ] 5 VoiceOver 念「展开 本机」「折叠 本机」
