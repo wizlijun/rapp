@@ -59,7 +59,7 @@ const PASSWORD_P: [&str; 5] = ["mysql", "mysqldump", "mysqladmin", "psql", "sshp
 /// Word prefixes of well-known token formats.
 const SECRET_PREFIXES: [&str; 8] = ["sk-", "ghp_", "gho_", "github_pat_", "xox", "AKIA", "eyJ", "Bearer"];
 
-/// Removes leading `NAME=value` words (values may be quoted), also after a leading `env`.
+/// Removes leading `NAME=value` words (values may be quoted or hold `\`-escaped blanks), also after a leading `env`.
 fn strip_assignments(line: &str) -> &str {
     let mut rest = line.trim_start();
     loop {
@@ -79,6 +79,11 @@ fn strip_assignments(line: &str) -> &str {
         }
         i += 1;
         while i < b.len() && !b[i].is_ascii_whitespace() {
+            if b[i] == b'\\' {
+                // An escaped character (a blank among them) is part of the value.
+                i += 2;
+                continue;
+            }
             if b[i] == b'\'' || b[i] == b'"' {
                 let q = b[i];
                 i += 1;
@@ -123,11 +128,13 @@ fn is_secret(line: &str) -> bool {
     let pass_p = has_prog(&PASSWORD_P);
     let curl = has_prog(&["curl"]);
     let redis = has_prog(&["redis-cli"]);
+    // `docker login -p x` (podman's too); `docker run -p 80:80` is a port.
+    let login = has_prog(&["docker", "podman"]) && words.contains(&"login");
     for w in &words {
         if token_like(w) {
             return true;
         }
-        if pass_p && w.starts_with("-p") {
+        if (pass_p || login) && w.starts_with("-p") {
             return true;
         }
         if curl && (w.starts_with("-u") || *w == "--user") {
@@ -416,12 +423,21 @@ mod tests {
             ("h2", "export X=ghp_abc", "export"),
             ("i", "psql -p5432", "psql"),
             ("j", "ls --keyboard", "ls"),
+            ("k", "docker login -u me -p hunter2 registry.example", "docker"),
+            ("k2", "docker login -phunter2", "docker"),
+            ("k3", "docker login --password hunter2 r.example", "docker"),
+            ("k4", "sudo podman login -p hunter2", "sudo"),
         ];
         for (id, line, prog) in rows {
             assert_eq!(clean_cmd(line), (None, Some(prog.into())), "{id} {line:?}");
         }
         // (g) assignments after env are assignments.
         assert_eq!(clean_cmd("env FOO=x ls -l"), (Some("ls -l".into()), Some("ls".into())));
+        // An escaped blank is part of the value.
+        assert_eq!(clean_cmd("TOKEN=abc\\ def claude"), (Some("claude".into()), Some("claude".into())));
+        assert_eq!(clean_cmd("A=x\\ y B=\"p q\" claude -c"), (Some("claude -c".into()), Some("claude".into())));
+        // A -p of docker other than login's is no password.
+        assert_eq!(clean_cmd("docker run -p 80:80 nginx"), (Some("docker run -p 80:80 nginx".into()), Some("docker".into())));
     }
 
     #[test]
