@@ -22,6 +22,11 @@ async fn post(addr: SocketAddr, path: &str, body: &str) -> (u16, Value) {
     request(addr, "POST", path, body).await
 }
 
+async fn put(addr: SocketAddr, path: &str, body: &str) -> (u16, Option<Value>) {
+    let (c, v) = request(addr, "PUT", path, body).await;
+    (c, if v.is_null() { None } else { Some(v) })
+}
+
 async fn request(addr: SocketAddr, method: &str, path: &str, body: &str) -> (u16, Value) {
     let mut s = TcpStream::connect(addr).await.unwrap();
     let req = format!(
@@ -175,4 +180,28 @@ async fn an_aborted_serve_does_not_save() {
     let all = lines.lock().unwrap().join("\n");
     assert!(!all.contains(r#""event":"saved""#), "{all}");
     assert!(!data.join("state.json").exists());
+}
+
+#[tokio::test]
+async fn seen_answers_204_404_400() {
+    let addr = start(old_ok()).await;
+    // Dated now: a device silent for 30 days is dropped, which the 2025 samples would hit.
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let ev = |n: u64, kind: &str| json!({"v":1,"fp":"aa","epoch":"e","n":n,"at":t,"t":kind,"session":"s","state":"working","seq":n}).to_string();
+    let first4 = format!("{}\n{}\n", ev(1, "state"), ev(2, "state"));
+    assert_eq!(post(addr, "/v1/events", &first4).await, (204, Value::Null));
+    let st = get(addr, "/v1/state").await.1;
+    let (fp, sid) = (st["devices"][0]["fp"].clone(), st["devices"][0]["sessions"][0]["session"].clone());
+    assert_eq!(put(addr, "/v1/seen", &json!({"fp": fp, "session": sid}).to_string()).await, (204, None));
+    assert!(get(addr, "/v1/state").await.1["devices"][0]["sessions"].as_array().unwrap().iter().any(|r| r["seen"].is_u64()));
+    assert_eq!(put(addr, "/v1/seen", r#"{"fp":"zz","session":"zz"}"#).await, (404, Some(json!({"error":"unknown session"}))));
+    assert_eq!(put(addr, "/v1/seen", r#"{"eid":"a:b:9"}"#).await, (404, Some(json!({"error":"unknown eid"}))));
+    assert_eq!(put(addr, "/v1/seen", r#"{"what":1}"#).await, (400, Some(json!({"error":"bad request"}))));
+    assert_eq!(put(addr, "/v1/seen", "not json").await, (400, Some(json!({"error":"bad request"}))));
+    assert_eq!(get(addr, "/v1/seen").await.0, 405);
+    let eid = get(addr, "/v1/queue").await.1["events"][0]["eid"].clone();
+    assert_eq!(put(addr, "/v1/seen", &json!({"eid": eid, "handled": true}).to_string()).await, (204, None));
+    let row = get(addr, "/v1/queue?limit=1").await.1["events"][0].clone();
+    assert_eq!(row["handled"], true);
+    assert!(row["seen"].is_u64());
 }

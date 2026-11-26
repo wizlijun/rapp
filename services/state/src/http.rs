@@ -16,7 +16,7 @@ use tokio::sync::Notify;
 
 use crate::disk;
 use crate::event::parse_line;
-use crate::store::Store;
+use crate::store::{Look, Store};
 use crate::{Config, Log};
 
 fn reply(status: StatusCode, body: Value) -> Response<Full<Bytes>> {
@@ -133,7 +133,7 @@ async fn post_events(store: &Shared, dirty: &Dirty, log: &Log, req: Request<Inco
         mark(dirty);
     }
     log.emit("events", json!({"from": from, "accepted": accepted, "dup": dup}));
-    Response::builder().status(StatusCode::NO_CONTENT).body(Full::new(Bytes::new())).expect("static response parts are valid")
+    no_content()
 }
 
 fn get_queue(store: &Shared, query: Option<&str>) -> Response<Full<Bytes>> {
@@ -156,11 +156,41 @@ fn get_queue(store: &Shared, query: Option<&str>) -> Response<Full<Bytes>> {
     }
 }
 
+fn no_content() -> Response<Full<Bytes>> {
+    Response::builder().status(StatusCode::NO_CONTENT).body(Full::new(Bytes::new())).expect("static response parts are valid")
+}
+
+async fn put_seen(store: &Shared, dirty: &Dirty, log: &Log, req: Request<Incoming>) -> Response<Full<Bytes>> {
+    let bad = || reply(StatusCode::BAD_REQUEST, json!({"error": "bad request"}));
+    let body = match Limited::new(req.into_body(), MAX_BODY).collect().await {
+        Ok(b) => b.to_bytes(),
+        Err(_) => return bad(),
+    };
+    let Ok(v) = serde_json::from_slice::<Value>(&body) else { return bad() };
+    let handled = v.get("handled").and_then(Value::as_bool).unwrap_or(false);
+    let s = |k: &str| v.get(k).and_then(Value::as_str);
+    let (look, by) = match (s("eid"), s("fp"), s("session")) {
+        (Some(eid), _, _) => (Look::Eid(eid), "eid"),
+        (None, Some(fp), Some(session)) => (Look::Session { fp, session }, "session"),
+        _ => return bad(),
+    };
+    let result = lock(store).mark_seen(look, handled, now());
+    match result {
+        Ok(()) => {
+            mark(dirty);
+            log.emit("seen", json!({"by": by}));
+            no_content()
+        }
+        Err(e) => reply(StatusCode::NOT_FOUND, json!({"error": e})),
+    }
+}
+
 async fn route(store: &Shared, dirty: &Dirty, log: &Log, req: Request<Incoming>) -> Response<Full<Bytes>> {
     let path = req.uri().path().to_string();
     let allowed = match path.as_str() {
         "/v1/health" | "/v1/state" | "/v1/queue" => &Method::GET,
         "/v1/events" => &Method::POST,
+        "/v1/seen" => &Method::PUT,
         _ => return reply(StatusCode::NOT_FOUND, json!({"error": "not found"})),
     };
     if req.method() != allowed {
@@ -170,6 +200,7 @@ async fn route(store: &Shared, dirty: &Dirty, log: &Log, req: Request<Incoming>)
         "/v1/health" => reply(StatusCode::OK, json!({"name": "rapp-state", "v": 1})),
         "/v1/state" => reply(StatusCode::OK, lock(store).state()),
         "/v1/queue" => get_queue(store, req.uri().query()),
+        "/v1/seen" => put_seen(store, dirty, log, req).await,
         _ => post_events(store, dirty, log, req).await,
     }
 }

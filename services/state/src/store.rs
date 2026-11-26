@@ -19,6 +19,9 @@ struct Row {
     data: Map<String, Value>,
     /// When the row entered its current state and `seq`.
     first: u64,
+    /// When a user last looked at this session (Unix seconds); kept across new states.
+    #[serde(default)]
+    seen: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +38,16 @@ struct Queued {
     at: u64,
     arr: u64,
     row: Value,
+    #[serde(default)]
+    seen: Option<u64>,
+    #[serde(default)]
+    handled: bool,
+}
+
+/// What a "seen" mark points at.
+pub enum Look<'a> {
+    Session { fp: &'a str, session: &'a str },
+    Eid(&'a str),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,7 +133,7 @@ impl Store {
             self.arrivals += 1;
             let key = (ev.at, self.arrivals);
             let pos = self.queue.partition_point(|q| (q.at, q.arr) <= key);
-            self.queue.insert(pos, Queued { at: ev.at, arr: self.arrivals, row });
+            self.queue.insert(pos, Queued { at: ev.at, arr: self.arrivals, row, seen: None, handled: false });
             self.trim();
         }
         true
@@ -185,7 +198,7 @@ impl Store {
                     needs.push((since, d.fp.clone(), sid.clone(), n));
                 }
                 let mut o = json!({"fp": d.fp, "last": d.last,
-                    "sessions": d.sessions.values().map(|r| Value::Object(r.data.clone())).collect::<Vec<_>>()});
+                    "sessions": d.sessions.values().map(row_json).collect::<Vec<_>>()});
                 if let Some(v) = &d.id {
                     o["id"] = json!(v);
                 }
@@ -199,6 +212,22 @@ impl Store {
         json!({"devices": devices, "needs": needs.into_iter().map(|n| n.3).collect::<Vec<_>>(), "queued": self.queue.len()})
     }
 
+    /// Marks a session (by device and session id) or a queue row (by eid) as seen at `now`.
+    pub fn mark_seen(&mut self, look: Look, handled: bool, now: u64) -> Result<(), &'static str> {
+        match look {
+            Look::Session { fp, session } => {
+                let row = self.devices.get_mut(fp).and_then(|d| d.sessions.get_mut(session)).ok_or("unknown session")?;
+                row.seen = Some(now);
+            }
+            Look::Eid(eid) => {
+                let q = self.queue.iter_mut().find(|q| q.row["eid"] == eid).ok_or("unknown eid")?;
+                q.seen = Some(now);
+                q.handled = handled;
+            }
+        }
+        Ok(())
+    }
+
     pub fn queue(&self, before: Option<&str>, limit: usize) -> Result<Value, String> {
         let limit = if limit == 0 { PAGE_DEFAULT } else { limit.min(PAGE_MAX) };
         let newest_first = || self.queue.iter().rev();
@@ -207,9 +236,28 @@ impl Store {
             Some(c) => newest_first().position(|q| q.row["eid"] == c).ok_or("bad cursor")? + 1,
         };
         let rest: Vec<&Queued> = newest_first().skip(skip).collect();
-        let events: Vec<Value> = rest.iter().take(limit).map(|q| q.row.clone()).collect();
+        let events: Vec<Value> = rest.iter().take(limit).map(|q| queued_json(q)).collect();
         Ok(json!({"events": events, "more": rest.len() > limit}))
     }
+}
+
+fn row_json(r: &Row) -> Value {
+    let mut m = r.data.clone();
+    if let Some(t) = r.seen {
+        m.insert("seen".into(), json!(t));
+    }
+    Value::Object(m)
+}
+
+fn queued_json(q: &Queued) -> Value {
+    let mut v = q.row.clone();
+    if let Some(t) = q.seen {
+        v["seen"] = json!(t);
+    }
+    if q.handled {
+        v["handled"] = json!(true);
+    }
+    v
 }
 
 /// A session row: the event body without the envelope, plus `at` and `by`.
@@ -231,7 +279,8 @@ fn put_row(dev: &mut Device, session: String, data: Map<String, Value>) {
         Some(old) if old.data.get("state") == data.get("state") && old.data.get("seq") == data.get("seq") => old.first,
         _ => at,
     };
-    dev.sessions.insert(session, Row { data, first });
+    let seen = dev.sessions.get(&session).and_then(|old| old.seen);
+    dev.sessions.insert(session, Row { data, first, seen });
 }
 
 #[cfg(test)]
@@ -254,6 +303,43 @@ mod tests {
     }
     fn ev(n: u64, at: u64) -> Event {
         parse_line(&json!({"v":1,"fp":"aa","epoch":"e","n":n,"at":at,"t":"state","session":"s","state":"working","seq":n}).to_string()).unwrap()
+    }
+
+    fn first_session(s: &Store) -> (String, String) {
+        let d = &s.state()["devices"][0];
+        (d["fp"].as_str().unwrap().into(), d["sessions"][0]["session"].as_str().unwrap().into())
+    }
+    fn session_row(s: &Store, fp: &str, sid: &str) -> Value {
+        let v = s.state();
+        let d = v["devices"].as_array().unwrap().iter().find(|d| d["fp"] == fp).unwrap();
+        d["sessions"].as_array().unwrap().iter().find(|r| r["session"] == sid).unwrap().clone()
+    }
+    fn feed_one(s: &mut Store, fp: &str, sid: &str, state: &str, at: u64) {
+        let l = json!({"v":1,"fp":fp,"epoch":"e9","n":at,"at":at,"t":"state","session":sid,"state":state,"seq":at});
+        s.apply(parse_line(&l.to_string()).unwrap(), at);
+    }
+
+    #[test]
+    fn seen_sticks_to_the_session_and_survives_a_new_state() {
+        let mut s = st();
+        feed(&mut s, TERM, 4);
+        let (fp, sid) = first_session(&s);
+        s.mark_seen(Look::Session { fp: &fp, session: &sid }, false, 500).unwrap();
+        assert_eq!(session_row(&s, &fp, &sid)["seen"], 500);
+        feed_one(&mut s, &fp, &sid, "working", 600);
+        assert_eq!(session_row(&s, &fp, &sid)["seen"], 500);
+        assert_eq!(s.mark_seen(Look::Session { fp: "nope", session: &sid }, false, 1), Err("unknown session"));
+    }
+
+    #[test]
+    fn seen_and_handled_mark_a_queue_row() {
+        let mut s = st();
+        feed(&mut s, TERM, 2);
+        let eid = s.queue(None, 1).unwrap()["events"][0]["eid"].as_str().unwrap().to_string();
+        s.mark_seen(Look::Eid(&eid), true, 700).unwrap();
+        let row = &s.queue(None, 1).unwrap()["events"][0];
+        assert_eq!((row["seen"].as_u64(), row["handled"].as_bool()), (Some(700), Some(true)));
+        assert_eq!(s.mark_seen(Look::Eid("x:y:1"), false, 1), Err("unknown eid"));
     }
 
     #[test]

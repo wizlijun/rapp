@@ -26,6 +26,16 @@ Body: NDJSON (format in `events.md`); blank lines are ignored.
 
 - 400 `{"error":"bad cursor"}`, 400 `{"error":"bad limit"}` (not a non-negative integer).
 
+## PUT /v1/seen
+
+Marks something as looked at, with the service's own clock. Body is one of `{"fp":"<fp>","session":"<id>"}` (a session row) or `{"eid":"<eid>"}` (a queue row), plus an optional `"handled":true` (only kept for a queue row).
+
+- 204: marked.
+- 404 `{"error":"unknown session"}` or `{"error":"unknown eid"}`.
+- 400 `{"error":"bad request"}`: not JSON, or neither shape.
+
+A marked session row in `GET /v1/state` carries `"seen": <Unix seconds>`; it stays through later states of that session and goes when the session is gone. A marked queue row in `GET /v1/queue` carries `"seen"`, and `"handled": true` when set.
+
 ## Other
 
 A known path with the wrong method: 405 `{"error":"method not allowed"}`.
