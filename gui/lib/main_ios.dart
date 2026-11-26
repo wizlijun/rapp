@@ -21,6 +21,7 @@ import 'ui/app_profile_store.dart';
 import 'ui/background.dart';
 import 'ui/device_os.dart';
 import 'ui/fullscreen.dart';
+import 'state/state_sync.dart';
 import 'ui/main_state.dart';
 import 'ui/main_window.dart';
 import 'ui/prefs.dart';
@@ -91,7 +92,16 @@ Future<void> mainIos() async {
   try {
     builtinRules = await rootBundle.loadString('assets/state_rules.json');
   } catch (_) {}
+  final stateSync = StateSync(localDir: data.localDir, find: () async => stateUrlFromPorts(hub?.portMaps ?? const []))..start();
+  var seenMaps = hub?.portMaps;
+  // A share that appears is picked up now, not at the next 60 s look.
+  hub?.addListener(() {
+    if (identical(seenMaps, hub!.portMaps)) return;
+    seenMaps = hub.portMaps;
+    if (stateSync.status == StateStatus.none) stateSync.refresh();
+  });
   final state = MainState(
+      stateSync: stateSync,
       hub: hub,
       hubError: hubError,
       data: data,

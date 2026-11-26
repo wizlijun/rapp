@@ -7,9 +7,11 @@ import '../data_relocate.dart';
 import '../paths.dart';
 import '../platform_caps.dart';
 import '../service_client.dart';
+import '../state/state_sync.dart';
 import 'data_section.dart';
 import 'linux_update_section.dart';
 import 'local_section.dart' show UpdateHooks, openInstallerPage;
+import 'state_section.dart';
 import 'update_section.dart';
 
 class GlobalSections extends StatelessWidget {
@@ -19,11 +21,15 @@ class GlobalSections extends StatelessWidget {
     required this.data,
     this.relocate,
     this.hooks,
+    this.stateSync,
     this.openPage = openInstallerPage,
     this.platform,
   });
 
   final ServiceMonitor monitor;
+
+  /// Null (tests): no 状态服务 block.
+  final StateSync? stateSync;
 
   /// The current data root; the caller rebuilds when it changes.
   final DataDir data;
@@ -65,6 +71,7 @@ class GlobalSections extends StatelessWidget {
               onSetAuto: (on) => m.setUpdate(autoUpdate: on),
               onOpenPage: (page) => openPage(page).catchError((_) {}),
             ),
+          if (stateSync != null) StateSection(sync: stateSync!),
           DataSection(data: data, relocate: relocate),
         ]);
       },

@@ -50,6 +50,27 @@ void main() {
       expect([s.port, s.token], [null, null]);
     });
 
+    test('ports event keeps kind and picks the smallest state id', () async {
+      expect(hub.portMaps, isEmpty);
+      expect(stateUrlFromPorts(hub.portMaps), isNull);
+      t.emit({
+        'event': 'ports',
+        'maps': [
+          {'id': '333', 'port': 8102, 'local': 28005, 'kind': 'state'},
+          {'id': '222', 'port': 8102, 'local': 28003, 'kind': 'state'},
+          {'id': '222', 'port': 3000, 'local': 28000},
+          {'bad': 1},
+        ],
+      });
+      await pumpEventQueue();
+      expect(hub.portMaps.length, 3);
+      expect(hub.portMaps.last.kind, isNull);
+      expect(stateUrlFromPorts(hub.portMaps), 'http://localhost:28003');
+      t.emit({'event': 'ports', 'maps': [{'id': '222', 'port': 3000, 'local': 28000}]});
+      await pumpEventQueue();
+      expect(stateUrlFromPorts(hub.portMaps), isNull);
+    });
+
     test('close carries reason user', () {
       hub.close(3, reason: 'user');
       expect(t.sent.last, {'cmd': 'close', 'sid': 3, 'reason': 'user'});
