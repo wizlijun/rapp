@@ -104,6 +104,7 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
                     "share" => crate::share_cmds::share(state, &cmd).await,
                     "unshare" => crate::share_cmds::unshare(state, &cmd).await,
                     "hosts" => hosts(state).await,
+                    "state" => crate::companion::ipc(state, &cmd).await,
                     "load" => crate::load::serve::reply(state, cmd["history"] == true, cmd["top"] == true),
                     "load_all" => load_all(state, &cmd).await,
                     // `serve::follow` writes the first line itself.
@@ -336,6 +337,7 @@ async fn load_all(state: &Arc<State>, cmd: &Value) -> Value {
 async fn reached(state: &Arc<State>, id: &str, name: &str, mut shares: Value) -> Value {
     use crate::share_cmds::{addr, number, numbers, protocol, told};
     let list = shares.as_array_mut().map(std::mem::take).unwrap_or_default();
+    crate::sink::saw(state, id, &list);
     crate::numbers::saw(state, id, name, &numbers(&list));
     let wants = rapp_ports::wants(&list);
     state.maps.keep(id, &wants.iter().map(|(port, _)| *port).collect::<Vec<u16>>());

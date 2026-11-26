@@ -13,6 +13,8 @@ rapp update [--yes] [--timeout 秒] [--json]      立即升级到最新版
 rapp update check [--timeout 秒] [--json]       只检查（并下载），不装
 rapp update status [--json]                     看升级状态
 rapp update rollback [--timeout 秒] [--json]    回到上一版
+rapp state                                      看状态服务
+rapp state on|off                               在这台上开、关状态服务
 rapp load [设备…] [--top] [--json]   各设备的余力、各项数值、警告；不写设备名就列出全部，含本机
 rapp load pick [--json]              推荐一台设备，并说明原因";
 
@@ -26,6 +28,8 @@ pub enum Cmd {
     /// `rapp term restore`: no picks = all; `list` and `forget` stand alone.
     TermRestore { list: bool, forget: bool, picks: Vec<String> },
     Update { what: Upd, yes: bool, timeout: Option<u64>, json: bool },
+    /// `rapp state [on|off]`: None shows, Some turns the state service on or off.
+    State { on: Option<bool> },
     Load { devices: Vec<String>, top: bool, json: bool },
     LoadPick { json: bool },
 }
@@ -71,6 +75,14 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
             Some((c, _)) => Err(format!("不认识的命令：term {c}")),
         },
         "update" => update(rest),
+        "state" => match rest {
+            [] => Ok(Cmd::State { on: None }),
+            [w, rest @ ..] if w == "on" || w == "off" => match rest {
+                [] => Ok(Cmd::State { on: Some(w == "on") }),
+                [extra, ..] => Err(format!("多写了：{extra}")),
+            },
+            [w, ..] => Err(format!("不认识的命令：state {w}")),
+        },
         "load" => load(rest),
         other => Err(format!("不认识的命令：{other}")),
     }
@@ -191,6 +203,15 @@ mod tests {
 
     fn p(s: &str) -> Result<Cmd, String> {
         parse(&s.split_whitespace().map(String::from).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn state_commands() {
+        assert_eq!(p("state"), Ok(Cmd::State { on: None }));
+        assert_eq!(p("state on"), Ok(Cmd::State { on: Some(true) }));
+        assert_eq!(p("state off"), Ok(Cmd::State { on: Some(false) }));
+        assert_eq!(p("state up"), Err("不认识的命令：state up".into()));
+        assert_eq!(p("state on x"), Err("多写了：x".into()));
     }
 
     #[test]

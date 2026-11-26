@@ -4,6 +4,7 @@ mod activity;
 pub mod autolock;
 mod channel;
 mod cm;
+mod companion;
 pub mod config;
 mod data;
 mod forward;
@@ -13,6 +14,7 @@ mod labels;
 pub mod load;
 mod maps;
 mod numbers;
+mod outbox;
 mod own;
 mod pace;
 mod peer;
@@ -22,6 +24,7 @@ mod relay_link;
 mod share_cmds;
 mod sharing;
 mod shares;
+mod sink;
 mod state;
 mod term;
 mod update;
@@ -170,6 +173,10 @@ impl Service {
         if let Some(why) = unreadable {
             log.event(Lvl::Warn, "maps_unreadable", json!({"err": why}));
         }
+        let (sinks, unreadable) = sink::Sinks::load(&opts.home);
+        if let Some(why) = unreadable {
+            log.event(Lvl::Warn, "state_sinks_unreadable", json!({"err": why}));
+        }
         let server = device_server_config(&identity, &[ALPN_DEVICE, ALPN_PEER])?;
         let endpoint = quinn::Endpoint::server(server, ([0, 0, 0, 0], port).into()).with_context(|| format!("bind udp port {port}"))?;
         let port = endpoint.local_addr()?.port();
@@ -208,6 +215,9 @@ impl Service {
             labels,
             maps,
             numbers: numbers::Numbers::new(),
+            sinks,
+            outbox: outbox::Outbox::new(),
+            companions: companion::Companions::new(),
             own: own::Own::new(opts.own_ports),
             probed: probe::Probed::default(),
             forwards: forward::Forwards::new(),
@@ -244,6 +254,9 @@ impl Service {
             autolock::spawn(state.clone(), opts.lock_grace),
             relay_link::spawn(state.clone(), opts.advertise_lan),
             spawn_forward_sums(state.clone(), opts.forward_sum_every),
+            sink::spawn(state.clone()),
+            outbox::spawn(state.clone()),
+            companion::spawn(state.clone()),
         ];
         if let Some(data) = opts.data {
             let name = state.cfg.lock().unwrap().name.clone();
@@ -287,6 +300,9 @@ impl Service {
         for t in &self.tasks {
             t.abort();
         }
+        self.state.companions.stop_all();
+        // Its own state service is gone with it (in memory only: the tell loop is stopped).
+        crate::sink::set_local(&self.state, None);
         self.state.maps.stop();
         self.state.own.stop();
         self.state.outbound.close();

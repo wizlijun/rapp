@@ -90,6 +90,9 @@ pub enum Op {
         #[serde(default)]
         port: Value,
     },
+    /// "Device `id` has a state service on its port `port`" (`on: false`: no longer). A device that
+    /// learns of one tells the devices it knows; an older device answers "unknown op".
+    StateSink { id: String, port: u16, on: bool },
     /// This device's load (device-load spec §10), once: `history` adds the last hour, `top` the busiest processes.
     Load {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -161,6 +164,14 @@ mod tests {
         let some = Op::Share { ports: json!([22]), note: None, allow: Value::Null, proto: Some("tcp".into()) };
         assert_eq!(serde_json::to_value(&some).unwrap(), json!({"op":"share","ports":[22],"proto":"tcp"}));
         assert_eq!(serde_json::from_value::<Op>(json!({"op":"share","ports":[22],"proto":"tcp"})).unwrap(), some);
+    }
+
+    #[test]
+    fn state_sink_wire() {
+        let op = Op::StateSink { id: "123456789".into(), port: 8102, on: true };
+        let v = json!({"op":"state_sink","id":"123456789","port":8102,"on":true});
+        assert_eq!(serde_json::to_value(&op).unwrap(), v);
+        assert_eq!(serde_json::from_value::<Op>(v).unwrap(), op);
     }
 
     #[test]

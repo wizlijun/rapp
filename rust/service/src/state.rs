@@ -102,6 +102,12 @@ pub struct State {
     pub maps: crate::maps::Maps,
     /// The share numbers other devices are seen to use.
     pub numbers: crate::numbers::Numbers,
+    /// Where the state services are (`state-sinks.json`, and this device's own).
+    pub sinks: crate::sink::Sinks,
+    /// Sends this device's session states to the chosen state service.
+    pub outbox: crate::outbox::Outbox,
+    /// The programs run beside this service (`services.json`): the state service.
+    pub companions: crate::companion::Companions,
     /// This device's own shares, served on their numbers.
     pub own: crate::own::Own,
     /// The shared ports whose protocol was detected in this run (`sharing::settle`).

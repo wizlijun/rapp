@@ -1342,3 +1342,23 @@ macOS、Linux、Duo、iPad 各一遍。
   - [ ] 10. macOS 上余力明细的「内存」可用 % 和活动监视器对得上
   - [ ] 11. Linux 采样器跑一遍：CPU / 内存 / 磁盘 / 温度 / 电池的数都合理，读不到的项是「—」
   - [ ] 12. 停掉对端的服务，或者断开中继：那一列的余力在约 20 秒内消失，「需要你」里不留资源行
+
+## rapp-state 状态服务（2026-11-26，规格 `docs/superpowers/specs/2026-11-26-rapp-state-design.md`，分支 `feat/rapp-state-p1`）
+
+- [x] P1：`rapp-state` 服务、`rapp-service` 的发件箱（终端程序状态）、附带服务（`local/services.json`）、`Share.kind` 和 `Op::StateSink` 找服务、`rapp state [on|off]`、进 macOS 和 Linux 安装包。release 构建的 `rapp-state` 二进制 1,850,784 字节（约 1.8 MB，本机 Apple 芯片）。规格 §18 第 4 条“hyper 进来以后安装包大多少”：还要打一次包，对比 zip 或 pkg 前后的大小
+- [ ] P1 实机检查：
+  - [ ] ① 两台真机，一台 `rapp state on`，另一台跑 Claude Code，`curl localhost:<分享号>/v1/queue` 里有 working、blocked、done
+  - [ ] ② 停状态服务期间让状态变 3 次，服务恢复后补到
+  - [ ] ③ 纯服务器上 `rapp state on`，在 Mac 上 `rapp hosts` 一次后，别的设备的 `rapp state` 都看到它
+  - [ ] ④ 没开状态服务的网里，`rapp state` 显示发件箱没在发
+- [ ] P1 遗留小问题（总审查记下的，不挡合并）：
+  - [ ] Linux 机器上跑一遍 `scripts/test-linux-build.py`、`test-linux-bundle.py`（已加 `rapp-state`，macOS 上跑不了）
+  - [ ] 状态服务反复起不来时，本机发件箱一直对着本机那个死端口，不会改投别台的状态服务；`rapp state` 还列着“本机的 <端口>”
+  - [ ] 开着时改 `local/services.json` 的端口要先 `rapp state off` 再 `on` 才生效（写进配置参考）
+  - [ ] 用户手动建的分享备注恰好是“状态服务”时，`off` 会把它当成自己的删掉
+  - [ ] 知道有状态服务、又开着终端时，发件箱会让终端 worker 一直活着（设计如此，看耗电/资源）
+  - [ ] 服务停时留下的 kind state 分享，若下次以 off 状态启动不会被收回
+- [ ] P2：app 接入（接入点设置、`/v1/watch`、`/v1/seen`，队列和需要你改从服务来，iOS 经内嵌 hub）。计划还没写；写之前先问用户规格 §17 第 3–5 条（队列里的程序状态行只从服务来；断开的会话、离线的设备不进全局；别处开着的会话只列出来、不自动打开）。要解决：纯服务器上开的状态服务，要等一台 GUI 设备看过一次它的分享表（`rapp hosts` 或分享页）才传得开，P2 里看要不要借 `list_apps` 的回复带出来（规格 §7.2）。还有规格 §18 第 3 条（iOS 前台 SSE 长连接是否稳）
+- [ ] P3：桌面和代报（`/v1/desk`、“别处开着”那一组、GUI 客户端推断状态代报、远程开启用设备间新请求 `SetService`）。计划还没写；写之前先问用户规格 §17 第 6 条
+- [ ] P4：`rapp emit`（IPC 的 `emit`、命令行、`RAPP_TERM`）。计划还没写
+- [ ] 规格 §18 第 1、2、5 条仍没验证：设备时钟差；发件箱对终端 `watch_terms` 的开销和会话从关到开的跟随；Windows 上 `rapp-service` 的现状

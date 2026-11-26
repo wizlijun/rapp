@@ -1,0 +1,6 @@
+{"at":1764130000,"list":{"terms":[{"id":"term:pty:a","name":"a","command":"zsh","host":null,"panes":1,"attached":0,"activity":0,"dead":false,"unread":false,"ps":{"state":"idle","seq":0,"since":1764129000}}],"hosts":[]}}
+{"at":1764130010,"list":{"terms":[{"id":"term:pty:a","name":"a","command":"zsh","host":null,"panes":1,"attached":0,"activity":0,"dead":false,"unread":false,"ps":{"state":"working","seq":1,"since":1764130010}}],"hosts":[]}}
+{"at":1764130020,"list":{"terms":[{"id":"term:pty:a","name":"a","command":"zsh","host":null,"panes":1,"attached":0,"activity":0,"dead":false,"unread":false,"ps":{"state":"blocked","seq":2,"since":1764130020,"kind":"permission","app":"claude-code","msg":"approve Bash: touch /tmp/x"}}],"hosts":[]}}
+{"at":1764130025,"list":{"terms":[{"id":"term:pty:a","name":"a","command":"zsh","host":null,"panes":1,"attached":0,"activity":0,"dead":false,"unread":false,"ps":{"state":"blocked","seq":2,"since":1764130020,"kind":"permission","app":"claude-code","msg":"approve Bash: touch /tmp/x","progress":40}}],"hosts":[]}}
+{"at":1764130030,"list":{"terms":[{"id":"term:pty:a","name":"a","command":"zsh","host":null,"panes":1,"attached":0,"activity":0,"dead":false,"unread":false,"ps":{"state":"done","seq":3,"since":1764130030}}],"hosts":[]}}
+{"at":1764130040,"list":{"terms":[],"hosts":[]}}

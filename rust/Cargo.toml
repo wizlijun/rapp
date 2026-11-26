@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["wire", "conn", "relay", "net", "service", "ports", "hub", "hub-ffi", "testkit", "update", "term", "client-core", "client-gtk", "cli", "host-linux", "speech-linux"]
+members = ["wire", "conn", "relay", "net", "service", "ports", "hub", "hub-ffi", "testkit", "update", "term", "client-core", "client-gtk", "cli", "host-linux", "speech-linux", "../services/state"]
 
 [workspace.package]
 version = "0.15.47"
@@ -16,6 +16,9 @@ rcgen = { version = "0.14", default-features = false, features = ["crypto", "rin
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+hyper = { version = "1", features = ["http1", "server", "client"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
 sha2 = "0.10"
 rand = "0.9"
 tempfile = "3"

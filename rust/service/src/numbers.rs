@@ -130,6 +130,7 @@ pub async fn on_start(state: Arc<State>) {
         while let Ok(Some(done)) = tokio::time::timeout_at(deadline, asks.join_next()).await {
             // A device that is offline, refuses or is too old to say has no numbers to count.
             if let Ok((id, Ok(shares))) = done {
+                crate::sink::saw(&state, &id, shares.as_array().map(Vec::as_slice).unwrap_or_default());
                 let locals = shares.as_array().into_iter().flatten().filter_map(|s| s["local"].as_u64()?.try_into().ok()).collect();
                 state.numbers.set_seen(&id, locals);
             }

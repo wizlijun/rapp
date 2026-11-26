@@ -25,7 +25,7 @@ version = tomllib.loads((repo / 'rust/Cargo.toml').read_text())['workspace']['pa
 protocol_source = (repo / 'rust/client-core/src/protocol.rs').read_text()
 protocol = re.search(r'^pub const VERSION: u8 = (\d+);$', protocol_source, re.MULTILINE)
 assert protocol, 'client protocol version declaration not found'
-for name in ['rapp', 'rapp-gui', 'rapp-cli', 'rapp-client', 'rapp-session', 'rapp-host', 'rapp-service', 'rapp-hub', 'rapp-term', 'rapp-speech']:
+for name in ['rapp', 'rapp-gui', 'rapp-cli', 'rapp-client', 'rapp-session', 'rapp-host', 'rapp-service', 'rapp-hub', 'rapp-term', 'rapp-state', 'rapp-speech']:
     assert (bundle / name).is_file() and os.access(bundle / name, os.X_OK), name
 assert subprocess.check_output([bundle / 'rapp', '--version'], text=True).strip() == f'rapp {version}'
 assert json.loads(subprocess.check_output([bundle / 'rapp-client', 'version', '--json'], text=True)) == {

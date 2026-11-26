@@ -161,6 +161,9 @@ fn listed(share: &Share) -> Value {
     if !share.note.is_empty() {
         v["note"] = json!(share.note);
     }
+    if let Some(kind) = &share.kind {
+        v["kind"] = json!(kind);
+    }
     v
 }
 
@@ -239,6 +242,14 @@ pub(crate) async fn connect_local(addrs: &[SocketAddr], wait: Duration) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn listed_says_the_kind() {
+        let s = Share { local: Some(28001), kind: Some("state".into()), ..Share::new(8102) };
+        assert_eq!(listed(&s), json!({"port": 8102, "proto": "http", "local": 28001, "kind": "state"}));
+        let s = Share { local: Some(28001), ..Share::new(8102) };
+        assert_eq!(listed(&s), json!({"port": 8102, "proto": "http", "local": 28001}));
+    }
 
     fn share(allow: Vec<Fp>) -> Share { Share { allow, ..Share::new(8000) } }
     const A: Fp = Fp([1; 32]);
