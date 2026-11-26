@@ -17,11 +17,12 @@ use windows_sys::Win32::Security::{
     NO_INHERITANCE, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED, SUB_CONTAINERS_AND_OBJECTS_INHERIT,
     TOKEN_QUERY, TOKEN_USER,
 };
+use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 use windows_sys::Win32::System::Console::{GetConsoleWindow, SetConsoleOutputCP};
 use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows_sys::Win32::System::Threading::{CreateMutexW, GetCurrentProcess, GetCurrentProcessId, OpenProcessToken};
 
-/// `FILE_ALL_ACCESS` (what `icacls` shows as `F`). Kept here so `Win32_Storage_FileSystem` is not needed.
+/// `FILE_ALL_ACCESS` (what `icacls` shows as `F`), as the plain `u32` the access entry takes.
 const FILE_ALL_ACCESS: u32 = 0x001F_01FF;
 /// `ACCESS_ALLOWED_ACE_TYPE` (`Win32_System_SystemServices` has it as `u32`; the header field is `u8`).
 const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
@@ -110,6 +111,18 @@ pub fn console_utf8() {
 pub fn has_console() -> bool {
     // SAFETY: plain call without pointers.
     !unsafe { GetConsoleWindow() }.is_null()
+}
+
+/// `(total, available to this user)` bytes of the volume that holds `path` (any directory on it).
+pub fn disk_space(path: &Path) -> io::Result<(u64, u64)> {
+    let w = wide(path.as_os_str())?;
+    let (mut avail, mut total, mut free) = (0u64, 0u64, 0u64);
+    // SAFETY: `w` is NUL-terminated and outlives the call; the three out pointers are valid.
+    let ok = unsafe { GetDiskFreeSpaceExW(w.as_ptr(), &mut avail, &mut total, &mut free) };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok((total, avail))
 }
 
 /// A SID as its string form (`S-1-5-…`).
@@ -280,6 +293,14 @@ pub fn read_acl(path: &Path) -> io::Result<(bool, Vec<String>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_disk_of_the_temp_dir_has_room() {
+        let d = tempfile::tempdir().unwrap();
+        let (total, avail) = disk_space(d.path()).unwrap();
+        assert!(total > 0 && avail <= total, "{total} {avail}");
+        assert!(disk_space(&d.path().join("missing")).is_err());
+    }
 
     #[test]
     fn named_mutex_is_exclusive_and_released() {
