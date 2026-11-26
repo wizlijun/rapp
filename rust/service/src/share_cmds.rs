@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 /// The device a command's `to` means, when it is not this one: its ID and the name this device
 /// gives it (its entry in `hosts.json`, or the ID).
-fn target(state: &State, cmd: &Value) -> Result<Option<(String, String)>, Value> {
+pub(crate) fn target(state: &State, cmd: &Value) -> Result<Option<(String, String)>, Value> {
     let Some(to) = cmd["to"].as_str() else { return Ok(None) };
     let id = target_id(to).ok_or_else(|| err("unknown name"))?;
     if state.cfg.lock().unwrap().id.as_deref() == Some(id.as_str()) {
@@ -27,7 +27,7 @@ fn target(state: &State, cmd: &Value) -> Result<Option<(String, String)>, Value>
 }
 
 /// Sends `op` to the device `id`: its reply and fingerprint, or the error to answer with.
-async fn ask_there(state: &State, id: &str, op: &Op) -> Result<(Value, Fp), Value> {
+pub(crate) async fn ask_there(state: &State, id: &str, op: &Op) -> Result<(Value, Fp), Value> {
     match tokio::time::timeout(HOSTS_WAIT, pipe::set(state, id, op)).await {
         Ok(Ok(got)) => Ok(got),
         Ok(Err(e)) => Err(err(e.as_str())),

@@ -287,8 +287,43 @@ async fn watcher(mut changes: broadcast::Receiver<String>, out: mpsc::Sender<Byt
     log.emit("watch_closed", json!({"watching": n, "lagged": lagged}));
 }
 
+const FP_MAX: usize = 128;
+
+async fn put_desk(cx: &Ctx, fp: &str, req: Request<Incoming>) -> Response<Body> {
+    let bad = || reply(StatusCode::BAD_REQUEST, json!({"error": "bad request"}));
+    if fp.is_empty() || fp.contains('/') || fp.chars().count() > FP_MAX {
+        return bad();
+    }
+    let body = match Limited::new(req.into_body(), MAX_BODY).collect().await {
+        Ok(b) => b.to_bytes(),
+        Err(_) => return bad(),
+    };
+    let Ok(v) = serde_json::from_slice::<Value>(&body) else { return bad() };
+    let result = {
+        let mut st = lock(&cx.store);
+        let r = st.put_desk(fp, &v, now());
+        cx.publish(&mut st);
+        r
+    };
+    match result {
+        Ok(()) => {
+            mark(&cx.dirty);
+            let n = v.get("sessions").and_then(Value::as_array).map_or(0, Vec::len);
+            cx.log.emit("desk", json!({"fp": fp, "sessions": n}));
+            no_content()
+        }
+        Err(_) => bad(),
+    }
+}
+
 async fn route(cx: &Ctx, req: Request<Incoming>) -> Response<Body> {
     let path = req.uri().path().to_string();
+    if let Some(fp) = path.strip_prefix("/v1/desk/") {
+        if req.method() != Method::PUT {
+            return reply(StatusCode::METHOD_NOT_ALLOWED, json!({"error": "method not allowed"}));
+        }
+        return put_desk(cx, fp, req).await;
+    }
     let allowed = match path.as_str() {
         "/v1/health" | "/v1/state" | "/v1/queue" | "/v1/watch" => &Method::GET,
         "/v1/events" => &Method::POST,

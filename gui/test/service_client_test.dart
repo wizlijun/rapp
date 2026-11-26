@@ -564,6 +564,38 @@ void main() {
       m.dispose();
     });
 
+    test('stateService asks state with to', () async {
+      final svc = FakeService('tok-ss');
+      await svc.start();
+      final m = ServiceMonitor(readToken: () async => 'tok-ss', port: svc.port, retry: const Duration(milliseconds: 50));
+      m.start();
+      await until(() => m.status != null);
+      svc.replies['state'] = {'ok': true, 'on': true, 'port': 8102};
+      expect(await m.stateService(to: '111111111', on: true), {'ok': true, 'on': true, 'port': 8102});
+      expect(svc.received.last, {'cmd': 'state', 'to': '111111111', 'on': true});
+      await m.stateService();
+      expect(svc.received.last, {'cmd': 'state'});
+      await svc.stop();
+      m.dispose();
+    });
+
+    test('stateHost reads outbox.dest', () async {
+      final svc = FakeService('tok-sh');
+      await svc.start();
+      final m = ServiceMonitor(readToken: () async => 'tok-sh', port: svc.port, retry: const Duration(milliseconds: 50));
+      m.start();
+      await until(() => m.status != null);
+      svc.replies['state'] = {'ok': true, 'outbox': {'dest': {'id': '222222222', 'port': 8102}}};
+      expect(await m.stateHost(), '222222222');
+      svc.replies['state'] = {'ok': true, 'outbox': {'dest': {'local': 8102}}};
+      expect(await m.stateHost(), m.status!.id);
+      expect(m.status!.id, isNotNull);
+      svc.replies['state'] = {'ok': true, 'outbox': {'dest': null}};
+      expect(await m.stateHost(), isNull);
+      await svc.stop();
+      m.dispose();
+    });
+
     test('share sends to, ports, note and allow; leaves out what is null', () async {
       final svc = FakeService('tok-r2');
       await svc.start();

@@ -25,6 +25,7 @@ import '../embed/traffic_label.dart' show segments;
 import '../history/input_history.dart';
 import '../history/input_recorder.dart';
 import '../hub_client.dart';
+import '../state/state_out.dart' show AppReport;
 import '../state/state_sync.dart';
 import '../load_model.dart';
 import '../service_client.dart' show ServiceMonitor;
@@ -234,6 +235,7 @@ class MainState extends ChangeNotifier {
     hub?.addListener(_onHub);
     monitor?.addListener(_onMonitor);
     stateSync?.addListener(_onStateSync);
+    _tellMe();
     hub?.askNet();
     _lastError = hub?.lastError;
     _netLevel = hub?.net?.level;
@@ -246,7 +248,7 @@ class MainState extends ChangeNotifier {
     this.profiles.addListener(_onProfiles);
     positions.dropExcept({for (final p in workspace.projects) p.id});
     if (prefs.first == FirstLayer.project) grouping = Grouping.project;
-    _entries = _mapEntries();
+    _remap();
     _trackAttention();
     refreshDevices();
     _restorePins();
@@ -344,7 +346,7 @@ class MainState extends ChangeNotifier {
       _syncHidden(rs);
     }
     _applyFps();
-    _entries = _mapEntries();
+    _remap();
     unawaited(history.refresh());
     final old = oldRoot.endsWith('/') ? oldRoot : '$oldRoot/';
     for (final e in resources.clips) {
@@ -786,11 +788,12 @@ class MainState extends ChangeNotifier {
   }
 
   /// What the queue shows, newest first: [hintHistory] alone, or, while the service is connected, the app's own
-  /// lines plus the service's program rows.
+  /// lines plus the service's program rows. The app's inferred rows whose state it reported come back from the
+  /// service, so they step aside too; one that was not reported (an unsure block, no fingerprint) stays.
   List<HintRecord> get queueRows {
     if (!_fromService) return hintHistory;
     final all = [
-      ...hintHistory.where((r) => !r.term),
+      ...hintHistory.where((r) => !r.term && _reportedRow[r] != true),
       ...stateSync!.rows.map(_serviceRow).whereType<HintRecord>(),
     ]..sort((a, b) => b.at.compareTo(a.at));
     return all.take(hintHistoryMax).toList();
@@ -809,11 +812,22 @@ class MainState extends ChangeNotifier {
       case 'state':
         final ps = termPs(row);
         if (ps == null) return null;
+        final known = id != null && (hub?.hosts.any((h) => h.id == id) ?? false);
+        final session = row['session'];
+        if (row['src'] == 'app') {
+          // A GUI client's state, inferred by some app from its screen.
+          final title = _text(row['name']) ?? (session is String ? session : '');
+          return HintRecord('$title @ $name：${programWord(ps)}', when,
+              device: known ? id : null,
+              app: known && session is String ? session : null,
+              title: title,
+              lamp: programLamp(ps),
+              inferred: true,
+              eid: eid);
+        }
         final nm = _text(row['title']) ?? _text(row['name']);
         final host = row['host'];
         final title = termDisplayName(nm is String ? nm : '', host is String ? host : null);
-        final known = id != null && (hub?.hosts.any((h) => h.id == id) ?? false);
-        final session = row['session'];
         return HintRecord('$title @ $name：${programWord(ps)}', when,
             device: known ? id : null,
             app: known && session is String ? session : null,
@@ -902,9 +916,17 @@ class MainState extends ChangeNotifier {
         openOrSwitch(n.device!, n.target, n.title!);
         notifyListeners();
       case NeedKind.session:
-      case NeedKind.app:
         corner = null;
         select(n.target);
+      case NeedKind.app:
+        corner = null;
+        if (_records.containsKey(n.target) || n.device == null) {
+          select(n.target);
+        } else {
+          // Another app's report: this one has no record of it, so it opens here.
+          openOrSwitch(n.device!, n.target.substring(n.target.indexOf('/') + 1), n.title!);
+          notifyListeners();
+        }
       case NeedKind.device:
         showDevice(n.target);
       case NeedKind.resource:
@@ -1110,7 +1132,7 @@ class MainState extends ChangeNotifier {
     }
     _markCurrentSeen();
     _noteLastTerm();
-    if (embeds) _entries = _mapEntries();
+    if (embeds) _remap();
     // The session list has nothing to show once the last session is gone.
     if (corner == Corner.sessions && _entries.isEmpty) corner = null;
     _trackAttention();
@@ -1591,7 +1613,8 @@ class MainState extends ChangeNotifier {
     return null;
   }
 
-  /// Blocked terminals of devices this app does not read itself (dropped, or not listed), from the service.
+  /// Blocked terminals of devices this app does not read itself (dropped, or not listed), from the service; and
+  /// GUI clients other apps inferred blocked, unless this app has the session live (it computes that one).
   Iterable<NeedItem> _serviceNeeds() sync* {
     final sync = stateSync!;
     final local = {...?hub?.termLists.keys}..removeAll(_offlineSince.keys);
@@ -1601,15 +1624,25 @@ class MainState extends ChangeNotifier {
       final rawId = n['id'];
       final id = rawId is String ? rawId : (fp is String ? sync.idOf(fp) : null);
       final session = n['session'];
-      if (id == null || session is! String || !hosts.contains(id) || local.contains(id)) continue;
+      if (id == null || session is! String || !hosts.contains(id)) continue;
       final ps = termPs({'state': 'blocked', 'kind': n['kind'], 'app': n['app'], 'msg': n['msg']});
       if (ps == null) continue;
       final row = fp is String ? sync.session(fp, session) : null;
+      final since = n['since'];
+      final seq = n['seq'];
+      if (n['src'] == 'app') {
+        final key = '$id/$session';
+        // Any record of it here (live, dropped, reconnecting): this app computes that one itself.
+        if (_records.containsKey(key)) continue;
+        final title = _text(row?['name']) ?? _text(n['name']) ?? session;
+        yield NeedItem(NeedKind.app, key, '$title @ ${deviceName(id)}：${termAskWord(ps)}（推断）', seq is num ? seq.toInt() : 0,
+            device: id, title: title, at: since is num ? since.toInt() : 0, greyWord: deviceOffline(id) ? '设备离线' : null);
+        continue;
+      }
+      if (local.contains(id)) continue;
       final nm = _text(row?['title']) ?? _text(row?['name']) ?? _text(n['title']) ?? _text(n['name']) ?? session;
       final host = row?['host'] ?? n['host'];
       final title = termDisplayName(nm, host is String ? host : null);
-      final since = n['since'];
-      final seq = n['seq'];
       yield NeedItem(NeedKind.terminal, session, '$title @ ${deviceName(id)}：${termAskWord(ps)}', seq is num ? seq.toInt() : 0,
           device: id, title: title, at: since is num ? since.toInt() : 0, greyWord: offlineWord(id, session));
     }
@@ -1784,6 +1817,76 @@ class MainState extends ChangeNotifier {
     return out;
   }
 
+  /// The 别处开着 cards: sessions other apps' desks have open that this app lists nowhere, one card per session with
+  /// [SessionEntry.openOn] naming the apps' devices, newest desk first. Not a device this app does not know or that is
+  /// off line (it could not open there), nor a terminal its device's list says is gone. Only while the queue follows
+  /// the state service; nothing else.
+  List<SessionEntry> get elsewhereEntries {
+    final h = hub;
+    final sync = stateSync;
+    if (h == null || sync == null || !_fromService) return const [];
+    // Before the hub has said who this app is (an old hub, or its first hosts event not in yet) there is no `me`:
+    // this app's own desk then counts as elsewhere too, for that while; what it lists is open here and skipped anyway.
+    final me = h.meFp;
+    final listedKeys = {for (final e in listed) e.key};
+    final desks = [for (final d in sync.desks) if (d['fp'] is String && d['fp'] != me) d];
+    int at(Map<String, Object?> d) => d['at'] is num ? (d['at'] as num).toInt() : 0;
+    // Stable: desks of the same time stay in the service's order.
+    final order = [for (var i = 0; i < desks.length; i++) i]
+      ..sort((a, b) {
+        final c = at(desks[b]).compareTo(at(desks[a]));
+        return c != 0 ? c : a.compareTo(b);
+      });
+    final where = <String, List<String>>{};
+    final firsts = <String, ({String id, String app, String name})>{};
+    for (final i in order) {
+      final d = desks[i];
+      final fp = d['fp'] as String;
+      final device = _text(d['device']) ?? (fp.length > 8 ? fp.substring(0, 8) : fp);
+      final sessions = d['sessions'];
+      if (sessions is! List) continue;
+      for (final s in sessions) {
+        if (s is! Map) continue;
+        final app = s['app'];
+        if (app is! String || app.isEmpty || app == termsEntry || isDesktopScreen(app)) continue;
+        final sfp = s['fp'];
+        final id = _text(s['id']) ?? (sfp is String ? sync.idOf(sfp) : null);
+        if (id == null || !h.hosts.any((x) => x.id == id) || deviceOffline(id)) continue;
+        final key = '$id/$app';
+        if (listedKeys.contains(key)) continue;
+        var name = _text(s['name']) ?? appName(id, app);
+        if (isTermApp(app)) {
+          final list = h.termLists[id];
+          if (list != null) {
+            final row = list.terms.where((r) => r.id == app).firstOrNull;
+            if (row == null || row.dead) continue;
+            name = termDisplayName(row.shown, row.host);
+          }
+        }
+        final names = where.putIfAbsent(key, () => []);
+        if (!names.contains(device)) names.add(device);
+        firsts.putIfAbsent(key, () => (id: id, app: app, name: name));
+      }
+    }
+    return [
+      for (final MapEntry(:key, value: (:id, :app, :name)) in firsts.entries)
+        SessionEntry(
+          sid: null,
+          id: id,
+          app: app,
+          appName: name,
+          device: deviceName(id),
+          path: '',
+          lamp: Lamp.notOpened,
+          ps: _termPs(id, app),
+          fg: termFg(id, app),
+          label: labelFor(id, app),
+          standby: Standby.open,
+          openOn: '在 ${where[key]!.join('、')} 上开着',
+        ),
+    ];
+  }
+
   /// A tap on a card in [standby]: 「打开」 opens the session; 「启动」 opens a new terminal on its device that takes the
   /// gone one's label (in the device's home: where it was is not kept yet), then goes to it.
   Future<void> openStandby(SessionEntry e) async {
@@ -1941,6 +2044,35 @@ class MainState extends ChangeNotifier {
     );
   }
 
+  /// Maps the session rows again, and tells the state service this app's desk when it changed.
+  void _remap() {
+    _entries = _mapEntries();
+    _syncDesk();
+  }
+
+  /// The desk as last told to the state service (JSON); null before the first, so the first is always told.
+  String? _deskTold;
+
+  void _syncDesk() {
+    final out = stateSync?.out;
+    if (out == null) return;
+    final desk = deskSessions;
+    final said = jsonEncode(desk);
+    if (said == _deskTold) return;
+    _deskTold = said;
+    out.setDesk(desk);
+  }
+
+  /// The sessions this app has open, as its desk goes up to the state service: one per record in any phase (a
+  /// disconnected one too), not the terminal list nor a desktop's extra screens (they come and go with the displays;
+  /// the desktop itself stands for them); the device's fingerprint when known. By key.
+  List<Map<String, Object?>> get deskSessions {
+    final rs = [for (final r in _records.values) if (r.app != termsEntry && !isDesktopScreen(r.app)) r]..sort((a, b) => a.key.compareTo(b.key));
+    return [
+      for (final r in rs) {'id': r.id, 'fp': ?_hostFp(r.id), 'app': r.app, 'name': r.appName},
+    ];
+  }
+
   List<SessionEntry> _mapEntries() {
     if (embeds) return [for (final r in _records.values) if (!isDesktopScreen(r.app)) _entryOf(r)];
     final h = hub;
@@ -1971,6 +2103,7 @@ class MainState extends ChangeNotifier {
   }
 
   void _onHub() {
+    _tellMe();
     _stampLoads();
     final back = <String>{};
     for (final p in hub!.takePresence()) {
@@ -2003,7 +2136,7 @@ class MainState extends ChangeNotifier {
     final old = _entries;
     // Only open sessions: a standby card is never the one to move to.
     final oldGroups = _openGroups;
-    _entries = _mapEntries();
+    _remap();
     final newKeys = {for (final e in _entries) e.key};
 
     final h = hub!;
@@ -2226,7 +2359,10 @@ class MainState extends ChangeNotifier {
     final wasLocked = rs.screenLocked;
     _applyPortEvent(rs, e);
     if (e is ReadyEvent) _sendRules(r, rs, e.sid);
-    if (e is AppStateEvent) _trackAppState(r, rs, e.sid);
+    if (e is AppStateEvent) {
+      _trackAppState(r, rs, e.sid);
+      _reportAppState(r);
+    }
     if (e is ComposerDraftEvent && e.action != null) _nativeAction(rs, e.action!);
     if (e is ComposerDraftEvent && (e.send || e.retry)) unawaited(_submitNative(rs, e));
     if (e is ScreenLockedEvent) {
@@ -2369,6 +2505,8 @@ class MainState extends ChangeNotifier {
       // [_appReportWanted]), so the lamp, the word and 需要你 fall back to what they are without rules.
       rs.clearAppState();
       _appSeen.remove(sid);
+      final r = _recordOfSid(sid);
+      if (r != null) _reportAppState(r);
       port.stateRules(sid, chosen?.json ?? '');
     }
   }
@@ -2382,8 +2520,62 @@ class MainState extends ChangeNotifier {
     final was = _appSeen[sid];
     _appSeen[sid] = now;
     if (was == null || was == now) return;
-    _queue(HintRecord('${r.appName} @ ${deviceName(r.id)}：${programWord(ps)}', _now(),
-        device: r.id, app: r.app, title: r.appName, lamp: programLamp(ps), inferred: true));
+    final row = HintRecord('${r.appName} @ ${deviceName(r.id)}：${programWord(ps)}', _now(),
+        device: r.id, app: r.app, title: r.appName, lamp: programLamp(ps), inferred: true);
+    _queue(row);
+    // [_reportAppState] runs next and reports this state: the service's row for it stands in for this one.
+    if (_reportTo(r) != null && _appReportOf(r) != null) _reportedRow[row] = true;
+  }
+
+  /// The app's own queue rows whose state went to the service as a report.
+  final _reportedRow = Expando<bool>();
+
+  /// The device fingerprint each record's state was last reported under (by record key): a gone goes there.
+  final Map<String, String> _reportedFp = {};
+
+  /// [id]'s device fingerprint from the hub's host list; null when unknown (never been through `rapp/2`).
+  String? _hostFp(String id) => hub?.hosts.where((h) => h.id == id).firstOrNull?.fp;
+
+  /// Tells the state service who this app is: the hub's own fingerprint and device name.
+  void _tellMe() {
+    final h = hub;
+    if (h != null) stateSync?.out.setMe(h.meFp, h.meName);
+  }
+
+  /// Reports [r]'s inferred state to the state service (spec §8): what [RemoteSession.inferredPs] says, except an
+  /// unsure block; none of that, and a record that is gone, report gone. A text terminal or the desktop has none,
+  /// and a device whose fingerprint is unknown is not reported.
+  void _reportAppState(SessionRecord r, {bool gone = false}) {
+    final out = stateSync?.out;
+    if (out == null) return;
+    final now = gone ? null : _appReportOf(r);
+    if (now == null) {
+      final fp = _reportedFp.remove(r.key);
+      if (fp != null) out.report(fp: fp, id: r.id, session: r.app, now: null);
+      return;
+    }
+    final fp = _reportTo(r);
+    if (fp == null) return;
+    _reportedFp[r.key] = fp;
+    out.report(fp: fp, id: r.id, session: r.app, now: now);
+  }
+
+  /// The device fingerprint [r]'s state goes to: null with no state service, for a text terminal or the desktop,
+  /// while the device's fingerprint is unknown, and for this app's own device (on macOS and Linux the app's
+  /// fingerprint is that device's own, the sender its service reports under).
+  String? _reportTo(SessionRecord r) {
+    if (stateSync == null || isTermApp(r.app) || isDesktopApp(r.app)) return null;
+    final fp = _hostFp(r.id);
+    return fp == null || fp == hub?.meFp ? null : fp;
+  }
+
+  /// What [r]'s live link infers, as reported: null for none and for an unsure block.
+  AppReport? _appReportOf(SessionRecord r) {
+    final rs = r.sid == null ? null : remote[r.sid];
+    final ps = rs?.inferredPs;
+    final a = rs?.appState;
+    if (ps == null || a == null || (ps.state == 'blocked' && !rs!.inferredNeed)) return null;
+    return (state: ps.state, kind: ps.state == 'blocked' ? ps.kind : null, app: a.pack, name: r.appName);
   }
 
   /// Each record's latest host notice (by record key: a reconnect keeps it), and its expiry.
@@ -2761,6 +2953,7 @@ class MainState extends ChangeNotifier {
   /// Takes [r] off the list and steps to the next session if it was current. Callers set the hint.
   void _endRecord(SessionRecord r) {
     _notices.remove(r.key)?.timer.cancel();
+    _reportAppState(r, gone: true);
     if (r.app == 'desktop:') {
       _endDesktopChildren(r.id);
       _desktopDisplays.remove(r.id);
@@ -2797,7 +2990,7 @@ class MainState extends ChangeNotifier {
         if (sid != null) ?_starts.remove(sid),
     });
     _records.remove(r.key);
-    _entries = _mapEntries();
+    _remap();
     if (currentKey == r.key) {
       currentKey = isDesktopScreen(r.app) && _records.containsKey('${r.id}/desktop:')
           ? '${r.id}/desktop:'
@@ -3794,7 +3987,7 @@ class MainState extends ChangeNotifier {
       fg: termFg(id, app),
       label: labelFor(id, app),
     );
-    _entries = _mapEntries();
+    _remap();
     final before = currentKey;
     if (select) {
       currentKey = key;
@@ -3813,14 +4006,14 @@ class MainState extends ChangeNotifier {
       _pending.remove(key);
       final missing = missingFromError('$e');
       hint = missing == null ? disconnectWord('$e') : remoteHint(deviceName(id), missing);
-      _entries = _mapEntries();
+      _remap();
       // Back to what was current before, if it is still open. Not selected by this open (全部打开
       // stopped on it): nothing to go back to that is known.
       if (currentKey == key) {
         currentKey = select && _entries.any((e) => e.key == before) ? before : null;
       }
     }
-    _entries = _mapEntries();
+    _remap();
     notifyListeners();
   }
 
@@ -4318,7 +4511,7 @@ class MainState extends ChangeNotifier {
         }
       }
       _desktopDisplays[r.id] = screens;
-      _entries = _mapEntries();
+      _remap();
       notifyListeners();
     } catch (_) {
       // A failed probe must not look like all displays were unplugged. Retry on the next tick.
@@ -4343,7 +4536,7 @@ class MainState extends ChangeNotifier {
     } catch (e) {
       _setOnline(id, false, error: '$e');
     }
-    _entries = _mapEntries();
+    _remap();
     notifyListeners();
   }
 
@@ -4355,7 +4548,7 @@ class MainState extends ChangeNotifier {
     } catch (e) {
       hint = disconnectWord('$e');
     }
-    _entries = _mapEntries();
+    _remap();
     notifyListeners();
     probeAll();
   }
@@ -4387,7 +4580,7 @@ class MainState extends ChangeNotifier {
     } catch (e) {
       hint = disconnectWord('$e');
     }
-    _entries = _mapEntries();
+    _remap();
     notifyListeners();
   }
 

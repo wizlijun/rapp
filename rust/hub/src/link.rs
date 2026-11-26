@@ -553,7 +553,7 @@ impl Hub {
                 Ok((conn, accepted, sock)) => {
                     let path = direct_path(&sock);
                     self.route(&host.id, path, Some(&addr), Ok(()));
-                    self.remember_fp(host, &accepted);
+                    self.remember_fp(host, &accepted).await;
                     return Ok(Some((Link::Quic { conn, path }, accepted)));
                 }
                 Err(e) => {
@@ -570,8 +570,9 @@ impl Hub {
         refused.map_or(Ok(None), Err)
     }
 
-    /// Saves the fingerprint a host showed, logging a change (hex only, never key material).
-    fn remember_fp(&self, host: &Host, accepted: &Accepted) {
+    /// Saves the fingerprint a host showed, logging a change (hex only, never key material). A saved change
+    /// goes out as a `hosts` event, so the app sees the device's new (or first) fingerprint.
+    async fn remember_fp(&self, host: &Host, accepted: &Accepted) {
         if host.fp == Some(accepted.fp) {
             return;
         }
@@ -581,6 +582,7 @@ impl Hub {
                     let (old, new) = (old.to_string(), accepted.fp.to_string());
                     self.log.event(Lvl::Warn, "host_key_changed", json!({"id": host.id, "old": old, "new": new}));
                 }
+                self.emit(self.hosts_event(), &None).await;
             }
             Ok(false) => {}
             Err(e) => self.log.msg(Lvl::Warn, format_args!("{}: cannot save host fingerprint: {e:#}", host.id)),
@@ -606,7 +608,7 @@ impl Hub {
                     conn.close(0u32.into(), b"host added");
                     if let Some(saved) = &saved {
                         // A new fingerprint for a saved host is a key change, logged as on any connect.
-                        self.remember_fp(saved, &accepted);
+                        self.remember_fp(saved, &accepted).await;
                     }
                     let name = Some(accepted.name).filter(|n| !n.is_empty()).unwrap_or_else(|| id.clone());
                     let host = Host {
@@ -689,7 +691,7 @@ impl Hub {
             anyhow::Ok((r, accepted))
         };
         let (r, accepted) = tokio::time::timeout(reply_wait(op), wait).await.map_err(|_| anyhow!("no reply"))??;
-        self.remember_fp(host, &accepted);
+        self.remember_fp(host, &accepted).await;
         Ok((pipe, r, accepted))
     }
 

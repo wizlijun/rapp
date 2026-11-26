@@ -187,4 +187,47 @@ void main() {
     link.close();
     await check;
   });
+
+  test('postEvents sends ndjson', () async {
+    String? method, path, ctype, body;
+    handler = (r) async {
+      method = r.method;
+      path = r.uri.path;
+      ctype = r.headers.contentType?.mimeType;
+      body = await utf8.decoder.bind(r).join();
+      r.response.statusCode = 204;
+      await r.response.close();
+    };
+    await link.postEvents([
+      {'a': 1},
+      {'b': 'x'}
+    ]);
+    expect(method, 'POST');
+    expect(path, '/v1/events');
+    expect(ctype, 'application/x-ndjson');
+    final lines = body!.trim().split('\n');
+    expect(lines.map(jsonDecode).toList(), [
+      {'a': 1},
+      {'b': 'x'}
+    ]);
+    handler = (r) => json(r, {'error': 'x'}, 400);
+    await expectLater(link.postEvents([{}]), throwsA(isA<StateLinkError>().having((e) => e.status, 'status', 400)));
+  });
+
+  test('putDesk encodes the fp and throws 404 as status 404', () async {
+    String? method, raw, body;
+    handler = (r) async {
+      method = r.method;
+      raw = r.uri.toString();
+      body = await utf8.decoder.bind(r).join();
+      r.response.statusCode = 204;
+      await r.response.close();
+    };
+    await link.putDesk('a/b', {'x': 1});
+    expect(method, 'PUT');
+    expect(raw, '/v1/desk/a%2Fb');
+    expect(jsonDecode(body!), {'x': 1});
+    handler = (r) => json(r, {}, 404);
+    await expectLater(link.putDesk('a', {}), throwsA(isA<StateLinkError>().having((e) => e.status, 'status', 404)));
+  });
 }

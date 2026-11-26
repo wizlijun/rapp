@@ -36,6 +36,16 @@ Marks something as looked at, with the service's own clock. Body is one of `{"fp
 
 A marked session row in `GET /v1/state` carries `"seen": <Unix seconds>`; it stays through later states of that session and goes when the session is gone. A marked queue row in `GET /v1/queue` carries `"seen"`, and `"handled": true` when set.
 
+## PUT /v1/desk/<fp>
+
+An app says what it has open, with the service's own clock. `<fp>` is the app's fingerprint: not empty, no `/`, at most 128 characters. Body `{"device":"<name>"?,"sessions":[{"fp"?,"id"?,"app","name"?},...]}`: `app` is a non-empty string, at least one of `fp` and `id` is a string, `name` is cut to 500 characters, other fields are dropped, at most 200 items. The desk is replaced whole; an empty `sessions` removes it.
+
+- 204: stored (or removed).
+- 400 `{"error":"bad request"}`: bad `<fp>`, not JSON, or a body that does not fit.
+- 405 for any other method.
+
+`GET /v1/state` has `"desks":[{"fp","device"?,"at","sessions":[...]}]`, sorted by `fp`. A desk not renewed for 30 days is removed on expire.
+
 ## GET /v1/watch
 
 200 `content-type: text/event-stream`, a reply that stays open and pushes what changes (Server-Sent Events). Every frame is one line followed by a blank line:
@@ -53,10 +63,11 @@ data: {"what":"seen","fp":"<fp>","session":"<id>","at":1764130100}
 data: {"what":"seen","eid":"<eid>","at":1764130100,"handled":true}
 ```
 
-- `session`: a session row as in `GET /v1/state`; `row: null` means the session is gone. `id` and `device` are that device's, as its entry in `GET /v1/state` carries them (left out when the device never sent them), so a watcher can place a device it did not have at its last fetch.
+- `session`: a session row as in `GET /v1/state`; `row: null` means the session is gone. A second app joining a proxy row's `vias`, or one of several leaving it, is not pushed (`api/events.md`); `GET /v1/state` has the current `vias`. `id` and `device` are that device's, as its entry in `GET /v1/state` carries them (left out when the device never sent them), so a watcher can place a device it did not have at its last fetch.
 - `queue`: a new queue row, as in `GET /v1/queue`.
 - `need`: the whole `needs` list of `GET /v1/state`, sent whenever it changes.
 - `seen`: a `PUT /v1/seen` mark; `handled` only when true.
+- `desk`: `{"what":"desk","fp":"<app fp>","desk":{"fp","device"?,"at","sessions":[...]}|null}`; `null` means the desk is gone. Not sent when only `at` moved.
 
 A watcher that falls more than 256 changes behind is disconnected. After any disconnect, fetch `GET /v1/state` and `GET /v1/queue` again: changes made while away are not replayed. To miss nothing, open the watch first and fetch once it says hello, holding the pushes that come meanwhile and applying them after the fetched state.
 

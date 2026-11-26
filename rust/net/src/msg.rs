@@ -93,6 +93,14 @@ pub enum Op {
     /// "Device `id` has a state service on its port `port`" (`on: false`: no longer). A device that
     /// learns of one tells the devices it knows; an older device answers "unknown op".
     StateSink { id: String, port: u16, on: bool },
+    /// Turn the companion service `name` (`"state"`) of the device asked on or off; without `on`,
+    /// only ask for its status. Same rule as `Share`: a key-trusted device only. An older device
+    /// answers "unknown op".
+    SetService {
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on: Option<bool>,
+    },
     /// This device's load (device-load spec §10), once: `history` adds the last hour, `top` the busiest processes.
     Load {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -172,6 +180,14 @@ mod tests {
         let v = json!({"op":"state_sink","id":"123456789","port":8102,"on":true});
         assert_eq!(serde_json::to_value(&op).unwrap(), v);
         assert_eq!(serde_json::from_value::<Op>(v).unwrap(), op);
+    }
+
+    #[test]
+    fn set_service_wire() {
+        let on: Op = serde_json::from_str(r#"{"op":"set_service","name":"state","on":true}"#).unwrap();
+        assert_eq!(on, Op::SetService { name: "state".into(), on: Some(true) });
+        let ask: Op = serde_json::from_str(r#"{"op":"set_service","name":"state"}"#).unwrap();
+        assert_eq!(serde_json::to_value(&ask).unwrap(), json!({"op":"set_service","name":"state"}));
     }
 
     #[test]

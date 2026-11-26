@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/pages/app_profile_page.dart';
+import 'package:rapp/state/service_switch.dart';
 import 'package:rapp/ui/controls.dart';
 import 'package:rapp/ui/devices_tab.dart';
 import 'package:rapp/ui/lamp.dart';
@@ -130,7 +131,7 @@ void main() {
   });
 
   Future<void> pumpTab(WidgetTester tester,
-      {bool settle = true, bool localBadge = false}) async {
+      {bool settle = true, bool localBadge = false, ServiceSwitchApi? serviceSwitch}) async {
     s.togglePanel(PanelTab.devices);
     // MainState's constructor already asked for the hosts, in setUp's real zone.
     await tester.runAsync(() async {
@@ -141,7 +142,7 @@ void main() {
     await tester.pumpWidget(wrap(SizedBox(
       width: 420,
       height: 900,
-      child: DevicesTab(state: s, local: const Text('local-body'), localBadge: localBadge),
+      child: DevicesTab(state: s, local: const Text('local-body'), localBadge: localBadge, serviceSwitch: serviceSwitch),
     )));
     if (settle) {
       await tester.pumpAndSettle();
@@ -169,6 +170,15 @@ void main() {
     await tester.tap(find.byKey(const Key('add-device-toggle')));
     await tester.pumpAndSettle();
   }
+
+  testWidgets('each remote device page has a 状态服务 row only when a switch api is given', (tester) async {
+    await pumpTab(tester, serviceSwitch: _NoSwitch());
+    await selectMini(tester);
+    expect(find.byKey(const ValueKey('state-service-111')), findsOneWidget);
+    await pumpTab(tester);
+    await selectMini(tester);
+    expect(find.byKey(const ValueKey('state-service-111')), findsNothing);
+  });
 
   testWidgets('lists saved devices from the hub on start', (tester) async {
     await pumpTab(tester);
@@ -1083,4 +1093,12 @@ void main() {
     await tester.pump();
     expect(s.prefs.termOpenFor('111'), 'text');
   });
+}
+
+class _NoSwitch implements ServiceSwitchApi {
+  @override
+  Future<Map<String, Object?>> stateService({String? to, bool? on}) async => {'ok': true, 'on': false};
+
+  @override
+  Future<String?> stateHost() async => null;
 }
