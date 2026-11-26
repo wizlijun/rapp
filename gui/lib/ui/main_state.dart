@@ -28,6 +28,7 @@ import '../permissions.dart';
 import '../embed/app_profile.dart';
 import '../embed/app_state.dart';
 import '../embed/state_rules.dart';
+import '../embed/strip_tools.dart';
 import '../embed/composer_model.dart';
 import '../embed/modifier_latch.dart';
 import '../term/term_id.dart';
@@ -1410,6 +1411,16 @@ class MainState extends ChangeNotifier {
     final fg = hub?.termLists[device]?.terms.where((r) => r.id == term).firstOrNull?.fg;
     return fg == null || fg.isEmpty ? null : fg;
   }
+
+  /// The terminals-list row of the pty text terminal behind [sid] (tmux gets none); null for other apps or an unlisted terminal.
+  TermRow? termRowOfSid(Object sid) {
+    final r = _recordOfSid(sid);
+    if (r == null || !isPtyTerm(r.app)) return null;
+    return hub?.termLists[r.id]?.terms.where((t) => t.id == r.app).firstOrNull;
+  }
+
+  /// The AI tool in front of [s] when it is a text terminal, else null.
+  AgentTool? stripToolOf(RemoteSession s) => toolOf(termRowOfSid(s.sid));
 
   /// What a favourite or project member is called: `<program> · <name>` for a text terminal ([termTitle]), whose
   /// name is the list's current one, else the one stored with it.
@@ -3998,16 +4009,16 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
-  /// 常用语 replaced (edited, reordered, deleted, 恢复默认); saved.
-  void setPhrases(List<Phrase> v) {
+  /// The whole strip list (commands and phrases) replaced; saved.
+  void setStripItems(List<StripItem> v) {
     prefs.phrases = List.of(v);
     _save();
   }
 
   /// 加到常用语: [text] at the end unless a phrase already has it. False when it was there (or blank).
   bool addPhrase(String text) {
-    if (text.trim().isEmpty || prefs.phrases.any((p) => p.text == text)) return false;
-    setPhrases([...prefs.phrases, Phrase(text)]);
+    if (text.trim().isEmpty || prefs.phrases.whereType<Phrase>().any((p) => p.text == text)) return false;
+    setStripItems([...prefs.phrases, Phrase(text)]);
     return true;
   }
 

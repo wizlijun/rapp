@@ -180,6 +180,7 @@ class InputRecorder {
       _save(d, rs);
     };
     c.onSubmitted = (o) {
+      if (o.command) return; // a strip command is never recorded, kept pending or remembered
       final m = _handed[o] = meta();
       // submit has not installed its inFlight row yet; retry has, and its
       // unrelated editor draft must keep its own privacy state.
@@ -382,6 +383,7 @@ class InputRecorder {
       _store.delete(key).catchError((Object e) => _log('rapp: 输入记录 草稿没删掉：${_reason(e)}'));
 
   Future<void> _finished(_Draft d, RemoteSession rs, Outgoing o, bool all) async {
+    if (o.command) return;
     final p = d.pieces.where((p) => identical(p.owner, o)).firstOrNull;
     final a = _attached[rs];
     var changed = false;
