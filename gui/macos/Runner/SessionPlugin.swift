@@ -262,6 +262,9 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .closeWindow(sid, window):
       live[sid]?.session.send(.close(window))
       result(nil)
+    case let .autoEnglish(sid, on):
+      live[sid]?.session.setAutoEnglish(on)
+      result(nil)
     case let .selectInput(sid, id):
       // Queued with the session's other messages: a composer send after it reaches A after the switch.
       live[sid]?.session.send(.selectInput(id: id))
