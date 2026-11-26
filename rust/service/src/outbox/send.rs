@@ -121,6 +121,8 @@ pub(super) mod fake {
         pub rules: Mutex<Rules>,
         pub got: Mutex<Vec<Got>>,
         tick: watch::Sender<usize>,
+        /// While on, a post is recorded but its reply waits.
+        hold: watch::Sender<bool>,
     }
 
     impl Fake {
@@ -129,7 +131,13 @@ pub(super) mod fake {
                 rules: Mutex::new(Rules { name, statuses: VecDeque::new(), down: false }),
                 got: Mutex::new(vec![]),
                 tick: watch::channel(0).0,
+                hold: watch::channel(false).0,
             })
+        }
+
+        /// Hold the replies to posts (each post is still recorded when it comes), or let them go.
+        pub fn hold(&self, on: bool) {
+            self.hold.send_replace(on);
         }
 
         /// One end of a fresh pipe; the other end is served by this fake.
@@ -175,6 +183,7 @@ pub(super) mod fake {
             };
             self.got.lock().unwrap().push(Got { status, lines });
             self.tick.send_modify(|n| *n += 1);
+            let _ = self.hold.subscribe().wait_for(|h| !*h).await;
             reply(status, if status == 204 { String::new() } else { "{\"error\":\"no\"}".into() })
         }
 

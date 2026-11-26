@@ -80,9 +80,8 @@ pub async fn pump<D: Dial>(
         }
         st.tell(stats);
     };
-    st.connected = false;
-    st.tell(stats);
-    stats.lock().unwrap_or_else(|e| e.into_inner()).active = false;
+    let mut s = stats.lock().unwrap_or_else(|e| e.into_inner());
+    (s.active, s.up) = (false, false);
     end
 }
 
@@ -100,7 +99,8 @@ async fn run(busy: &mut Option<Busy<'_>>) -> Step {
 enum What {
     /// Cached events up to `n == through`.
     Events { through: u64, count: usize },
-    Snap,
+    /// A snap built when the cache had dropped `dropped` events in all.
+    Snap { dropped: u64 },
 }
 
 /// How the busy future ended.
@@ -159,8 +159,14 @@ impl State {
     }
 
     fn feed(&mut self, list: &Value, at: u64) {
+        let dropped = self.cache.dropped();
         for body in self.diff.feed(list, at) {
             self.cache.push(body, at);
+        }
+        // Spec §7.4: a loss from the cache is told like a reconnection, by the resend and then a
+        // snap with `gap:true`. When not connected, the next connection owes the snap anyway.
+        if self.connected && self.cache.dropped() > dropped {
+            self.owe_snap = true;
         }
         self.at = at;
         self.started = true;
@@ -199,7 +205,8 @@ impl State {
             let count = lines.len();
             (lines, What::Events { through, count })
         } else if self.owe_snap && self.diff.ready() {
-            (vec![self.cache.snap(self.diff.snap(), self.at)], What::Snap)
+            let dropped = self.cache.dropped();
+            (vec![self.cache.snap(self.diff.snap(), self.at)], What::Snap { dropped })
         } else {
             self.conn = Some(conn);
             return None;
@@ -241,19 +248,29 @@ impl State {
                         self.refused += count as u64;
                         log.event(Lvl::Warn, "outbox_refused", json!({"status": status, "count": count}));
                     }
-                    (What::Snap, posted) => {
+                    (What::Snap { dropped }, posted) => {
+                        self.owe_snap = false;
                         match posted {
                             Posted::Taken => {
                                 self.taken(1);
-                                self.cache.snap_taken();
+                                if self.cache.dropped() == dropped {
+                                    self.cache.snap_taken();
+                                } else {
+                                    // Lost while this snap was on its way: it did not say so,
+                                    // so the gap stays and another snap follows.
+                                    self.owe_snap = true;
+                                }
                             }
+                            // 4xx: the service will not take it, so it is not sent again on this
+                            // connection. The gap (if any) stays set; the next snap, after the next
+                            // drop or reconnection, carries it. That cannot loop: only a new drop
+                            // or a new connection owes a snap.
                             Posted::Refused(status) => {
                                 self.refused += 1;
                                 log.event(Lvl::Warn, "outbox_refused", json!({"status": status, "count": 1}));
                             }
                         }
-                        self.owe_snap = false;
-                        self.up(log);
+                        self.up(dropped, log);
                     }
                 }
             }
@@ -267,15 +284,17 @@ impl State {
         self.last_ok = Some(now());
     }
 
-    /// The resend and the snap are through: say so, with what was dropped meanwhile.
-    fn up(&mut self, log: &Log) {
-        let Some(resent) = self.resent.take() else { return };
-        log.event(Lvl::Info, "outbox_up", json!({"resent": resent}));
-        let count = self.cache.dropped() - self.dropped_told;
+    /// A snap is through: after a (re)connection say the outbox is up; and sum up what was
+    /// dropped up to that snap (`dropped` in all) and not yet told.
+    fn up(&mut self, dropped: u64, log: &Log) {
+        if let Some(resent) = self.resent.take() {
+            log.event(Lvl::Info, "outbox_up", json!({"resent": resent}));
+        }
+        let count = dropped.saturating_sub(self.dropped_told);
         if count > 0 {
             log.event(Lvl::Warn, "outbox_dropped", json!({"count": count}));
+            self.dropped_told = dropped;
         }
-        self.dropped_told = self.cache.dropped();
     }
 
     fn fail(&mut self, why: &'static str, log: &Log) {
@@ -624,6 +643,115 @@ mod tests {
         let t = dial.times();
         assert!(t[1] - t[0] >= Duration::from_secs(2) && t[2] - t[1] >= Duration::from_secs(4));
         assert!(fake.got.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_drop_while_connected_is_told_without_a_reconnection() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = Log::file(dir.path(), "service.log");
+        let fake = Fake::new("rapp-state");
+        let dial = FakeDial::new(&fake, true);
+        let (tx, rx) = mpsc::channel(16);
+        let stats = Mutex::new(Stats::default());
+        let drive = async {
+            tx.send((list("idle", 0, "x"), 1)).await.unwrap();
+            fake.until(has_snap(1)).await;
+            settle().await;
+            fake.hold(true);
+            tx.send((list("blocked", 1, "x"), 2)).await.unwrap();
+            fake.until(|got| got.len() == 2).await;
+            // n2 is on its way; 250 more make 251 cached: the 51 oldest (n2..n52) go.
+            for seq in 2..=251 {
+                tx.send((list("blocked", seq, "x"), 1 + seq)).await.unwrap();
+            }
+            settle().await;
+            assert_eq!(stats.lock().unwrap().dropped, 51);
+            fake.hold(false);
+            fake.until(has_snap(253)).await;
+            settle().await;
+            let st = stats.lock().unwrap().clone();
+            drop(tx);
+            st
+        };
+        let (_, st) = tokio::join!(pump(me(), rx, dial.clone(), &log, &stats), drive);
+        let got = fake.taken();
+        let mut want = vec![1, 2];
+        want.extend(53..=253);
+        assert_eq!(ns(&got), want);
+        assert!(got[0].get("gap").is_none());
+        assert_eq!((got[202]["t"].as_str(), got[202]["gap"].as_bool()), (Some("snap"), Some(true)));
+        assert_eq!(dial.times().len(), 1, "no reconnection");
+        assert_eq!((st.dropped, st.sent, st.cached, st.up), (51, 203, 0, true));
+        log.flush();
+        let text = std::fs::read_to_string(dir.path().join("service.log")).unwrap();
+        let dropped: Vec<Value> =
+            text.lines().map(|l| serde_json::from_str::<Value>(l).unwrap()).filter(|l| l["ev"] == "outbox_dropped").collect();
+        assert_eq!(dropped.len(), 1);
+        assert_eq!(dropped[0]["count"], 51);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_drop_while_a_snap_is_on_its_way_is_told_by_the_next() {
+        let fake = Fake::new("rapp-state");
+        let dial = FakeDial::new(&fake, true);
+        let (tx, rx) = mpsc::channel(16);
+        let stats = Mutex::new(Stats::default());
+        let log = Log::none();
+        let drive = async {
+            fake.hold(true);
+            tx.send((list("idle", 0, "x"), 1)).await.unwrap();
+            fake.until(|got| got.len() == 1).await;
+            // The snap n1 is on its way, built with no gap; 201 changes drop one (n2).
+            for seq in 1..=201 {
+                tx.send((list("blocked", seq, "x"), 1 + seq)).await.unwrap();
+            }
+            settle().await;
+            assert_eq!(stats.lock().unwrap().dropped, 1);
+            fake.hold(false);
+            fake.until(has_snap(203)).await;
+            drop(tx);
+        };
+        tokio::join!(pump(me(), rx, dial.clone(), &log, &stats), drive);
+        let got = fake.taken();
+        let mut want = vec![1];
+        want.extend(3..=203);
+        assert_eq!(ns(&got), want);
+        assert!(got[0].get("gap").is_none());
+        assert_eq!((got[201]["t"].as_str(), got[201]["gap"].as_bool()), (Some("snap"), Some(true)));
+        assert_eq!(dial.times().len(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_refused_snap_with_a_gap_is_not_sent_again() {
+        let fake = Fake::new("rapp-state");
+        let dial = FakeDial::new(&fake, false);
+        let (tx, rx) = mpsc::channel(16);
+        let stats = Mutex::new(Stats::default());
+        let log = Log::none();
+        let drive = async {
+            tx.send((list("idle", 0, "x"), 1)).await.unwrap();
+            for seq in 1..=201 {
+                tx.send((list("blocked", seq, "x"), 1 + seq)).await.unwrap();
+            }
+            dial.dialled(1).await;
+            // 4 batches taken, then the snap (gap:true) refused.
+            fake.rules.lock().unwrap().statuses.extend([204, 204, 204, 204, 400]);
+            dial.set_open(true);
+            fake.until(|got| got.len() == 5).await;
+            settle().await;
+            tx.send((list("done", 202, "x"), 203)).await.unwrap();
+            fake.until(|got| got.len() == 6).await;
+            settle().await;
+            let st = stats.lock().unwrap().clone();
+            drop(tx);
+            st
+        };
+        let (_, st) = tokio::join!(pump(me(), rx, dial.clone(), &log, &stats), drive);
+        let all = fake.got.lock().unwrap().clone();
+        assert_eq!(all.len(), 6, "the refused snap is not sent again");
+        assert_eq!((all[4].status, all[4].lines[0]["t"].as_str(), all[4].lines[0]["gap"].as_bool()), (400, Some("snap"), Some(true)));
+        assert_eq!(ns(&all[5].lines), [203]);
+        assert_eq!((st.refused, st.dropped, st.up), (1, 1, true));
     }
 
     #[tokio::test(start_paused = true)]
