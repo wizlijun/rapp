@@ -4,6 +4,7 @@
 
 mod args;
 mod ipc;
+mod load;
 mod out;
 mod say;
 mod update;
@@ -51,7 +52,7 @@ async fn main() {
         Ok(c) => c,
         Err(line) => {
             // An agent asking for JSON gets its usage error as JSON too.
-            if argv.first().map(String::as_str) == Some("update") && argv.iter().any(|a| a == "--json") {
+            if matches!(argv.first().map(String::as_str), Some("update" | "load")) && argv.iter().any(|a| a == "--json") {
                 out::Out { json: true }.fail("usage", &line, None);
             }
             eprintln!("{line}\n{}", args::USAGE);
@@ -106,6 +107,7 @@ async fn main() {
             print!("{}", say::hosts(&r));
         }
         Cmd::Pipe { to, port } => pipe(to, port).await,
+        Cmd::Load { .. } | Cmd::LoadPick { .. } => load::run(cmd).await,
         Cmd::Update { what, yes, timeout, json } => update::run(what, yes, timeout, out::Out { json }).await,
     }
 }

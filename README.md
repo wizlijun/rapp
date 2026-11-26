@@ -41,6 +41,12 @@ Multiple text terminals: press ⌘T (Ctrl+Shift+T on non-macOS) in a text termin
 
 Upgrades preserve the data directory and saved hosts. The legacy relay configuration from 0.5.x is retired by the mainline migration; enter a current relay key to use the new relay. This is separate from preserving local data.
 
+## 给 agent 的说明 (Notes for agents)
+
+- `rapp load [设备…] [--top] [--json]`: each device's headroom (余力, 0-100), CPU, GPU, free memory, heat, tightest disk and warnings; offline devices say 不在线, old ones 版本太旧，不支持.
+- `rapp load pick [--json]`: the online device that can run terminals, has no 危险 warning and the highest headroom (ties go to the lower CPU use). Exit 4 and `no_device` when none fits; exit 3 when the local service is not running.
+- `--json` fields: `rapp load` prints `{ok, devices:[{id, name, local?, load:{at, headroom, tightest, term, items, disks, warnings}} | {id, name, error}]}`; `rapp load pick` prints `{ok, id, name, headroom, tightest, reason}`. `error` is `offline`, `old version` or `no data`.
+
 ## Build
 
 Requires Rust/Cargo and Flutter with Dart 3.12.1+.

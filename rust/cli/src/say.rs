@@ -4,7 +4,7 @@ use serde_json::Value;
 
 /// `s` without control characters: what another device sent (a name, an error text) is printed
 /// through this, so it cannot move the cursor, colour the terminal or start a new line.
-fn plain(s: &str) -> String {
+pub(crate) fn plain(s: &str) -> String {
     s.chars().filter(|c| !c.is_control()).collect()
 }
 
@@ -15,7 +15,7 @@ fn width(s: &str) -> usize {
 
 /// Pads every cell but the last of each row to its column's widest cell plus two spaces. A
 /// row's last cell is not padded, so it does not widen its column either.
-fn columns(rows: &[Vec<String>]) -> String {
+pub(crate) fn columns(rows: &[Vec<String>]) -> String {
     let n = rows.iter().map(Vec::len).max().unwrap_or(0);
     let padded = |r: &Vec<String>, i: usize| (i + 1 < r.len()).then(|| width(&r[i]));
     let widths: Vec<usize> = (0..n).map(|i| rows.iter().filter_map(|r| padded(r, i)).max().unwrap_or(0)).collect();

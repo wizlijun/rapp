@@ -222,3 +222,26 @@ rapp load pick [--json]              推荐一台设备，并说明原因
 9. 磁盘阈值用「且」：剩 <10% 且 <20 GB 算注意，剩 <5% 且 <5 GB 算危险，剩 <1 GB 一律危险。
 10. 不做「清理升级缓存」这个动作（服务已经会自动清理）。
 11. 「到别的设备新建终端」先在那台设备的主目录打开，不等 term-restore。
+
+## 附录：`--json` 的字段
+
+`rapp load --json`：
+
+```
+{"ok": true, "devices": [设备…]}
+```
+
+每台设备是下面两种之一，本机排第一，带 `"local": true`：
+
+- 有数据：`{"id", "name", "local"?, "load": {"at", "headroom"?, "tightest"?, "term", "items", "disks", "warnings"}}`
+  - `headroom`：0 到 100 的整数；一项都读不到时没有这个字段，`tightest` 同。
+  - `tightest`：`cpu`、`gpu`、`mem`、`disk`、`heat`、`battery` 之一。
+  - `term`：这台设备能不能开终端。
+  - `items`：`cpu {pct, cores, load1?}`、`gpu {pct}`、`mem {total, avail, swap_used?, pressure?}`、`heat {level, celsius?}`、`battery {pct, plugged}`；读不到的项不出现。`heat.level` 是 `normal`、`hot`、`serious`、`critical`。
+  - `disks`：`{mount, total, avail, level, inode_free_pct?, eta_min?, paths}`；读不到的盘是 `{mount, unreadable: true, paths}`。
+  - `warnings`：`{item, level, text, eta_min?}`，`level` 是 `warn` 或 `danger`。
+- 没数据：`{"id", "name", "error"}`，`error` 是 `offline`（不在线）、`old version`（版本太旧，不支持）或 `no data`（刚启动，还没有样本）。
+
+`rapp load pick --json`：`{"ok": true, "id", "name", "headroom", "tightest", "reason"}`。没有合适的设备时输出 `{"ok": false, "error": "no_device", "message": "没有合适的设备", "page": null}`，退出码 4。
+
+本机服务连不上时（退出码 3）：`{"ok": false, "error": "not_running", ...}`。
