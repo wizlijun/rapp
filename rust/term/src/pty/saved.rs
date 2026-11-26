@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 
@@ -12,6 +12,7 @@ const DAY: u64 = 86_400;
 const MAX_AGE: u64 = 30 * DAY;
 const MAX_KEPT: usize = 50;
 const MAX_CMD: usize = 1000;
+const MAX_FILE: u64 = 64 * 1024;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct Snapshot {
@@ -49,14 +50,22 @@ pub fn key_ok(key: &str) -> bool {
 }
 
 /// Option-name parts that mark the value as a secret.
-const SECRET_NAMES: [&str; 7] = ["key", "token", "secret", "password", "passwd", "auth", "credential"];
+const SECRET_NAMES: [&str; 9] = ["key", "token", "secret", "password", "passwd", "pass", "pwd", "auth", "credential"];
+/// Programs whose `-p…` is a password.
+const PASSWORD_P: [&str; 5] = ["mysql", "mysqldump", "mysqladmin", "psql", "sshpass"];
 /// Word prefixes of well-known token formats.
 const SECRET_PREFIXES: [&str; 8] = ["sk-", "ghp_", "gho_", "github_pat_", "xox", "AKIA", "eyJ", "Bearer"];
 
-/// Removes leading `NAME=value` words (values may be quoted).
+/// Removes leading `NAME=value` words (values may be quoted), also after a leading `env`.
 fn strip_assignments(line: &str) -> &str {
     let mut rest = line.trim_start();
     loop {
+        if let Some(r) = rest.strip_prefix("env") {
+            if r.starts_with(char::is_whitespace) {
+                rest = r.trim_start();
+                continue;
+            }
+        }
         let b = rest.as_bytes();
         let mut i = 0;
         while i < b.len() && (b[i] == b'_' || b[i].is_ascii_alphanumeric()) {
@@ -88,28 +97,53 @@ fn has_url_password(line: &str) -> bool {
     })
 }
 
-fn is_secret(line: &str, prog: &str) -> bool {
+fn token_like(w: &str) -> bool {
+    let w = w.trim_matches(|c| c == '\'' || c == '"');
+    SECRET_PREFIXES.iter().any(|p| w.starts_with(p))
+        || (w.len() >= 32 && w.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'))
+}
+
+fn secret_name(name: &str) -> bool {
+    let name = name.trim_start_matches('-').to_ascii_lowercase();
+    SECRET_NAMES.iter().any(|s| name.contains(s))
+}
+
+fn is_secret(line: &str) -> bool {
     let lower = line.to_ascii_lowercase();
-    if lower.contains("authorization:") || line.contains("Bearer ") || has_url_password(line) {
+    if lower.contains("authorization:") || lower.contains("bearer ") || has_url_password(line) {
         return true;
     }
-    let mysqlish = prog == "mysql" || prog == "psql";
-    for (n, raw) in line.split_whitespace().enumerate() {
-        let w = raw.trim_matches(|c| c == '\'' || c == '"');
-        if SECRET_PREFIXES.iter().any(|p| w.starts_with(p)) {
+    let words: Vec<&str> =
+        line.split_whitespace().map(|w| w.trim_matches(|c| c == '\'' || c == '"')).collect();
+    let base = |w: &str| w.rsplit('/').next().unwrap_or(w).to_string();
+    let has_prog = |names: &[&str]| words.iter().any(|w| names.contains(&base(w).as_str()));
+    let pass_p = has_prog(&PASSWORD_P);
+    let curl = has_prog(&["curl"]);
+    let redis = has_prog(&["redis-cli"]);
+    for w in &words {
+        if token_like(w) {
             return true;
         }
-        if w.len() >= 32 && w.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+        if pass_p && w.starts_with("-p") {
             return true;
         }
-        if n > 0 && mysqlish && w.starts_with("-p") {
+        if curl && (w.starts_with("-u") || *w == "--user") {
             return true;
         }
-        if let Some((name, _)) = w.split_once('=').or(if w.starts_with('-') { Some((w, "")) } else { None }) {
-            let name = name.trim_start_matches('-').to_ascii_lowercase();
-            if SECRET_NAMES.iter().any(|s| name.contains(s)) {
+        if redis && *w == "-a" {
+            return true;
+        }
+        if let Some(h) = w.strip_suffix(':') {
+            if secret_name(h) {
                 return true;
             }
+        }
+        if let Some((name, value)) = w.split_once('=') {
+            if secret_name(name) || token_like(value) {
+                return true;
+            }
+        } else if w.starts_with('-') && secret_name(w) {
+            return true;
         }
     }
     false
@@ -121,11 +155,12 @@ pub fn clean_cmd(raw: &str) -> (Option<String>, Option<String>) {
     let bad_chars = raw.chars().any(|c| c.is_control());
     let line = strip_assignments(raw).trim();
     let first = line.split_whitespace().next().map(|w| w.trim_matches(|c| c == '\'' || c == '"'));
-    let prog = first.map(|w| w.rsplit('/').next().unwrap_or(w).to_string()).filter(|p| !p.is_empty());
+    let prog = first.map(|w| w.rsplit('/').next().unwrap_or(w).chars().filter(|c| !c.is_control()).collect::<String>())
+        .filter(|p| !p.is_empty());
     if line.is_empty() {
         return (None, None);
     }
-    if bad_chars || raw.chars().count() > MAX_CMD || is_secret(line, prog.as_deref().unwrap_or("")) {
+    if bad_chars || raw.chars().count() > MAX_CMD || is_secret(line) {
         return (None, prog);
     }
     (Some(line.to_string()), prog)
@@ -146,11 +181,17 @@ pub fn write(term_dir: &Path, s: &Snapshot) -> std::io::Result<()> {
     }
     let d = dir(term_dir);
     std::fs::create_dir_all(&d)?;
+    if !std::fs::symlink_metadata(&d)?.file_type().is_dir() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "saved/ is not a real directory"));
+    }
     std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700))?;
     let tmp = d.join(format!(".{}.{}.tmp", s.key, std::process::id()));
+    let _ = std::fs::remove_file(&tmp);
     let res = (|| {
-        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
-        f.write_all(&serde_json::to_vec(s).map_err(std::io::Error::other)?)?;
+        let mut s = s.clone();
+        s.prog = s.prog.map(|p| p.chars().filter(|c| !c.is_control()).collect());
+        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+        f.write_all(&serde_json::to_vec(&s).map_err(std::io::Error::other)?)?;
         f.sync_all()?;
         std::fs::rename(&tmp, path(term_dir, &s.key))
     })();
@@ -165,7 +206,13 @@ pub fn read(term_dir: &Path, key: &str) -> Option<Snapshot> {
     if !key_ok(key) {
         return None;
     }
-    serde_json::from_slice(&std::fs::read(path(term_dir, key)).ok()?).ok()
+    let f = std::fs::File::open(path(term_dir, key)).ok()?;
+    let mut buf = Vec::new();
+    std::io::Read::take(f, MAX_FILE + 1).read_to_end(&mut buf).ok()?;
+    if buf.len() as u64 > MAX_FILE {
+        return None;
+    }
+    serde_json::from_slice(&buf).ok()
 }
 
 pub fn remove(term_dir: &Path, key: &str) {
@@ -183,7 +230,12 @@ pub fn restorable(term_dir: &Path, live: &HashSet<String>, now: u64) -> Vec<Snap
         let p = e.path();
         let name = e.file_name().to_string_lossy().into_owned();
         if name.starts_with('.') {
-            continue; // a write in progress
+            // A write in progress; one left over for an hour is dead.
+            let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok());
+            if old.is_some_and(|a| a.as_secs() > 3600) {
+                let _ = std::fs::remove_file(&p);
+            }
+            continue;
         }
         let key = name.strip_suffix(".json").filter(|k| key_ok(k));
         let Some(key) = key else {
@@ -268,13 +320,64 @@ mod tests {
             ("x eyJhbGci", "x"),
             (&long_word, "x"),
             ("a\nb", "a"),
-            ("a\x1bb", "a\x1bb"),
+            ("a\x1bb", "ab"),
             (&long_line, "echo"),
         ];
         assert!(long_line.len() > 1000);
         for (line, prog) in cases {
             assert_eq!(clean_cmd(line), (None, Some(prog.into())), "{line:?}");
         }
+    }
+
+    #[test]
+    fn clean_cmd_closes_realistic_leaks() {
+        let rows = [
+            ("a", "curl -H \"X-Api-Key: abc\" u", "curl"),
+            ("b", "curl -H 'x: BEARER abc' u", "curl"),
+            ("c", "curl -u user:pass u", "curl"),
+            ("c2", "curl --user user:pass u", "curl"),
+            ("d", "sudo mysql -psecret", "sudo"),
+            ("d2", "env X=1 psql -p", "psql"),
+            ("d3", "sshpass -p x ssh h", "sshpass"),
+            ("e", "redis-cli -a hunter2", "redis-cli"),
+            ("f", "export DB_PASS=x", "export"),
+            ("h", &format!("tool --opt={}", "a".repeat(40)), "tool"),
+            ("h2", "export X=ghp_abc", "export"),
+            ("i", "psql -p5432", "psql"),
+            ("j", "ls --keyboard", "ls"),
+        ];
+        for (id, line, prog) in rows {
+            assert_eq!(clean_cmd(line), (None, Some(prog.into())), "{id} {line:?}");
+        }
+        // (g) assignments after env are assignments.
+        assert_eq!(clean_cmd("env FOO=x ls -l"), (Some("ls -l".into()), Some("ls".into())));
+    }
+
+    #[test]
+    fn snapshot_hardening() {
+        let d = tempfile::tempdir().unwrap();
+        // a symlinked saved/ is refused
+        let real = d.path().join("elsewhere");
+        std::fs::create_dir(&real).unwrap();
+        std::os::unix::fs::symlink(&real, d.path().join("saved")).unwrap();
+        assert!(write(d.path(), &snap(&k(1), 1, 2)).is_err());
+        std::fs::remove_file(d.path().join("saved")).unwrap();
+        // control chars leave prog; an oversized file is junk
+        let s = Snapshot { prog: Some("a\x1bb".into()), ..snap(&k(1), 1, 2) };
+        write(d.path(), &s).unwrap();
+        assert_eq!(read(d.path(), &k(1)).unwrap().prog.as_deref(), Some("ab"));
+        let big = format!("{{\"v\":1,\"key\":\"{}\",\"name\":\"{}\"}}", k(2), "x".repeat(70_000));
+        std::fs::write(path(d.path(), &k(2)), big).unwrap();
+        assert_eq!(read(d.path(), &k(2)), None);
+        // a stale temp is swept, a fresh one stays
+        let old = d.path().join("saved/.old.tmp");
+        let fresh = d.path().join("saved/.fresh.tmp");
+        std::fs::write(&old, "x").unwrap();
+        std::fs::write(&fresh, "x").unwrap();
+        let t = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+        std::fs::File::options().write(true).open(&old).unwrap().set_modified(t).unwrap();
+        restorable(d.path(), &HashSet::new(), 10);
+        assert!(!old.exists() && fresh.exists());
     }
 
     #[test]
