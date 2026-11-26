@@ -25,7 +25,7 @@ For macOS on Apple silicon, download the companion [Fcitx5 for Sumi 0.5.0.15 ins
 
 For access across networks, see [self-hosted relay setup](docker/relay/README.md). E2E relay connections require rApp 0.6+ on both ends; Linux v0.5.2 uses the legacy connection path. Downloads are selected separately for each platform.
 
-Linux v0.5.2 cannot connect to macOS hosts running 0.8+. Linux and macOS now share the workspace release version and app protocol 14; update both ends together. Build and package this source if the release page does not yet offer the matching Linux assets. Older explicit `protocol=4/5/6` addresses are rejected.
+Linux v0.5.2 cannot connect to macOS hosts running 0.8+. Linux and macOS now share the workspace release version and app protocol 16; update both ends together. Build and package this source if the release page does not yet offer the matching Linux assets. Older explicit `protocol=4/5/6` addresses are rejected.
 
 Linux supports embedded sessions, detach/reattach into native windows, and the standalone GTK client. The main window retains the last picture and draft while reconnecting. The standalone client, like its Mac counterpart, exits on an ordinary disconnect and offers an explicit take-back after takeover. Text, images and file transfers use the same current protocol as the picture connection.
 

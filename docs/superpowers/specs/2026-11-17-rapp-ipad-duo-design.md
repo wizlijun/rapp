@@ -196,16 +196,16 @@ iPad 上没有 `rapp-service`，所以 `service.json` 没人写。做法（我�
 - 加 `gui/ios/`（Flutter 的 iOS 工程，UIScene 生命周期，F10）。
 - `main.dart` 按"这个平台有什么能力"分开，不在界面代码里到处判断平台。加一个小的能力表（我定的），由入口填好交给 `MainState`：
 
-  | 能力 | macOS | Linux | iOS |
-  |---|---|---|---|
-  | hub 传输 | 子进程 | 子进程 | 进程内 |
-  | 会话端口 | 通道 | `rapp-session` | 通道 |
-  | 本机服务（`rapp-service`） | 有 | 有（只控制端） | 无 |
-  | 托盘、窗口管理 | 有 | 有 | 无 |
-  | 单独窗口 | 有 | 无 | 无 |
-  | 在线更新 | 有 | 有 | 无 |
-  | 打开文件夹、打开链接 | `open` | `xdg-open` | 系统接口（§8.7） |
-  | 记住 Mac 密码 | Keychain | 只在内存 | Keychain |
+  | 能力 | macOS | Linux | iOS | Windows（后加，见 Windows 设计） |
+  |---|---|---|---|---|
+  | hub 传输 | 子进程 | 子进程 | 进程内 | 子进程 |
+  | 会话端口 | 通道 | `rapp-session` | 通道 | `rapp-session`（Windows 设计 §10.2） |
+  | 本机服务（`rapp-service`） | 有 | 有（只控制端） | 无 | 有 |
+  | 托盘、窗口管理 | 有 | 有 | 无 | 有 |
+  | 单独窗口 | 有 | 无 | 无 | 无 |
+  | 在线更新 | 有 | 有 | 无 | 有（G 段） |
+  | 打开文件夹、打开链接 | `open` | `xdg-open` | 系统接口（§8.7） | 资源管理器、系统的“打开”（Windows 设计 §10.1） |
+  | 记住 Mac 密码 | Keychain | 只在内存 | Keychain | 系统凭据管理器（Windows 设计 §13.1） |
 
 - `tray_manager`、`window_manager` 是桌面插件。iOS 的入口不引用它们；如果它们让 iOS 构建失败，把桌面外壳（`_Shell`、托盘菜单、全屏）移到单独的文件里，用条件导入。
 - `service_client.dart`、`service_control.dart`、`linux_*.dart` 在 iOS 上不被引用。

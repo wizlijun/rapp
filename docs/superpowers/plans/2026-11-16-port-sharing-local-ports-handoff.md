@@ -176,7 +176,7 @@
 - **设备从列表里删掉后**，它的本机端口要等运行 `rapp hosts` 或服务重启才收回。面板不调用 `hosts`。
 - **测试用的端口**：`maps.rs` 里每条测试有自己的一段端口（单元测试 29100–29229，端到端 29300–29379），这样能同时跑。新加测试要另取一段。别的测试文件用默认范围 28000 起，断言里不能写死端口号（用 `without_local()` 或从回复里读）。
 - **"不含本机"的字样**：本机自己的分享如果"只给"别的设备，面板上会显示"（不含本机）"，但地址和"打开"是有的（在本机上它本来就连得到）。这是原来就有的写法，这次没有动，看着有点怪。
-- **Windows 上"打开"**：`gui/lib/term/term_stage.dart` 的 `openUrl` 只有 macOS 和 Linux 两个分支。原来就这样，这次没有动。
+- **Windows 上"打开"**：`gui/lib/term/term_stage.dart` 的 `openUrl` 只有 macOS 和 Linux 两个分支。原来就这样，这次没有动。（后来加了 Windows 分支 `cmd /c start`；收成一个函数见 Windows 设计 §10.1。）
 - **rustfmt**：仓库没有 `rustfmt.toml`，代码行宽超过默认值，不要整文件跑 `cargo fmt`。
 - **提交的作者**：之前我做的提交都是 `Claude <noreply@anthropic.com>`，因为那个环境里读不到用户的 git 身份，历史里又有两个身份（`lijun2`、`wizlijun`）。用户还没有说要用哪一个。
 

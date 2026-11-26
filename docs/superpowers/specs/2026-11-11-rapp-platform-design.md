@@ -190,7 +190,7 @@ relay 在 A 的长连接上开一条流，发 `{"op":"relayed","token":T}`，然
     - 停止：`launchctl bootout gui/$UID/com.rapp.service`
     - 重启：`launchctl kickstart -k gui/$UID/com.rapp.service`
   - Linux：systemd 用户单元 `rapp-service.service`，用 `systemctl --user start|stop|restart`。
-  - Windows：开机启动写在注册表 `HKCU\…\Run`。GUI 直接拉起服务进程，停止用 `taskkill`。
+  - Windows：开机启动写在注册表 `HKCU\…\Run`。GUI 直接拉起服务进程，停止用 `taskkill`。（已改：Windows 有两种运行方式，见 `2026-11-26-rapp-windows-design.md` §7。）
 
 ## 5. worker CLI 契约（Swift 版先实现）
 通用约定：

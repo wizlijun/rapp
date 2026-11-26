@@ -25,7 +25,7 @@ macOS Apple 芯片用户可下载配套的 [Fcitx5 for Sumi 0.5.0.15 安装包�
 
 跨网络连接可参考[自建中继说明](docker/relay/README.md)。E2E 中继要求两端均为 rApp 0.6+；Linux v0.5.2 使用旧连接方式。各平台分别选择对应的下载版本。
 
-Linux v0.5.2 无法连接 macOS 0.8+ 被控端。当前 Linux 与 macOS 共用工作区版本号和应用协议 v14，请同步升级两端。若发布页还没有对应版本的 Linux 安装包，可从当前源码构建。
+Linux v0.5.2 无法连接 macOS 0.8+ 被控端。当前 Linux 与 macOS 共用工作区版本号和应用协议 v16，请同步升级两端。若发布页还没有对应版本的 Linux 安装包，可从当前源码构建。
 
 Linux 支持内嵌会话、拆分及合回原生窗口、独立 GTK 客户端，以及文本、图片和文件传输。Linux 现在可以作为整桌面被控端：其他同协议版本的 client 可通过现有局域网、直连或中继连接“桌面”，支持多屏、鼠标键盘和文本输入。支持 Omarchy/Hyprland、提供 wlr screencopy 与虚拟输入协议的 Wayland 合成器，以及 X11（文本输入需安装 `xdotool`）。GNOME/KDE Wayland 的 portal 后端、单应用共享、Linux host 的剪贴板/文件传输及自动输入解锁密码尚未实现；锁屏阻止采集时需在本机解锁。安装新版 Linux 包或运行 `scripts/build-linux.sh` 会包含 `rapp-host`；原有安装升级后需重启服务。运行 `rapp-host check --json` 可检查桌面是否可用。文本终端需要已安装的受支持终端、图形登录会话和 systemd 用户管理器。终端独立运行，重启 rApp 服务不会结束它。Linux 更新通过包管理器安装，或替换完整便携包。
 
