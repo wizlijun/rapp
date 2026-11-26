@@ -14,7 +14,7 @@
 | 4 | `34c7efbf` | 写完 | `rapp-service`：`supervise.rs`（`--supervised`、互斥名、升级缓存目录）、Windows 单实例、`UpdateOpts::windows`、`cm.rs` 找 `rapp-gui.exe`、`reset_permissions` 照 Linux、新同步仓库 `core.autocrlf false`、启动程序都走 `rapp_net::proc`；config-reference 三行 |
 | 5 | `1cadb684` | 写完 | `rapp-term`：unix 专用的模块挂 `cfg(unix)`，`main.rs` 分派到 `unix_main.rs` / `stub_main.rs`（Windows 上报“不支持文本终端”，退出 1）；四个测试文件 `#![cfg(unix)]`；新 `tests/unsupported.rs` |
 | 6 | `656bf1a1` | 写完 | `rapp-cli`：`gui.rs`（`launch_args`、`version_dir_name`、`gui_exe`，各系统都测）；Windows 上先 `console_utf8`，不带子命令时启动 `rapp-gui.exe` 后退出 0 |
-| 7 | `61ea0b91`、`b44895ef`、`46873ae7`、`9c662470`、`b4f19477` | 写完（但见 §4 第 1 条：testkit、rapp-conn 的测试在 Windows 上还是编不过） | relay `audit.rs` 三处 `cfg(unix)`；rapp-state 的权限位只在 unix 上设；余力 `load/disks.rs` 的 Windows 分支（真 bug，规则 4）；七处权限断言加 Windows 访问列表断言；testkit `bins()` 在 Windows 上复制四个程序成 `.exe`；`tasks/todo.md` 新标题「Windows 版：现在在 Windows 上关着的测试」 |
+| 7 | `61ea0b91`、`b44895ef`、`46873ae7`、`9c662470`、`b4f19477`、`132111ad`、`ddbdc52b` | 写完 | relay `audit.rs` 三处 `cfg(unix)`；relay `admin.rs` 的管理套接字挂 `cfg(unix)`，别的系统上是同名空壳（§4 第 1 条，用户选了 (a)）；换钥匙的八个测试挂 `cfg(unix)`；rapp-state 的权限位只在 unix 上设；余力 `load/disks.rs` 的 Windows 分支（真 bug，规则 4）；七处权限断言加 Windows 访问列表断言；testkit `bins()` 在 Windows 上复制四个程序成 `.exe`；`tasks/todo.md` 新标题「Windows 版：现在在 Windows 上关着的测试」 |
 | 8 | `5d1f207c` | 部分 | `rust/.cargo/config.toml`（`+crt-static`，只对 msvc 目标）、`scripts/stage-windows.ps1`、`scripts/check-windows.ps1`。Step 4–6 要 Windows 机器，没做 |
 | 9 | `d72c324f` | 部分 | 规格 §19.2 的旧话（16 个文件，最小改动）；`tasks/todo.md` 新标题「Windows 版 A 段（地基）」。完成标记、合并没做 |
 
@@ -70,8 +70,13 @@
    - `admin.rs:25` `use tokio::net::{UnixListener, UnixStream};`，用在 `:69`、`:157`、`:167`、`:172`、`:200`
    - `admin.rs:174`、`:384` `from_mode`；`:373` `.mode()`
    - `--exclude rapp-relay` 不管用：`rust/conn/Cargo.toml:25` 和 `rust/testkit/Cargo.toml:58` 把它当 dev-dependency，`cargo test --workspace` 照样要编它。用到它的测试：`testkit/tests/common/mod.rs`（RelayRig，从 `:478` 起）、`conn/tests/relay.rs`、`testkit/tests/key_change.rs`、`netmon.rs`、`forward.rs`。
-   - 结果：Windows 上 rapp-conn 和 testkit 的测试全部编不过，`check-windows.ps1` 第 1、2 步必然红。
-   - 要用户选：(a) 再批准给 relay 的管理套接字挂 `cfg(unix)`（Windows 上没有管理命令，relay 本来也不在 Windows 上发）；(b) 把 `rapp-relay` 挪到两个 crate 的 `[target.'cfg(unix)'.dev-dependencies]`，并把 RelayRig 和这些测试挂 `cfg(unix)`（Windows 上丢掉 relay 相关的覆盖）。我倾向 (a)，改动小、覆盖不丢。
+   - 不改的话：Windows 上 rapp-conn 和 testkit 的测试全部编不过，`check-windows.ps1` 第 1、2 步必然红。
+   - **已定：(a)，只动 `admin.rs`**（用户 2026-11-26 批准；`132111ad`、`ddbdc52b`）。
+     - `admin.rs` 里用 Unix 套接字和权限位的部分挂 `#[cfg(unix)]`：常量、`call`、`issue_key`、`Cmd`、`Server` 和它的 `impl`/`Drop`、`connection`、`Handler`、`resolve`、`persist_enroll`，以及只给它们用的 `use`（从合在一起的 `use` 里拆出来单挂）。unix 上的代码没有挪动、改名或改写。
+     - 别的系统上的空壳，名字和签名同 unix：`pub fn socket_path`、`pub const SOCKET`、`pub struct NotRunning`（共用，没动）；`pub async fn call(&Path, Value) -> Result<Value>`、`pub async fn issue_key(&Path, bool) -> Result<Option<Key>>`（一律报 `the admin socket is not available on this system (<路径>)`，不是 `NotRunning`）；`pub(crate) struct Server`（单元结构）、`Server::bind(&Path) -> Result<Server>`（成功、什么也不开）、`Server::serve(&mut self, Ctx)`（什么也不做）、空的 `Drop`（让 `server.rs:224` 的 `drop(admin)` 不触发 clippy `drop_non_drop`）。`Control`、`Ctx` 共用，挂 `cfg_attr(not(unix), allow(dead_code))`。
+     - `server.rs`、`lib.rs`、`main.rs`、`store.rs` 等没动。`main.rs:215`（`DirBuilderExt::mode`）和 `main.rs:17`（`tokio::signal::unix`）留着：relay 的程序不在 Windows 上编（`--exclude rapp-relay`；dev-dependency 只编库）。
+     - 关掉的测试（挂在测试上，不挂整个文件）：`conn/tests/relay.rs` 的 `rotate_key_closes_every_device_with_code_4`、`requests_after_a_key_change_say_key_changed`、`an_open_relayed_stream_says_key_changed_after_a_rotate`；`testkit/tests/key_change.rs` 的 `service_stops_and_says_key_changed_after_rotate`、`a_new_key_reconnects_with_the_same_id`、`a_wrong_new_key_says_bad_key`、`hub_presence_says_key_changed_and_stops_dialing`、`hub_reports_key_changed`。只给它们用的 `CLOSE_KEY_CHANGED`（import）、`rotate`、`audit_events`、`hex` 也挂上；`conn/tests/relay.rs` 的 `Rig.data` 在别的系统上只用来保住临时目录，挂 `allow(dead_code)`。都列进了 `tasks/todo.md`。
+     - `relay/tests/` 下的 `admin.rs`、`secrets.rs`、`bench.rs` 也用 `admin::`，没挂：relay 自己的测试在 Windows 上不编（`--exclude rapp-relay`）。
 2. **Task 5 Step 4 的改名检查做不到**：计划要 git 把 `unix_main.rs` 认成从 `main.rs` 改名，但 `main.rs` 还在（变成了分派），git 只会显示 `unix_main.rs` 是新加的。检查应改成“`unix_main.rs` 的内容和旧 `main.rs` 只差 `fn main` → `pub fn main`”（`git diff 7ed6c7e4:rust/term/src/main.rs HEAD:rust/term/src/unix_main.rs`）。
 3. **计划早于 rapp-state 和余力**：`services/state`（0.15.48 起是 workspace 成员，testkit 的普通依赖）和 `rust/service/src/load/disks.rs`（0.15.47）都是无条件的 unix 代码，计划的 File Map 和 Task 7 都没提到。不改的话 Windows 上 `rapp-service` 和 testkit 都编不过。
 4. **计划 Task 7 Step 2 列了三个假程序**，`rust/testkit/tests/common/mod.rs` 的 `bins()` 现在有四个（多 `rapp-state`）。
@@ -82,7 +87,11 @@
 
 按可能性从高到低：
 
-1. **relay `admin.rs`**（§4 第 1 条）：不定下来，Windows 门禁第 1、2 步必红。
+1. **relay `admin.rs` 的空壳**（§4 第 1 条）：
+   - Windows 上没有管理套接字挡着，同一个数据目录可以起两个 relay（unix 上第二个在 `bind` 就报 `another relay is using …`）。只影响测试，relay 不在 Windows 上发。
+   - 非 unix 上没人调用 `Control` 的方法：已给 trait 挂 `allow(dead_code)`，按 rustc 的规则带 `allow` 的项算活的根，`server.rs` 里只从 `impl Control for Shared` 调到的 `Shared::unbind_id`、`Shared::key_changed`（`server.rs:484`、`:521`）应该不报未用；若 Windows 的 clippy 还是报，只能动 `server.rs`（按规定没碰，要再问）。
+   - `Ctx` 的字段在非 unix 上只写不读，已挂 `allow(dead_code)`。
+   - 测试里挂掉换钥匙的测试以后，`key_change.rs`、`conn/tests/relay.rs` 还可能剩别的只给它们用的东西没被我看出来，Windows 上的 `-D warnings` 会指出来。
 2. **windows-sys 0.61 的签名**（`rust/net/src/win.rs`）：`SetNamedSecurityInfoW` 的路径参数是 `PCWSTR` 还是 `PWSTR`；`EXPLICIT_ACCESS_W` / `TRUSTEE_W` 的字段名和类型（`grfAccessPermissions` 是 `u32`，`grfInheritance` 的类型）；`GetAce`、`GetSecurityDescriptorControl` 的参数；`GetDiskFreeSpaceExW`（`PCWSTR`，三个 `*mut u64`，返回 `BOOL`）；各常量所在的模块和要开的特性。第一次 `cargo check --target x86_64-pc-windows-msvc` 多半要在这里改几处。
 3. **`Cargo.lock` 没重新生成**：第一次 cargo 会改它；要提交（这是 A 段的依赖变化，不是版本号）。确认用户同意由 A 段提交它。
 4. **`UpdateOpts::windows` 里的闭包**（`rust/service/src/lib.rs:148`）：`&|k| std::env::var_os(k).map(Into::into)` 传给 `&dyn Fn(&str) -> Option<PathBuf>`，`k` 的类型和 `Into` 的目标可能推不出来，要写成 `|k: &str| std::env::var_os(k).map(PathBuf::from)`。
@@ -96,7 +105,7 @@
 
 ## 6. 验证的人先做什么（按顺序）
 
-1. 先问用户 §4 第 1 条（relay `admin.rs`）选 (a) 还是 (b)，同时问 §2 的 `CLAUDE.md` 四处改动和由 A 段提交 `Cargo.lock`。
+1. 先问用户 §2 的 `CLAUDE.md` 四处改动和由 A 段提交 `Cargo.lock`（§4 第 1 条已定 (a)）。
 2. Mac 上：`cd rust && cargo check --workspace --all-targets`，确认 macOS 没变坏，顺带生成 `Cargo.lock`；再跑完整门禁（`swift test`、`cargo test --workspace --no-fail-fast`、clippy `-D warnings`、`flutter analyze`、`flutter test`）。`a_stuck_disk_gets_one_thread_not_one_per_read` 换了临时目录，要看它在 macOS、Linux 上仍然过。
 3. Mac 上交叉检查：`rustup target add x86_64-pc-windows-msvc`，`cargo check --workspace --all-targets --target x86_64-pc-windows-msvc --exclude rapp-relay --exclude rapp-host-linux --exclude rapp-client-gtk --exclude rapp-hub-ffi`。不用链接就能先把 §5 第 2、4 条的签名问题改掉（缺 MSVC 的 C 依赖时，个别 crate 可能要到 Windows 机器上才能查）。
 4. Windows 机器（Task 1 Step 4）：clone 后 `git ls-files --eol` 没有 `w/crlf`；在 `rust\` 里 `cargo test` 先跑 `-p rapp-net`（`win.rs` 的测试、`private.rs` 的三个测试，含中文带空格的目录），再 `-p rapp-service`、`-p rapp-cli`、`-p rapp-term`。
