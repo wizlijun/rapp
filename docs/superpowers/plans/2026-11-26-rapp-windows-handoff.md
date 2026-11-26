@@ -53,6 +53,48 @@
   4. 两个 PowerShell 脚本没跑过；`Step` 靠脚本块返回一个布尔值，命令往管道里多吐东西就会被判成失败。
 - **先在 Mac 上做的**：`cargo check --workspace`（确认没碰坏 macOS），再 `cargo check --target x86_64-pc-windows-msvc`（只查类型，不链接），然后才上 Windows 机器。
 
+### 3.2 B 段草稿的实际情况
+
+B 段分三批写，前两批在两个分支上并行，互相没看过对方的代码。
+
+**编码组：任务 1–6，分支 `feat/windows-host-core`**（说明文件 `docs/superpowers/plans/notes/2026-11-26-windows-b1-draft-notes.md`）
+
+- **写了的**：crate 外壳、时钟、Swift 样本工具、边界测试（任务 1）；画面协议编解码和“不处理”的消息表（2）；deflate 流，直接绑 `libz-sys`（3）；量化（4）；分块编码和滚动检测（5）；发送节奏、弱网档、省流阶梯、暂停队列（6）。每个任务都有 Swift 样本生成器和 Rust 对照测试。
+- **现在编不过，原因是已知的**：`lib.rs` 在任务 1 就把任务 7–19 的模块全声明了，`tile.rs` 还用了任务 7 的 `geometry::Rect`（假定字段是 `x, y, width, height: f64`）。两个分支合到一起、任务 13–19 也写完之后才可能编过。
+- **样本文件一个都没生成**（不许跑 swift）。生成命令：`RAPP_WRITE_FIXTURES=1 swift test --filter 'Fixtures/'`。
+- **和计划不同的名字**：说明文件第 3 节有完整清单。要紧的几处已经按 Swift 改回计划 B：`encode` 返回 `Option`、`region` 可空；`offer` 多一个 `captured`；`SenderOutput::Frame` 带 `region`；`set_paused`/`set_pinned`/`set_steps` 有返回值；`take_stats` 要 `now`。
+- **草稿没照计划做的三处，接手的人要改或者认下来**：
+  1. `tests/pacing.rs` 用 `serde_json::Value` 比结果。计划 B 的规矩是反序列化成 Rust 类型再比，不比 `Value`。
+  2. 轨迹里每一步写成 `{"op": …, "pic": …}`，计划写的是 `{"call": …, "scene": …}`。两边一致就行，改不改都可以，改就两边一起改。
+  3. 超过 512 字节的帧只记长度和 FNV 校验，不记十六进制。对不上时看不到是哪个字节不同，要查就临时把上限调大。
+- **计划里错的，已经改回计划 B**（提交 `0c29a2ce`、`48b5c6eb`）：恢复暂停后发的是差量，不是整帧（只有暂停期间换了模式才是整帧；计划的审查重点 5 和任务 14 的测试原来也写错了，已改）；区域大小变化不强制整帧，只有密度变 1% 以上才是；输出缓冲是固定 64 KiB 循环取，不是越长越大；分块样本要带每次调用的输入，不然 Rust 没法重放；`lib.rs` 的模块要按任务逐个声明。
+- **最先会撞上的**：
+  1. **zlib 输出是不是逐字节相同**。Windows 上 `libz-sys` 用它自己编的 zlib（草稿说是 1.3.x，没核对），Swift 用的是苹果系统的 zlib，两边的输出没比过。探针 C1 本来该先回答这个问题，草稿是在 C1 之前写的。不相同就走计划 B 任务 3 写好的退路（比解压后的字节），任务 5 的切片边界跟着变。
+  2. `deflate.rs` 是这个 crate 里唯一有 `unsafe` 的文件：`zalloc`/`zfree` 的指针类型、`deflateCopy`、`Box` 的处理都是凭记忆写的。
+  3. Swift 生成器可能过不了类型检查（很长的元组数组字面量、`SenderTrace.init` 里的 `[unowned self]` 闭包）。
+  4. 时间和 RTT 是 `f64`，经过 JSON 来回一趟要一位不差。
+  5. 样本很大、跑得慢：发送器有 1080p 和 75 秒的轨迹，协议拒收样本有几 MB。
+  6. 没有计时器时发送器把每次编码都算 0 毫秒，真实的编码计时那条路没有样本覆盖。
+- **先验的顺序**：先让它编过（`cargo check`、`clippy -D warnings`）→ 边界测试 → 生成样本、修生成器 → 协议和 deflate 测试（deflate 的结果决定走不走退路）→ 量化 → 分块（先跑 `decoder_agrees`）→ 节奏。
+
+**规则组：任务 7–12，分支 `feat/windows-host-core-rules`**（说明文件 `docs/superpowers/plans/notes/2026-11-26-windows-b2-draft-notes.md`）
+
+- **写了的**：几何、窗口表、桌面、命中测试、提示（7）；焦点窗格和跟踪器（8）；输入规则和 worker 命令行（9）；剪贴板规则、传输存储、可移植文件名（10）；锁屏和解锁规则（11）；应用状态规则引擎，在 `src/state/` 下八个文件（12）。每组都有 Swift 样本生成器和 Rust 对照测试。`src/` 里没有平台相关写法，取时间只在 `clock.rs`。
+- **现在编不过，原因是已知的**：它用的协议类型（`CanvasRect`、`WindowInfo`、`Message`、`APP_STATE_LIMIT` 等）和 `tile::EncodeReport` 在另一个分支上，字段名是照编码组早先的提交猜的。两边对不上的地方由第三批在合并后先改齐（见下）。
+- **要 Rust 1.89 以上**：`File::lock`（计划 B 指定用它，为了不碰 `libc`）和 `Option::is_none_or`。仓库没有固定工具链版本，Mac 和 Windows 构建机都要先确认版本够。
+- **草稿和 Swift 不一样的一处**：`resolve_regions` 收的是区域表，Swift 的 `resolveRegions` 收整个规则包（`Sources/RappCore/StateRules/Regions.swift:5`）。已让第三批照 Swift 改或者写明理由。
+- **计划里错的，已经改回计划 B**（提交 `48b5c6eb`）：`Input` 事件没有字段；找不到程序时的文字按规格 §6.4 写 `<id> not found`；`with_unlock_lock` 多一个 `log` 参数；`RuleImage::sample` 可能返回空；Swift 的 `PutSink` 不自己续传；计划漏列了 `view_region`、`clamp_size`、`shareable_apps`、`apps_text`、`ListedWindow`；`lock_json` 用到的 `LockOutcome` 要在任务 9 就定义。
+- **样本测不到的两条上限**：一次最多 100 个文件、图片不超过 64 MiB。这两条在 Swift 的 `rapp-host` 里，不在 `RappCore`，样本生成器调不到。Rust 这边只核对了常量，行为要靠任务 16 的会话测试。
+- **最先会撞上的**：
+  1. **状态规则的大图是重画出来的**。800×600 和 1600×1000 的画面存不下，样本里只有画法和 SHA-256，Rust 测试用移植的 `RuleCanvas.swift` 重画后比哈希。重画移植错了，所有状态规则测试都会先停在这里，所以先看哈希对不对，再看规则。
+  2. **字符串和数字的细节是近似的**：Swift 按字素簇和规范等价比较字符串，Rust 按字节；`isNumber`、`Double` 转字符串的分界点、`"%.1f"` 的舍入、`localizedStandardCompare` 都是照推测写的。样本里只放了几例组合字符，对不上时先怀疑这里。
+  3. Swift 遇到溢出会崩，Rust 这边改成了饱和或回绕，不会崩但会给出一个值。
+  4. 大文件（`tracker.rs`、`transfers.rs`、`state/*`）里闭包借用和 `json!` 宏多，没编过，借用检查会报一批错。
+  5. 任务 12 的 Swift 生成器有几处类型推断可疑（`Any` 字典字面量、`as?` 区分两种字典）。
+- **没有样本的场景**：传输测试里靠 `chmod` 造失败的一例（只能在 POSIX 上跑）；状态引擎单次耗时的测试（只移植了场景，没测时间）。
+
+**第三批：任务 13–19**（会话、假平台、画面循环、输入和提示、剪贴板和文件传输、锁屏解锁、`PORTING.md`、`fake-host-core`）在 `feat/windows-host-core` 上接着写：先把规则组的分支合进来，改齐两组互相猜错的名字，再逐个任务提交。说明文件是 `docs/superpowers/plans/notes/2026-11-26-windows-b3-draft-notes.md`。任务 20（收尾）要上机器，草稿不做。
+
 ## 4. 边界
 
 ### 4.1 三条模块边界（规格 §5.3，改这些要回来问用户）
