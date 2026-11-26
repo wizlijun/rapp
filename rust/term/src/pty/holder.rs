@@ -48,6 +48,9 @@ const SNAPSHOT_QUIET: Duration = Duration::from_secs(2);
 const SNAPSHOT_MAX_WAIT: Duration = Duration::from_secs(10);
 /// How long a restored terminal waits for its shell's first prompt before it pre-types the command anyway.
 const PREFILL_WAIT: Duration = Duration::from_secs(2);
+/// How often, and how far apart, a snapshot to restore that cannot be read is tried again.
+const RESTORE_TRIES: u32 = 5;
+const RESTORE_GAP: Duration = Duration::from_millis(200);
 /// How long after the program exited by itself a signal to `run` still counts as the reason (a shutdown that
 /// stopped the program first, which caught its SIGTERM and exited cleanly).
 const LATE_SIGNAL_WAIT: Duration = Duration::from_millis(150);
@@ -120,8 +123,15 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
         None => session_name(default_name(&command)).unwrap_or_else(|| "shell".into()),
     };
     let (cols, rows) = window_size().unwrap_or(DEFAULT_SIZE);
-    // The terminal to restore: its snapshot, unless there is none for the key.
-    let mut restoring = opts.restore.as_deref().and_then(|k| saved::read(&opts.dir, k).filter(|s| s.key == k));
+    // The terminal to restore: its snapshot, unless there is none for the key. One that cannot be read stops run
+    // rather than start a new terminal beside it.
+    let mut restoring = match opts.restore.clone() {
+        Some(k) => {
+            let dir = opts.dir.clone();
+            tokio::task::spawn_blocking(move || saved::to_restore(&dir, &k, RESTORE_TRIES, RESTORE_GAP)).await??
+        }
+        None => None,
+    };
 
     // The name (and a restored key): picked and bound under the lock, so two runs starting together never get the same.
     let dir = opts.dir.clone();

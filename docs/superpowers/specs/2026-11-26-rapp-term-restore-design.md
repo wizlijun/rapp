@@ -155,6 +155,8 @@ A 用不上的 shell（钩子没装上，或者 `sh`、`nu` 这类没写钩子�
 | 恢复成功（新 holder 起来了） | 留，同一个 `key` 接着写 | 新 holder 沿用旧 `key`（§4.5） |
 | 用户在恢复列表里点「清掉」 | 删 | |
 | 超过 30 天，或超过 50 份时最旧的 | 删 | serve 扫的时候顺手删【我定的】 |
+| 文件坏了（不是快照、太大、`key` 对不上） | 删 | serve 扫的时候顺手删 |
+| 文件这次读不出来（I/O 错误、没权限、描述符用完） | 留，这一轮不列出来也不删，下一轮再看 | 可能是好的快照，删了就再也恢复不了【计划里改的】 |
 
 **哪些算「可以恢复」**：`saved/` 里 `key` 不等于任何活着的 holder 的快照。活着的 holder 不出现在恢复列表里（它们还在，用 0.15.33 的「打开」）。
 
@@ -168,7 +170,7 @@ exec rapp-term run --dir … --ticket … --restore <key> --cwd <cwd> -- <shell>
 
 `--cwd` 照旧给（目录不存在就不给，从家目录开）。holder 带 `--restore` 起来后：
 
-1. 读 `saved/<key>.json`，**沿用旧 `key`** 当自己的 `meta.key`，所以 term id（`term:pty:<key>`）不变：常用、项目成员（`workspace.json` 里存的就是 term id）、「全部打开」照旧认得它，GUI 不用改【审读后我定的】。用里面的名字（`named` 原样带过来，名字冲突照 `pick_name` 加后缀）。`saved/<key>.json` 不删，由新 holder 原地接着写。它一起来，这个 `key` 就是活的，不再算可恢复，两次恢复撞不到一起（serve 的 `opening` 锁也一个接一个开）。
+1. 读 `saved/<key>.json`（读不出来就每 200 ms 再试，共 5 次；还读不出来，holder 报错退出，快照留着，不换新 `key` 起一个新终端，免得旧快照以后又被恢复一遍【计划里改的】），**沿用旧 `key`** 当自己的 `meta.key`，所以 term id（`term:pty:<key>`）不变：常用、项目成员（`workspace.json` 里存的就是 term id）、「全部打开」照旧认得它，GUI 不用改【审读后我定的】。用里面的名字（`named` 原样带过来，名字冲突照 `pick_name` 加后缀）。`saved/<key>.json` 不删，由新 holder 原地接着写。它一起来，这个 `key` 就是活的，不再算可恢复，两次恢复撞不到一起（serve 的 `opening` 锁也一个接一个开）。
 2. 把 `venv`、`conda` 放进给 shell 的环境变量 `RAPP_RESTORE_VENV`、`RAPP_RESTORE_CONDA`。钩子在用户配置加载完以后：
    - 有 conda 且 `conda` 命令可用：`conda activate <前缀>`。
    - 有 venv 且 `<venv>/bin/activate` 存在（fish 用 `activate.fish`）：source 它。conda 先、venv 后（venv 常常建在 conda 的 python 上）。

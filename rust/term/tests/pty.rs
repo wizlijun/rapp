@@ -560,6 +560,33 @@ async fn restore_unknown_key_starts_fresh() {
 }
 
 #[tokio::test]
+async fn restore_of_an_unreadable_snapshot_stops_and_keeps_it() {
+    if unsafe { libc::geteuid() } == 0 {
+        eprintln!("note: root reads any file; the test is skipped");
+        return;
+    }
+    use std::os::unix::fs::PermissionsExt;
+    let d = short_dir();
+    let k = "00000000000000b3";
+    let mut a = Window::start(d.path(), &["--name", "a", "--", "/bin/cat"]);
+    let ka = key_of(d.path(), "a").await;
+    wait_snapshot(d.path(), &ka, WAIT, |_| true);
+    // The same snapshot under another key, then made unreadable: run must not start a new terminal beside it.
+    let mut s = saved::read(d.path(), &ka).unwrap();
+    s.key = k.into();
+    saved::write(d.path(), &s).unwrap();
+    a.type_in(b"\x04");
+    a.wait_exit();
+    let p = saved::path(d.path(), k);
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let mut w = Window::start(d.path(), &["--restore", k, "--", "/bin/cat"]);
+    assert_ne!(w.wait_exit(), 0, "{:?}", w.output());
+    assert!(w.output().contains("could not be read"), "{:?}", w.output());
+    assert!(p.exists());
+    assert!(std::fs::read_dir(d.path().join("saved")).unwrap().count() == 1, "no new terminal's snapshot");
+}
+
+#[tokio::test]
 async fn restore_of_a_live_key_takes_a_new_one() {
     let d = short_dir();
     let _a = Window::start(d.path(), &["--name", "a", "--", "/bin/cat"]);

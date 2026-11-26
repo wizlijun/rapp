@@ -201,18 +201,63 @@ pub fn write(term_dir: &Path, s: &Snapshot) -> std::io::Result<()> {
     res
 }
 
-/// The snapshot of `key`; a missing or unreadable file is None.
-pub fn read(term_dir: &Path, key: &str) -> Option<Snapshot> {
+/// What reading `saved/<key>.json` found.
+#[derive(Debug, PartialEq)]
+pub enum Loaded {
+    Snap(Snapshot),
+    /// No such file (or a key that names none).
+    Missing,
+    /// A file that never will be a snapshot of this key: too big, not one, or another key's. Safe to delete.
+    Bad,
+    /// The file is there but could not be read just now (out of descriptors, an I/O error, no permission): it may
+    /// be a good one, so it is left alone.
+    Unreadable,
+}
+
+/// Reads the snapshot of `key`, telling a bad file from one that could not be read.
+pub fn load(term_dir: &Path, key: &str) -> Loaded {
     if !key_ok(key) {
-        return None;
+        return Loaded::Missing;
     }
-    let f = std::fs::File::open(path(term_dir, key)).ok()?;
+    let f = match std::fs::File::open(path(term_dir, key)) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Loaded::Missing,
+        Err(_) => return Loaded::Unreadable,
+    };
     let mut buf = Vec::new();
-    std::io::Read::take(f, MAX_FILE + 1).read_to_end(&mut buf).ok()?;
-    if buf.len() as u64 > MAX_FILE {
-        return None;
+    if std::io::Read::take(f, MAX_FILE + 1).read_to_end(&mut buf).is_err() {
+        return Loaded::Unreadable;
     }
-    serde_json::from_slice(&buf).ok()
+    if buf.len() as u64 > MAX_FILE {
+        return Loaded::Bad;
+    }
+    match serde_json::from_slice::<Snapshot>(&buf) {
+        Ok(s) if s.key == key => Loaded::Snap(s),
+        _ => Loaded::Bad,
+    }
+}
+
+/// The snapshot of `key`; None for a missing, bad or unreadable file.
+pub fn read(term_dir: &Path, key: &str) -> Option<Snapshot> {
+    match load(term_dir, key) {
+        Loaded::Snap(s) => Some(s),
+        _ => None,
+    }
+}
+
+/// The snapshot `run --restore <key>` takes over: None when there is none (or it is bad), so the terminal starts as
+/// a new one. A file that cannot be read is tried `tries` times, `gap` apart, and then is an error: starting under
+/// a new key would leave the old snapshot to be restored a second time.
+pub fn to_restore(term_dir: &Path, key: &str, tries: u32, gap: std::time::Duration) -> anyhow::Result<Option<Snapshot>> {
+    for n in 1..=tries.max(1) {
+        match load(term_dir, key) {
+            Loaded::Snap(s) => return Ok(Some(s)),
+            Loaded::Missing | Loaded::Bad => return Ok(None),
+            Loaded::Unreadable if n < tries => std::thread::sleep(gap),
+            Loaded::Unreadable => {}
+        }
+    }
+    anyhow::bail!("the terminal to restore could not be read")
 }
 
 pub fn remove(term_dir: &Path, key: &str) {
@@ -222,7 +267,8 @@ pub fn remove(term_dir: &Path, key: &str) {
 }
 
 /// The snapshots of terminals that are not alive, oldest `started` first. Prunes as it goes: files older than 30 days
-/// and those beyond the 50 newest are deleted, as are junk files. A live key's file is never touched.
+/// and those beyond the 50 newest are deleted, as are junk files. A live key's file is never touched, nor one that
+/// could not be read.
 pub fn restorable(term_dir: &Path, live: &HashSet<String>, now: u64) -> Vec<Snapshot> {
     let Ok(rd) = std::fs::read_dir(dir(term_dir)) else { return Vec::new() };
     let mut out = Vec::new();
@@ -245,9 +291,11 @@ pub fn restorable(term_dir: &Path, live: &HashSet<String>, now: u64) -> Vec<Snap
         if live.contains(key) {
             continue;
         }
-        match read(term_dir, key) {
-            Some(s) if s.key == key && now.saturating_sub(s.saved) <= MAX_AGE => out.push(s),
-            _ => {
+        match load(term_dir, key) {
+            Loaded::Snap(s) if now.saturating_sub(s.saved) <= MAX_AGE => out.push(s),
+            // Not readable just now: perhaps a good one, so neither deleted nor offered this time.
+            Loaded::Unreadable | Loaded::Missing => {}
+            Loaded::Snap(_) | Loaded::Bad => {
                 let _ = std::fs::remove_file(&p);
             }
         }
@@ -425,6 +473,57 @@ mod tests {
         std::fs::write(path(d.path(), &k(1)), "{").unwrap();
         assert_eq!(read(d.path(), &k(1)), None);
         assert_eq!(read(d.path(), "../x"), None);
+    }
+
+    #[test]
+    fn an_unreadable_snapshot_survives() {
+        if unsafe { libc::geteuid() } == 0 {
+            eprintln!("note: root reads any file; the test is skipped");
+            return;
+        }
+        let d = tempfile::tempdir().unwrap();
+        write(d.path(), &snap(&k(1), 1, 100)).unwrap();
+        write(d.path(), &snap(&k(2), 2, 100)).unwrap();
+        let p = path(d.path(), &k(1));
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o000)).unwrap();
+        assert_eq!(load(d.path(), &k(1)), Loaded::Unreadable);
+        // Skipped this round, not deleted, and not offered.
+        let got = restorable(d.path(), &HashSet::new(), 200);
+        assert_eq!(got.iter().map(|s| s.key.clone()).collect::<Vec<_>>(), vec![k(2)]);
+        assert!(p.exists());
+        // Readable again: offered again.
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(restorable(d.path(), &HashSet::new(), 200).len(), 2);
+        // A directory in a snapshot's place cannot be read either: left alone too.
+        std::fs::create_dir(path(d.path(), &k(5))).unwrap();
+        assert_eq!(load(d.path(), &k(5)), Loaded::Unreadable);
+        assert_eq!(restorable(d.path(), &HashSet::new(), 200).len(), 2);
+        assert!(path(d.path(), &k(5)).is_dir());
+        // What tells a bad file from an unreadable one.
+        assert_eq!(load(d.path(), &k(3)), Loaded::Missing);
+        std::fs::write(path(d.path(), &k(3)), "{").unwrap();
+        assert_eq!(load(d.path(), &k(3)), Loaded::Bad);
+        std::fs::write(path(d.path(), &k(3)), serde_json::to_vec(&snap(&k(4), 1, 2)).unwrap()).unwrap();
+        assert_eq!(load(d.path(), &k(3)), Loaded::Bad, "another key's snapshot");
+    }
+
+    #[test]
+    fn restore_never_starts_fresh_over_an_unreadable_file() {
+        if unsafe { libc::geteuid() } == 0 {
+            eprintln!("note: root reads any file; the test is skipped");
+            return;
+        }
+        let d = tempfile::tempdir().unwrap();
+        let gap = std::time::Duration::from_millis(1);
+        write(d.path(), &snap(&k(1), 1, 100)).unwrap();
+        assert_eq!(to_restore(d.path(), &k(1), 3, gap).unwrap().map(|s| s.key), Some(k(1)));
+        assert!(to_restore(d.path(), &k(2), 3, gap).unwrap().is_none(), "no snapshot: a new terminal");
+        std::fs::write(path(d.path(), &k(3)), "{").unwrap();
+        assert!(to_restore(d.path(), &k(3), 3, gap).unwrap().is_none(), "a bad one: a new terminal");
+        let p = path(d.path(), &k(1));
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o000)).unwrap();
+        assert!(to_restore(d.path(), &k(1), 3, gap).is_err(), "unreadable: neither restored nor started afresh");
+        assert!(p.exists());
     }
 
     #[test]
