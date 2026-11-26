@@ -12,7 +12,6 @@ import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/ui/app_profile_store.dart';
 import 'package:rapp/embed/stream_choice.dart';
-import 'package:rapp/embed/strip_tools.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/history/draft_store.dart';
 import 'package:rapp/history/input_recorder.dart';
