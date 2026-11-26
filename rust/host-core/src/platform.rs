@@ -91,6 +91,12 @@ pub trait Platform: Send + Sync {
     fn applications(&self) -> Result<Vec<SharedApp>, String>;
     /// Usable without a target: the `lock` command.
     fn lock(&self) -> Box<dyn LockOps>;
+    /// While A is locked: the frames (global points) of app `app`'s ordinary on-screen windows
+    /// (Swift `lockedAppDisplay`, `WindowCapture.swift:273-287`: the window server's layer-0
+    /// windows of the app's process). host-core picks the display with `lock::locked_start_display`.
+    /// `None` when the app is not running or the platform cannot list windows while A is
+    /// locked: the session then announces the main display.
+    fn locked_app_windows(&self, app: &str) -> Option<Vec<Rect>>;
     fn open(&self, target: &Target) -> Result<Parts, OpenError>;
 }
 

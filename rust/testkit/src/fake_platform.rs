@@ -68,6 +68,8 @@ struct State {
     /// Why the next `lock` call cannot be made (`None`: it locks).
     lock_error: Option<String>,
     awake: bool,
+    /// What `locked_app_windows` answers for the fake app (`None`: the platform cannot say).
+    locked_windows: Option<Vec<Rect>>,
 
     clip: Option<ClipRead>,
     change: i64,
@@ -221,6 +223,7 @@ impl FakePlatform {
             can_unlock: true,
             lock_error: None,
             awake: false,
+            locked_windows: None,
             clip: None,
             change: 0,
             written: None,
@@ -347,6 +350,12 @@ impl FakePlatform {
     /// Makes `lock` fail with `reason` (`None`: it locks again).
     pub fn set_lock_error(&self, reason: Option<&str>) {
         self.st().lock_error = reason.map(str::to_string);
+    }
+
+    /// The window frames the platform lists for the fake app while A is locked (`None`, the
+    /// default: it cannot list them, and a session started locked announces the main display).
+    pub fn set_locked_app_windows(&self, w: Option<Vec<Rect>>) {
+        self.st().locked_windows = w;
     }
 
     /// Whether the session holds A awake.
@@ -535,6 +544,14 @@ impl Platform for FakePlatform {
 
     fn lock(&self) -> Box<dyn LockOps> {
         Box::new(FakeLock(self.state.clone()))
+    }
+
+    fn locked_app_windows(&self, app: &str) -> Option<Vec<Rect>> {
+        let s = self.st();
+        if app != FAKE_APP || !s.alive {
+            return None;
+        }
+        s.locked_windows.clone()
     }
 
     fn open(&self, target: &Target) -> Result<Parts, OpenError> {

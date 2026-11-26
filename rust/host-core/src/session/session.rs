@@ -9,10 +9,11 @@ use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::Arc;
 
 use crate::cli::{check_hello, input_blocked_notice, taken_over_error, WorkerEvent};
-use crate::desktop::{desktop_table, desktop_target, desktop_title, ordered_displays, DesktopTarget};
+use crate::desktop::{desktop_table, desktop_target, desktop_title, ordered_displays, rounded_int, DesktopTarget};
 use crate::geometry::{window_title, Rect, Size};
 use crate::hints::CoverNotices;
 use crate::input::{HeldInput, InputYield, YieldDecision, INPUT_REPORT_EVERY};
+use crate::lock::locked_start_display;
 use crate::pacing::{save_ladder_steps, save_ladder_stream, PacedSender, SenderOutput, StreamSpec};
 use crate::pause::PauseOutbox;
 use crate::platform::{
@@ -634,13 +635,26 @@ impl Session {
         });
     }
 
-    /// A is locked at session start: announce the main display, tell B, and wait for the unlock.
-    /// (Swift announces the app window's display when it has one; the platform cannot say
-    /// which while A is locked, so it is always the main one: plan B notes §4.)
+    /// The canvas an app on a locked A is announced with (`Server.swift:677-678`): the display
+    /// its largest window is on, else the main display. `true` when it is the app's display.
+    fn locked_canvas(&self, app: &str) -> ((u16, u16), bool) {
+        let displays: Vec<Rect> = ordered_displays(self.inner.platform.displays()).iter().map(|d| d.frame).collect();
+        let on_app = self.inner.platform.locked_app_windows(app).and_then(|windows| locked_start_display(&windows, &displays));
+        match on_app {
+            Some(r) => ((clamp_u16(rounded_int(r.w())), clamp_u16(rounded_int(r.h()))), true),
+            None => (self.main_display_size(), false),
+        }
+    }
+
+    /// A is locked at session start (`Server.swift:674-697`): announce the app's display (or the
+    /// main one), tell B, and check once a second for the unlock.
     fn wait_for_unlock(&mut self, app: &str) {
-        let (w, h) = self.main_display_size();
+        let ((w, h), on_app) = self.locked_canvas(app);
         self.announced = Some((w, h));
-        self.inner.out.log("A is locked at start; waiting for unlock (canvas: main display)");
+        self.inner.out.log(&format!(
+            "A is locked at start; waiting for unlock (canvas: {})",
+            if on_app { "the app's display" } else { "main display" }
+        ));
         let name = self.app_display_name(app);
         self.send(Message::Ready { app_name: window_title(Some(""), Some(&name)), width: w, height: h });
         self.send_locked();

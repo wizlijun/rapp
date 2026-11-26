@@ -87,7 +87,7 @@ on the real platform) or "not on Windows".
 | `Sources/rapp-host/Server.swift:580-613` | `activated` and `startHints`: an app opened by input is announced. | `session::hints` `start_hints`, `hints_tick`, `check_opened_app` (platform: `WindowOps::opened_app`) | `host_session::app_opened_after_input_only` |
 | `Sources/rapp-host/Server.swift:614-660` | `admit`, `yielded`, `startInputTimer`, `decoratedWindow`. | `session::session` `admit`, `yielded`; `session::input` `decorated_window` | `host_session::yield_blocks_then_releases` |
 | `Sources/rapp-host/Server.swift:661-675` | `appDisplayName`: the name in `ready`. | `session::session` `app_display_name` | `host_session::listening_then_ready` |
-| `Sources/rapp-host/Server.swift:676-698` | `waitForUnlock`: an app session started on a locked A waits, then shows. | `session::session` `wait_for_unlock`, `lock_wait_tick` | `host_session::app_session_started_locked_waits_then_shows` |
+| `Sources/rapp-host/Server.swift:676-698` | `waitForUnlock`: an app session started on a locked A waits, then shows. | `session::session` `wait_for_unlock`, `locked_canvas`, `lock_wait_tick` | `host_session::app_session_started_locked_waits_then_shows`, `host_session::locked_start_announces_the_app_display` |
 | `Sources/rapp-host/Server.swift:699-740` | `startCapture`: opens the app, refuses with the fixed reasons. | `session::session` `start_app`, `app_opened` (platform: `Platform::open`) | `host_session::cannot_open_reports_the_reason`, `cli::open_error_reasons_are_fixed` |
 | `Sources/rapp-host/Server.swift:741-793` | `captureReady`: `ready`, the window table, the first frame, density capped by the display. | `session::session` `app_opened`, `ceiling`; `session::capture` `start_capture_thread` | `host_session::density_is_capped_by_the_display_scale`, `host_session::listening_then_ready` |
 | `Sources/rapp-host/Server.swift:794-811` | `startTimers`: the 1 s tick and the window poll. | `session::session` `start_timers`, `start_window_poll` | `host_session::stats_event_every_second` |
@@ -118,7 +118,7 @@ on the real platform) or "not on Windows".
 | `Sources/rapp-host/WindowCapture.swift:165-243` | `start`, `stop`, `setRegion`, `setStream`, `apply`, `output`. | `session::capture` `start_capture_thread`, `capture_params_changed`, `stop_capture`, `run` | `host_session::set_view_narrows_the_picture`, `host_session::capture_silence_does_not_spin`, `host_session::disconnect_mid_frame_cleans_up` |
 | `Sources/rapp-host/WindowCapture.swift:244-250` | The stream's error ends the session. | `session::capture` `deliver` | `host_session::capture_error_ends_the_session` |
 | `Sources/rapp-host/WindowCapture.swift:251-272` | `currentDisplays`: the displays for `list-apps` and desktop sessions. | platform: `Platform::displays`; `desktop` `ordered_displays` | `rules_windows::desktop_matches_swift` |
-| `Sources/rapp-host/WindowCapture.swift:273-287` | `lockedAppDisplay`: the display an app on a locked A is shown on. | `session::session` `wait_for_unlock` (always the main display; part 4) | `host_session::app_session_started_locked_waits_then_shows` |
+| `Sources/rapp-host/WindowCapture.swift:273-287` | `lockedAppDisplay`: the display an app on a locked A is shown on. | `session::session` `locked_canvas`; `lock` `locked_start_display` (platform: `Platform::locked_app_windows`) | `host_session::locked_start_announces_the_app_display`, `host_session::locked_start_without_app_windows_announces_the_main_display` |
 | `Sources/rapp-host/WindowResizer.swift:1-119` | Moves and resizes the target's windows, kept on the display. | `geometry` `window_size`, `clamped_window_origin`; `session::input` `resize_window`, `move_window`; platform: `WindowOps::resize`, `move_to` | `host_session::window_commands_reach_the_platform`, `rules_windows::geometry_matches_swift` |
 | `Sources/rapp-host/WindowTracker.swift:1-35` | The tracker: polls the target's windows. | `session::session` `start_window_poll` | `host_session::window_added_and_removed` |
 | `Sources/rapp-host/WindowTracker.swift:36-105` | `poll`: the window table from the system list. | `session::tracker` `window_table`, `raw_for`; `wintable` (platform: `WindowOps::list`, `screen`) | `rules_windows::window_table_matches_swift`, `host_session::all_windows_closed_keeps_the_session` |
@@ -253,9 +253,12 @@ Each entry: what differs from Swift, why, and the weaker check that stands in.
   probe H7), so its lines cannot match Vision's. Check: the detectors are fixture-tested with
   scripted lines (`state_rules::rule_detectors`); the reader itself is phase D's.
 - **The display an app on a locked A is shown on (`WindowCapture.swift:273-287`).** Swift
-  picks the display the app's windows were on; host-core shows the main display, because the
-  platform trait has no "display of a locked app" query. Check:
-  `host_session::app_session_started_locked_waits_then_shows` checks the main display's size.
+  asks the window server for the app's windows; host-core asks the platform
+  (`Platform::locked_app_windows`) and applies the same `locked_start_display`. A platform that
+  cannot list windows while locked answers `None`, and the session shows the main display, as
+  Swift does when the app lists no usable window. Check:
+  `host_session::locked_start_announces_the_app_display`,
+  `host_session::locked_start_without_app_windows_announces_the_main_display`.
 - **Staying awake (`PowerHold.swift`).** Swift's session holds an IOKit assertion through
   `StayAwake`. host-core ports `lock::StayAwake` with the same ids and release-once rule, but
   the session calls `LockOps::stay_awake(true)` at a valid hello and `stay_awake(false)` at

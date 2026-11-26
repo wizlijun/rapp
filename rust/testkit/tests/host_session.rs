@@ -1549,7 +1549,7 @@ fn app_session_started_locked_waits_then_shows() {
     let mut c = Controller::connect(host.port());
     c.hello(TOKEN, FAKE_APP, "B", 0, 15);
     match c.wait_for(|m| matches!(m, Incoming::Ready(..))) {
-        // The main display (plan B notes §4: Swift's largest-window display is not known while locked).
+        // The main display: the fake lists no windows while locked by default.
         Incoming::Ready(_, w, h) => assert_eq!((w, h), (1280, 800)),
         _ => unreachable!(),
     }
@@ -1564,6 +1564,65 @@ fn app_session_started_locked_waits_then_shows() {
     assert!(platform.log().iter().any(|l| *l == open));
     // The size did not change, so no second `ready` and no error.
     assert!(c.quiet_for(host_time(1.0), |m| !matches!(m, Incoming::Ready(..) | Incoming::Error(_))).is_ok());
+}
+
+/// The fake's main display plus a larger one to its right.
+fn two_displays(platform: &FakePlatform) {
+    use rapp_host_core::desktop::DesktopDisplay;
+    use rapp_host_core::Rect;
+    platform.set_displays(vec![
+        DesktopDisplay { id: 1, name: "Fake Display".into(), main: true, frame: Rect::new(0.0, 0.0, 1280.0, 800.0) },
+        DesktopDisplay { id: 2, name: "Fake Side".into(), main: false, frame: Rect::new(1280.0, 0.0, 1920.0, 1080.0) },
+    ]);
+}
+
+/// A session started while A is locked: the size its `ready` announced.
+fn locked_start_canvas(platform: &FakePlatform) -> (Host, (u16, u16)) {
+    platform.set_locked(true);
+    let host = Host::start(platform.clone(), FAKE_APP, TOKEN);
+    let mut c = Controller::connect(host.port());
+    c.hello(TOKEN, FAKE_APP, "B", 0, 15);
+    let size = match c.wait_for(|m| matches!(m, Incoming::Ready(..))) {
+        Incoming::Ready(_, w, h) => (w, h),
+        _ => unreachable!(),
+    };
+    c.wait_for(|m| matches!(m, Incoming::ScreenLocked(true)));
+    (host, size)
+}
+
+/// `Server.swift:676-680`, `WindowCapture.swift:273-287`: when the platform lists the app's
+/// windows while A is locked, the canvas is the display holding its largest window's centre.
+#[test]
+fn locked_start_announces_the_app_display() {
+    use rapp_host_core::Rect;
+    let platform = FakePlatform::new();
+    two_displays(&platform);
+    // A small window on the main display, the largest one on the second.
+    platform.set_locked_app_windows(Some(vec![Rect::new(100.0, 100.0, 300.0, 200.0), Rect::new(1400.0, 100.0, 1000.0, 700.0)]));
+    let (host, size) = locked_start_canvas(&platform);
+    assert_eq!(size, (1920, 1080));
+    wait_text(&host, "waiting for unlock (canvas: the app's display)", 1);
+}
+
+/// `Server.swift:678`: no usable window (the platform cannot list them, none, one under
+/// 50 x 50, or one whose centre is on no display) → the main display.
+#[test]
+fn locked_start_without_app_windows_announces_the_main_display() {
+    use rapp_host_core::Rect;
+    let cases: Vec<Option<Vec<Rect>>> = vec![
+        None,
+        Some(vec![]),
+        Some(vec![Rect::new(1400.0, 100.0, 40.0, 300.0)]),
+        Some(vec![Rect::new(5000.0, 5000.0, 400.0, 300.0)]),
+    ];
+    for (i, windows) in cases.into_iter().enumerate() {
+        let platform = FakePlatform::new();
+        two_displays(&platform);
+        platform.set_locked_app_windows(windows);
+        let (host, size) = locked_start_canvas(&platform);
+        assert_eq!(size, (1280, 800), "case {i}");
+        wait_text(&host, "waiting for unlock (canvas: main display)", 1);
+    }
 }
 
 #[test]
