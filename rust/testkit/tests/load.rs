@@ -38,6 +38,11 @@ async fn req_ok(conn: &Connection, v: Value) -> Value {
 
 /// A service with no load sampling, as an older device answers.
 async fn service_without_load(home: &Path, bins: &Path) -> rapp_service::Service {
+    service_with_load(home, bins, None).await
+}
+
+/// A service whose load sampling is `load`.
+async fn service_with_load(home: &Path, bins: &Path, load: Option<rapp_service::LoadOpts>) -> rapp_service::Service {
     rapp_service::Service::start(rapp_service::Opts {
         home: home.to_path_buf(),
         bin_dir: Some(bins.to_path_buf()),
@@ -55,7 +60,7 @@ async fn service_without_load(home: &Path, bins: &Path) -> rapp_service::Service
         pacing: true,
         map_ports: TEST_PORTS,
         own_ports: true,
-        load: None,
+        load,
     })
     .await
     .unwrap()
@@ -299,4 +304,94 @@ async fn ipc_load_all_marks_old_device() {
     let r = load_all(&a.svc, a.home.path(), json!({"cmd":"load_all","devices":["old", new.id]})).await;
     let ids: Vec<&Value> = r["devices"].as_array().unwrap().iter().map(|d| &d["id"]).collect();
     assert_eq!(ids, vec![&json!(old.id), &json!(new.id)], "{r}");
+}
+
+/// `fake_load()`'s machine, whose first sample takes `first` (later ones are at once).
+fn slow_first_load(first: Duration) -> rapp_service::LoadOpts {
+    use rapp_service::load::{Cpu, Heat, HeatLevel, Mem, Sample, Sampler};
+    struct Slow(Option<Duration>);
+    impl Sampler for Slow {
+        fn sample(&mut self) -> Sample {
+            if let Some(d) = self.0.take() {
+                std::thread::sleep(d);
+            }
+            let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            Sample {
+                at,
+                cpu: Some(Cpu { pct: 10.0, cores: 8, load1: None }),
+                mem: Some(Mem { total: 16_000_000_000, avail: 8_000_000_000, swap_used: None, pressure: None }),
+                heat: Some(Heat { level: HeatLevel::Normal, celsius: None }),
+                ..Default::default()
+            }
+        }
+    }
+    rapp_service::LoadOpts {
+        every: Duration::from_millis(200),
+        sampler: Arc::new(move || Box::new(Slow(Some(first)))),
+        disk_wait: Duration::from_secs(2),
+    }
+}
+
+#[tokio::test]
+async fn watch_load_waits_for_the_first_sample() {
+    let (home, bins) = (tempfile::tempdir().unwrap(), bins());
+    service_json(home.path());
+    let svc = service_with_load(home.path(), bins.path(), Some(slow_first_load(Duration::from_secs(3)))).await;
+    let a = TestService { id: String::new(), svc, home, bins };
+    let (_ep, conn) = b(&a).await;
+    // No sample yet: the one-shot `load` says so.
+    assert_eq!(req(&conn, json!({"op":"load"})).await, json!({"ok":false,"error":"no data"}));
+    let mut watch = bi(conn.open_bi().await.unwrap());
+    write_json(&mut watch, &json!({"op":"watch_load"})).await.unwrap();
+    // A watch closed while it waits ends at once, with nothing written.
+    let mut gone = bi(conn.open_bi().await.unwrap());
+    write_json(&mut gone, &json!({"op":"watch_load"})).await.unwrap();
+    let began = std::time::Instant::now();
+    gone.shutdown().await.unwrap();
+    let mut rest = Vec::new();
+    tokio::time::timeout(Duration::from_secs(2), tokio::io::AsyncReadExt::read_to_end(&mut gone, &mut rest))
+        .await
+        .expect("a watch closed while waiting ends")
+        .unwrap();
+    assert!(rest.is_empty(), "{}", String::from_utf8_lossy(&rest));
+    assert!(began.elapsed() < Duration::from_secs(2), "{:?}", began.elapsed());
+    assert_eq!(req(&conn, json!({"op":"load"})).await, json!({"ok":false,"error":"no data"}), "the sample came too soon");
+    // The open one's first line is the snapshot with history, once the sample is there.
+    let first = next(&mut watch).await;
+    assert_eq!(first["ok"], true, "{first}");
+    assert!(first["history"].as_array().is_some_and(|h| !h.is_empty()), "{first}");
+    assert_eq!(first["items"]["cpu"]["pct"], json!(10.0), "{first}");
+    let line = next(&mut watch).await;
+    assert!(line["point"]["at"].is_u64(), "{line}");
+}
+
+#[tokio::test]
+async fn a_broken_term_json_does_not_fill_the_log() {
+    let a = service().await;
+    let (_ep, conn) = b(&a).await;
+    req_ok(&conn, json!({"op":"load"})).await;
+    std::fs::write(a.home.path().join("term.json"), "{not json").unwrap();
+    for _ in 0..5 {
+        assert_eq!(req_ok(&conn, json!({"op":"load"})).await["term"], false);
+        let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"load"})).await;
+        assert_eq!(r["term"], false, "{r}");
+    }
+    let mut s = bi(conn.open_bi().await.unwrap());
+    write_json(&mut s, &json!({"op":"watch_load"})).await.unwrap();
+    for _ in 0..5 {
+        assert_eq!(next(&mut s).await["term"], false);
+    }
+    // A terminal request still reports it: its warning, then its `request` line. The log folds identical lines in
+    // a row into a `repeat` line, written before the next different one; so had the load path warned too, there
+    // would be a `repeat` line (or more warnings) in between.
+    assert_eq!(req(&conn, json!({"op":"list_terms"})).await, json!({"ok":false,"error":"term.json is invalid"}));
+    let home = a.home.path();
+    wait_log(home, "request", |v| v["op"] == "list_terms").await;
+    let evs = log_events(home);
+    let warned: Vec<usize> = (0..evs.len())
+        .filter(|&i| evs[i]["msg"].as_str().is_some_and(|m| m.contains("not the expected JSON")))
+        .collect();
+    assert_eq!(warned.len(), 1, "{evs:#?}");
+    let after = &evs[warned[0] + 1];
+    assert_eq!((&after["ev"], &after["op"]), (&json!("request"), &json!("list_terms")), "{evs:#?}");
 }
