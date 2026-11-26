@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["wire", "conn", "relay", "net", "service", "ports", "hub", "hub-ffi", "testkit", "update", "term", "client-core", "client-gtk", "cli", "host-linux", "speech-linux", "../services/state"]
+members = ["wire", "conn", "relay", "net", "service", "ports", "hub", "hub-ffi", "testkit", "update", "term", "client-core", "client-gtk", "cli", "host-linux", "host-core", "speech-linux", "../services/state"]
 
 [workspace.package]
 version = "0.15.51"
@@ -34,6 +34,7 @@ rapp-hub = { path = "hub" }
 rapp-ports = { path = "ports" }
 rapp-update = { path = "update" }
 rapp-term = { path = "term" }
+rapp-host-core = { path = "host-core" }
 
 [profile.release]
 lto = "thin"
