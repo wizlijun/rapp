@@ -1489,7 +1489,11 @@ macOS、Linux、Duo、iPad 各一遍。
 
 ## Windows 版 A 段（地基）（计划 `docs/superpowers/plans/2026-11-26-rapp-windows-a-foundation.md`，分支 `feat/windows-foundation`）
 
-现状：代码是草稿，**还没在任何机器上编译、没跑过测试**，没有合并。草稿笔记在 `docs/superpowers/plans/notes/2026-11-26-windows-a-draft-notes.md`，验证的人先看它的第 6 节。合并时把合并提交写在这里。
+现状（2026-11-27）：代码是草稿，**还没在任何机器上编译、没跑过测试**。草稿笔记在 `docs/superpowers/plans/notes/2026-11-26-windows-a-draft-notes.md`，验证的人先看它的第 6、7 节。
+
+- **已合进本机 `main`，这次合并不发版。** `main` 的文件里只有 Mac 不编译的部分：`rust/host-windows/`、`rust/svc-windows/`（都不在 `rust/Cargo.toml` 的成员表里）、`scripts/check-windows.ps1`、`scripts/stage-windows.ps1`、`.gitattributes` 和文档。Mac 编译的文件和合并前一个字节都不差，所以不影响 macOS 和 iOS 发版。
+- **接线不在 `main` 的文件里。** 对已有 crate 的改动（约 55 个文件）在提交 `118b1f72` 里撤下了，它们在 `main` 的历史里。分支 `feat/windows-foundation` 上已经把这个提交还原好，验证的人直接在分支上编译、修。
+- **接线进 `main` 的条件**：Mac 门禁全绿，Windows 门禁（`scripts\check-windows.ps1`）全绿，再照常合并。那一次合并改的是共用代码，算 macOS 的改动。
 
 - A 段做完后，一台 Windows 机器能：编出全部 Rust crate（`rapp-relay`、`rapp-host-linux`、`rapp-client-gtk`、`rapp-hub-ffi` 除外）、跑过测试和 clippy（`scripts\check-windows.ps1`）、编出 Flutter 界面、用 `scripts\stage-windows.ps1` 摆出开发用的版本目录、从 `bin\rapp.exe` 启动界面、当控制端连别的设备。
 - 还不能：当被控端（没有 `rapp-host`，D 段）、开文本终端（E 段）、自己升级（G 段）、有监督程序和系统服务（`rapp-svc`，C 段）、语音（H 段）、安装包（G 段）。
