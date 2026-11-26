@@ -1465,3 +1465,9 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 5 卡片出现时照常能在终端里打字、点卡片下面的东西
 - [ ] 6 浅色、深色主题和远端画面上都看得清；iPad 窄屏不超出舞台
 - [ ] 7 （放大后，`fix/wait-card-big`）卡片宽 360–560、主字 18、转圈 22；授权提示整句三行内显示完，不再出现「…」
+
+## Linux 0.15.55 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），将 Linux / Omarchy `x86_64` 产物构建并挂载至已发布的 [v0.15.55](https://github.com/wizlijun/rapp/releases/tag/v0.15.55) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.52`–`0.15.55`（含 Linux `0.15.54` `fix/linux-terminal-paste`）：放大版非阻塞 `WaitCard` 舞台等候卡片（`Ctrl+Shift+T` 排队计数与远端 Mac 授权自动切桌面）、`rapp-host-linux` 终端窗口 `Ctrl+Shift+V` 中文粘贴与 Wayland 选区往返同步、以及 `rapp-state` 第 3 步（`PUT /v1/desk/<fp>` 会话面板「别处开着」一键接力、`StateOut` 应用状态规则代报与「需要你」`推断` 标记、`Op::SetService` 节点间控制及设备页 `StateServiceRow` 开关）；补充 `scripts/test-linux-bundle.py`、`gui/test/term/term_main_test.dart`、`gui/test/ui/state_service_row_test.dart` 与 `gui/test/ui/wait_card_test.dart` Linux 侧回归校验。
+- [x] `v0.15.55`（源码 `1038f30b`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01555-parity.md`。
