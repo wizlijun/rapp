@@ -443,8 +443,8 @@ git add gui/lib/state gui/test/state && git commit -m "feat(gui): StateLink, the
     2. `manual` 用 `config.url`；`auto` 调 `find()`，得到 `null` 时 status 为 `none`，并在 60 秒后再找一次。
     3. status 设为 `connecting`。
     4. `health()` 为假就进 `unreachable`，按 2…60 秒退避后回到第 1 步。
-    5. 取 `state()` 和 `queue(limit: 50)`。队列整页替换掉 `rows` 里比这页最旧一条更新的部分，再按 `eid` 去重。
-    6. 开 `watch()`。收到 hello 时 status 设为 `connected`，补发攒着的“看过”。
+    5. 开 `watch()`。收到 hello 后取 `state()` 和 `queue(limit: 50)`，这期间的推送先攒着。队列整页替换掉 `rows` 里比这页最旧一条更新的部分，再按 `eid` 去重。（终审 I2 改过：原来是先取再开 watch，中间的变化会丢。）
+    6. 全貌放好后按顺序补上攒着的推送，status 设为 `connected`，补发攒着的“看过”。
     7. 推送的处理：
        - `session`：更新那个会话的行。
        - `queue`：去重后插到 `rows` 最前。

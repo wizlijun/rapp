@@ -58,7 +58,7 @@ data: {"what":"seen","eid":"<eid>","at":1764130100,"handled":true}
 - `need`: the whole `needs` list of `GET /v1/state`, sent whenever it changes.
 - `seen`: a `PUT /v1/seen` mark; `handled` only when true.
 
-A watcher that falls more than 256 changes behind is disconnected. After any disconnect, fetch `GET /v1/state` and `GET /v1/queue` again before watching again: changes made while away are not replayed.
+A watcher that falls more than 256 changes behind is disconnected. After any disconnect, fetch `GET /v1/state` and `GET /v1/queue` again: changes made while away are not replayed. To miss nothing, open the watch first and fetch once it says hello, holding the pushes that come meanwhile and applying them after the fetched state.
 
 ## Other
 

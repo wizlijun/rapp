@@ -15,20 +15,35 @@ class FakeLink extends StateLink {
   Map<String, Object?> queueBody = {'events': [], 'more': false};
   Object? seenError;
   final seenCalls = <Map<String, String?>>[];
-  final watchCtl = StreamController<Map<String, Object?>>();
+  late final watchCtl = StreamController<Map<String, Object?>>(onListen: () => calls.add('watch'));
   bool closed = false;
   int healthCalls = 0;
+
+  /// The order of the calls: health, watch (when it is listened to), state, queue.
+  final calls = <String>[];
+
+  /// While set, `state()` waits for it.
+  Completer<void>? hold;
 
   @override
   Future<bool> health() async {
     healthCalls++;
+    calls.add('health');
     return healthy;
   }
 
   @override
-  Future<Map<String, Object?>> state() async => stateBody;
+  Future<Map<String, Object?>> state() async {
+    calls.add('state');
+    await hold?.future;
+    return stateBody;
+  }
+
   @override
-  Future<Map<String, Object?>> queue({String? before, int limit = 50}) async => queueBody;
+  Future<Map<String, Object?>> queue({String? before, int limit = 50}) async {
+    calls.add('queue');
+    return queueBody;
+  }
   @override
   Future<void> seen({String? fp, String? session, String? eid, bool handled = false}) async {
     seenCalls.add({'fp': fp, 'session': session, 'eid': eid});
@@ -335,6 +350,7 @@ void main() {
     await links.single.watchCtl.close();
     await settle();
     expect(sync.status, StateStatus.unreachable);
+    sync.dispose(); // the 2 s retry timer goes with it
   });
 
   test('the second queue page replaces newer rows and keeps older ones', () async {
@@ -347,6 +363,8 @@ void main() {
     expect(sync.rows.map((r) => r['eid']), ['F:e:9', 'F:e:2', 'F:e:1']);
     configure = (l) => l..queueBody = {'events': [row('F:e:3', 300), row('F:e:2', 200)], 'more': false};
     await sync.refresh();
+    await settle();
+    links.last.watchCtl.add({'what': 'hello'});
     await settle();
     // page oldest at=200: rows with at>=200 replaced by the page; e:1 (at 50) stays
     expect(sync.rows.map((r) => r['eid']), ['F:e:3', 'F:e:2', 'F:e:1']);
@@ -393,6 +411,198 @@ void main() {
     await settle();
     expect(sync.status, StateStatus.off);
     expect(links.last.closed, isTrue);
+    sync.dispose();
+  });
+
+  test('the watch opens first; a push during the fetch is applied after the snapshot', () async {
+    withState();
+    make().start();
+    await settle();
+    final l = links.single;
+    final hold = l.hold = Completer<void>();
+    l.watchCtl.add({'what': 'hello'});
+    await settle();
+    expect(l.calls, ['health', 'watch', 'state']);
+    expect(sync.status, StateStatus.connecting);
+    l.watchCtl
+      ..add({'what': 'queue', 'row': row('F:e:3', 300)})
+      ..add({'what': 'session', 'fp': 'F', 'session': 't2', 'row': {'session': 't2', 'state': 'working'}})
+      ..add({'what': 'seen', 'fp': 'F', 'session': 't1', 'at': 250});
+    await settle();
+    expect(sync.rows, isEmpty, reason: 'held until the snapshot is in');
+    hold.complete();
+    await settle();
+    expect(l.calls, ['health', 'watch', 'state', 'queue']);
+    expect(sync.status, StateStatus.connected);
+    expect(sync.rows.map((r) => r['eid']), ['F:e:3', 'F:e:2', 'F:e:1']);
+    expect(sync.session('F', 't2')!['state'], 'working');
+    expect(sync.session('F', 't1')!['seen'], 250);
+    sync.dispose();
+  });
+
+  test('a session push for a device unknown at connect adds it', () async {
+    withState();
+    make().start();
+    await settle();
+    final l = links.single;
+    l.watchCtl.add({'what': 'hello'});
+    await settle();
+    expect(sync.fpOf('222'), isNull);
+    l.watchCtl.add({
+      'what': 'session',
+      'fp': 'G',
+      'id': '222',
+      'device': 'pad',
+      'session': 't5',
+      'row': {'session': 't5', 'name': 'build', 'state': 'working'},
+    });
+    await settle();
+    expect(sync.fpOf('222'), 'G');
+    expect(sync.idOf('G'), '222');
+    expect(sync.session('G', 't5')!['name'], 'build');
+    sync.markSeen('222', 't5');
+    await settle();
+    expect(l.seenCalls.last, {'fp': 'G', 'session': 't5', 'eid': null});
+    sync.dispose();
+  });
+
+  test('a session push of an unknown device without id fetches the state again, once, a second later', () {
+    fakeAsync((fa) {
+      withState();
+      make().start();
+      fa.flushMicrotasks();
+      final l = links.single;
+      l.watchCtl.add({'what': 'hello'});
+      fa.flushMicrotasks();
+      expect(l.calls.where((c) => c == 'state'), hasLength(1));
+      l.stateBody = {
+        'devices': [
+          ...(l.stateBody['devices'] as List),
+          {
+            'fp': 'G',
+            'id': '222',
+            'sessions': [
+              {'session': 't5', 'name': 'build'},
+            ],
+          },
+        ],
+        'needs': [],
+      };
+      for (final sid in ['t5', 't6']) {
+        l.watchCtl.add({'what': 'session', 'fp': 'G', 'session': sid, 'row': {'session': sid}});
+      }
+      fa.flushMicrotasks();
+      sync.markSeen('222', 't5');
+      fa.flushMicrotasks();
+      expect(l.seenCalls, isEmpty);
+      fa.elapse(const Duration(milliseconds: 900));
+      expect(l.calls.where((c) => c == 'state'), hasLength(1));
+      fa.elapse(const Duration(milliseconds: 200));
+      expect(l.calls.where((c) => c == 'state'), hasLength(2));
+      expect(sync.fpOf('222'), 'G');
+      expect(sync.session('G', 't5')!['name'], 'build');
+      expect(l.seenCalls, [
+        {'fp': 'G', 'session': 't5', 'eid': null},
+      ]);
+      sync.dispose();
+    });
+  });
+
+  test('refresh while connected keeps the snapshot; only a second failed try is an outage', () {
+    fakeAsync((fa) {
+      withState();
+      make().start();
+      fa.flushMicrotasks();
+      links.single.watchCtl.add({'what': 'hello'});
+      fa.flushMicrotasks();
+      expect(sync.hasSnapshot, isTrue);
+      sync.pause();
+      configure = (l) => l..healthy = false;
+      sync.refresh();
+      fa.flushMicrotasks();
+      expect(links, hasLength(2));
+      expect(sync.status, StateStatus.connecting);
+      expect(sync.hasSnapshot, isTrue);
+      expect(sync.outage, 0);
+      expect(sync.rows, hasLength(2));
+      fa.elapse(const Duration(seconds: 1, milliseconds: 900));
+      expect(links, hasLength(2));
+      fa.elapse(const Duration(milliseconds: 200));
+      expect(links, hasLength(3));
+      expect(sync.status, StateStatus.unreachable);
+      expect(sync.hasSnapshot, isFalse);
+      expect(sync.outage, 1);
+      sync.dispose();
+    });
+  });
+
+  test('refresh while connected that succeeds never leaves the service view', () async {
+    withState();
+    make().start();
+    await settle();
+    links.single.watchCtl.add({'what': 'hello'});
+    await settle();
+    final seen = <(StateStatus, bool)>[];
+    sync.addListener(() => seen.add((sync.status, sync.hasSnapshot)));
+    await sync.refresh();
+    await settle();
+    links.last.watchCtl.add({'what': 'hello'});
+    await settle();
+    expect(seen.every((s) => s.$2), isTrue, reason: '$seen');
+    expect(sync.status, StateStatus.connected);
+    expect(sync.outage, 0);
+    sync.dispose();
+  });
+
+  test('the snapshot goes with a new config and with off', () async {
+    withState();
+    make().start();
+    await settle();
+    links.single.watchCtl.add({'what': 'hello'});
+    await settle();
+    expect(sync.hasSnapshot, isTrue);
+    await sync.setConfig(const StateConfig(StateMode.manual, url: 'http://z:9'));
+    expect(sync.hasSnapshot, isFalse);
+    expect(sync.rows, isEmpty);
+    expect(sync.fpOf('111'), isNull);
+    await settle();
+    links.last.watchCtl.add({'what': 'hello'});
+    await settle();
+    expect(sync.hasSnapshot, isTrue);
+    await sync.setConfig(const StateConfig(StateMode.off));
+    expect(sync.hasSnapshot, isFalse);
+    expect(sync.needs, isEmpty);
+    sync.dispose();
+  });
+
+  test('a mark made before the first connect is sent once connected', () async {
+    withState();
+    make();
+    sync.markSeen('111', 't1');
+    sync.start();
+    await settle();
+    final l = links.single;
+    expect(l.seenCalls, isEmpty);
+    l.watchCtl.add({'what': 'hello'});
+    await settle();
+    expect(l.seenCalls, [
+      {'fp': 'F', 'session': 't1', 'eid': null},
+    ]);
+    sync.dispose();
+  });
+
+  test('marks of one session waiting together go out as one PUT', () async {
+    withState();
+    make().start();
+    await settle();
+    final l = links.single;
+    for (var i = 0; i < 5; i++) {
+      sync.markSeen('111', 't1');
+    }
+    sync.markSeen('111', 't2');
+    l.watchCtl.add({'what': 'hello'});
+    await settle();
+    expect(l.seenCalls.map((c) => c['session']), ['t1', 't2']);
     sync.dispose();
   });
 

@@ -36,11 +36,30 @@ class StateSync extends ChangeNotifier {
   List<Row> needs = [];
   int outage = 0;
 
+  /// Whether [rows], [needs] and the sessions are a snapshot of the service the app may keep showing: true from
+  /// the first hello on, still true while a [refresh] reconnects, false once the service is unreachable, found
+  /// nothing, is off, or a new config points elsewhere.
+  bool hasSnapshot = false;
+
   List<Row> _devices = [];
-  final _pending = <(String fp, String session)>[];
+
+  /// "Seen" marks not sent yet, by device id; the fp is looked up when they go out (spec §9.3).
+  final _pending = <(String deviceId, String session)>[];
   StateLink? _link;
   StreamSubscription<Row>? _sub;
   Timer? _timer;
+
+  /// A coming `/v1/state` fetch for a pushed device the app could not place (an older service's push).
+  Timer? _refetch;
+
+  /// Pushes that came while the snapshot was being fetched; null while they apply at once.
+  List<Row>? _buffer;
+
+  /// A [refresh] of a working link: its first failed try is retried in 2 s without going unreachable.
+  bool _grace = false;
+
+  /// Whether a `/v1/state` was applied since the last config change.
+  bool _known = false;
   int _gen = 0;
   int _attempt = 0;
   bool _started = false;
@@ -88,20 +107,30 @@ class StateSync extends ChangeNotifier {
   Future<void> setConfig(StateConfig c) {
     config = c;
     c.save(localDir);
+    // Another service, or none: what the old one said is not shown again.
+    _drop();
     return _connect();
   }
 
-  Future<void> refresh() => _connect();
+  /// Reconnects and fetches everything again (back in the foreground). From a working link the last snapshot
+  /// stays on show meanwhile, and one failed try is not yet an outage.
+  Future<void> refresh() {
+    _grace = status == StateStatus.connected || (status == StateStatus.connecting && hasSnapshot);
+    return _connect();
+  }
 
   void pause() {
     _gen++;
     _cancelAll();
   }
 
+  /// Tells the service [session] on [deviceId] was looked at. Kept (at most [maxPending], oldest dropped) until
+  /// connected. Once the app knows the service's devices, a device it does not list is dropped at once.
   void markSeen(String deviceId, String session) {
-    final fp = fpOf(deviceId);
-    if (fp == null) return;
-    _pending.add((fp, session));
+    if (_known && fpOf(deviceId) == null && _refetch == null) return;
+    _pending
+      ..removeWhere((p) => p.$1 == deviceId && p.$2 == session)
+      ..add((deviceId, session));
     if (_pending.length > maxPending) _pending.removeAt(0);
     if (status == StateStatus.connected) _flush();
   }
@@ -117,14 +146,29 @@ class StateSync extends ChangeNotifier {
   void _cancelAll() {
     _timer?.cancel();
     _timer = null;
+    _refetch?.cancel();
+    _refetch = null;
+    _buffer = null;
     _sub?.cancel();
     _sub = null;
     _link?.close();
     _link = null;
   }
 
+  /// Forgets everything the service said.
+  void _drop() {
+    hasSnapshot = false;
+    _known = false;
+    _devices = [];
+    rows = [];
+    needs = [];
+  }
+
   void _set(StateStatus s) {
     if (_disposed) return;
+    if (s == StateStatus.off || s == StateStatus.none) _drop();
+    // Unreachable keeps the rows for the next page merge but stops showing them.
+    if (s == StateStatus.unreachable) hasSnapshot = false;
     if (s == StateStatus.unreachable && status != StateStatus.unreachable) outage++;
     if (s != status) debugPrint('state_sync: ${s.name}');
     status = s;
@@ -166,30 +210,58 @@ class StateSync extends ChangeNotifier {
     final link = _link = _makeLink(uri);
     try {
       if (!await link.health()) return _fail(gen);
-      if (stale()) return;
-      final st = await link.state();
-      final page = await link.queue(limit: 50);
-      if (stale()) return;
-      _applyState(st);
-      _applyPage(page);
     } catch (_) {
       return _fail(gen);
     }
+    if (stale()) return;
+    // The watch opens first and its pushes wait while the snapshot is fetched (on hello), so nothing that
+    // changes in between is lost.
+    _buffer = [];
     _sub = link.watch().listen(
       (e) => _onPush(gen, e),
       onError: (Object _) => _fail(gen),
       onDone: () => _fail(gen),
       cancelOnError: true,
     );
-    notifyListeners();
+  }
+
+  /// The watch said hello: fetch the snapshot, apply it, then the pushes that came meanwhile, in order.
+  Future<void> _onHello(int gen) async {
+    final link = _link;
+    if (link == null) return;
+    _buffer ??= [];
+    try {
+      final st = await link.state();
+      final page = await link.queue(limit: 50);
+      if (_disposed || gen != _gen) return;
+      _applyState(st);
+      _applyPage(page);
+    } catch (_) {
+      return _fail(gen);
+    }
+    final held = _buffer ?? const <Row>[];
+    _buffer = null;
+    for (final e in held) {
+      _apply(e);
+    }
+    hasSnapshot = true;
+    _attempt = 0;
+    _grace = false;
+    _set(StateStatus.connected);
+    _flush();
   }
 
   void _fail(int gen) {
     if (_disposed || gen != _gen) return;
-    _sub?.cancel();
-    _sub = null;
-    _link?.close();
-    _link = null;
+    // Later failures of this same try (the watch and a fetch both failing) are not new ones.
+    _gen++;
+    _cancelAll();
+    if (_grace) {
+      // The first failed try after a refresh of a working link: keep showing what it had, try again soon.
+      _grace = false;
+      _timer = Timer(Duration(seconds: _backoff.first), _connect);
+      return;
+    }
     _set(StateStatus.unreachable);
     final secs = _backoff[_attempt < _backoff.length ? _attempt : _backoff.length - 1];
     _attempt++;
@@ -202,6 +274,7 @@ class StateSync extends ChangeNotifier {
   }
 
   void _applyState(Row st) {
+    _known = true;
     final d = st['devices'];
     _devices = [
       if (d is List)
@@ -237,12 +310,21 @@ class StateSync extends ChangeNotifier {
 
   void _onPush(int gen, Row e) {
     if (_disposed || gen != _gen) return;
+    if (e['what'] == 'hello') {
+      _onHello(gen);
+      return;
+    }
+    final held = _buffer;
+    if (held != null) {
+      held.add(e);
+      return;
+    }
+    if (_apply(e)) notifyListeners();
+  }
+
+  /// Applies one push; false for one the app does not know.
+  bool _apply(Row e) {
     switch (e['what']) {
-      case 'hello':
-        _attempt = 0;
-        _set(StateStatus.connected);
-        _flush();
-        return;
       case 'session':
         _onSession(e);
       case 'queue':
@@ -254,21 +336,55 @@ class StateSync extends ChangeNotifier {
       case 'seen':
         _onSeen(e);
       default:
-        return;
+        return false;
     }
-    notifyListeners();
+    return true;
   }
 
   void _onSession(Row e) {
     final fp = e['fp'];
     final id = e['session'];
     final row = e['row'];
-    for (final d in _devices) {
-      if (d['fp'] != fp) continue;
-      final list = _sessions(d)..removeWhere((s) => s['session'] == id);
-      if (row is Row) list.add({...row});
-      d['sessions'] = list;
+    if (fp is! String) return;
+    var dev = _devices.where((d) => d['fp'] == fp).firstOrNull;
+    if (dev == null) {
+      if (row is! Row) return;
+      final devId = e['id'];
+      if (devId is! String) {
+        // An older service names no device in its push: look at the whole state again, once for a burst.
+        _refetchSoon();
+        return;
+      }
+      dev = {'fp': fp, 'id': devId, 'device': ?e['device'], 'sessions': <Row>[]};
+      _devices.add(dev);
+    } else {
+      for (final k in ['id', 'device']) {
+        if (e[k] is String) dev[k] = e[k];
+      }
     }
+    final list = _sessions(dev)..removeWhere((s) => s['session'] == id);
+    if (row is Row) list.add({...row});
+    dev['sessions'] = list;
+  }
+
+  void _refetchSoon() {
+    if (_refetch != null) return;
+    final gen = _gen;
+    _refetch = Timer(const Duration(seconds: 1), () async {
+      final link = _link;
+      try {
+        if (link == null) return;
+        final st = await link.state();
+        if (_disposed || gen != _gen) return;
+        _applyState(st);
+        notifyListeners();
+      } catch (_) {
+        // The watch notices a dead link itself; a failed look leaves things as they were.
+      } finally {
+        if (gen == _gen) _refetch = null;
+      }
+      if (!_disposed && gen == _gen) _flush();
+    });
   }
 
   void _onSeen(Row e) {
@@ -286,19 +402,36 @@ class StateSync extends ChangeNotifier {
     if (s != null) s['seen'] = at;
   }
 
+  /// Sends the kept marks in order, one PUT per session however many marks it has. A mark whose device the
+  /// service does not list is dropped, unless a fetch that may bring it is coming.
   Future<void> _flush() async {
     if (_flushing) return;
     _flushing = true;
+    final sent = <String>{};
     try {
-      while (_pending.isNotEmpty && status == StateStatus.connected && !_disposed) {
+      var i = 0;
+      while (i < _pending.length && status == StateStatus.connected && !_disposed) {
         final link = _link;
         if (link == null) return;
-        final item = _pending.removeAt(0);
+        final item = _pending[i];
+        final fp = fpOf(item.$1);
+        if (fp == null) {
+          if (_refetch != null) {
+            i++;
+          } else {
+            _pending.removeAt(i);
+          }
+          continue;
+        }
+        _pending.removeAt(i);
+        if (!sent.add('$fp\n${item.$2}')) continue;
         try {
-          await link.seen(fp: item.$1, session: item.$2);
+          await link.seen(fp: fp, session: item.$2);
         } on StateLinkError catch (e) {
-          if (e.status == 0) _pending.insert(0, item);
-          if (e.status == 0) return;
+          if (e.status == 0) {
+            _pending.insert(i, item);
+            return;
+          }
         } catch (_) {
           return;
         }

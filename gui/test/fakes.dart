@@ -316,8 +316,14 @@ class FakeStateSync extends StateSync {
   void markSeen(String deviceId, String session) => seenCalls.add((deviceId, session));
   @override
   void pause() => pauseCalls++;
+  /// Runs inside [refresh], to see what had happened by then.
+  void Function()? onRefresh;
+
   @override
-  Future<void> refresh() async => refreshCalls++;
+  Future<void> refresh() async {
+    refreshCalls++;
+    onRefresh?.call();
+  }
 
   void push() => notifyListeners();
 }
