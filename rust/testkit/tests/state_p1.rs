@@ -228,7 +228,9 @@ async fn state_off_stops_and_unshares() {
     assert_eq!(r["ok"], true, "{r}");
     assert_eq!((r["on"].clone(), r["running"].clone(), r["share"].clone()), (json!(false), json!(false), Value::Null), "{r}");
     assert_eq!(r["sinks"], json!([]), "{r}");
-    assert!(share_of(&a, p).await.is_none(), "unshared");
+    // The user made that share: it stays, as an ordinary share again.
+    let s = share_of(&a, p).await.expect("the user's share stays");
+    assert_eq!((s["kind"].clone(), s["note"].as_str()), (Value::Null, Some("我的")), "{s}");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
     while health(p).await.is_some() {
         assert!(tokio::time::Instant::now() < deadline, "rapp-state still answers");
@@ -261,27 +263,92 @@ async fn a_taken_port_is_said_and_not_shared() {
     assert_eq!(share_of(&a, p).await.expect("shared now")["kind"], "state");
 }
 
+/// A crash is for now only: while the supervisor starts it again, the share and the local sink
+/// stay (no device is told `on: false`), so the outbox keeps its cache and sends it once it is
+/// back: a change made while it was down reaches the queue.
 #[tokio::test]
 async fn a_crashed_service_comes_back() {
     let key = rapp_wire::Key::new_local();
     let p = free_port();
-    let a = start_on(29030, &key, |h| services(h, p, "memory", false)).await;
+    let a = start_on(29030, &key, |h| {
+        services(h, p, "memory", false);
+        term_json(h, "idle", 0);
+    })
+    .await;
+    let a_fp = fp_of(&a).await;
     ipc(&a, json!({"cmd":"state","on":true})).await;
     let r = wait_state(&a, Duration::from_secs(5), |r| r["running"] == true).await;
     let share = r["share"].clone();
     let pid = wait_log(a.home.path(), "companion_start", |_| true).await["pid"].as_u64().unwrap();
     assert_eq!(health(p).await.unwrap()["name"], "rapp-state");
+    wait_state(&a, WAIT, |r| r["outbox"]["dest"] == json!({"local": p}) && r["outbox"]["up"] == true).await;
+    wait_http_state(p, WAIT, |v| session_a(v, &a_fp).is_some_and(|s| s["state"] == "idle")).await;
     let killed = std::process::Command::new("kill").args(["-9", &pid.to_string()]).status().unwrap();
     assert!(killed.success());
+    // Changed while it is down.
+    term_json(a.home.path(), "working", 0);
     wait_log(a.home.path(), "companion_exit", |v| v["name"] == "state").await;
-    let l = wait_log(a.home.path(), "state_sink", |v| v["from"] == "local" && v["on"] == false).await;
-    assert_eq!(l["id"], a.id.as_str(), "{l}");
+    let r = ipc(&a, json!({"cmd":"state"})).await;
+    assert_eq!(r["sinks"], json!([{"id": a.id, "port": p, "local": true, "chosen": true}]), "the sink is kept: {r}");
     let r = wait_state(&a, Duration::from_secs(10), |r| r["running"] == true).await;
     assert_eq!(r["share"], share, "the share stayed: {r}");
     let again = wait_log(a.home.path(), "companion_start", |v| v["pid"] != pid).await;
     assert_eq!(again["port"], p, "{again}");
     assert_eq!(health(p).await.unwrap()["name"], "rapp-state");
-    wait_state(&a, WAIT, |r| r["outbox"]["dest"] == json!({"local": p})).await;
+    // The cached change, not only the snap: it is a queue row of the new service.
+    let q = wait_queue(p, Duration::from_secs(15), |q| !q.is_empty()).await;
+    assert_eq!(shape(&q), [st("working", 0)], "{q:?}");
+    let v = wait_http_state(p, WAIT, |v| session_a(v, &a_fp).is_some_and(|s| s["state"] == "working")).await;
+    assert_eq!(v["needs"], json!([]), "{v}");
+    let r = wait_state(&a, WAIT, |r| r["outbox"]["cached"] == 0 && r["outbox"]["up"] == true).await;
+    assert_eq!(r["outbox"]["dest"], json!({"local": p}), "{r}");
+    let off: Vec<Value> = log_events(a.home.path()).into_iter().filter(|v| v["ev"] == "state_sink" && v["on"] == false).collect();
+    assert!(off.is_empty(), "no device was told the sink is gone: {off:?}");
+}
+
+/// `rapp state off` and `on` with the disk store: the service comes back with what it had seen
+/// of this device, and this device's numbers go on from there, so its next change is taken.
+#[tokio::test]
+async fn off_and_on_again_keeps_taking_changes() {
+    let key = rapp_wire::Key::new_local();
+    let p = free_port();
+    let a = start_on(29470, &key, |h| {
+        services(h, p, "disk", false);
+        term_json(h, "idle", 0);
+    })
+    .await;
+    let a_fp = fp_of(&a).await;
+    ipc(&a, json!({"cmd":"state","on":true})).await;
+    wait_state(&a, Duration::from_secs(5), |r| r["running"] == true).await;
+    wait_http_state(p, WAIT, |v| session_a(v, &a_fp).is_some_and(|s| s["state"] == "idle")).await;
+    for (state, seq) in [("working", 0), ("blocked", 1), ("done", 1)] {
+        term_json(a.home.path(), state, seq);
+        wait_http_state(p, WAIT, |v| session_a(v, &a_fp).is_some_and(|s| s["state"] == state)).await;
+    }
+    // Saved: the next start has it.
+    let file = a.home.path().join("state").join("state.json");
+    let saved = || {
+        std::fs::read(&file).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|v| v["queue"].as_array().map(Vec::len)).unwrap_or(0)
+    };
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while saved() != 3 {
+        assert!(tokio::time::Instant::now() < deadline, "never saved");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let r = ipc(&a, json!({"cmd":"state","on":false})).await;
+    assert_eq!((r["ok"].clone(), r["running"].clone()), (json!(true), json!(false)), "{r}");
+    // The share the companion made itself goes with it.
+    assert!(share_of(&a, p).await.is_none(), "unshared");
+    ipc(&a, json!({"cmd":"state","on":true})).await;
+    wait_state(&a, Duration::from_secs(5), |r| r["running"] == true).await;
+    wait_state(&a, WAIT, |r| r["outbox"]["dest"] == json!({"local": p}) && r["outbox"]["up"] == true).await;
+    term_json(a.home.path(), "working", 2);
+    let v = wait_http_state(p, Duration::from_secs(10), |v| session_a(v, &a_fp).is_some_and(|s| s["state"] == "working" && s["seq"] == 2)).await;
+    assert_eq!(v["needs"], json!([]), "{v}");
+    let q = wait_queue(p, WAIT, |q| q.len() >= 4).await;
+    assert_eq!(shape(&q), [st("working", 2), st("done", 1), st("blocked", 1), st("working", 0)], "{q:?}");
+    all_from(&q, &a_fp);
 }
 
 #[tokio::test]
