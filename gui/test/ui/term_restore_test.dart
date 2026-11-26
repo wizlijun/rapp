@@ -20,6 +20,8 @@ void main() {
   late MainState s;
   late Directory tmp;
   String? restoreError;
+  // A restore that stops after the first key: the device's words, the first terminal open.
+  String? restoreStop;
 
   Future<void> pump() => Future<void>.delayed(Duration.zero);
 
@@ -49,6 +51,7 @@ void main() {
 
   setUp(() async {
     restoreError = null;
+    restoreStop = null;
     savedRows = [];
     liveRows = [];
     tmp = Directory.systemTemp.createTempSync('term_restore_test');
@@ -70,6 +73,13 @@ void main() {
           t.emit({'event': 'term_created', 'req': req, 'id': '111', 'term': 'term:pty:n'});
         case 'restore_terms':
           if (restoreError != null) return t.emit({'event': 'error', 'req': req, 'error': restoreError});
+          if (restoreStop != null) {
+            final k = m['keys'].first;
+            liveRows = [
+              {'id': 'term:pty:$k', 'name': k, 'command': 'zsh', 'activity': 1},
+            ];
+            return t.emit({'event': 'terms_restored', 'req': req, 'id': m['id'], 'terms': ['term:pty:$k'], 'error': restoreStop});
+          }
           liveRows = [
             for (final k in m['keys']) {'id': 'term:pty:$k', 'name': k, 'command': 'zsh', 'activity': 1},
           ];
@@ -216,6 +226,20 @@ void main() {
     expect(s.hint, '已恢复 2 个终端');
     await pump();
     await pump();
+    expect(s.currentKey, '111/term:pty:a');
+  });
+
+  test('restore_stopped_part_way_opens_what_did_and_says_why', () async {
+    s.dispose();
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: FakeSessionPort(), termPort: FakeTermSessionPort());
+    savedRows = [saved('a', 'rapp', boot: true), saved('b', 'train', boot: true)];
+    restoreStop = 'no shell to start';
+    await listed();
+    await s.restoreSaved('111', ['a', 'b']);
+    expect(s.hint, 'no shell to start');
+    await pump();
+    await pump();
+    expect(t.sent.where((m) => m['cmd'] == 'open').map((m) => m['app']), ['term:pty:a']);
     expect(s.currentKey, '111/term:pty:a');
   });
 

@@ -932,12 +932,38 @@ fn relay_failure(e: anyhow::Error) -> anyhow::Error {
 }
 
 fn finish((s, r): (Pipe, Value), path: &'static str) -> Result<(Pipe, Value, &'static str)> {
-    if r["ok"] == true {
-        Ok((s, r, path))
-    } else {
-        Err(anyhow!(error_of(&r)))
+    accepted(r).map(|r| (s, r, path))
+}
+
+/// A device's reply: itself when `ok`, else a `Refused`.
+pub(crate) fn accepted(r: Value) -> Result<Value> {
+    match r["ok"] == true {
+        true => Ok(r),
+        false => Err(Refused::of(r).into()),
     }
 }
+
+/// The device answered and refused: its error, which is what this shows, and the whole reply (a restore that stopped
+/// part way still names the terminals it opened).
+#[derive(Debug)]
+pub(crate) struct Refused {
+    pub error: String,
+    pub reply: Value,
+}
+
+impl Refused {
+    fn of(reply: Value) -> Refused {
+        Refused { error: error_of(&reply), reply }
+    }
+}
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.error)
+    }
+}
+
+impl std::error::Error for Refused {}
 
 /// Whether a link a request failed on is dropped: always after a repeatable one (the next try dials afresh), and
 /// after any other only when the connection is closed.

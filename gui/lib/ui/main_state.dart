@@ -2797,13 +2797,18 @@ class MainState extends ChangeNotifier {
   /// the count; a failure is the hint and the list refreshes, so what was not restored stays listed.
   Future<void> restoreSaved(String device, List<String> keys) async {
     if (!hubUsable || keys.isEmpty) return;
-    try {
-      final ids = await hub!.restoreTerms(device, keys, app: _launcherOf(device));
-      if (_disposed) return;
+    // The terminals that came up are opened, the first one selected; also when the restore stopped part way.
+    void stage(List<String> ids) {
       for (final (i, id) in ids.indexed) {
         final row = hub?.termLists[device]?.terms.where((r) => r.id == id).firstOrNull;
         unawaited(_open(device, id, row == null ? '已结束' : termDisplayName(row.shown, row.host), select: i == 0, quiet: true));
       }
+    }
+
+    try {
+      final ids = await hub!.restoreTerms(device, keys, app: _launcherOf(device));
+      if (_disposed) return;
+      stage(ids);
       hint = '已恢复 ${ids.length} 个终端';
     } catch (e) {
       if (_disposed) return;
@@ -2811,6 +2816,7 @@ class MainState extends ChangeNotifier {
       try {
         await hub?.terms(device);
       } catch (_) {}
+      if (e is RestoreStopped && !_disposed) stage(e.ids);
     }
     if (!_disposed) notifyListeners();
   }

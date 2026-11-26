@@ -81,8 +81,8 @@ fn due(w: Option<&Watch>, now: Instant) -> Option<Option<Duration>> {
     }
 }
 
-/// The terminal commands; `cmd` is one of `terms`, `open_term`, `rename_term`, whose
-/// fields (other than `cmd`, `id`, `req`) are the device request's.
+/// The terminal commands; `cmd` is one of `terms`, `open_term`, `rename_term`, `end_term`, `restore_terms`,
+/// `forget_terms`, whose fields (other than `cmd`, `id`, `req`) are the device request's.
 pub(crate) async fn command(hub: &Arc<Hub>, cmd: &str, v: &Value) -> Result<Value> {
     let id = v.get("id").and_then(Value::as_str).context("missing id")?;
     let host = hub.host(id)?;
@@ -98,8 +98,18 @@ pub(crate) async fn command(hub: &Arc<Hub>, cmd: &str, v: &Value) -> Result<Valu
     let mut op = v.clone();
     op["op"] = json!(cmd);
     let op: Op = serde_json::from_value(op).with_context(|| format!("bad {cmd}"))?;
-    let (_, r, _) = hub.request(&host, &op).await?;
-    Ok(event(&op, id, &r))
+    match hub.request(&host, &op).await {
+        Ok((_, r, _)) => Ok(event(&op, id, &r)),
+        Err(e) => stopped(&op, id, &e).ok_or(e),
+    }
+}
+
+/// A restore that stopped part way: the terminals it opened, with why it stopped, so the GUI can show them.
+fn stopped(op: &Op, id: &str, e: &anyhow::Error) -> Option<Value> {
+    let Op::RestoreTerms { .. } = op else { return None };
+    let r = e.downcast_ref::<crate::link::Refused>()?;
+    let ids = r.reply["ids"].as_array().filter(|a| !a.is_empty())?;
+    Some(json!({"event":"terms_restored","id":id,"terms":ids,"error":r.error}))
 }
 
 /// The event that tells the GUI how its terminal command `op` went on device `id`, `r` being the reply.
@@ -192,9 +202,9 @@ async fn follow(hub: &Hub, host: &Host, listed: &mut bool) -> Result<std::conver
 
 #[cfg(test)]
 mod tests {
-    use super::{after_end, due, ended, event, Next, Watch, OFF_RECHECK};
+    use super::{after_end, due, ended, event, stopped, Next, Watch, OFF_RECHECK};
     use rapp_net::msg::Op;
-    use serde_json::json;
+    use serde_json::{json, Value};
     use std::time::{Duration, Instant};
 
     const S: Duration = Duration::from_secs(1);
@@ -227,6 +237,24 @@ mod tests {
         assert_eq!(e, json!({"event":"terms_restored","id":"d1","terms":["term:pty:a","term:pty:b"]}));
         let op = Op::ForgetTerms { keys: vec!["k".into()] };
         assert_eq!(event(&op, "d1", &json!({"ok": true, "forgot": 1})), json!({"event":"terms_forgotten","id":"d1"}));
+    }
+
+    #[test]
+    fn a_restore_stopped_part_way_still_names_what_opened() {
+        let op = Op::RestoreTerms { keys: vec![], app: None };
+        let refused = |r: Value| crate::link::accepted(r).unwrap_err();
+        let e = refused(json!({"ok": false, "error": "no shell", "ids": ["term:pty:a"]}));
+        assert_eq!(e.to_string(), "no shell");
+        assert_eq!(
+            stopped(&op, "d1", &e),
+            Some(json!({"event":"terms_restored","id":"d1","terms":["term:pty:a"],"error":"no shell"}))
+        );
+        // Nothing opened, another command, or no reply at all: the error as it was.
+        assert_eq!(stopped(&op, "d1", &refused(json!({"ok": false, "error": "no shell", "ids": []}))), None);
+        assert_eq!(stopped(&op, "d1", &refused(json!({"ok": false, "error": "no shell"}))), None);
+        let forget = Op::ForgetTerms { keys: vec![] };
+        assert_eq!(stopped(&forget, "d1", &e), None);
+        assert_eq!(stopped(&op, "d1", &anyhow::anyhow!("timed out")), None);
     }
 
     #[test]

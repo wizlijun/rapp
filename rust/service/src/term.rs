@@ -142,11 +142,18 @@ async fn finish<S: AsyncWrite + Unpin>(s: &mut S, v: &Value) -> Result<()> {
     Ok(())
 }
 
-/// A worker line as a reply to B: one carrying `error` is that error, anything else is passed on with `ok` added.
+/// A worker line as a reply to B: one carrying `error` is that error (with the `ids` of a restore that stopped part
+/// way, so B can show the terminals that did open), anything else is passed on with `ok` added.
 fn answer(r: Result<Value>) -> Value {
     match r {
         Ok(v) => match v["error"].as_str() {
-            Some(e) => err(e),
+            Some(e) => {
+                let mut out = err(e);
+                if let Some(ids) = v.get("ids") {
+                    out["ids"] = ids.clone();
+                }
+                out
+            }
             None => ok(v),
         },
         Err(e) => err(&format!("{e:#}")),
@@ -484,6 +491,13 @@ mod tests {
         let f = log_fields(&op);
         assert_eq!(f, json!({"op":"open_term","app":"iTerm","from":"term"}));
         assert!(!f.to_string().contains("secret"));
+    }
+
+    #[test]
+    fn a_partial_restore_keeps_the_ids_that_opened() {
+        let v = answer(Ok(json!({"error": "no shell", "ids": ["term:pty:a"]})));
+        assert_eq!(v, json!({"ok": false, "error": "no shell", "ids": ["term:pty:a"]}));
+        assert_eq!(answer(Ok(json!({"error": "x"}))), json!({"ok": false, "error": "x"}));
     }
 
     #[test]

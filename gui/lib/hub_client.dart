@@ -62,6 +62,12 @@ class HubException implements Exception {
   String toString() => message;
 }
 
+/// A restore that stopped part way: [ids] opened before [message] stopped it.
+class RestoreStopped extends HubException {
+  RestoreStopped(super.message, this.ids);
+  final List<String> ids;
+}
+
 class HubHost {
   const HubHost(this.id, this.name, {this.lan = const [], this.route});
   final String id;
@@ -457,7 +463,9 @@ class HubClient extends ChangeNotifier {
   Future<List<String>> restoreTerms(String id, List<String> keys, {required String app}) async {
     try {
       final m = await _request({'cmd': 'restore_terms', 'id': id, 'keys': keys, 'app': app}, 'terms_restored');
-      return [for (final x in (m['terms'] as List? ?? const [])) '$x'];
+      final ids = [for (final x in (m['terms'] as List? ?? const [])) '$x'];
+      if (m['error'] case final String e) throw RestoreStopped(e, ids);
+      return ids;
     } finally {
       try {
         await terms(id);
