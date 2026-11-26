@@ -56,7 +56,7 @@ class _PhraseStripState extends State<PhraseStrip> {
         });
       case PhraseOutcome.offline || PhraseOutcome.busy:
         _say(phraseHint(o)!);
-      case PhraseOutcome.put || PhraseOutcome.tooSoon:
+      case PhraseOutcome.put || PhraseOutcome.tooSoon || PhraseOutcome.missing:
         break;
     }
     return o;
