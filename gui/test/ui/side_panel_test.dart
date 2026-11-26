@@ -5,6 +5,7 @@ import 'package:rapp/llm_api.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/local_ime.dart';
 import 'package:rapp/embed/tidy_mode.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/traffic_label.dart' show formatRate;
@@ -303,6 +304,28 @@ void main() {
     await tester.pump();
     expect(s.prefs.inputHistory, false);
     expect(UiPrefs.load('${tmp.path}/devices/dev1').inputHistory, false);
+  });
+
+  testWidgets('IME intent switch: only where there is a local input method to switch', (tester) async {
+    await tester.pumpWidget(wrap(panel())); // tests default to no local input method
+    expect(find.byKey(const Key('ime-intent-switch')), findsNothing);
+    expect(find.text('打开写作版时切到中文，回到画面时切回英文'), findsNothing);
+  });
+
+  testWidgets('IME intent switch is on by default, flips and saves', (tester) async {
+    s.dispose();
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), localIme: _QuietIme());
+    await tester.pumpWidget(wrap(panel()));
+    expect(find.text('打开写作版时切到中文，回到画面时切回英文'), findsOneWidget);
+    expect(s.prefs.imeIntent, true);
+    await tester.ensureVisible(find.byKey(const Key('ime-intent-switch')));
+    await tester.tap(find.byKey(const Key('ime-intent-switch')));
+    await tester.pump();
+    expect(s.prefs.imeIntent, false);
+    expect(UiPrefs.load('${tmp.path}/devices/dev1').imeIntent, false);
+    await tester.tap(find.byKey(const Key('ime-intent-switch')));
+    await tester.pump();
+    expect(s.prefs.imeIntent, true);
   });
 
   testWidgets('legend shows all seven words', (tester) async {
@@ -840,6 +863,95 @@ void main() {
     expect(panelWidth(1194), 597);
     expect(panelWidth(744), 372);
   });
+
+  testWidgets('Linux: side panel 会话 tab renders unified SessionBlock and FavoriteBlock for terminals', (tester) async {
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await onPlatform(TargetPlatform.linux, () async {
+      final term = FakeTermSessionPort();
+      var nextSid = 0;
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') {
+          final sid = ++nextSid;
+          Future.microtask(() => t.emit({
+                'event': 'opened',
+                'sid': sid,
+                'id': m['id'],
+                'app': m['app'],
+                'path': 'lan',
+                'port': 5000 + sid,
+                'token': 'tk',
+                'req': m['req'],
+              }));
+        }
+      };
+      final ls = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: FakeSessionPort(), termPort: term);
+      addTearDown(ls.dispose);
+      ls.prefs.termOpen['111'] = 'text';
+      await tester.runAsync(() async {
+        t.emit({
+          'event': 'terms',
+          'id': '111',
+          'terms': [
+            {
+              'id': 'term:pty:a',
+              'name': 'zsh',
+              'title': '~/git/rapp',
+              'fg': 'claude',
+              'shell': false,
+              'command': 'zsh',
+              'activity': 1,
+              'dead': false,
+              'ps': {'state': 'blocked', 'kind': 'permission', 'msg': 'approve Bash: ls', 'seq': 2},
+            },
+          ],
+          'hosts': [
+            {
+              'host': null,
+              'launchers': ['ghostty'],
+              'shells': [
+                {'name': 'zsh', 'path': '/bin/zsh', 'default': true},
+              ],
+            },
+          ],
+        });
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      ls.toggleFavorite('111', 'terms:', '终端');
+      await tester.pumpWidget(wrap(SidePanel(state: ls, devicesTab: const Text('devices-body'))));
+      await tester.pump();
+
+      final fav = find.byKey(const Key('favorite-111/terms:'));
+      expect(fav, findsOneWidget);
+      expect(find.descendant(of: fav, matching: find.text('mini')), findsOneWidget);
+      expect(find.descendant(of: fav, matching: find.text('打开')), findsOneWidget);
+
+      await tester.tap(fav);
+      await tester.runAsync(() async {
+        for (var i = 0; i < 6; i++) {
+          await flush();
+        }
+      });
+      term.play(const ReadyEvent(1, 'x'));
+      await tester.runAsync(flush);
+      ls.togglePanel(PanelTab.sessions);
+      await tester.pump();
+      expect(ls.entries.map((e) => e.app), ['term:pty:a']);
+
+      final card = find.byKey(const Key('session-111/term:pty:a'));
+      expect(card, findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text('claude · ~/git/rapp')), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text('CLI · 等确认 · approve Bash: ls')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('group-app')));
+      await tester.pump();
+      expect(find.descendant(of: card, matching: find.text('CLI · mini · 等确认 · approve Bash: ls')), findsOneWidget);
+      expect(find.descendant(of: fav, matching: find.text('新建')), findsOneWidget);
+    });
+  });
 }
 
 class _FakeLlm extends LlmApi {
@@ -851,4 +963,16 @@ class _FakeLlm extends LlmApi {
     probed.add(e);
     return e.key == 'rl-k' ? const LlmProbeOk(['dictation'], Duration(milliseconds: 12)) : const LlmProbeFailed('key 不对');
   }
+}
+
+/// A local input method that switches nothing, but is one: the 全局设置 switch shows.
+class _QuietIme implements LocalIme {
+  @override
+  Future<String?> toChinese(String? preferredId) async => null;
+
+  @override
+  Future<void> toEnglish() async {}
+
+  @override
+  Future<({String id, bool ascii})?> current() async => null;
 }

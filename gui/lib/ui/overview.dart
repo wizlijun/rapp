@@ -8,6 +8,7 @@ import '../embed/traffic_label.dart';
 import '../service_client.dart';
 import 'inbound.dart';
 import 'lamp.dart';
+import 'load_row.dart';
 import 'os_mark.dart';
 import 'main_state.dart';
 import 'open_apps_menu.dart';
@@ -15,6 +16,7 @@ import 'overview_model.dart';
 import 'prefs.dart' show FirstLayer;
 import 'projects.dart' show orderedProjects;
 import 'session_block.dart';
+import 'term_restore_dialog.dart' show showTermRestore;
 import 'workspace_store.dart';
 import 'tokens.dart';
 
@@ -46,7 +48,8 @@ class Overview extends StatelessWidget {
         final cols = deviceColumns(
           hosts: hosts,
           probes: state.probes,
-          entries: entries,
+          // The labelled sessions that are not open stand at the end of their device's column (not counted).
+          entries: state.listed,
           name: state.deviceName,
           localVersion: state.hub?.version,
           localOs: state.localOs,
@@ -66,7 +69,14 @@ class Overview extends StatelessWidget {
                   key: const Key('wall'),
                   spacing: _gap,
                   runSpacing: _gap,
-                  children: [for (final c in cols) _Column(state: state, col: c, monitor: monitor)],
+                  children: [
+                    for (final c in cols)
+                      // No local service (iPad/Duo): 本机 holds nothing, so it starts as a narrow strip.
+                      if (c.id == null && monitor == null)
+                        _LocalFold(state: state, col: c)
+                      else
+                        _Column(state: state, col: c, monitor: monitor),
+                  ],
                 ),
               ),
             ),
@@ -277,11 +287,78 @@ class _CountCell extends StatelessWidget {
   }
 }
 
+/// The 本机 column without a local service: folded to a strip until tapped; open for the rest of this run
+/// ([MainState.localColumnOpen]).
+class _LocalFold extends StatelessWidget {
+  const _LocalFold({required this.state, required this.col});
+  final MainState state;
+  final DeviceColumn col;
+
+  @override
+  Widget build(BuildContext context) => state.localColumnOpen
+      ? _Column(state: state, col: col, onFold: () => state.openLocalColumn(false))
+      : _FoldedColumn(col: col, onOpen: () => state.openLocalColumn(true));
+}
+
+const _foldedWidth = 56.0;
+
+/// A folded column: system mark, lamp and name, stacked in a narrow strip. One tap opens it.
+class _FoldedColumn extends StatelessWidget {
+  const _FoldedColumn({required this.col, required this.onOpen});
+  final DeviceColumn col;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    final small = Theme.of(context).textTheme.bodySmall;
+    final key = col.id ?? 'local';
+    return SizedBox(
+      key: Key('column-$key'),
+      width: _foldedWidth,
+      child: Semantics(
+        button: true,
+        label: '展开 ${col.name}',
+        excludeSemantics: true,
+        onTap: onOpen,
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            key: Key('column-$key-folded'),
+            onTap: onOpen,
+            borderRadius: BorderRadius.circular(t.r),
+            child: Container(
+              decoration: t.panelBox(border: t.line),
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+              child: Column(children: [
+                OsMark(col.os, key: Key('os-mark-$key')),
+                const SizedBox(height: 6),
+                StatusLamp(col.lamp),
+                const SizedBox(height: 6),
+                Text(
+                  col.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: small?.copyWith(fontWeight: FontWeight.w600, color: col.offline ? t.muted : t.text),
+                ),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _Column extends StatelessWidget {
-  const _Column({required this.state, required this.col, this.monitor});
+  const _Column({required this.state, required this.col, this.monitor, this.onFold});
   final MainState state;
   final DeviceColumn col;
   final ServiceMonitor? monitor;
+
+  /// Set when the column can fold back to a strip: a small button beside the name.
+  final VoidCallback? onFold;
 
   @override
   Widget build(BuildContext context) {
@@ -289,6 +366,15 @@ class _Column extends StatelessWidget {
     final id = col.id;
     final small = Theme.of(context).textTheme.bodySmall;
     final favorites = id == null ? const <AppRef>[] : [for (final f in state.idleFavorites) if (f.device == id) f];
+    // 余力 (device-load §7), read where 需要你 reads it.
+    final load = state.columnLoad(id, local: monitor, offline: col.offline);
+    final loadNow = columnLoadNow(state.hub, monitor, id);
+    final title = Text(
+      col.name,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(fontWeight: FontWeight.w600, color: col.offline ? t.muted : t.text),
+    );
     return SizedBox(
       key: Key('column-${id ?? 'local'}'),
       width: _colWidth,
@@ -296,12 +382,25 @@ class _Column extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(
-              col.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontWeight: FontWeight.w600, color: col.offline ? t.muted : t.text),
-            ),
+            if (onFold == null)
+              title
+            else
+              Row(children: [
+                Expanded(child: title),
+                // A touch-sized target (this column only folds on iPad/Duo).
+                Semantics(
+                  button: true,
+                  label: '折叠 ${col.name}',
+                  excludeSemantics: true,
+                  onTap: onFold,
+                  child: InkWell(
+                    key: Key('column-${id ?? 'local'}-fold'),
+                    borderRadius: BorderRadius.circular(t.r),
+                    onTap: onFold,
+                    child: SizedBox.square(dimension: 44, child: Icon(Icons.chevron_left, size: 18, color: t.muted)),
+                  ),
+                ),
+              ]),
             const SizedBox(height: 2),
             Row(children: [
               OsMark(col.os, key: Key('os-mark-${id ?? 'local'}')),
@@ -317,6 +416,7 @@ class _Column extends StatelessWidget {
                 ),
               ),
             ]),
+            LoadRow(id: id ?? 'local', load: load, loadNow: loadNow),
           ]),
         ),
         // The sessions, then this device's favourites that are not open (one tap opens one). The page scrolls,
@@ -334,6 +434,14 @@ class _Column extends StatelessWidget {
               hosts: state.hub?.hosts ?? const [],
               now: state.now,
               onKick: monitor!.kick,
+              labels: monitor!.labels == null
+                  ? null
+                  : LocalLabels(
+                      table: monitor!.labels!,
+                      set: (app, title, note) => monitor!.setLabel(app, title: title, note: note),
+                      reset: monitor!.resetLabel,
+                      say: state.say,
+                    ),
             ),
           if (favorites.isNotEmpty) ...[
             Padding(
@@ -345,8 +453,10 @@ class _Column extends StatelessWidget {
               FavoriteBlock(
                 favorite: f,
                 label: state.labelOf(f),
-                verb: state.favoriteCreates(f) ? '新建' : '打开',
-                onTap: state.hubUsable && !col.offline ? () => state.openFavorite(f) : null,
+                verb: state.favoriteVerb(f),
+                onTap: state.hubUsable && !col.offline
+                    ? () => state.favoriteVerb(f) == '恢复' ? showTermRestore(context, state, f.device) : state.openFavorite(f)
+                    : null,
               ),
             ],
           ],

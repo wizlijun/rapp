@@ -313,7 +313,7 @@ mod tests {
     use super::*;
 
     fn fgd(prog: &str, shell: bool) -> Fg {
-        Fg { prog: Some(prog.into()), cwd: Some("/h/x".into()), shell, probed: true }
+        Fg { prog: Some(prog.into()), cwd: Some("/h/x".into()), shell, probed: true, pgrp: None }
     }
 
     fn titled() -> Window<Vec<u8>> {

@@ -1,12 +1,15 @@
 // 「需要你」: the top bar's count of what waits for the person (dropped sessions, dropped devices,
 // terminals whose program asks) and the popover that lists all of it. A tap on a row goes there; the
 // row's button does its one thing. The only thing that may come looking for the person is 等你 (§0),
-// so nothing here opens by itself.
+// so nothing here opens by itself. A load warning's row (device-load §8) carries its suggested actions and
+// 「1小时内不再提醒」 under its text.
 import 'package:flutter/material.dart';
 
+import '../load_model.dart';
 import 'controls.dart';
 import 'corner_popover.dart';
 import 'lamp.dart';
+import 'load_row.dart' show showLoadDetail;
 import 'main_state.dart';
 import 'tokens.dart';
 
@@ -140,19 +143,37 @@ class _NeedsList extends StatelessWidget {
 
   Widget _row(RappTokens t, NeedItem n) {
     final session = n.kind == NeedKind.session;
-    final where = n.kind == NeedKind.device ? '查看这台设备' : '切到这个会话';
+    final where = switch (n.kind) {
+      NeedKind.device || NeedKind.resource => '查看这台设备',
+      _ => '切到这个会话',
+    };
     // The whole row goes there; the button at its end keeps its own job (打开 / 重连 / 查看).
     return Material(
       type: MaterialType.transparency,
       child: InkWell(
         key: Key('need-row-${n.target}'),
-        onTap: () => state.goToNeed(n),
+        onTap: n.greyWord != null ? null : () => state.goToNeed(n),
         child: _rowBody(t, n, session, where),
       ),
     );
   }
 
   Widget _rowBody(RappTokens t, NeedItem n, bool session, String where) {
+    if (n.kind == NeedKind.resource) return _resourceBody(t, n, where);
+    final grey = n.greyWord;
+    if (grey != null) {
+      // Cannot be followed (device offline, session dropped): counted, muted, no button.
+      return Container(
+        constraints: const BoxConstraints(minHeight: 48),
+        padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
+        alignment: Alignment.centerLeft,
+        child: Semantics(
+          label: '${n.text}，$grey',
+          excludeSemantics: true,
+          child: Text('${n.text} · $grey', maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.muted)),
+        ),
+      );
+    }
     return Container(
       constraints: const BoxConstraints(minHeight: 48),
       padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
@@ -203,5 +224,98 @@ class _NeedsList extends StatelessWidget {
           ),
       ]),
     );
+  }
+
+  /// A load warning: its text, then what to do about it (by item, §8) and 「1小时内不再提醒」.
+  Widget _resourceBody(RappTokens t, NeedItem n, String where) {
+    final device = n.device!, item = n.title!;
+    final mount = item.startsWith('disk:')
+        ? item.substring(5)
+        : (item.startsWith('inode:') ? item.substring(6) : null);
+    final busy = const {'cpu', 'gpu', 'mem', 'heat'}.contains(item);
+    final terms = mount == null ? const <(String, String)>[] : state.termsOnDisk(device, mount);
+    // Only a device that says it can list its processes offers 「看占用最多的进程」 (none does yet).
+    final loadNow = busy && (state.deviceLoads[device]?.canTop ?? false) ? state.loadNowOf(device) : null;
+    final best = busy ? state.newTermElsewhere(device) : null;
+    return Container(
+      constraints: const BoxConstraints(minHeight: 48),
+      padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Semantics(
+            button: true,
+            label: '${n.text}，$where',
+            excludeSemantics: true,
+            onTap: () => state.goToNeed(n),
+            child: Text(n.text, maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.text)),
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              if (terms.isNotEmpty)
+                Builder(
+                  builder: (c) => RappButton.secondary(
+                    key: Key('need-disk-terms-${n.target}'),
+                    label: '看在这块盘上的终端',
+                    onPressed: state.hubUsable ? () => _diskTerms(c, device, terms) : null,
+                  ),
+                ),
+              if (loadNow != null)
+                Builder(
+                  builder: (c) => RappButton.secondary(
+                    key: Key('need-top-${n.target}'),
+                    label: '看占用最多的进程',
+                    onPressed: () => _top(c, device, loadNow),
+                  ),
+                ),
+              if (best != null)
+                RappButton.secondary(
+                  key: Key('need-newterm-${n.target}'),
+                  label: '到 ${state.loadDeviceName(best)} 上新建终端',
+                  onPressed: state.hubUsable ? () => state.newTermOn(best) : null,
+                ),
+              RappButton.secondary(
+                key: Key('need-snooze-${n.target}'),
+                label: '1小时内不再提醒',
+                onPressed: () => state.snoozeNeed(n),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 「看在这块盘上的终端」: a menu of them under the button; a pick opens that terminal.
+  Future<void> _diskTerms(BuildContext c, String device, List<(String, String)> terms) async {
+    final box = c.findRenderObject()! as RenderBox;
+    final pick = await showRappMenu<String>(
+      c,
+      position: menuAt(c, box.localToGlobal(Offset(0, box.size.height))),
+      items: [
+        for (final (id, title) in terms) RappMenuItem(value: id, label: title, key: Key('need-disk-term-$id')),
+      ],
+    );
+    if (pick == null) return;
+    final title = terms.firstWhere((x) => x.$1 == pick).$2;
+    state.openOrSwitch(device, pick, title);
+    state.closeCorner();
+  }
+
+  /// 「看占用最多的进程」: the device's 余力 detail with its process list asked at once, following its load.
+  Future<void> _top(BuildContext c, String device, LoadNow loadNow) async {
+    final live = ValueNotifier<DeviceLoad?>(state.deviceLoads[device]);
+    void follow() => live.value = state.deviceLoads[device];
+    state.addListener(follow);
+    try {
+      await showLoadDetail(c, load: live, loadNow: loadNow, top: true);
+    } finally {
+      state.removeListener(follow);
+      live.dispose();
+    }
   }
 }

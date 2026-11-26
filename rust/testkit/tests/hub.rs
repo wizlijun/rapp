@@ -685,6 +685,7 @@ impl LanA {
                 pacing: true,
                 map_ports: TEST_PORTS,
         own_ports: true,
+        load: Some(common::fake_load()),
             };
             match rapp_service::Service::start(opts).await {
                 Ok(s) => {

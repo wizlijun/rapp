@@ -299,11 +299,30 @@ async fn not_launchd_exits_7() {
     let r = rapp(dir.path(), "update check --json").await;
     assert_eq!(r.code, 7);
     assert_eq!(r.json()["error"], "not_launchd");
-    // Not from the pkg at all.
+    // Not from the pkg at all (macOS), or Linux where online swap is off and directs to the releases list.
     let _f = Fake::new(dir.path(), with(ready(), json!({"state": "off", "current": null}))).await;
     let r = rapp(dir.path(), "update --json").await;
-    assert_eq!(r.code, 1);
-    assert_eq!(r.json()["error"], "failed");
+    if cfg!(target_os = "linux") {
+        assert_eq!(r.code, 7);
+        assert_eq!(r.json()["error"], "not_launchd");
+        assert_eq!(r.json()["page"], "https://example.invalid/releases");
+        let st = rapp(dir.path(), "update status --json").await;
+        assert_eq!(st.code, 0);
+        assert_eq!(st.json()["current"], env!("CARGO_PKG_VERSION"));
+        let st_txt = rapp(dir.path(), "update status").await;
+        assert!(st_txt.stdout.contains("Linux 上还不能在线升级"), "{}", st_txt.stdout);
+        let _f = Fake::new(
+            dir.path(),
+            with(ready(), json!({"state": "off", "current": null, "reinstall_page": "https://github.com/wizlijun/rapp/releases/latest"})),
+        )
+        .await;
+        let r2 = rapp(dir.path(), "update --json").await;
+        assert_eq!(r2.code, 7);
+        assert_eq!(r2.json()["page"], "https://github.com/wizlijun/rapp/releases");
+    } else {
+        assert_eq!(r.code, 1);
+        assert_eq!(r.json()["error"], "failed");
+    }
 }
 
 #[tokio::test]

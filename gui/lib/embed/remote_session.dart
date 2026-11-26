@@ -37,6 +37,7 @@ class RemoteSession extends ChangeNotifier {
       this.appId = '',
       this.onReturn,
       this.onSelectInput,
+      this.onAutoEnglish,
       this.onClick,
       this.onView,
       this.onComposeKey,
@@ -102,6 +103,7 @@ class RemoteSession extends ChangeNotifier {
 
   /// Where an input source switch goes (the runner's `select_input`; '' = English).
   final void Function(String id)? onSelectInput;
+  final void Function(bool on)? onAutoEnglish;
 
   /// Where the click on the marked text box goes: a left click at A point [at] of [window].
   final void Function(int window, Offset at)? onClick;
@@ -158,7 +160,7 @@ class RemoteSession extends ChangeNotifier {
   /// 「直接回车且隐藏」: then the Return goes and the panel hides (the text stays, W6; the picture takes the keys back).
   void _allSent() {
     // A 常用语 always ends with Return and leaves the panel and the keyboard as they were (phrases spec §4).
-    if (composer.lastDone?.phrase == true) {
+    if (composer.lastDone?.phrase == true || composer.lastDone?.command == true) {
       onReturn?.call();
       return;
     }
@@ -190,6 +192,16 @@ class RemoteSession extends ChangeNotifier {
 
   /// The last input method (not a plain layout) A had: what 「切回」 selects.
   ({String id, String name, bool ascii})? lastInputMethod;
+
+  /// Whether A is switched to English before a key-down (paused by 「切回」 until the writing panel opens).
+  bool autoEnglish = true;
+
+  void setAutoEnglish(bool on) {
+    if (autoEnglish == on) return;
+    autoEnglish = on;
+    onAutoEnglish?.call(on);
+    notifyListeners();
+  }
 
   /// Switches A's input source: '' for English, else a source id it reported.
   void selectInput(String id) {
@@ -438,6 +450,7 @@ class RemoteSession extends ChangeNotifier {
         // A clip's 「插入」: into the draft, which opens to show it.
         composer.apply(e.insert);
         composer.open = true;
+        if (e.letter) composer.keepImeOnFocus = true;
         composer.wantFocus();
       case ComposeKeyEvent():
         // A letter on the picture (type-to-compose): the panel opens, takes the caret, then asks for the letter.

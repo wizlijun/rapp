@@ -1,9 +1,9 @@
 //! Which shells this machine has, found from plain inputs so every platform's rules can be tested anywhere.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// One shell a window can run: the button's `name`, where it is, and whether it is the user's own.
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Shell {
     pub name: String,
     pub path: String,

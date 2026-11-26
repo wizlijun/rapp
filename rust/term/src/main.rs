@@ -8,7 +8,7 @@ use rapp_term::config;
 use rapp_term::id::session_name;
 use rapp_term::proto::PROTO;
 use rapp_term::pty::holder::{self, NoTerminal, RunOpts};
-use rapp_term::pty::local;
+use rapp_term::pty::{local, saved};
 use rapp_term::serve::{self, ServeOpts};
 use serde::Serialize;
 use std::io::Write;
@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 const USAGE: &str = "\
 usage: rapp-term version [--json]
-       rapp-term run [--name N] [--cwd DIR] [--dir DIR] [--ticket T] [-- COMMAND...]
+       rapp-term run [--name N] [--cwd DIR] [--dir DIR] [--ticket T] [--restore KEY] [-- COMMAND...]
        rapp-term serve --token-env <variable> --config <path> [--bind <address>] [--port <port>] [--json]";
 
 /// Why the command stopped.
@@ -52,6 +52,8 @@ struct Args {
     cwd: Option<String>,
     dir: Option<String>,
     ticket: Option<String>,
+    /// The key of the terminal to restore.
+    restore: Option<String>,
     /// Hidden: the program `serve` runs to open a window instead of `open -a`, for tests.
     launch_with: Option<String>,
     /// Arguments that are not options.
@@ -96,6 +98,7 @@ fn parse_args(allowed: &[&str], argv: &[String]) -> Res<Args> {
             "cwd" => &mut a.cwd,
             "dir" => &mut a.dir,
             "ticket" => &mut a.ticket,
+            "restore" => &mut a.restore,
             "launch-with" => &mut a.launch_with,
             _ => return Err(usage("unknown option")),
         };
@@ -122,8 +125,11 @@ fn version(a: &Args) {
     }
 }
 
-/// A program in a pty in this terminal window; the program's exit code.
-async fn run(a: &Args) -> Res<i32> {
+/// The options `run` takes.
+const RUN_ALLOWED: &[&str] = &["name", "cwd", "dir", "ticket", "restore", "--"];
+
+/// What `run` was asked for, checked.
+fn run_opts(a: &Args) -> Res<RunOpts> {
     if !a.pos.is_empty() {
         return Err(usage("unexpected argument: the command goes after --"));
     }
@@ -134,17 +140,28 @@ async fn run(a: &Args) -> Res<i32> {
     if a.cwd.as_deref().is_some_and(|d| !Path::new(d).is_dir()) {
         return Err(usage("--cwd is not a directory"));
     }
+    // Nor the key: it names a file.
+    if a.restore.as_deref().is_some_and(|k| !saved::key_ok(k)) {
+        return Err(usage("invalid --restore key"));
+    }
     let dir = a.dir.as_ref().map_or_else(local::default_dir, PathBuf::from);
-    // Read once, at start: a broken file means on (serve already refuses requests then, so it is seen).
-    let program_status = config::load(&config::beside(&dir)).map(|c| c.program_status).unwrap_or(true);
-    let opts = RunOpts {
+    // Read once, at start: a broken file means the defaults, all on (serve already refuses requests then, so it is seen).
+    let cfg = config::load(&config::beside(&dir)).unwrap_or_default();
+    Ok(RunOpts {
         name: a.name.clone(),
         cwd: a.cwd.as_ref().map(PathBuf::from),
         dir,
         ticket: a.ticket.clone(),
         command: a.command.clone().unwrap_or_default(),
-        program_status,
-    };
+        program_status: cfg.program_status,
+        shell_hook: cfg.shell_hook,
+        restore: a.restore.clone(),
+    })
+}
+
+/// A program in a pty in this terminal window; the program's exit code.
+async fn run(a: &Args) -> Res<i32> {
+    let opts = run_opts(a)?;
     holder::run(opts).await.map_err(|e| match e.downcast_ref::<NoTerminal>() {
         Some(n) => Fail::Terminal(n.to_string()),
         None => runtime(format!("run stopped: {e:#}")),
@@ -213,7 +230,7 @@ fn dispatch(argv: &[String]) -> Res<i32> {
     };
     let allowed: &[&str] = match sub.as_str() {
         "version" => &["json"],
-        "run" => &["name", "cwd", "dir", "ticket", "--"],
+        "run" => RUN_ALLOWED,
         "serve" => &["json", "token-env", "config", "bind", "port", "launch-with"],
         "help" | "--help" | "-h" => {
             println!("{USAGE}");
@@ -296,5 +313,23 @@ mod tests {
         assert!(parse_args(&["json"], &s(&["--", "x"])).is_err());
         let a = parse_args(&["--", "name"], &s(&["--name", "n", "--", "sh", "--json"])).ok().unwrap();
         assert_eq!(a.command, Some(s(&["sh", "--json"])));
+    }
+
+    #[test]
+    fn restore_option_parses_and_rejects_bad_keys() {
+        let dir = ["--dir", "/nonexistent-rapp-term-test/term"];
+        let args = |extra: &[&str]| s(&[&dir[..], extra].concat());
+        let a = parse_args(RUN_ALLOWED, &args(&["--restore", "0123456789abcdef", "--", "/bin/zsh", "-l"])).ok().unwrap();
+        let o = run_opts(&a).ok().unwrap();
+        assert_eq!((o.restore.as_deref(), o.command.len()), (Some("0123456789abcdef"), 2));
+        assert_eq!(run_opts(&parse_args(RUN_ALLOWED, &args(&[])).ok().unwrap()).ok().unwrap().restore, None);
+        for bad in ["../../etc/passwd", "0123456789ABCDEF", "0123456789abcde", "0123456789abcdeg", ""] {
+            let a = parse_args(RUN_ALLOWED, &args(&["--restore", bad])).ok().unwrap();
+            match run_opts(&a) {
+                Err(Fail::Usage(m)) => assert!(!m.contains(bad) || bad.is_empty(), "{m}"),
+                _ => panic!("{bad:?} was taken"),
+            }
+        }
+        assert!(parse_args(RUN_ALLOWED, &args(&["--restore"])).is_err());
     }
 }

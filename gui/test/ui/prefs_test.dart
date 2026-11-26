@@ -77,6 +77,19 @@ void main() {
     expect([back.rimeEnabled, back.rimeDictionary], [false, 'user']);
   });
 
+  test('ime_intent and chinese_ime: on and none when missing or bad, saved and read back', () {
+    expect([UiPrefs().imeIntent, UiPrefs().chineseIme], [true, null]);
+    File('${tmp.path}/gui.json').writeAsStringSync('{"ime_intent":"x","chinese_ime":3}');
+    final bad = UiPrefs.load(tmp.path);
+    expect([bad.imeIntent, bad.chineseIme], [true, null]);
+    UiPrefs(imeIntent: false, chineseIme: 'im.rime.inputmethod.Squirrel.Hans').save(tmp.path);
+    final back = UiPrefs.load(tmp.path);
+    expect([back.imeIntent, back.chineseIme], [false, 'im.rime.inputmethod.Squirrel.Hans']);
+    UiPrefs().save(tmp.path);
+    expect(File('${tmp.path}/gui.json').readAsStringSync(), isNot(contains('chinese_ime')));
+    expect(UiPrefs.load(tmp.path).imeIntent, isTrue);
+  });
+
   test('keep_awake: on when missing or bad, saved when off', () {
     File('${tmp.path}/gui.json').writeAsStringSync('{"keep_awake":"x"}');
     expect(UiPrefs.load(tmp.path).keepAwake, isTrue);
@@ -215,5 +228,16 @@ void main() {
     final d = UiPrefs.load(tmp.path);
     expect(d.voiceHotkey, VoiceHotkey.standard);
     expect(d.voiceLanguageHintShown, isFalse);
+  });
+  test('snooze_survives_restart: load_snooze round-trips and drops bad values', () {
+    final p = UiPrefs()..loadSnooze['111\ndisk:/'] = '1764103600000 warn';
+    p.save(tmp.path);
+    expect(File('${tmp.path}/gui.json').readAsStringSync(), contains('"load_snooze":{"111\\ndisk:/":"1764103600000 warn"}'));
+    expect(UiPrefs.load(tmp.path).loadSnooze, {'111\ndisk:/': '1764103600000 warn'});
+    File('${tmp.path}/gui.json').writeAsStringSync('{"load_snooze":{"a":"x y","b":4,"c":"1764103600000 danger"}}');
+    expect(UiPrefs.load(tmp.path).loadSnooze, {'c': '1764103600000 danger'});
+    File('${tmp.path}/gui.json').writeAsStringSync('{"load_snooze":"nope"}');
+    expect(UiPrefs.load(tmp.path).loadSnooze, isEmpty);
+    expect(UiPrefs().loadSnooze, isEmpty);
   });
 }

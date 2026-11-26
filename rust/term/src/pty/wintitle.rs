@@ -294,7 +294,7 @@ mod tests {
     }
 
     fn fg(prog: &str, cwd: &str, shell: bool) -> Fg {
-        Fg { prog: Some(prog.into()), cwd: Some(PathBuf::from(cwd)), shell, probed: true }
+        Fg { prog: Some(prog.into()), cwd: Some(PathBuf::from(cwd)), shell, probed: true, pgrp: None }
     }
 
     #[test]

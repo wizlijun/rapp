@@ -6,6 +6,7 @@ import 'session_block.dart';
 import 'session_model.dart';
 import 'session_row.dart' show SessionGroupTitle;
 import 'tab_chip.dart';
+import 'term_restore_dialog.dart' show showTermRestore;
 import 'tokens.dart';
 
 class SessionsTab extends StatelessWidget {
@@ -76,10 +77,14 @@ class SessionsTab extends StatelessWidget {
                         child: FavoriteBlock(
                           favorite: f,
                           label: state.labelOf(f),
-                          verb: state.favoriteCreates(f) ? '新建' : '打开',
+                          verb: state.favoriteVerb(f),
                           keyPrefix: 'favorite',
                           device: state.deviceName(f.device),
-                          onTap: state.hubUsable ? () => state.openFavorite(f) : null,
+                          onTap: state.hubUsable
+                              ? () => state.favoriteVerb(f) == '恢复'
+                                  ? showTermRestore(context, state, f.device)
+                                  : state.openFavorite(f)
+                              : null,
                         ),
                       ),
                   ],

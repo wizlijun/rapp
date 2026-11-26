@@ -245,6 +245,22 @@ void main() {
     expect(t.sent.where((m) => m['cmd'] == 'open_term').length, 2);
   });
 
+  testWidgets('常用 · 终端 says 恢复 when only terminals saved before boot are left, and opens the list', (tester) async {
+    await boot(tester);
+    s.prefs.termOpen['m1'] = 'text';
+    s.hub!.termLists['m1'] = TermList('m1', hosts: [
+      TermHost(null, launchers: const ['Terminal'], saved: const [TermSaved('a', 'rapp', prog: 'claude', saved: 1, boot: true)]),
+    ]);
+    s.toggleFavorite('m1', termsEntry, termsEntryName);
+    await show(tester);
+    const key = Key('ov-favorite-m1/terms:');
+    expect(find.descendant(of: find.byKey(key), matching: find.text('恢复')), findsOneWidget);
+    await tester.tap(find.byKey(key));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('恢复上次的终端'), findsOneWidget);
+    expect(t.sent.where((m) => m['cmd'] == 'open_term'), isEmpty);
+  });
+
   testWidgets('常用 · 终端 新建 tapped again while the host is still opening sends nothing and says 请稍候', (tester) async {
     await boot(tester);
     s.prefs.termOpen['m1'] = 'text';
@@ -304,6 +320,74 @@ void main() {
         contains('允许 rApp 控制“终端”'));
     expect(MainState.newTermWords(HubException('device offline')), 'device offline');
     expect(MainState.newTermWords(TimeoutException('x')), '新建终端没有回应，请稍后再试');
+  });
+
+  const asking = 'macOS is asking on that Mac whether rApp may control Terminal: answer it there, then open again';
+
+  testWidgets('a permission prompt on the host is said at once', (tester) async {
+    await boot(tester);
+    expect(MainState.newTermWords(HubException(asking)), contains('授权框'));
+    expect(MainState.newTermWords(HubException(asking)), contains('点「允许」'));
+  });
+
+  Future<void> newTermAsked(WidgetTester tester) async {
+    s.prefs.termOpen['m1'] = 'text';
+    s.hub!.termLists['m1'] = TermList('m1', hosts: [TermHost(null, launchers: const ['Terminal'])]);
+    final inner = t.onSend!;
+    t.onSend = (m) {
+      if (m['cmd'] == 'open_term') {
+        t.emit({'event': 'error', 'req': m['req'], 'error': asking});
+      } else if (m['cmd'] == 'terms') {
+        t.emit({'event': 'terms', 'req': m['req'], 'id': m['id'], 'terms': [], 'hosts': [{'host': null, 'launchers': ['Terminal']}]});
+      } else {
+        inner(m);
+      }
+    };
+    await tester.runAsync(() async {
+      final done = s.newTermFromRestore('m1');
+      for (var j = 0; j < 6; j++) {
+        await flush();
+      }
+      await done;
+      for (var j = 0; j < 6; j++) {
+        await flush();
+      }
+    });
+    await tester.pump();
+  }
+
+  testWidgets('a permission prompt on the host brings up its desktop to answer it', (tester) async {
+    await boot(tester);
+    await newTermAsked(tester);
+    expect(s.hint, contains('授权框'));
+    expect(s.hint, endsWith('已切到它的桌面'));
+    expect(t.sent.where((m) => m['cmd'] == 'open').map((m) => m['app']), ['desktop:']);
+  });
+
+  testWidgets('a permission prompt while the host desktop is on the stage stays on that screen', (tester) async {
+    await boot(tester);
+    await tester.runAsync(() async {
+      await s.openOrSwitch('m1', 'desktop:', '桌面');
+      for (var j = 0; j < 6; j++) {
+        await flush();
+      }
+    });
+    expect(s.currentKey, 'm1/desktop:');
+    s.toggleOverview();
+    await newTermAsked(tester);
+    expect(s.hint, endsWith('不在这块屏上就换一块屏看看'));
+    expect(t.sent.where((m) => m['cmd'] == 'open'), hasLength(1));
+    expect(s.currentKey, 'm1/desktop:');
+    expect(s.overview, isFalse);
+  });
+
+  testWidgets('a permission prompt on a host without a desktop is only said', (tester) async {
+    capsOf['m1'] = {'graphical': false};
+    await boot(tester);
+    await newTermAsked(tester);
+    expect(s.hint, contains('授权框'));
+    expect(s.hint, isNot(contains('桌面')));
+    expect(t.sent.where((m) => m['cmd'] == 'open'), isEmpty);
   });
 
   testWidgets('常用 · 终端 first says 打开 and reopens the running terminals, then says 新建', (tester) async {
@@ -501,6 +585,9 @@ void main() {
     versions = {'m1': '0.14.8'};
     await boot(tester, apps: ['m1/a']);
     await show(tester);
+    // No local service here: 本机 starts folded, so open it to see its version.
+    await tester.tap(find.byKey(const Key('column-local-folded')));
+    await tester.pump();
     final m1 = tester.widget<Text>(find.byKey(const Key('version-m1')));
     expect(m1.data, '0.14.8');
     expect(m1.style!.color, tokens(tester).muted);
@@ -1277,6 +1364,80 @@ void main() {
     await tester.drag(find.byKey(const Key('wall')), const Offset(0, -200));
     await tester.pump();
     expect(dy('column-m1'), lessThan(before));
+  });
+
+  group('local column fold', () {
+    testWidgets('no local service: the 本机 column starts folded, 56 wide', (tester) async {
+      hubVersion = '0.14.7';
+      await boot(tester);
+      await show(tester);
+      expect(find.byKey(const Key('column-local-folded')), findsOneWidget);
+      expect(tester.getSize(find.byKey(const Key('column-local'))).width, 56);
+      expect(inside('column-local', find.text('本机')), findsOneWidget);
+      expect(find.byKey(const Key('os-mark-local')), findsOneWidget);
+      expect(inside('column-local', find.text('没有打开的 app')), findsNothing);
+      expect(find.byKey(const Key('version-local')), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a tap opens it; the fold button closes it again', (tester) async {
+      hubVersion = '0.14.7';
+      await boot(tester);
+      await show(tester);
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      expect(tester.getSize(find.byKey(const Key('column-local'))).width, 220);
+      expect(find.byKey(const Key('version-local')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('column-local-fold')));
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsOneWidget);
+    });
+
+    testWidgets('stays open across rebuilds', (tester) async {
+      await boot(tester);
+      await show(tester);
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      s.say('x');
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsNothing);
+      expect(find.byKey(const Key('column-local-fold')), findsOneWidget);
+    });
+
+    testWidgets('stays open after leaving the overview and coming back', (tester) async {
+      await boot(tester);
+      await show(tester);
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      // Leaving 全景 unmounts the overview (the stage takes its place); coming back mounts a fresh one.
+      await tester.pumpWidget(wrap(const SizedBox()));
+      await tester.pumpWidget(wrap(SizedBox(width: 1194, height: 700, child: Overview(state: s))));
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsNothing);
+      expect(find.byKey(const Key('column-local-fold')), findsOneWidget);
+    });
+
+    testWidgets('the fold button is a touch-sized target', (tester) async {
+      await boot(tester);
+      await show(tester);
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      final size = tester.getSize(find.byKey(const Key('column-local-fold')));
+      expect(size.height, greaterThanOrEqualTo(44));
+      expect(size.width, greaterThanOrEqualTo(44));
+    });
+
+    testWidgets('a local service keeps the column open, with no fold button', (tester) async {
+      await boot(tester);
+      s.toggleOverview();
+      final m = ServiceMonitor(readToken: () async => null);
+      addTearDown(m.dispose);
+      await tester.pumpWidget(wrap(SizedBox(width: 1194, height: 700, child: Overview(state: s, monitor: m))));
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsNothing);
+      expect(find.byKey(const Key('column-local-fold')), findsNothing);
+      expect(tester.getSize(find.byKey(const Key('column-local'))).width, 220);
+    });
   });
 }
 

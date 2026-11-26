@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../embed/app_profile.dart' show InputPoint;
 import '../embed/phrases.dart';
+import '../embed/strip_cmds.dart';
 import '../embed/tidy_mode.dart';
 import '../embed/voice_key_gate.dart';
 import 'tokens.dart';
@@ -32,12 +33,15 @@ class UiPrefs {
     this.quickAutoHide,
     this.termComposerAt,
     this.phraseStrip = true,
-    List<Phrase>? phrases,
+    List<StripItem>? phrases,
+    this.phraseCmdsSeeded = true,
     this.termFit = true,
     this.voiceAiTidy = true,
     this.voiceAiThink = false,
     this.keepAwake = true,
     this.rimeEnabled = true,
+    this.imeIntent = true,
+    this.chineseIme,
     this.rimeDictionary = 'bundled',
     this.first = FirstLayer.device,
     this.composerZoom = 0,
@@ -48,10 +52,12 @@ class UiPrefs {
     Map<String, String>? termOpen,
     Map<String, TidyMode>? voiceTidyMode,
     Map<String, String>? termApp,
-  })  : phrases = phrases ?? List.of(defaultPhrases),
+    Map<String, String>? loadSnooze,
+  })  : phrases = phrases ?? defaultStripItems,
         termOpen = termOpen ?? {},
         voiceTidyMode = voiceTidyMode ?? {},
-        termApp = termApp ?? {};
+        termApp = termApp ?? {},
+        loadSnooze = loadSnooze ?? {};
 
   RappTheme theme;
   bool startFullscreen;
@@ -84,7 +90,10 @@ class UiPrefs {
 
   /// 常用语 (`phrases`, iOS): in strip order. Missing or not a list means [defaultPhrases]; bad entries are
   /// dropped on load.
-  List<Phrase> phrases;
+  List<StripItem> phrases;
+
+  /// The six built-in commands were put in front of the saved list once (`phrase_cmds_seeded`).
+  bool phraseCmdsSeeded;
 
   /// 跟着我的窗口 (`term_fit`): the host's terminal window follows this console's size. Missing or bad means on.
   bool termFit;
@@ -103,6 +112,14 @@ class UiPrefs {
   /// 实体键盘用内置输入法 (`rime_enabled`, iOS): the master switch; each session's app profile can still turn it
   /// off for that app (`rime`). Missing or bad means on.
   bool rimeEnabled;
+
+  /// 打开写作版时切到中文，回到画面时切回英文 (`ime_intent`): the writing panel switches this device's input method.
+  /// Missing or bad means on.
+  bool imeIntent;
+
+  /// The Chinese input method last left when the caret came out of the writing panel (`chinese_ime`): the next
+  /// switch asks for it. Null (missing or bad) lets the device pick.
+  String? chineseIme;
 
   /// 词库 (`rime_dictionary`, iOS): `'bundled'` (自带雾凇) or `'user'` (我的目录). Anything else means `'bundled'`.
   String rimeDictionary;
@@ -137,6 +154,10 @@ class UiPrefs {
   /// dropped on load.
   final Map<String, String> termApp;
 
+  /// 1小时内不再提醒 (`load_snooze`, device-load §8): `<device>\n<item>` to `<untilMs> <level>`, this GUI's own and never
+  /// sent to the device. A value that is not a number and `warn` or `danger` is dropped on load.
+  final Map<String, String> loadSnooze;
+
   /// The stored app when [launchers] still has it, else the first launcher.
   String termAppFor(String device, List<String> launchers) {
     final a = termApp[device];
@@ -144,6 +165,13 @@ class UiPrefs {
   }
 
   /// Never throws: a missing or corrupt file gives the defaults.
+  /// A saved list from before the commands: the built-in ones go in front once (those it does not hold yet).
+  static List<StripItem> _seeded(List<StripItem> l, bool done) {
+    if (done) return l;
+    final have = {for (final c in l.whereType<StripCmd>()) c.id};
+    return [for (final id in builtinCmdOrder) if (!have.contains(id)) StripCmd(id), ...l];
+  }
+
   static UiPrefs load(String dir) {
     try {
       final j = jsonDecode(File('$dir/gui.json').readAsStringSync());
@@ -157,6 +185,8 @@ class UiPrefs {
       final vk = j['voice_ai_think'];
       final ka = j['keep_awake'];
       final re = j['rime_enabled'];
+      final ii = j['ime_intent'];
+      final ci = j['chinese_ime'];
       final rd = j['rime_dictionary'];
       final fl = j['first'];
       final cz = j['composer_zoom'];
@@ -170,6 +200,7 @@ class UiPrefs {
       final qt = j['quick_hidden_term'];
       final qa = j['quick_hidden_app'];
       final qh = j['quick_auto_hide'];
+      final ls = j['load_snooze'];
       return UiPrefs(
         theme: RappTheme.values.firstWhere(
           (t) => t.name == name,
@@ -185,13 +216,15 @@ class UiPrefs {
         termComposerAt: InputPoint.fromJson(j['term_composer_at']),
         phraseStrip: j['phrase_strip'] != false,
         phrases: j['phrases'] is List
-            ? [for (final e in j['phrases'] as List) ?Phrase.fromJson(e)]
+            ? _seeded([for (final e in j['phrases'] as List) ?stripItemFromJson(e)], j['phrase_cmds_seeded'] == true)
             : null,
         termFit: tf is bool ? tf : true,
         voiceAiTidy: vt is bool ? vt : true,
         voiceAiThink: vk is bool ? vk : false,
         keepAwake: ka is bool ? ka : true,
         rimeEnabled: re is bool ? re : true,
+        imeIntent: ii is bool ? ii : true,
+        chineseIme: ci is String && ci.isNotEmpty ? ci : null,
         rimeDictionary: rd == 'user' ? 'user' : 'bundled',
         composerZoom: cz is int ? cz.clamp(0, composerZoomMax) : 0,
         stageButtonsSide: sb == 'left' ? StageSide.left : StageSide.right,
@@ -217,6 +250,12 @@ class UiPrefs {
             for (final e in ta.entries)
               if (e.key is String && e.value is String) e.key as String: e.value as String,
         },
+        loadSnooze: {
+          if (ls is Map)
+            for (final e in ls.entries)
+              if (e.key is String && e.value is String && RegExp(r'^\d+ (warn|danger)$').hasMatch(e.value as String))
+                e.key as String: e.value as String,
+        },
       );
     } catch (_) {
       return UiPrefs();
@@ -239,11 +278,14 @@ class UiPrefs {
         if (termComposerAt != null) 'term_composer_at': termComposerAt!.toJson(),
         'phrase_strip': phraseStrip,
         'phrases': [for (final p in phrases) p.toJson()],
+        'phrase_cmds_seeded': phraseCmdsSeeded,
         'term_fit': termFit,
         'voice_ai_tidy': voiceAiTidy,
         'voice_ai_think': voiceAiThink,
         'keep_awake': keepAwake,
         'rime_enabled': rimeEnabled,
+        'ime_intent': imeIntent,
+        if (chineseIme != null) 'chinese_ime': chineseIme,
         'rime_dictionary': rimeDictionary,
         'first': first.name,
         'composer_zoom': composerZoom,
@@ -254,6 +296,7 @@ class UiPrefs {
         'voice_tidy_mode': {for (final e in voiceTidyMode.entries) e.key: e.value.json},
         'term_open': termOpen,
         'term_app': termApp,
+        'load_snooze': loadSnooze,
       }),
     );
   }

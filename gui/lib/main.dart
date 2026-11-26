@@ -24,6 +24,8 @@ import 'term/term_session_port.dart';
 import 'ui/app_profile_store.dart';
 import 'ui/fullscreen.dart';
 import 'tray_menu.dart';
+import 'state/refresh_on.dart';
+import 'state/state_sync.dart';
 import 'ui/main_state.dart';
 import 'ui/main_window.dart';
 import 'ui/prefs.dart';
@@ -108,7 +110,11 @@ Future<void> main(List<String> args) async {
   try {
     builtinRules = await rootBundle.loadString('assets/state_rules.json');
   } catch (_) {}
+  final stateSync = StateSync(localDir: data.localDir, find: monitor.stateUrl)..start();
+  // The service may connect after the first look: look again when it does.
+  refreshStateOn(monitor, () => monitor.running, stateSync);
   final state = MainState(
+      stateSync: stateSync,
       hub: hub,
       hubError: hubError,
       data: data,
@@ -120,6 +126,7 @@ Future<void> main(List<String> args) async {
       profiles: AppProfileStore.load(data.sharedDir, builtin),
       stateRules: await StateRulesLibrary.load(data, builtinRules),
       builtinStateRules: builtinRules,
+      monitor: monitor,
       log: stderr.writeln);
   mainState = state;
   // Native window visibility: macOS occlusion, Linux mapping/minimization.

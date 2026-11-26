@@ -6,7 +6,8 @@
 //! `fake_rows`; one host with the launcher `Terminal` and the shell `zsh`. `open` answers `term:pty:opened`,
 //! `rename` `{"ok":true}`. `view` says hello and echoes every line back. `term.log` next to argv[0] gets
 //! `argv <arguments>` per start, `view <term> <lines>` per view (never the lines), `open <request>`,
-//! `rename <request>`, `end <request>` and `watch closed`.
+//! `rename <request>`, `end <request>`, `watch open` and `watch closed`. A `fake_rows` item is a key, or
+//! `{"key","ps"?,"title"?,"fg"?,"name"?}`: the row then carries those fields.
 
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -100,9 +101,23 @@ fn row(key: &str) -> Value {
     json!({"id":format!("term:pty:{key}"),"host":null,"name":key,"command":"bash","panes":1,"attached":0,"activity":0,"dead":false,"unread":false})
 }
 
+/// A `fake_rows` item: a key, or `{"key","ps"?,"title"?,"fg"?,"name"?}` whose other fields go on the row as they are.
+fn fake_row(item: &Value) -> Option<Value> {
+    if let Some(key) = item.as_str() {
+        return Some(row(key));
+    }
+    let mut r = row(item["key"].as_str()?);
+    for f in ["ps", "title", "fg", "name"] {
+        if let Some(v) = item.get(f).filter(|v| !v.is_null()) {
+            r[f] = v.clone();
+        }
+    }
+    Some(r)
+}
+
 fn term_list(cfg: &Value) -> Value {
     let mut terms = vec![row("work")];
-    terms.extend(cfg["fake_rows"].as_array().into_iter().flatten().filter_map(Value::as_str).map(row));
+    terms.extend(cfg["fake_rows"].as_array().into_iter().flatten().filter_map(fake_row));
     let host = json!({"host":null,"launchers":["Terminal"],"shells":[{"name":"zsh","path":"/bin/zsh","default":true}]});
     json!({"terms":terms,"hosts":[host]})
 }
@@ -168,6 +183,26 @@ fn conn(mut s: TcpStream, token: &str, config_path: &str) {
             };
             send(&mut s, &v);
         }
+        Some(verb @ ("restore" | "forget")) => {
+            let v = match cfg {
+                Err(e) => json!({"error":e}),
+                Ok(c) => {
+                    log(&format!("{verb} {req}"));
+                    if verb == "restore" && c["fake_restore_error"].is_string() {
+                        json!({"error":c["fake_restore_error"],"ids":["term:pty:r1"]})
+                    } else if verb == "restore" {
+                        json!({"ok":true,"ids":["term:pty:r1","term:pty:r2"]})
+                    } else {
+                        json!({"ok":true,"forgot":req["keys"].as_array().map_or(0, Vec::len)})
+                    }
+                }
+            };
+            send(&mut s, &v);
+        }
+        Some("saved") => {
+            log("saved");
+            send(&mut s, &json!({"ok":true,"saved":[{"key":"k1","name":"train","saved":1,"boot":1,"cwd":"/tmp/p"}]}));
+        }
         Some("view") => view(s, r, &req, cfg.err()),
         _ => {
             send(&mut s, &json!({"error":"bad request"}));
@@ -177,6 +212,7 @@ fn conn(mut s: TcpStream, token: &str, config_path: &str) {
 
 /// The list now, and again within 100 ms of `term.json` changing, until the other end closes.
 fn watch(mut s: TcpStream, mut r: BufReader<TcpStream>, config_path: &str) {
+    log("watch open");
     let _ = s.set_read_timeout(Some(Duration::from_millis(20)));
     let (mut last, mut sent): (Option<String>, Option<Value>) = (None, None);
     'run: loop {

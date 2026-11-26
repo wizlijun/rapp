@@ -8,8 +8,9 @@ import 'dart:ui' show Offset, Size;
 import '../paths.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show Clipboard;
-import 'package:flutter/widgets.dart' show StringCharacters;
+import 'package:flutter/widgets.dart' show AppLifecycleListener, AppLifecycleState, StringCharacters;
 
+import '../embed/local_ime.dart';
 import '../embed/phrases.dart';
 import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
@@ -24,10 +25,14 @@ import '../embed/traffic_label.dart' show segments;
 import '../history/input_history.dart';
 import '../history/input_recorder.dart';
 import '../hub_client.dart';
+import '../state/state_sync.dart';
+import '../load_model.dart';
+import '../service_client.dart' show ServiceMonitor;
 import '../permissions.dart';
 import '../embed/app_profile.dart';
 import '../embed/app_state.dart';
 import '../embed/state_rules.dart';
+import '../embed/strip_tools.dart';
 import '../embed/composer_model.dart';
 import '../embed/modifier_latch.dart';
 import '../term/term_id.dart';
@@ -35,6 +40,7 @@ import '../term/term_session_port.dart';
 import '../term/term_wire.dart' show TermPane, noSuchTextTerminal;
 import 'app_profile_store.dart';
 import 'device_os.dart';
+import 'ime_intent.dart';
 import 'lamp.dart';
 import 'term_status.dart' show programLamp, programWord, termAskWord;
 import 'lifecycle.dart';
@@ -45,10 +51,12 @@ import '../embed/composer_editor.dart' show ZoomKey;
 import '../embed/tidy_diff.dart' show LearnAction, LearnItem, editLearns;
 import '../embed/voice_fix.dart';
 import 'project_positions.dart';
+import 'secure_text_field.dart' show SecureInput;
 import '../llm_api.dart';
 import 'projects.dart';
 import 'resources_state.dart';
 import '../embed/tidy_mode.dart';
+import '../labels.dart';
 import 'session_model.dart';
 import 'terms_entry.dart';
 import 'tokens.dart';
@@ -67,10 +75,17 @@ enum Corner { stream, needs, session, remote, sessions, hints }
 /// device reported ([device] and [app] name its session, [title] its shown name, [lamp] its state).
 /// [inferred]: read off the screen by rules rather than reported by the program (GUI apps, not built yet).
 class HintRecord {
-  const HintRecord(this.text, this.at, {this.device, this.app, this.title, this.lamp, this.inferred = false});
+  const HintRecord(this.text, this.at,
+      {this.device, this.app, this.title, this.lamp, this.inferred = false, this.term = false, this.eid});
   final String text;
   final DateTime at;
   final String? device, app, title;
+
+  /// Written by [MainState._trackPrograms] from a device's terminal list (the local source of program rows).
+  final bool term;
+
+  /// The service's id for this row; null for every row the app made itself.
+  final String? eid;
   final Lamp? lamp;
   final bool inferred;
 
@@ -78,16 +93,24 @@ class HintRecord {
   bool get goes => device != null && app != null;
 }
 
-enum NeedKind { session, device, terminal, app }
+enum NeedKind { session, device, terminal, app, resource }
 
 /// One thing waiting for the person: a disconnected session ([target] its record key) or a
 /// device that dropped ([target] its id), or a text terminal blocked on the person ([target] its session id,
 /// [device] its device, [title] its shown name), or an app session whose screen shows a sure block ([target] its
-/// record key). Newer [seq] first.
+/// record key), or a load warning (device-load §8: [target] `<device>\n<item>`, [device] its device, [title] the
+/// item). Newer [seq] first.
 class NeedItem {
-  const NeedItem(this.kind, this.target, this.text, this.seq, {this.reconnectWord = '重连', this.device, this.title});
+  const NeedItem(this.kind, this.target, this.text, this.seq,
+      {this.reconnectWord = '重连', this.device, this.title, this.at = 0, this.greyWord});
   final String reconnectWord;
   final String? device, title;
+
+  /// Unix seconds it was first seen (the service's `since` for a service need); newest first.
+  final int at;
+
+  /// Why it cannot be followed (设备离线 / 已断开); null when it can. A grey row is counted but does nothing.
+  final String? greyWord;
   final NeedKind kind;
   final String target;
   final String text;
@@ -142,6 +165,18 @@ String openedText(String name) => 'A 上打开了「$name」';
 const desktopLockText = '远程电脑已锁屏；输入系统密码解锁';
 const childLockText = '远程电脑已锁屏；请在主窗口输入系统密码解锁';
 
+/// A load whose last line came longer ago than this is left out, as if there were none (device-load §7: no stale
+/// numbers). Timed by this GUI's clock when the line arrived, never by the snapshot's `at` (the device's clock).
+const loadStaleAfter = Duration(seconds: 20);
+
+/// How [columnLoad]'s device is asked once (the detail's process list).
+LoadNow? columnLoadNow(HubClient? hub, ServiceMonitor? local, String? id) => id != null
+    ? (hub == null ? null : ({bool top = false}) => hub.loadNow(id, top: top))
+    : local?.loadNow;
+
+/// How long 「1小时内不再提醒」 keeps a load warning quiet.
+const loadSnoozeFor = Duration(hours: 1);
+
 /// A screen was plugged into A while its desktop is open: it is not opened by itself.
 const screenAddedHint = 'A 多了一块屏，在顶栏的屏幕菜单里切过去';
 
@@ -163,6 +198,9 @@ class MainState extends ChangeNotifier {
     VoiceInput? voice,
     LlmApi? llmApi,
     DeviceOs? localOs,
+    LocalIme? localIme,
+    this.monitor,
+    this.stateSync,
   })  : localOs = localOs ?? localDeviceOs(),
         _builtinStateRules = builtinStateRules,
         stateRules = stateRules ?? StateRulesLibrary.parse(builtinStateRules, const {}),
@@ -193,6 +231,8 @@ class MainState extends ChangeNotifier {
     _termSub = termPort?.events.listen(_onPortEvent);
     if (defaultTargetPlatform == TargetPlatform.macOS || defaultTargetPlatform == TargetPlatform.linux) port?.setVoiceHotkey(prefs.voiceHotkey);
     hub?.addListener(_onHub);
+    monitor?.addListener(_onMonitor);
+    stateSync?.addListener(_onStateSync);
     hub?.askNet();
     _lastError = hub?.lastError;
     _netLevel = hub?.net?.level;
@@ -211,7 +251,40 @@ class MainState extends ChangeNotifier {
     _restorePins();
     unawaited(recorder.sweep());
     unawaited(history.refresh()); // never throws; the panel's ↑ has what is read by then
+    // Tests never reach a real input method unless they pass one.
+    final ime = localIme ?? (Platform.environment.containsKey('FLUTTER_TEST') ? const NoLocalIme() : localImeForPlatform());
+    // No input method to switch (Windows, Android, tests): no intent, nothing queued, nothing to listen for.
+    if (ime is NoLocalIme) return;
+    imeIntent = ImeIntent(ime,
+        enabled: () => prefs.imeIntent,
+        secure: () => SecureInput.active,
+        lastId: () => prefs.chineseIme,
+        saveId: (id) {
+          if (_disposed || prefs.chineseIme == id) return;
+          prefs.chineseIme = id;
+          _save();
+        });
+    // Away, the focus moves are another app's; back, the caret decides once.
+    _imeResume = AppLifecycleListener(onStateChange: imeLifecycle);
   }
+
+  /// The writing panel switches this device's input method: Chinese in it, English back on the picture.
+  /// Null where there is none to switch.
+  ImeIntent? imeIntent;
+  AppLifecycleListener? _imeResume;
+
+  /// The app's lifecycle as [imeIntent] needs it: only resumed is in front.
+  void imeLifecycle(AppLifecycleState s) {
+    if (s == AppLifecycleState.resumed) {
+      imeIntent?.appResumed();
+    } else {
+      imeIntent?.appInactive();
+    }
+  }
+
+  /// The input method switches asked for so far have ended (each bounded): a compose replay waits for it, so
+  /// the letter that opened the panel lands in the Chinese input method.
+  Future<void> get imeSettled => imeIntent?.settled ?? Future.value();
 
   /// The input record: what the writing panel sends, and the drafts it leaves.
   late final InputRecorder recorder;
@@ -615,12 +688,161 @@ class MainState extends ChangeNotifier {
     _queue(HintRecord(v, _now()));
   }
 
+  /// Puts [words] on the hint line now.
+  void say(String words) {
+    hint = words;
+    notifyListeners();
+  }
+
   void _queue(HintRecord r) {
     hintHistory.insert(0, r);
     if (hintHistory.length > hintHistoryMax) hintHistory.removeLast();
   }
 
   static const hintHistoryMax = 50;
+
+  /// The rapp-state service this app follows; null when it is not wired in.
+  final StateSync? stateSync;
+
+  /// Whether the queue and the needs follow the service: connected, or reconnecting (a refresh) with the last
+  /// snapshot still in hand, so coming back to the foreground does not flip them to the local view and back.
+  bool get _fromService {
+    final sync = stateSync;
+    if (sync == null) return false;
+    return sync.status == StateStatus.connected || (sync.status == StateStatus.connecting && sync.hasSnapshot);
+  }
+
+  /// [v] when it is a non-empty string, else null: a blank title is no title.
+  static String? _text(Object? v) => v is String && v.isNotEmpty ? v : null;
+
+  int _outageSeen = 0;
+
+  void _onStateSync() {
+    final sync = stateSync!;
+    if (sync.status == StateStatus.unreachable && sync.outage > _outageSeen) {
+      _outageSeen = sync.outage;
+      _queue(HintRecord('状态服务连不上，先用本机的', _now()));
+    }
+    _markPushedRows(sync);
+    notifyListeners();
+  }
+
+  /// The text terminal on show, or null: a GUI app session, no session, or a window nobody can see.
+  SessionEntry? get _shownTerm {
+    final r = current;
+    if (r == null || r.standby != null || !isTermApp(r.app) || !_mainVisible || backgrounded) return null;
+    return r;
+  }
+
+  /// The terminal last told to the service as seen, so one change of [currentKey] sends once.
+  String? _seenSent;
+
+  /// Tells the service the shown terminal was looked at; the one place every way of switching ends up in.
+  void _markCurrentSeen({bool again = false}) {
+    final sync = stateSync;
+    if (sync == null) return;
+    // Called on every notify: the session is only looked up when there is something to mark.
+    final key = currentKey;
+    if (key == null) {
+      _seenSent = null;
+      return;
+    }
+    if (!again && _seenSent == key) return;
+    final r = _shownTerm;
+    if (r == null) {
+      final c = current;
+      if (c == null || !isTermApp(c.app)) _seenSent = null;
+      return;
+    }
+    if (!again && _seenSent == r.key) return;
+    _seenSent = r.key;
+    sync.markSeen(r.id, r.app);
+  }
+
+  /// Queue rows (by `eid`) already looked at because their terminal was on show.
+  final Set<String> _rowsMarked = {};
+
+  /// A pushed row for the terminal on show is marked seen at once, once per row. A `seen` or `session`
+  /// push brings no new row, so it never comes back here as a mark.
+  void _markPushedRows(StateSync sync) {
+    final live = <String>{};
+    final r = _shownTerm;
+    var mark = false;
+    for (final row in sync.rows) {
+      final eid = row['eid'];
+      if (eid is! String) continue;
+      live.add(eid);
+      if (r == null || _rowsMarked.contains(eid) || row['session'] != r.app) continue;
+      final fp = row['fp'], rawId = row['id'];
+      final id = rawId is String ? rawId : (fp is String ? sync.idOf(fp) : null);
+      if (id != r.id) continue;
+      _rowsMarked.add(eid);
+      mark = true;
+    }
+    // However many new rows it has, the shown terminal is marked once.
+    if (mark) sync.markSeen(r!.id, r.app);
+    _rowsMarked.retainAll(live);
+  }
+
+  /// What the queue shows, newest first: [hintHistory] alone, or, while the service is connected, the app's own
+  /// lines plus the service's program rows.
+  List<HintRecord> get queueRows {
+    if (!_fromService) return hintHistory;
+    final all = [
+      ...hintHistory.where((r) => !r.term),
+      ...stateSync!.rows.map(_serviceRow).whereType<HintRecord>(),
+    ]..sort((a, b) => b.at.compareTo(a.at));
+    return all.take(hintHistoryMax).toList();
+  }
+
+  HintRecord? _serviceRow(Map<String, Object?> row) {
+    final sync = stateSync!;
+    final fp = row['fp'];
+    final rawId = row['id'];
+    final id = rawId is String ? rawId : (fp is String ? sync.idOf(fp) : null);
+    final name = id != null ? deviceName(id) : '${row['device'] ?? ''}';
+    final at = row['at'];
+    final when = DateTime.fromMillisecondsSinceEpoch((at is num ? at : 0).toInt() * 1000);
+    final eid = row['eid'] is String ? row['eid'] as String : null;
+    switch (row['t']) {
+      case 'state':
+        final ps = termPs(row);
+        if (ps == null) return null;
+        final nm = _text(row['title']) ?? _text(row['name']);
+        final host = row['host'];
+        final title = termDisplayName(nm is String ? nm : '', host is String ? host : null);
+        final known = id != null && (hub?.hosts.any((h) => h.id == id) ?? false);
+        final session = row['session'];
+        return HintRecord('$title @ $name：${programWord(ps)}', when,
+            device: known ? id : null,
+            app: known && session is String ? session : null,
+            title: title,
+            lamp: programLamp(ps),
+            eid: eid);
+      case 'gap':
+        return HintRecord('$name 有一段状态没收到', when, eid: eid);
+      default:
+        return null;
+    }
+  }
+
+  /// Why a queued line about [termId] on [device] cannot be followed, in the word the list shows; null when it can.
+  String? offlineWord(String device, String termId) {
+    if (_offlineSince.containsKey(device) || probes[device]?.lamp == Lamp.offline) return '设备离线';
+    if (_records['$device/$termId']?.phase == Phase.disconnected) return '已断开';
+    return null;
+  }
+
+  /// Whether a service row is one the person has not looked at yet.
+  bool queuedFresh(HintRecord r) {
+    final eid = r.eid;
+    final sync = stateSync;
+    if (eid == null || sync == null) return false;
+    for (final row in sync.rows) {
+      if (row['eid'] == eid) return sync.fresh(row);
+    }
+    return false;
+  }
 
   /// The status queue: every line the hint showed this run and every program status change, newest first,
   /// at most [hintHistoryMax].
@@ -652,8 +874,9 @@ class MainState extends ChangeNotifier {
         _psSeen[k] = now;
         if (first || was == now) continue;
         final title = termDisplayName(r.shown, r.host);
+        if (_fromService) continue;
         _queue(HintRecord('$title @ ${deviceName(device)}：${programWord(ps)}', _now(),
-            device: device, app: r.id, title: title, lamp: programLamp(ps)));
+            device: device, app: r.id, title: title, lamp: programLamp(ps), term: true));
       }
       _psSeen.removeWhere((k, _) => k.startsWith('$device\n') && !live.contains(k));
     }
@@ -661,7 +884,7 @@ class MainState extends ChangeNotifier {
 
   /// A tap on a queued line about a session: that session, opened if it is not, and the list closes.
   void goToQueued(HintRecord r) {
-    if (!r.goes) return;
+    if (!r.goes || offlineWord(r.device!, r.app!) != null) return;
     corner = null;
     openOrSwitch(r.device!, r.app!, r.title ?? r.app!);
     notifyListeners();
@@ -670,6 +893,7 @@ class MainState extends ChangeNotifier {
   /// A tap on a 需要你 row: a blocked terminal opens (or comes up), a dropped session comes on stage
   /// (its reconnect is there), a dropped device shows its panel.
   void goToNeed(NeedItem n) {
+    if (n.greyWord != null) return;
     switch (n.kind) {
       case NeedKind.terminal:
         if (!hubUsable) return;
@@ -682,7 +906,187 @@ class MainState extends ChangeNotifier {
         select(n.target);
       case NeedKind.device:
         showDevice(n.target);
+      case NeedKind.resource:
+        // This machine has no device panel: its column on 全景 is where its 余力 is.
+        if (n.device == localLoadId) {
+          corner = null;
+          overview = true;
+          logs = false;
+          _blur();
+          notifyListeners();
+        } else {
+          showDevice(n.device!);
+        }
     }
+  }
+
+  // ---- load (device-load §8) ----
+  /// This machine's service (null on iOS and in tests that do not give one): its load and its id.
+  final ServiceMonitor? monitor;
+
+  /// This machine's device id while its service gives a load; null on iOS.
+  String? get localLoadId => defaultTargetPlatform == TargetPlatform.iOS ? null : monitor?.status?.id;
+
+  /// A device column's load (device-load §7): a remote one's ([id]) from the hub's watch while it is online; this
+  /// machine's (no [id]) from its service ([local], else [monitor]), which iOS does not have. Every reader goes
+  /// through here (the overview's columns, 需要你, the hint, 到 X 上新建终端), so none shows a load whose last line
+  /// is more than [loadStaleAfter] old.
+  DeviceLoad? columnLoad(String? id, {ServiceMonitor? local, bool offline = false}) {
+    final l = id != null
+        ? (offline ? null : hub?.loads[id])
+        : (defaultTargetPlatform == TargetPlatform.iOS ? null : (local ?? monitor)?.load);
+    return l == null || _now().difference(_loadArrived(l)) > loadStaleAfter ? null : l;
+  }
+
+  /// When each load (one per line: a new line is a new object) was first seen here, which is when it arrived:
+  /// [_onHub] and [_onMonitor] look at every one as it comes.
+  final _loadAt = Expando<DateTime>();
+  DateTime _loadArrived(DeviceLoad l) => _loadAt[l] ??= _now();
+
+  /// Wakes once when the first shown load turns stale, so the rows go without a new line to say so.
+  Timer? _loadStale;
+
+  void _stampLoads() {
+    for (final l in hub?.loads.values ?? const <DeviceLoad>[]) {
+      _loadArrived(l);
+    }
+    final l = monitor?.load;
+    if (l != null) _loadArrived(l);
+  }
+
+  /// Every online device's load, as the overview's columns show it; this machine's under its own id.
+  Map<String, DeviceLoad> get deviceLoads {
+    final out = <String, DeviceLoad>{};
+    for (final h in hub?.hosts ?? const <HubHost>[]) {
+      final l = columnLoad(h.id, offline: probes[h.id]?.lamp == Lamp.offline);
+      if (l != null) out[h.id] = l;
+    }
+    final me = localLoadId, l = columnLoad(null);
+    if (me != null && l != null) out.putIfAbsent(me, () => l);
+    return out;
+  }
+
+  /// The name a load row says: this machine's own, else the device's.
+  String loadDeviceName(String id) {
+    if (id != localLoadId) return deviceName(id);
+    final n = monitor?.status?.name ?? '';
+    return n.isEmpty ? '本机' : n;
+  }
+
+  /// How [id] is asked for its load once (the detail's 「看占用最多的进程」).
+  LoadNow? loadNowOf(String id) => columnLoadNow(hub, monitor, id == localLoadId ? null : id);
+
+  /// Whether [device]'s [item] at [level] was snoozed: until the hour is up, at that level or under it.
+  bool loadSnoozed(String device, String item, LoadLevel level) {
+    final v = prefs.loadSnooze['$device\n$item']?.split(' ');
+    if (v == null || v.length != 2) return false;
+    final until = int.tryParse(v[0]);
+    return until != null && _now().millisecondsSinceEpoch < until && level.index <= loadLevelOf(v[1]).index;
+  }
+
+  /// 「1小时内不再提醒」: [device]'s [item] stays out of 需要你 and the hint for an hour, unless it rises past [level].
+  /// Kept in this GUI's prefs, never sent to the device.
+  void snoozeLoad(String device, String item, LoadLevel level) {
+    final now = _now().millisecondsSinceEpoch;
+    prefs.loadSnooze.removeWhere((_, v) => (int.tryParse(v.split(' ').first) ?? 0) <= now);
+    prefs.loadSnooze['$device\n$item'] = '${now + loadSnoozeFor.inMilliseconds} ${level.name}';
+    _save();
+  }
+
+  /// [snoozeLoad] for a resource row, at the level it shows now.
+  void snoozeNeed(NeedItem n) {
+    final item = n.title!;
+    final w = deviceLoads[n.device]?.warnings.where((w) => w.item == item).firstOrNull;
+    snoozeLoad(n.device!, item, w?.level ?? LoadLevel.danger);
+  }
+
+  /// The text terminals whose directory is on [device]'s disk [mount] (「看在这块盘上的终端」): id and shown name.
+  /// Only a device the hub reaches: this machine's own terminals are not opened from here.
+  List<(String, String)> termsOnDisk(String device, String mount) {
+    if (!(hub?.hosts.any((h) => h.id == device) ?? false)) return const [];
+    final disk = deviceLoads[device]?.disks.where((d) => d['mount'] == mount).firstOrNull;
+    final out = <(String, String)>[];
+    final seen = <String>{};
+    for (final p in (disk?['paths'] is List ? disk!['paths'] as List : const [])) {
+      if (p is! Map || p['kind'] != 'term' || p['term'] is! String || !seen.add(p['term'] as String)) continue;
+      final id = p['term'] as String;
+      final row = hub?.termLists[device]?.terms.where((r) => r.id == id).firstOrNull;
+      out.add((id, row == null ? '${p['path'] ?? id}' : termDisplayName(row.shown, row.host)));
+    }
+    return out;
+  }
+
+  /// Where 「到 `<name>` 上新建终端」 goes from [device]'s row: the device `rapp load pick` would pick, leaving out
+  /// [device] and this machine (its terminals are not opened through the hub); null when there is none.
+  String? newTermElsewhere(String device) {
+    final cands = deviceLoads..remove(device)..remove(localLoadId);
+    return pickDevice(cands, cands.keys.toSet());
+  }
+
+  /// 「到 `<name>` 上新建终端」: the way 「新建」 opens one (`open_term` without `from`), its failure in the hint.
+  void newTermOn(String id) {
+    corner = null;
+    notifyListeners();
+    unawaited(_openTerms(id, target: const NewText(null)));
+  }
+
+  /// Each item's level per device at the last look, and when that load arrived; a device not here has not given a
+  /// load since it appeared, or since its last one went stale.
+  final Map<String, ({Map<String, LoadLevel> levels, DateTime at})> _loadLevels = {};
+
+  /// The hint says an item that rose (正常 → 注意 / 危险, 注意 → 危险) since the device's last load; not the first
+  /// load after a device appears or after its last one went stale, and not a snoozed item.
+  void _trackLoads() {
+    final loads = deviceLoads;
+    _loadLevels.removeWhere((id, _) => !loads.containsKey(id));
+    for (final MapEntry(key: id, value: l) in loads.entries) {
+      final now = <String, LoadLevel>{};
+      for (final w in l.warnings) {
+        if (w.level.index > (now[w.item] ?? LoadLevel.normal).index) now[w.item] = w.level;
+      }
+      final at = _loadArrived(l);
+      final last = _loadLevels[id];
+      _loadLevels[id] = (levels: now, at: at);
+      // A gap longer than the stale line is a fresh start, even if no look fell inside it.
+      if (last == null || at.difference(last.at) > loadStaleAfter) continue;
+      for (final w in l.warnings) {
+        if (w.level.index <= (last.levels[w.item] ?? LoadLevel.normal).index || loadSnoozed(id, w.item, w.level)) {
+          continue;
+        }
+        hint = '${loadDeviceName(id)} ${w.text}';
+      }
+    }
+    _planLoadStale(loads.values);
+  }
+
+  /// One timer for every shown load: it fires when the oldest turns stale, looks again, and plans the next.
+  void _planLoadStale(Iterable<DeviceLoad> shown) {
+    _loadStale?.cancel();
+    _loadStale = null;
+    if (_disposed || shown.isEmpty) return;
+    final now = _now();
+    final left = [for (final l in shown) loadStaleAfter - now.difference(_loadArrived(l))]
+        .reduce((a, b) => a < b ? a : b);
+    // Just past the line (every shown load is inside it, so [left] is never below zero).
+    _loadStale = Timer(left + const Duration(milliseconds: 10), () {
+      _loadStale = null;
+      _trackLoads();
+      notifyListeners();
+    });
+  }
+
+  DeviceLoad? _localLoadSeen;
+  String? _localIdSeen;
+
+  /// This machine's service changed: only a new load or id is news here.
+  void _onMonitor() {
+    final m = monitor!;
+    _stampLoads();
+    if (identical(m.load, _localLoadSeen) && m.status?.id == _localIdSeen) return;
+    _localLoadSeen = m.load;
+    _localIdSeen = m.status?.id;
+    _trackLoads();
+    notifyListeners();
   }
   final Map<String, DeviceProbe> probes = {};
   String? deviceTab;
@@ -703,6 +1107,8 @@ class MainState extends ChangeNotifier {
       markingInput = null;
       _followCurrentKey();
     }
+    _markCurrentSeen();
+    _noteLastTerm();
     if (embeds) _entries = _mapEntries();
     // The session list has nothing to show once the last session is gone.
     if (corner == Corner.sessions && _entries.isEmpty) corner = null;
@@ -724,6 +1130,16 @@ class MainState extends ChangeNotifier {
   // ---- overview ----
   /// The stage shows the overview wall instead of the current session's picture.
   bool overview = false;
+
+  /// The overview's 本机 column, folded when there is no local service (iPad/Duo), has been opened.
+  /// Kept for this run only, so leaving 全景 for an app and coming back does not fold it again.
+  bool localColumnOpen = false;
+
+  void openLocalColumn(bool open) {
+    if (localColumnOpen == open) return;
+    localColumnOpen = open;
+    notifyListeners();
+  }
 
   /// The 日志 screen fills the stage (reached from 访问记录's 更多); no session is on stage meanwhile.
   bool logs = false;
@@ -778,7 +1194,11 @@ class MainState extends ChangeNotifier {
   /// Native blur arrives after the frame that requested it. Let Picture retry its focus guard.
   void composerFocusChanged(RemoteSession session, bool focused) {
     session.composer.editorFocused = focused;
+    final keep = focused && session.composer.keepImeOnFocus;
+    if (focused) session.composer.keepImeOnFocus = false;
+    imeIntent?.focus(session.sid, focused, keepIme: keep);
     if (focused) {
+      session.setAutoEnglish(true);
       blurPicture();
     } else if (pictureFocused == session.sid) {
       notifyListeners();
@@ -1001,6 +1421,7 @@ class MainState extends ChangeNotifier {
     if (v == _mainVisible) return;
     _mainVisible = v;
     _applyFps();
+    if (v) _markCurrentSeen(again: true);
   }
 
   /// Sends each started session's effective rate when it differs from the last one sent: the
@@ -1150,6 +1571,49 @@ class MainState extends ChangeNotifier {
   /// When (`_seq`) each blocked-terminal ask (device, session, ps.seq) was first seen; only orders [needs].
   final Map<String, int> _termNeedSeq = {};
 
+  /// When (Unix seconds) each need was first seen, same keys as [_termNeedSeq] plus `sess\n…` and `dev\n…`.
+  final Map<String, int> _needAt = {};
+
+  int _firstSeen(String key) => _needAt.putIfAbsent(key, () => _now().millisecondsSinceEpoch ~/ 1000);
+
+  /// The service's `since` for the need of terminal [session] on [id], else null.
+  int? _serviceSince(String id, String session) {
+    final sync = stateSync;
+    if (sync == null || !_fromService) return null;
+    for (final n in sync.needs) {
+      final nid = n['id'] is String ? n['id'] as String : (n['fp'] is String ? sync.idOf(n['fp'] as String) : null);
+      if (nid == id && n['session'] == session) {
+        final since = n['since'];
+        return since is num ? since.toInt() : null;
+      }
+    }
+    return null;
+  }
+
+  /// Blocked terminals of devices this app does not read itself (dropped, or not listed), from the service.
+  Iterable<NeedItem> _serviceNeeds() sync* {
+    final sync = stateSync!;
+    final local = {...?hub?.termLists.keys}..removeAll(_offlineSince.keys);
+    final hosts = {for (final h in hub?.hosts ?? const <HubHost>[]) h.id};
+    for (final n in sync.needs) {
+      final fp = n['fp'];
+      final rawId = n['id'];
+      final id = rawId is String ? rawId : (fp is String ? sync.idOf(fp) : null);
+      final session = n['session'];
+      if (id == null || session is! String || !hosts.contains(id) || local.contains(id)) continue;
+      final ps = termPs({'state': 'blocked', 'kind': n['kind'], 'app': n['app'], 'msg': n['msg']});
+      if (ps == null) continue;
+      final row = fp is String ? sync.session(fp, session) : null;
+      final nm = _text(row?['title']) ?? _text(row?['name']) ?? _text(n['title']) ?? _text(n['name']) ?? session;
+      final host = row?['host'] ?? n['host'];
+      final title = termDisplayName(nm, host is String ? host : null);
+      final since = n['since'];
+      final seq = n['seq'];
+      yield NeedItem(NeedKind.terminal, session, '$title @ ${deviceName(id)}：${termAskWord(ps)}', seq is num ? seq.toInt() : 0,
+          device: id, title: title, at: since is num ? since.toInt() : 0, greyWord: offlineWord(id, session));
+    }
+  }
+
   /// Everything waiting for the person, newest first. Handled things leave on their own.
   List<NeedItem> get needs {
     final seen = <String>{};
@@ -1157,10 +1621,11 @@ class MainState extends ChangeNotifier {
       for (final r in _records.values)
         if (r.phase == Phase.disconnected)
           NeedItem(NeedKind.session, r.key, '${r.appName} @ ${deviceName(r.id)} 已断开：${disconnectWord(r.reason)}', r.seq,
-              reconnectWord: reconnectLabel(r.reason)),
+              reconnectWord: reconnectLabel(r.reason), at: _firstSeen('sess\n${r.key}')),
       for (final h in hub?.hosts ?? const <HubHost>[])
         if (_seenOnline.contains(h.id) && _offlineSince.containsKey(h.id))
-          NeedItem(NeedKind.device, h.id, '${deviceName(h.id)} 离线', _offlineSince[h.id]!),
+          NeedItem(NeedKind.device, h.id, '${deviceName(h.id)} 离线', _offlineSince[h.id]!,
+              at: _firstSeen('dev\n${h.id}')),
       // A device that dropped keeps its last list; its terminals cannot be opened, so they are not asks.
       for (final e in hub?.termLists.entries ?? const <MapEntry<String, TermList>>[])
         if (!_offlineSince.containsKey(e.key))
@@ -1172,7 +1637,7 @@ class MainState extends ChangeNotifier {
               final title = termDisplayName(r.shown, r.host);
               return NeedItem(NeedKind.terminal, r.id, '$title @ ${deviceName(e.key)}：${termAskWord(r.ps!)}',
                   _termNeedSeq.putIfAbsent(key, () => ++_seq),
-                  device: e.key, title: title);
+                  device: e.key, title: title, at: _serviceSince(e.key, r.id) ?? _firstSeen(key));
             }(),
       // An app whose screen shows a sure block waits for the person; a guess (or out-of-date rules) does not.
       for (final r in _records.values)
@@ -1182,11 +1647,30 @@ class MainState extends ChangeNotifier {
             seen.add(key);
             return NeedItem(NeedKind.app, r.key,
                 '${r.appName} @ ${deviceName(r.id)}：${termAskWord(remote[r.sid]!.inferredPs!)}',
-                _termNeedSeq.putIfAbsent(key, () => ++_seq));
+                _termNeedSeq.putIfAbsent(key, () => ++_seq), at: _firstSeen(key));
           }(),
+      // A load warning on an online device (device-load §8), unless snoozed; a rise comes first again.
+      for (final MapEntry(key: id, value: l) in deviceLoads.entries)
+        for (final w in l.warnings)
+          if (w.level != LoadLevel.normal && !loadSnoozed(id, w.item, w.level))
+            () {
+              final key = 'load\n$id\n${w.item}\n${w.level.name}';
+              seen.add(key);
+              return NeedItem(NeedKind.resource, '$id\n${w.item}', '${loadDeviceName(id)} ${w.text}',
+                  _termNeedSeq.putIfAbsent(key, () => ++_seq),
+                  device: id, title: w.item, at: _firstSeen(key));
+            }(),
     ];
+    if (_fromService) out.addAll(_serviceNeeds());
+    for (final r in _records.values) {
+      if (r.phase == Phase.disconnected) seen.add('sess\n${r.key}');
+    }
+    for (final h in hub?.hosts ?? const <HubHost>[]) {
+      if (_seenOnline.contains(h.id) && _offlineSince.containsKey(h.id)) seen.add('dev\n${h.id}');
+    }
     _termNeedSeq.removeWhere((k, _) => !seen.contains(k));
-    out.sort((a, b) => b.seq.compareTo(a.seq));
+    _needAt.removeWhere((k, _) => !seen.contains(k));
+    out.sort((a, b) => b.at != a.at ? b.at.compareTo(a.at) : b.seq.compareTo(a.seq));
     return out;
   }
 
@@ -1215,7 +1699,114 @@ class MainState extends ChangeNotifier {
   }
 
   // ---- sessions ----
-  List<SessionGroup> get groups => groupSessions(_entries, grouping, projects: projects, first: currentProject);
+  /// What every session list shows: the open sessions, then the labelled ones that are not open ([standbyEntries]),
+  /// each at the end of its group.
+  List<SessionGroup> get groups => standLast(groupSessions(listed, grouping, projects: projects, first: currentProject));
+
+  /// The open sessions, then [standbyEntries]: what the overview's columns and the top bar's list show.
+  List<SessionEntry> get listed => [..._entries, ...standbyEntries];
+
+  /// The groups [step] walks: open sessions only.
+  List<SessionGroup> get _openGroups => groupSessions(_entries, grouping, projects: projects, first: currentProject);
+
+  // ---- labels (spec 2026-11-26-rapp-session-labels-design.md) ----
+
+  /// The label of [app] on [device], as its table last came; null for none, or before the table has come.
+  SessionLabel? labelFor(String device, String app) => hub?.labels[device]?.labels[app];
+
+  /// The card menu's 改标题和备注… / 还原 show for [device]: its table has come (so it knows labels).
+  bool labelsReady(String device) => hub?.labels.containsKey(device) == true;
+
+  /// What [app] on [device] is called wherever it is listed: its label's title, else [fallback] (spec §7.6).
+  String titleOf(String device, String app, String fallback) {
+    final t = labelFor(device, app)?.title;
+    return t == null || t.isEmpty ? fallback : t;
+  }
+
+  /// Labels [app] on [device]; both empty clears it. The device's refusal is thrown with its words.
+  Future<void> setLabel(String device, String app, {required String title, required String note}) async {
+    final h = hub;
+    if (h == null || !hubUsable) throw StateError('rapp-hub 没有在运行');
+    await h.setLabel(device, app, title: title, note: note);
+  }
+
+  Future<void> resetLabel(String device, String app) async {
+    final h = hub;
+    if (h == null || !hubUsable) throw StateError('rapp-hub 没有在运行');
+    await h.resetLabel(device, app);
+  }
+
+  /// A card for every labelled session that is not open in this window, on each device that is on line and whose
+  /// table has come (spec §7.3): 「打开」 for one that runs (an app, or a terminal still listed), 「已停止」 for a
+  /// terminal that is gone. A terminal waits for its device's list, which says which it is.
+  List<SessionEntry> get standbyEntries {
+    final h = hub;
+    if (h == null) return const [];
+    final open = {for (final e in _entries) e.key};
+    final out = <SessionEntry>[];
+    final seen = <String>{};
+    for (final host in h.hosts) {
+      final id = host.id;
+      final table = h.labels[id];
+      if (table == null || !seen.add(id) || deviceOffline(id)) continue;
+      for (final MapEntry(key: app, value: label) in table.labels.entries) {
+        if (open.contains('$id/$app')) continue;
+        if (app == termsEntry || isDesktopScreen(app)) continue;
+        var standby = Standby.open;
+        var name = appName(id, app);
+        if (isTermApp(app)) {
+          final list = h.termLists[id];
+          if (list == null) continue;
+          final row = list.terms.where((r) => r.id == app).firstOrNull;
+          if (row == null || row.dead) {
+            standby = Standby.stopped;
+            if (row == null && name == app) name = parseTermId(app)?.name ?? app;
+          } else {
+            name = termDisplayName(row.shown, row.host);
+          }
+        }
+        out.add(SessionEntry(
+          sid: null,
+          id: id,
+          app: app,
+          appName: name,
+          device: deviceName(id),
+          path: '',
+          lamp: Lamp.notOpened,
+          ps: standby == Standby.open ? _termPs(id, app) : null,
+          fg: standby == Standby.open ? termFg(id, app) : null,
+          label: label,
+          standby: standby,
+        ));
+      }
+    }
+    return out;
+  }
+
+  /// A tap on a card in [standby]: 「打开」 opens the session; 「启动」 opens a new terminal on its device that takes the
+  /// gone one's label (in the device's home: where it was is not kept yet), then goes to it.
+  Future<void> openStandby(SessionEntry e) async {
+    if (e.standby != Standby.stopped) return openOrSwitch(e.id, e.app, e.appName);
+    if (!hubUsable) return;
+    try {
+      final launchers = hub?.termLists[e.id]?.hosts.where((h) => h.host == null).firstOrNull?.launchers ?? const <String>[];
+      if (launchers.isEmpty) throw StateError('这台设备没有可用的终端窗口');
+      final term = await hub!.openTerm(e.id, app: prefs.termAppFor(e.id, launchers), labelFrom: e.app);
+      try {
+        await hub?.terms(e.id);
+      } catch (_) {}
+      hint = '原来的目录没有记下，已在家目录新开';
+      notifyListeners();
+      final row = hub?.termLists[e.id]?.terms.where((r) => r.id == term).firstOrNull;
+      // Quiet: 已打开 … would cover why it starts in the home directory (a failed open still says so).
+      unawaited(_open(e.id, term, row == null ? e.appName : termDisplayName(row.shown, row.host), quiet: true));
+    } catch (err) {
+      if (_disposed) return;
+      hint = newTermWords(err);
+      _showConsentPrompt(e.id, err);
+      notifyListeners();
+    }
+  }
 
   int get sessionCount => _entries.length;
 
@@ -1265,7 +1856,7 @@ class MainState extends ChangeNotifier {
   }
 
   void step(int delta) {
-    final k = stepKey(groups, currentKey, delta, within: _stepWithin);
+    final k = stepKey(_openGroups, currentKey, delta, within: _stepWithin);
     if (k == null) return;
     currentKey = k;
     notifyListeners();
@@ -1297,10 +1888,20 @@ class MainState extends ChangeNotifier {
     return fg == null || fg.isEmpty ? null : fg;
   }
 
+  /// The terminals-list row of the pty text terminal behind [sid] (tmux gets none); null for other apps or an unlisted terminal.
+  TermRow? termRowOfSid(Object sid) {
+    final r = _recordOfSid(sid);
+    if (r == null || !isPtyTerm(r.app)) return null;
+    return hub?.termLists[r.id]?.terms.where((t) => t.id == r.app).firstOrNull;
+  }
+
+  /// The AI tool in front of [s] when it is a text terminal, else null.
+  AgentTool? stripToolOf(RemoteSession s) => toolOf(termRowOfSid(s.sid));
+
   /// What a favourite or project member is called: `<program> · <name>` for a text terminal ([termTitle]), whose
   /// name is the list's current one, else the one stored with it.
-  String labelOf(AppRef a) =>
-      isTermApp(a.bundle) ? termTitle(termName(a.device, a.bundle) ?? a.name, fg: termFg(a.device, a.bundle)) : a.name;
+  String labelOf(AppRef a) => titleOf(a.device, a.bundle,
+      isTermApp(a.bundle) ? termTitle(termName(a.device, a.bundle) ?? a.name, fg: termFg(a.device, a.bundle)) : a.name);
 
   /// A text terminal's program status from its live row on [device]; null when the app is no terminal, the row is
   /// gone or dead, or the device dropped (its last list is stale).
@@ -1334,6 +1935,7 @@ class MainState extends ChangeNotifier {
       ps: r.phase == Phase.disconnected ? null : (_termPs(r.id, r.app) ?? inferredPs),
       inferred: inferredPs != null && !isTermApp(r.app),
       fg: termFg(r.id, r.app),
+      label: labelFor(r.id, r.app),
     );
   }
 
@@ -1355,6 +1957,7 @@ class MainState extends ChangeNotifier {
           lamp: _termBlocked(s.id, s.app) ? Lamp.waiting : Lamp.active,
           ps: _termPs(s.id, s.app),
           fg: termFg(s.id, s.app),
+          label: labelFor(s.id, s.app),
         );
         if (seen.add(e.key)) out.add(e);
       }
@@ -1366,6 +1969,7 @@ class MainState extends ChangeNotifier {
   }
 
   void _onHub() {
+    _stampLoads();
     final back = <String>{};
     for (final p in hub!.takePresence()) {
       if (p.online) back.add(p.id);
@@ -1373,6 +1977,7 @@ class MainState extends ChangeNotifier {
       _setOnline(p.id, p.online, error: p.error);
     }
     _trackPrograms();
+    _trackLoads();
     if (!hub!.alive) _watching.clear();
     final level = hub!.net?.level;
     final netBack = _netLevel == NetLevel.down && level != NetLevel.down;
@@ -1394,7 +1999,8 @@ class MainState extends ChangeNotifier {
     }
     // Sessions run by rapp-client (no port) are not moved: their next reconnect takes the new link.
     final old = _entries;
-    final oldGroups = groups;
+    // Only open sessions: a standby card is never the one to move to.
+    final oldGroups = _openGroups;
     _entries = _mapEntries();
     final newKeys = {for (final e in _entries) e.key};
 
@@ -2161,7 +2767,8 @@ class MainState extends ChangeNotifier {
     _rerouteEnd(r, false);
     _batchEnded.remove(r.key);
     _stopRetry(r);
-    final oldGroups = groups;
+    // Only open sessions: a standby card is never the one to move to.
+    final oldGroups = _openGroups;
     final old = r.lastSid;
     if (old != null) portOf(old)?.close(old); // reconnected but not swapped yet: the old session is still open
     // Before a swap the old session is the one on show, the one written in. A waiting tidy's
@@ -2348,6 +2955,9 @@ class MainState extends ChangeNotifier {
         onSelectInput: (id) {
           if (_liveSid(s.sid)) portOf(s.sid)!.selectInput(s.sid, id);
         },
+        onAutoEnglish: (on) {
+          if (_liveSid(s.sid)) portOf(s.sid)!.autoEnglish(s.sid, on);
+        },
         onClick: (w, at) {
           if (!_liveSid(s.sid)) return;
           portOf(s.sid)!.mouse(s.sid, w, 'down', 'left', at.dx, at.dy, 1);
@@ -2358,6 +2968,7 @@ class MainState extends ChangeNotifier {
         },
         onComposeKey: () => tidyIfAny(s.sid)?.closed(),
         followNewTabs: !term);
+    rs.composer.onBlur = () => imeIntent?.focus(rs.sid, false);
     rs.composer.onAiSent = (ai, text) => _offerEditLearns(rs.sid, ai.original, editLearns(ai.original, ai.result, text));
     // Without the AI: what the user changed in the device's fixed words, against what was heard (spec D8).
     rs.composer.onHeardSent = (h, text) => _offerEditLearns(rs.sid, h.heard, editLearns(h.heard, h.fixed, text));
@@ -2503,6 +3114,7 @@ class MainState extends ChangeNotifier {
   Future<void> enterBackground({Future<void> Function()? begin, Future<void> Function()? end}) async {
     if (backgrounded) return;
     backgrounded = true;
+    stateSync?.pause();
     final epoch = ++_backgroundEpoch;
     try {
       await begin?.call();
@@ -2569,6 +3181,9 @@ class MainState extends ChangeNotifier {
     // iOS took the hub's socket while the app was away: a new one, and every device asked again.
     h?.netChanged();
     h?.pausePresence(false);
+    // After the hub has its network again: on iOS the service is reached through the hub's port map.
+    stateSync?.refresh();
+    _markCurrentSeen(again: true);
     bool closedByBackground(SessionRecord r) => r.phase == Phase.disconnected && r.reason == 'background';
     final cur = currentRecord;
     final list = [
@@ -2777,10 +3392,71 @@ class MainState extends ChangeNotifier {
       _termsNewTargetOf(id) is NewText &&
       _unopenedTerms(id).isNotEmpty;
 
-  /// A 常用 tile for the 终端 entry creates a new terminal (the tile says 「新建」); before that, its first
-  /// tap after launch reopens the terminals still running (「打开」).
-  bool favoriteCreates(AppRef f) =>
-      f.bundle == termsEntry && !_restoresTerms(f.device) && _termsNewTargetOf(f.device) is NewText;
+  /// The saved text terminals of [id] (from its local host row); empty on an old device.
+  List<TermSaved> savedTerms(String id) =>
+      hub?.termLists[id]?.hosts.where((h) => h.host == null).firstOrNull?.saved ?? const [];
+
+  /// What a 常用 tile says: the 终端 entry says 「打开」 on its first tap after launch while text terminals are still
+  /// running; else 「恢复」 when the device has no live text terminal but some saved one from before it started; else
+  /// 「新建」 when it creates a new terminal; every other tile says 「打开」.
+  String favoriteVerb(AppRef f) {
+    if (f.bundle != termsEntry || _restoresTerms(f.device)) return '打开';
+    final live = (hub?.termLists[f.device]?.terms ?? const <TermRow>[]).any((r) => !r.dead && parseTermId(r.id)?.backend == 'pty');
+    if (!live && savedTerms(f.device).any((x) => x.boot)) return '恢复';
+    return _termsNewTargetOf(f.device) is NewText ? '新建' : '打开';
+  }
+
+  /// The terminal app a new or restored text terminal of [id] opens in; throws when the device has none.
+  String _launcherOf(String id) {
+    final launchers = hub?.termLists[id]?.hosts.where((h) => h.host == null).firstOrNull?.launchers ?? const <String>[];
+    if (launchers.isEmpty) throw StateError('这台设备没有可用的终端窗口');
+    return prefs.termAppFor(id, launchers);
+  }
+
+  /// 恢复所选: reopens the saved terminals [keys] of [id] (always explicit keys), the first one current. One hint with
+  /// the count; a failure is the hint and the list refreshes, so what was not restored stays listed.
+  Future<void> restoreSaved(String device, List<String> keys) async {
+    if (!hubUsable || keys.isEmpty) return;
+    // The terminals that came up are opened, the first one selected; also when the restore stopped part way.
+    void stage(List<String> ids) {
+      for (final (i, id) in ids.indexed) {
+        final row = hub?.termLists[device]?.terms.where((r) => r.id == id).firstOrNull;
+        unawaited(_open(device, id, row == null ? '已结束' : termDisplayName(row.shown, row.host), select: i == 0, quiet: true));
+      }
+    }
+
+    try {
+      final ids = await hub!.restoreTerms(device, keys, app: _launcherOf(device));
+      if (_disposed) return;
+      stage(ids);
+      hint = '已恢复 ${ids.length} 个终端';
+    } catch (e) {
+      if (_disposed) return;
+      hint = newTermWords(e);
+      try {
+        await hub?.terms(device);
+      } catch (_) {}
+      if (e is RestoreStopped && !_disposed) stage(e.ids);
+      // After the ones that came up: the desktop with the prompt is what comes forward.
+      if (!_disposed) _showConsentPrompt(device, e);
+    }
+    if (!_disposed) notifyListeners();
+  }
+
+  /// 全部清掉: forgets the saved terminals [keys] of [device].
+  Future<void> forgetSaved(String device, List<String> keys) async {
+    if (!hubUsable || keys.isEmpty) return;
+    try {
+      await hub!.forgetTerms(device, keys);
+    } catch (e) {
+      if (_disposed) return;
+      hint = newTermWords(e);
+      notifyListeners();
+    }
+  }
+
+  /// 新建 from the restore list: the same new terminal the 常用 · 终端 tile makes.
+  Future<void> newTermFromRestore(String device) => _openTerms(device, target: _termsNewTargetOf(device));
 
   /// Taps a 常用 tile: the 终端 entry first reopens the running text terminals, then makes a new terminal
   /// each tap when it can; anything else opens or switches.
@@ -2847,15 +3523,36 @@ class MainState extends ChangeNotifier {
           return;
         }
         try {
-          await openText(id, shell: shell);
+          await openText(id, shell: shell, from: newTermSource(id));
         } catch (e) {
           if (_disposed) return;
           hint = newTermWords(e);
+          _showConsentPrompt(id, e);
           notifyListeners();
         } finally {
           _newingText.remove(id);
         }
     }
+  }
+
+  /// The host refused a new terminal because macOS is asking there whether rApp may control Terminal.
+  @visibleForTesting
+  static bool isConsentAsk(String message) => message.contains('whether rApp may control Terminal');
+
+  /// After a terminal open on [id] failed with [e]: when macOS is asking on that device, its desktop comes up so the
+  /// prompt can be answered there — not for this machine (the prompt is on this screen) nor a device without one.
+  void _showConsentPrompt(String id, Object e) {
+    if (e is! HubException || !isConsentAsk(e.message)) return;
+    if (id == localLoadId || !_hasGraphicalApps(id)) return;
+    // The prompt comes up on whichever of its screens is active: one of them already on the stage stays there.
+    final r = currentRecord;
+    if (r != null && r.id == id && isDesktopApp(r.app)) {
+      hint = '$hint；不在这块屏上就换一块屏看看';
+      select(r.key);
+      return;
+    }
+    hint = desktopScreens(id).length > 1 ? '$hint；已切到它的桌面，不在这块屏上就换一块屏看看' : '$hint；已切到它的桌面';
+    unawaited(_open(id, 'desktop:', _desktopName(id), quiet: true));
   }
 
   /// Devices a 新建 from the 终端 entry is still opening a text terminal on.
@@ -2865,6 +3562,9 @@ class MainState extends ChangeNotifier {
   @visibleForTesting
   static String newTermWords(Object e) => switch (e) {
         StateError(:final message) => message,
+        // macOS on the host would have stopped the Terminal tab script to ask: the prompt is up there now.
+        HubException(:final message) when isConsentAsk(message) =>
+          '被控 Mac 上弹出了授权框「“rApp”想要控制“终端”」：请在那台 Mac 上点「允许」（可能连着两个），点完再新建',
         // The host's Terminal tab script was cut off and no window came: most likely macOS asking for permission.
         HubException(:final message) when message.contains('allow rApp to control Terminal') =>
           '被控 Mac 上的「终端」没有回应：请在那台 Mac 上看看是否弹出了「允许 rApp 控制“终端”」，点「好」后再新建',
@@ -2877,9 +3577,7 @@ class MainState extends ChangeNotifier {
   /// refusal is thrown with the hub's words. [from]: the terminal it opens beside (its directory, shell and window).
   Future<void> openText(String id, {String? shell, String? from}) async {
     if (!hubUsable) return;
-    final launchers = hub?.termLists[id]?.hosts.where((h) => h.host == null).firstOrNull?.launchers ?? const <String>[];
-    if (launchers.isEmpty) throw StateError('这台设备没有可用的终端窗口');
-    final app = prefs.termAppFor(id, launchers);
+    final app = _launcherOf(id);
     final term = await hub!.openTerm(id, shell: shell, app: app, from: from);
     try {
       await hub?.terms(id);
@@ -2887,6 +3585,29 @@ class MainState extends ChangeNotifier {
     final row = hub?.termLists[id]?.terms.where((r) => r.id == term).firstOrNull;
     final shown = row == null ? '已结束' : termDisplayName(row.shown, row.host);
     unawaited(openOrSwitch(id, term, shown));
+  }
+
+  /// The last text terminal each device showed on the stage this run (device id to term id).
+  final Map<String, String> _lastTerm = {};
+
+  /// Every change of the current session ends in [notifyListeners], which calls this: a text terminal on the stage
+  /// becomes its device's last one.
+  void _noteLastTerm() {
+    final r = current;
+    if (r != null && isTermApp(r.app)) _lastTerm[r.id] = r.app;
+  }
+
+  bool _termListed(String device, String term) =>
+      hub?.termLists[device]?.terms.any((t) => t.id == term) ?? false;
+
+  /// Where a 新建 on [device] starts: the terminal on the stage when it is one of the device's listed text
+  /// terminals, else the last one this run showed there (still listed), else 'last' (serve's own pick).
+  String newTermSource(String device) {
+    final r = current;
+    if (r != null && r.id == device && isTermApp(r.app) && _termListed(device, r.app)) return r.app;
+    final last = _lastTerm[device];
+    if (last != null && _termListed(device, last)) return last;
+    return 'last';
   }
 
   Future<void> _newTerms = Future<void>.value();
@@ -3050,6 +3771,7 @@ class MainState extends ChangeNotifier {
       path: '',
       lamp: Lamp.connecting,
       fg: termFg(id, app),
+      label: labelFor(id, app),
     );
     _entries = _mapEntries();
     final before = currentKey;
@@ -3721,6 +4443,12 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 「打开写作版时切到中文，回到画面时切回英文」: saved; [imeIntent] reads it at each switch.
+  void setImeIntent(bool v) {
+    prefs.imeIntent = v;
+    _save();
+  }
+
   /// 「实体键盘用内置输入法」 (iOS): saved; the built-in input method follows (`RimeGlue` listens here).
   void setRimeEnabled(bool v) {
     prefs.rimeEnabled = v;
@@ -3799,16 +4527,16 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
-  /// 常用语 replaced (edited, reordered, deleted, 恢复默认); saved.
-  void setPhrases(List<Phrase> v) {
+  /// The whole strip list (commands and phrases) replaced; saved.
+  void setStripItems(List<StripItem> v) {
     prefs.phrases = List.of(v);
     _save();
   }
 
   /// 加到常用语: [text] at the end unless a phrase already has it. False when it was there (or blank).
   bool addPhrase(String text) {
-    if (text.trim().isEmpty || prefs.phrases.any((p) => p.text == text)) return false;
-    setPhrases([...prefs.phrases, Phrase(text)]);
+    if (text.trim().isEmpty || prefs.phrases.whereType<Phrase>().any((p) => p.text == text)) return false;
+    setStripItems([...prefs.phrases, Phrase(text)]);
     return true;
   }
 
@@ -4126,7 +4854,8 @@ class MainState extends ChangeNotifier {
 
   /// Favourites with no session (pending or open), in favourite order.
   List<AppRef> get idleFavorites {
-    final open = {for (final e in _entries) e.key};
+    // A labelled one that is not open already has its card (standing at the end of its group): not twice.
+    final open = {for (final e in _entries) e.key, for (final e in standbyEntries) e.key};
     return [
       for (final f in workspace.favorites)
         if (!open.contains(f.key)) f,
@@ -4682,11 +5411,14 @@ class MainState extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _loadStale?.cancel();
     for (final t in _tidies.values) {
       t.dispose();
     }
     _tidies.clear();
     voice?.dispose();
+    _imeResume?.dispose();
+    imeIntent?.dispose();
     _voiceKeys.close();
     _voiceEnds.close();
     composerZoom.dispose();
@@ -4695,6 +5427,8 @@ class MainState extends ChangeNotifier {
     resources.removeListener(notifyListeners);
     resources.dispose();
     hub?.removeListener(_onHub);
+    monitor?.removeListener(_onMonitor);
+    stateSync?.removeListener(_onStateSync);
     profiles.removeListener(_onProfiles);
     _portSub?.cancel();
     _termSub?.cancel();

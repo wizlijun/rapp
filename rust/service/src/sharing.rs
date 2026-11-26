@@ -250,6 +250,9 @@ async fn answer(state: &Arc<State>, op: &Op, peer: &Peer) -> Value {
                     if let Some(local) = s.local {
                         v["local"] = json!(local);
                     }
+                    if let Some(kind) = &s.kind {
+                        v["kind"] = json!(kind);
+                    }
                     v
                 })
                 .collect();

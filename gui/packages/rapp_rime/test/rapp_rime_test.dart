@@ -275,4 +275,14 @@ void main() {
     expect(f.path, '');
     expect(f.ready, false);
   });
+
+  test('setAscii sends ascii {on} on iOS and nothing elsewhere', () async {
+    await rime.setAscii(false);
+    expect(calls.map((c) => c.method), ['ascii']);
+    expect(calls.single.arguments, {'on': false});
+    calls.clear();
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    await rime.setAscii(true);
+    expect(calls, isEmpty);
+  });
 }

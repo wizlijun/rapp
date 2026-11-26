@@ -14,6 +14,9 @@ pub const START_TIMEOUT: &str = "terminal launcher did not respond within 5 s";
 /// The Terminal tab script was cut off and no window came: macOS is most likely still asking, on that Mac,
 /// whether rApp may control Terminal or System Events.
 pub const NO_ANSWER: &str = "Terminal did not answer: on that Mac, allow rApp to control Terminal and System Events";
+/// macOS would stop the Terminal tab script to ask whether rApp may control Terminal or System Events: the prompt
+/// is up on that Mac, and the terminal was not opened.
+pub const ASKING: &str = "macOS is asking on that Mac whether rApp may control Terminal: answer it there, then open again";
 
 /// How [`open`] went when it did not fail.
 #[derive(Debug, PartialEq)]
@@ -33,11 +36,19 @@ pub fn quote(s: &str) -> String {
 }
 
 /// The content of a `.command` file that runs `bin run` in `dir` for `ticket`, with `shell` as a login shell.
-/// With `cwd`, the shell starts in that directory.
-pub fn command_file(bin: &Path, dir: &Path, ticket: &str, shell: &str, cwd: Option<&Path>) -> String {
+/// With `cwd`, the shell starts in that directory; with `restore`, `run` restores the saved terminal of that key.
+pub fn command_file(
+    bin: &Path,
+    dir: &Path,
+    ticket: &str,
+    shell: &str,
+    cwd: Option<&Path>,
+    restore: Option<&str>,
+) -> String {
+    let restore = restore.map(|k| format!(" --restore {}", quote(k))).unwrap_or_default();
     let cwd = cwd.map(|c| format!(" --cwd {}", quote(&c.to_string_lossy()))).unwrap_or_default();
     format!(
-        "#!/bin/sh\nexec {} run --dir {} --ticket {}{cwd} -- {} -l\n",
+        "#!/bin/sh\nexec {} run --dir {} --ticket {}{restore}{cwd} -- {} -l\n",
         quote(&bin.to_string_lossy()), quote(&dir.to_string_lossy()), quote(ticket), quote(shell)
     )
 }
@@ -289,12 +300,14 @@ fn terminal_tab(file: &Path, source_tty: Option<&str>) -> TabOutcome {
     tab_outcome(bounded_command(&mut c, Duration::from_secs(10)))
 }
 
-/// Open `file`; a test launcher is synchronous and has no platform dependencies.
-/// With `source_tty`, the new tab goes beside the tab on that tty.
+/// Open `file`; a test launcher is synchronous and has no platform dependencies, and is given `source_tty` as a
+/// third argument. With `source_tty`, the new tab goes beside the tab on that tty.
 pub fn open(app: &str, file: &Path, launch_with: Option<&Path>, source_tty: Option<&str>) -> anyhow::Result<Launched> {
     // A new terminal goes in a tab beside the ones rapp already opened; the first one gets a window.
     // Unsure leaves the holder's own start-up wait to tell whether it started.
     if cfg!(target_os = "macos") && launch_with.is_none() && app == "Terminal" {
+        // Asked first: the script would only hang on the prompt.
+        if super::consent::asking() { bail!(ASKING); }
         match terminal_tab(file, source_tty) {
             TabOutcome::Opened => return Ok(Launched::Yes),
             TabOutcome::Unsure => return Ok(Launched::CutOff),
@@ -305,6 +318,9 @@ pub fn open(app: &str, file: &Path, launch_with: Option<&Path>, source_tty: Opti
         Some(p) => {
             let mut c = Command::new(p);
             c.arg(app).arg(file);
+            if let Some(t) = source_tty {
+                c.arg(t);
+            }
             c
         }
         None if cfg!(target_os = "linux") => linux_command(app, file, &desktop_env())?,
@@ -333,14 +349,32 @@ mod tests {
 
     #[test]
     fn the_command_file_runs_the_shell_as_a_login_shell() {
-        let f = command_file(Path::new("/A pp/rapp-term"), Path::new("/r/local/term"), "t1", "/opt/my shells/fish", None);
+        let f = command_file(Path::new("/A pp/rapp-term"), Path::new("/r/local/term"), "t1", "/opt/my shells/fish", None, None);
         assert_eq!(f, "#!/bin/sh\nexec '/A pp/rapp-term' run --dir '/r/local/term' --ticket 't1' -- '/opt/my shells/fish' -l\n");
     }
 
     #[test]
     fn command_file_with_cwd() {
-        let f = command_file(Path::new("/b"), Path::new("/d"), "t", "/bin/zsh", Some(Path::new("/w x/it's")));
+        let f = command_file(Path::new("/b"), Path::new("/d"), "t", "/bin/zsh", Some(Path::new("/w x/it's")), None);
         assert_eq!(f, "#!/bin/sh\nexec '/b' run --dir '/d' --ticket 't' --cwd '/w x/it'\\''s' -- '/bin/zsh' -l\n");
+    }
+
+    #[test]
+    fn command_file_with_restore() {
+        let f = command_file(
+            Path::new("/b"),
+            Path::new("/d"),
+            "t",
+            "/bin/zsh",
+            Some(Path::new("/w x")),
+            Some("0123456789abcdef"),
+        );
+        assert_eq!(
+            f,
+            "#!/bin/sh\nexec '/b' run --dir '/d' --ticket 't' --restore '0123456789abcdef' --cwd '/w x' -- '/bin/zsh' -l\n"
+        );
+        let f = command_file(Path::new("/b"), Path::new("/d"), "t", "/bin/zsh", None, Some("0123456789abcdef"));
+        assert_eq!(f, "#!/bin/sh\nexec '/b' run --dir '/d' --ticket 't' --restore '0123456789abcdef' -- '/bin/zsh' -l\n");
     }
 
     #[test]
@@ -361,7 +395,7 @@ mod tests {
 
     #[test]
     fn launch_script_quotes_every_argument() {
-        let f = command_file(Path::new("/x'y"), Path::new("/a b"), "t;$USER", "/shell's/bash", None);
+        let f = command_file(Path::new("/x'y"), Path::new("/a b"), "t;$USER", "/shell's/bash", None, None);
         assert_eq!(f, "#!/bin/sh\nexec '/x'\\''y' run --dir '/a b' --ticket 't;$USER' -- '/shell'\\''s/bash' -l\n");
     }
 

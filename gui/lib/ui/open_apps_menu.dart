@@ -149,9 +149,12 @@ class _OpenAppsMenuState extends State<_OpenAppsMenu> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final c = key?.currentContext;
       if (c == null || !c.mounted) return;
-      Scrollable.ensureVisible(c,
-          alignmentPolicy:
-              by > 0 ? ScrollPositionAlignmentPolicy.keepVisibleAtEnd : ScrollPositionAlignmentPolicy.keepVisibleAtStart);
+      Scrollable.ensureVisible(
+        c,
+        alignmentPolicy: by > 0
+            ? ScrollPositionAlignmentPolicy.keepVisibleAtEnd
+            : ScrollPositionAlignmentPolicy.keepVisibleAtStart,
+      );
     });
   }
 
@@ -185,9 +188,11 @@ class _OpenAppsMenuState extends State<_OpenAppsMenu> {
       key: const Key('open-apps-menu'),
       type: MaterialType.transparency,
       child: Container(
-        decoration: t.floatBox(border: t.line).copyWith(
-          boxShadow: const [BoxShadow(color: Color(0x8C000000), blurRadius: 32, offset: Offset(0, 12))],
-        ),
+        decoration: t
+            .floatBox(border: t.line)
+            .copyWith(
+              boxShadow: const [BoxShadow(color: Color(0x8C000000), blurRadius: 32, offset: Offset(0, 12))],
+            ),
         padding: const EdgeInsets.all(6),
         // The keys work from either field, and on iPad with a hardware keyboard before any field has focus.
         child: CallbackShortcuts(
@@ -204,81 +209,96 @@ class _OpenAppsMenuState extends State<_OpenAppsMenu> {
                 final p = state.probes[id];
                 final apps = p?.apps;
                 final groups = deviceAppGroups(apps, state.hub?.termLists[id]);
-                final shown = filterAppGroups(groups, _filter.text);
+                final shown = filterAppGroups(groups, _filter.text, shownAs: (a) => state.titleOf(id, a.app, a.name));
                 _rows = [for (final g in shown) ...g.apps];
                 final applications =
                     apps?.capabilities?['graphical'] != false && apps?.capabilities?['applications'] != false;
                 final notes = _notes(p, groups, shown);
                 var i = 0;
-                return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  TextField(
-                    key: const Key('open-apps-filter'),
-                    controller: _filter,
-                    // On iOS focusing would raise the on-screen keyboard over the menu.
-                    autofocus: !_touch,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      hintText: '输入筛选…',
-                      prefixIcon: Icon(Icons.search, size: 16),
-                      prefixIconConstraints: BoxConstraints(minWidth: 28),
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextField(
+                      key: const Key('open-apps-filter'),
+                      controller: _filter,
+                      // On iOS focusing would raise the on-screen keyboard over the menu.
+                      autofocus: !_touch,
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        hintText: '输入筛选…',
+                        prefixIcon: Icon(Icons.search, size: 16),
+                        prefixIconConstraints: BoxConstraints(minWidth: 28),
+                      ),
+                      onChanged: (_) => setState(() => _pickApp = null),
+                      onSubmitted: (_) => _openPicked(),
                     ),
-                    onChanged: (_) => setState(() => _pickApp = null),
-                    onSubmitted: (_) => _openPicked(),
-                  ),
-                  const SizedBox(height: 4),
-                  Flexible(
-                    child: SingleChildScrollView(
-                      controller: _scroll,
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                        for (final n in notes)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                            child: Text(n, style: small),
-                          ),
-                        for (final g in shown) ...[
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(8, 6, 8, 3),
-                            child: Text(g.title, style: small?.copyWith(letterSpacing: t.labelSpacing * t.textSize)),
-                          ),
-                          for (final a in g.apps) _row(context, a, i++),
-                        ],
-                      ]),
-                    ),
-                  ),
-                  Divider(height: 12, color: t.line),
-                  if (applications)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(2, 0, 2, 4),
-                      child: Row(children: [
-                        Expanded(
-                          child: TextField(
-                            key: const Key('open-apps-bundle'),
-                            controller: _bundle,
-                            style: small?.copyWith(color: t.text),
-                            decoration: const InputDecoration(isDense: true, hintText: '其他 app 的包名（例：com.apple.TextEdit）'),
-                            onSubmitted: (_) => _openBundle(),
-                          ),
+                    const SizedBox(height: 4),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        controller: _scroll,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            for (final n in notes)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                child: Text(n, style: small),
+                              ),
+                            for (final g in shown) ...[
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(8, 6, 8, 3),
+                                child: Text(
+                                  g.title,
+                                  style: small?.copyWith(letterSpacing: t.labelSpacing * t.textSize),
+                                ),
+                              ),
+                              for (final a in g.apps) _row(context, a, i++),
+                            ],
+                          ],
                         ),
-                        const SizedBox(width: 6),
-                        TextButton(
-                          key: const Key('open-apps-bundle-open'),
-                          onPressed: _canOpen ? _openBundle : null,
-                          child: const Text('打开'),
+                      ),
+                    ),
+                    Divider(height: 12, color: t.line),
+                    if (applications)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(2, 0, 2, 4),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                key: const Key('open-apps-bundle'),
+                                controller: _bundle,
+                                style: small?.copyWith(color: t.text),
+                                decoration: const InputDecoration(
+                                  isDense: true,
+                                  hintText: '其他 app 的包名（例：com.apple.TextEdit）',
+                                ),
+                                onSubmitted: (_) => _openBundle(),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            TextButton(
+                              key: const Key('open-apps-bundle-open'),
+                              onPressed: _canOpen ? _openBundle : null,
+                              child: const Text('打开'),
+                            ),
+                          ],
                         ),
-                      ]),
+                      ),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        key: const Key('open-apps-details'),
+                        onPressed: () {
+                          _close();
+                          state.showDevice(id);
+                        },
+                        child: Text('设备详情 ›', style: TextStyle(color: t.on)),
+                      ),
                     ),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      key: const Key('open-apps-details'),
-                      onPressed: () {
-                        _close();
-                        state.showDevice(id);
-                      },
-                      child: Text('设备详情 ›', style: TextStyle(color: t.on)),
-                    ),
-                  ),
-                ]);
+                  ],
+                );
               },
             ),
           ),
@@ -298,6 +318,7 @@ class _OpenAppsMenuState extends State<_OpenAppsMenu> {
       Lamp.disconnected => '已断开',
       _ => '已打开',
     };
+    final shown = state.titleOf(id, a.app, a.name);
     final fav = state.isFavorite(id, a.app);
     final favWord = fav ? '取消常用' : '设为常用';
     // Like the device panel: a row already connecting does not open again.
@@ -308,7 +329,7 @@ class _OpenAppsMenuState extends State<_OpenAppsMenu> {
       child: Semantics(
         button: true,
         enabled: tappable,
-        label: [a.name, session == null ? '没打开' : word, if (fav) '常用'].join('，'),
+        label: [shown, if (shown != a.name) a.name, session == null ? '没打开' : word, if (fav) '常用'].join('，'),
         child: Material(
           key: Key('open-apps-row-${a.app}'),
           type: MaterialType.transparency,
@@ -321,26 +342,43 @@ class _OpenAppsMenuState extends State<_OpenAppsMenu> {
             child: Ink(
               decoration: picked ? t.raiseBox(border: Colors.transparent) : null,
               padding: const EdgeInsets.only(left: 8),
-              child: Row(children: [
-                StatusLamp(session?.lamp ?? Lamp.notOpened),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(a.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: tappable ? t.text : t.muted)),
-                ),
-                if (word.isNotEmpty) Text(word, style: small),
-                IconButton(
-                  key: Key('open-apps-star-${a.app}'),
-                  tooltip: favWord,
-                  padding: EdgeInsets.zero,
-                  constraints: BoxConstraints(minWidth: _rowHeight, minHeight: _rowHeight),
-                  iconSize: 16,
-                  icon: Icon(fav ? Icons.star : Icons.star_border, color: fav ? t.accent : t.muted),
-                  onPressed: () => state.toggleFavorite(id, a.app, a.name),
-                ),
-              ]),
+              child: Row(
+                children: [
+                  StatusLamp(session?.lamp ?? Lamp.notOpened),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            shown,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: tappable ? t.text : t.muted),
+                          ),
+                        ),
+                        // A labelled app: its own name in small type after the label's title (spec §7.6).
+                        if (shown != a.name) ...[
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(a.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: small),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (word.isNotEmpty) Text(word, style: small),
+                  IconButton(
+                    key: Key('open-apps-star-${a.app}'),
+                    tooltip: favWord,
+                    padding: EdgeInsets.zero,
+                    constraints: BoxConstraints(minWidth: _rowHeight, minHeight: _rowHeight),
+                    iconSize: 16,
+                    icon: Icon(fav ? Icons.star : Icons.star_border, color: fav ? t.accent : t.muted),
+                    onPressed: () => state.toggleFavorite(id, a.app, a.name),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

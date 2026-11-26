@@ -5,8 +5,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:rapp_rime/rapp_rime.dart' show RappRime;
 
 import 'data_dir.dart';
+import 'embed/local_ime.dart';
 import 'embed/rime_glue.dart';
 import 'embed/session_port.dart';
 import 'embed/state_rules.dart';
@@ -21,6 +23,8 @@ import 'ui/app_profile_store.dart';
 import 'ui/background.dart';
 import 'ui/device_os.dart';
 import 'ui/fullscreen.dart';
+import 'state/refresh_on.dart';
+import 'state/state_sync.dart';
 import 'ui/main_state.dart';
 import 'ui/main_window.dart';
 import 'ui/prefs.dart';
@@ -91,7 +95,11 @@ Future<void> mainIos() async {
   try {
     builtinRules = await rootBundle.loadString('assets/state_rules.json');
   } catch (_) {}
+  final stateSync = StateSync(localDir: data.localDir, find: () async => stateUrlFromPorts(hub?.portMaps ?? const []))..start();
+  // A share that appears is picked up now, not at the next 60 s look.
+  if (hub != null) refreshStateOn(hub, () => hub!.portMaps, stateSync);
   final state = MainState(
+      stateSync: stateSync,
       hub: hub,
       hubError: hubError,
       data: data,
@@ -103,6 +111,8 @@ Future<void> mainIos() async {
       stateRules: await StateRulesLibrary.load(data, builtinRules),
       builtinStateRules: builtinRules,
       localOs: localDeviceOs(iosIdiom: idiom),
+      // The writing panel turns the built-in Rime to Chinese (the system keyboards cannot be switched).
+      localIme: RimeLocalIme(RappRime.instance),
       log: _log);
   state.overview = true;
   // The built-in input method follows 全局设置 and the session on the stage. Lives as long as the app.

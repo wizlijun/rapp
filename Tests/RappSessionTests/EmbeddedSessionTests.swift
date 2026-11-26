@@ -46,6 +46,79 @@ final class EmbeddedSessionTests: XCTestCase {
         return (s, q)
     }
 
+    // MARK: auto English before a key
+
+    private func sentKinds(_ link: FakeLink) -> [String] {
+        link.sent.map { m -> String in
+            switch m {
+            case let .selectInput(id): return "select(\(id))"
+            case let .key(code, mods, down): return "key(\(code),\(mods),\(down))"
+            default: return "other"
+            }
+        }
+    }
+
+    private func keyed(report: Bool?, _ body: (EmbeddedSession, DispatchQueue, FakeLink) -> Void) -> [String] {
+        let link = FakeLink()
+        let (s, q) = make(link) { _ in }
+        if let ascii = report { q.sync { link.feed(.inputSource(id: "pinyin", name: "拼音", ascii: ascii)) } }
+        body(s, q, link)
+        q.sync {}
+        return sentKinds(link)
+    }
+
+    func testKeyDownSwitchesRemoteToEnglishFirst() {
+        let sent = keyed(report: false) { s, _, _ in s.send(.key(keyCode: 0, modifiers: 0, down: true)) }
+        XCTAssertEqual(sent, ["select()", "key(0,0,true)"])
+    }
+
+    func testRepeatSendsOneSelect() {
+        let sent = keyed(report: false) { s, _, _ in
+            for c: UInt16 in [0, 1, 2] { s.send(.key(keyCode: c, modifiers: 0, down: true)) }
+        }
+        XCTAssertEqual(sent.filter { $0 == "select()" }.count, 1)
+        XCTAssertEqual(sent.count, 4)
+    }
+
+    func testAsciiHostGetsNoSelect() {
+        let sent = keyed(report: true) { s, _, _ in s.send(.key(keyCode: 0, modifiers: 0, down: true)) }
+        XCTAssertEqual(sent, ["key(0,0,true)"])
+    }
+
+    func testNoReportNoSelect() {
+        let sent = keyed(report: nil) { s, _, _ in s.send(.key(keyCode: 0, modifiers: 0, down: true)) }
+        XCTAssertEqual(sent, ["key(0,0,true)"])
+    }
+
+    func testKeyUpModifierOnlyAndCommandSkip() {
+        let sent = keyed(report: false) { s, _, _ in
+            s.send(.key(keyCode: 0, modifiers: 0, down: false))
+            s.send(.key(keyCode: 56, modifiers: 0, down: true))
+            s.send(.key(keyCode: 0, modifiers: 1 << 20, down: true))
+        }
+        XCTAssertFalse(sent.contains("select()"))
+        XCTAssertEqual(sent.count, 3)
+    }
+
+    func testPausedSkipsAndResumes() {
+        let sent = keyed(report: false) { s, _, _ in
+            s.setAutoEnglish(false)
+            s.send(.key(keyCode: 0, modifiers: 0, down: true))
+            s.setAutoEnglish(true)
+            s.send(.key(keyCode: 1, modifiers: 0, down: true))
+        }
+        XCTAssertEqual(sent, ["key(0,0,true)", "select()", "key(1,0,true)"])
+    }
+
+    func testFreshReportReArms() {
+        let sent = keyed(report: false) { s, q, link in
+            s.send(.key(keyCode: 0, modifiers: 0, down: true))
+            q.sync { link.feed(.inputSource(id: "pinyin", name: "拼音", ascii: false)) }
+            s.send(.key(keyCode: 1, modifiers: 0, down: true))
+        }
+        XCTAssertEqual(sent, ["select()", "key(0,0,true)", "select()", "key(1,0,true)"])
+    }
+
     func testReadyWindowsAndFrameProduceEvents() throws {
         let link = FakeLink()
         var events = [SessionEvent]()

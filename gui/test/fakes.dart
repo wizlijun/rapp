@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:rapp/embed/composer_editor.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/state/state_sync.dart';
 import 'package:rapp/term/term_model.dart';
 import 'package:rapp/term/term_session_port.dart';
 import 'package:rapp/term/term_wire.dart';
@@ -265,4 +266,64 @@ class FakeTermSessionPort extends TermSessionPort {
 
   @override
   void fetchHistory(Object sid) => calls.add(('fetchHistory', {'sid': sid}));
+}
+
+/// A [StateSync] the test drives by hand: set the fields, then `notifyListeners()`. It never connects.
+class FakeStateSync extends StateSync {
+  FakeStateSync(String localDir) : super(localDir: localDir, find: () async => null);
+
+  StateStatus _status = StateStatus.off;
+  List<Map<String, Object?>> _rows = [];
+  int _outage = 0;
+
+  @override
+  StateStatus get status => _status;
+  @override
+  set status(StateStatus v) => _status = v;
+  @override
+  List<Map<String, Object?>> get rows => _rows;
+  @override
+  set rows(List<Map<String, Object?>> v) => _rows = v;
+  @override
+  int get outage => _outage;
+  @override
+  set outage(int v) => _outage = v;
+
+  /// Device ids by fingerprint.
+  final Map<String, String> ids = {};
+
+  /// Queue rows (by `eid`) that count as unseen.
+  final Set<String> freshEids = {};
+
+  @override
+  String? idOf(String fp) => ids[fp];
+
+  /// Session rows by `fp\nid`.
+  final Map<String, Map<String, Object?>> sessions = {};
+
+  @override
+  Map<String, Object?>? session(String fp, String id) => sessions['$fp\n$id'];
+
+  @override
+  bool fresh(Map<String, Object?> row) => freshEids.contains(row['eid']);
+
+  /// What the app told the service, without any network.
+  final List<(String, String)> seenCalls = [];
+  int pauseCalls = 0;
+  int refreshCalls = 0;
+
+  @override
+  void markSeen(String deviceId, String session) => seenCalls.add((deviceId, session));
+  @override
+  void pause() => pauseCalls++;
+  /// Runs inside [refresh], to see what had happened by then.
+  void Function()? onRefresh;
+
+  @override
+  Future<void> refresh() async {
+    refreshCalls++;
+    onRefresh?.call();
+  }
+
+  void push() => notifyListeners();
 }

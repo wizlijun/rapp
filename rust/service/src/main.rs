@@ -2,7 +2,7 @@
 //! Env: `RAPP_BIN_DIR` (where rapp-host lives), `RAPP_GUI` (the `rapp` GUI for `--cm`),
 //! `RAPP_LOG_DIR` (where `service.log` goes; see `rapp_net::log::log_dir`).
 
-use rapp_service::{autolock, DataOpts, Opts, Service, SystemRunner, UpdateOpts, WORKER_IDLE};
+use rapp_service::{autolock, DataOpts, LoadOpts, Opts, Service, SystemRunner, UpdateOpts, WORKER_IDLE};
 use std::sync::Arc;
 
 #[cfg(target_os = "linux")]
@@ -52,6 +52,7 @@ async fn main() {
         pacing: true,
         map_ports: rapp_service::MAP_PORTS,
         own_ports: true,
+        load: Some(LoadOpts::system()),
         update: std::env::current_exe().ok().and_then(|e| rapp_update::bundle_of(&e)).map(UpdateOpts::system),
     };
     match Service::start(opts).await {

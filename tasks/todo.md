@@ -1202,6 +1202,44 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01536-parity.md`。
 - [ ] 实机验收：Linux 连接 macOS 0.15.35 验证协议 v16 状态规则推断显示；Linux 本地验证 `Ctrl+Shift+T`/`Ctrl+Shift+W`、宿主终端 `<目录> · <程序>` 标题与总览本机列「正在被接入」。
 
+## 文本终端恢复（规格：docs/superpowers/specs/2026-11-26-rapp-term-restore-design.md，计划：docs/superpowers/plans/2026-11-26-rapp-term-restore.md）
+
+已完成（任务 1–9）：
+
+- [x] 1 shell 钩子（zsh/bash/fish）与 OSC 7502 上报
+- [x] 2 快照存盘、命令过滤、清理
+- [x] 3 快照的删除规则
+- [x] 4 serve `restore` / `forget`、`term_saved`
+- [x] 5 `rapp-term run --restore`（沿用旧 key、环境激活、命令预填）
+- [x] 6 `rapp term restore` 命令行
+- [x] 7 「新建」沿用上一个终端的目录（`from: "last"`）
+- [x] 8 GUI 恢复列表与入口
+- [x] 9 testkit 端到端测试
+
+实机检查（规格 §7）：
+
+- [ ] 1 开 3 个终端：一个在 venv 里跑 claude，一个在 conda 环境里空着，一个在别的目录跑 `npm run dev`。重启电脑，在 rApp 里恢复：目录、环境（提示符前的 `(venv)`、`(ml)`）、填好的命令都对，没有一个自己跑起来。
+- [ ] 2 同上，改在被控 Mac 上敲 `rapp term restore`。
+- [ ] 3 敲 `exit` 结束的、在 rApp 里点「结束终端」的，不在恢复列表里。
+- [ ] 4 点 Terminal 的红色关闭按钮关掉的，在恢复列表里，勾掉就不恢复。
+- [ ] 5 在终端 A（`~/git/x`）里点总览「新建」：新终端在 `~/git/x`；在设备页点「新建 · bash」：bash，在 `~/git/x`。
+- [ ] 6 重启 rApp 后什么都不看，直接点「新建」：在最近有输入的那个终端的目录。
+- [ ] 7 自己的 `~/.zshrc` 里的提示符（oh-my-zsh、starship 之类）、补全、别名在 rApp 开的终端里和直接开 Terminal 一样。
+- [ ] 8 在 rApp 开的终端里再敲 `zsh`、`tmux`：读的是用户自己的配置。
+- [ ] 9 `KEY=xxx claude` 跑着时重启，恢复后填的是 `claude --continue`，`saved/` 里搜不到 `xxx`；`claude --api-key sk-abc…` 跑着时重启，恢复后只填 `claude`，`saved/` 里搜不到 `sk-`。
+- [ ] 10 恢复后不按回车再重启一次，命令还能填回来。
+- [ ] 11 只关窗口（不重启）后，总览按钮仍说「新建」；设备页有「上次没关的 1 个终端」。
+- [ ] 12 macOS 自己的「重新登录时重新打开窗口」：重启后 Terminal 会不会把 rapp 的旧标签页重开成普通 shell，和恢复出来的混在一起（规格 §8）。⌘Q 的情形见第 13 项。
+- [ ] 13 Terminal.app ⌘Q 实验（会关掉本机所有 Terminal 窗口，先确认没有别的会话在用）：开一个 rapp 文字终端，⌘Q 退出 Terminal 再打开。看标签页回不回来，回来的是同目录的普通 shell 还是重跑 `.command`；再看 rApp 恢复同一个终端后会不会出现两份。结果写进规格 §8。已知 `NSQuitAlwaysKeepsWindows` 没设（系统默认，退出时关闭窗口）。
+
+跟进：
+
+- [ ] `rust/term/src/pty/resume.rs` 改写表的三处问题（终审第 3 条，只影响预填，不会执行）：`claude -p hi` 被改成 `claude -p --continue`（一次性打印，不是交互会话）；表里没有的带值选项（如 `--system-prompt`、`--output-format`）会把 `--continue` 吞成自己的值，或把自己的值当提示词丢掉；子命令也被改写（`claude doctor` → `claude --continue`，`codex exec x` → `codex resume --last`）。做法：claude 的 `-p/--print` 和已知子命令原样不动。
+- [ ] 恢复时快照恰好读不出来（极少见）：终端窗口里写了原因，但 rApp / `rapp term restore` 只说「10 秒内没打开」。做法：holder 读不出来时先把原因交回 serve，再退出。
+- [ ] 快照存命令时，双引号里的 `\"` 没跳过：`TOKEN="abc\" def" claude` 会存成 `def" claude`，漏出值的一部分。做法：`strip_assignments` 在双引号里也认 `\`。
+- [ ] 规格的密钥规则表补上 `docker/podman login -p`（代码已拦）。
+- [ ] `rust/term/tests/shell_hook.rs`：`strip_osc` 插进了 `home()` 和它的注释之间，把注释挪回 `home()` 上。
+
 ## Linux 0.15.38 新建终端防重开与前台程序标题对齐与发布（2026-11-26）
 
 - [x] 对齐 macOS 0.15.37：`rapp-term serve` 跳过请求方已断开的排队 `open`、`rapp-hub` 禁止重发 `open_term`/`end_term` 并将 `open_term` 超时放宽至 45 秒、GUI 单设备「新建」串行互斥（提示「正在新建终端，请稍候」），以及文字终端标题显示前台程序 `<程序> · <标题>` 且 `CLI` 移至副标题。
@@ -1232,3 +1270,166 @@ macOS、Linux、Duo、iPad 各一遍。
 
 - [x] service 的 `list_apps` 回报 `os`（macos / windows / linux / omarchy）；hub 记进 hosts.json 并转给 GUI；总览每个设备列在状态灯左边画单色系统图标（9 种，含「未知」），悬停显示系统名。分支 `feat/device-os-marks`。
 - [ ] 实机检查：① Mac 本机列显示苹果；② 已升级的另一台 Mac / Omarchy / Linux 列显示对的图标；③ 未升级的设备显示「未知」，升级后变对；④ 设备离线后图标还在；⑤ iPad、iPhone 本机列是平板 / 手机外形加苹果；⑥ 三套主题下都看得清；⑦ 悬停显示系统名。
+
+## 会话标注（2026-11-26，规格 `docs/superpowers/specs/2026-11-26-rapp-session-labels-design.md`，计划 `docs/superpowers/plans/2026-11-26-rapp-session-labels.md`，分支 `feat/session-labels`）
+
+- [x] 第一期：被控端服务存 `labels.json`（标题 ≤64 字、备注 ≤200 字），新 Op `WatchLabels` / `SetLabel` / `ResetLabel`、`OpenTerm.label_from`；本机 IPC `labels` / `set_label` / `reset_label`；hub 每台在线设备一个标注 watch，推 `labels` 事件，旧设备推 `unsupported`
+- [x] GUI：总览、顶栏会话列表、侧栏会话页、「打开应用」菜单都显示标注标题和备注；卡片右键 / 长按「改标题和备注…」「还原」；有标注但没打开的会话排在所属分组末尾（「没有打开 · 打开」或「已停止 · 启动」，后者在家目录新开并搬走标注）；本机列「正在被接入」卡片并进同一张卡片，下面列出「有标注的会话」
+- 第二期（等 `feat/term-restore` 合入后做，规则见规格 §7.2）：
+  - [ ] 钉住：标注表里的 `term:pty:<key>` 交给 serve，holder 在 shell 退出 /「结束终端」时不删钉住的快照，改记 `ended`
+  - [ ] `HostRow.saved` 加 `pinned`、`ended`；`ended` 的不进「恢复上次的终端」，钉住的不参加 30 天 / 50 个清理，`ForgetTerms` 跳过
+  - [ ] 「启动」有快照时用 `RestoreTerms{keys:[key]}` 恢复原目录；还原标注时解除钉住，已 `ended` 的快照删掉
+- 小项（审查时看到，不急）：
+  - [ ] 状态队列那几行（`_trackPrograms`、`termDisplayName`）和「已结束 …」提示还用默认名，没用标注标题
+  - [ ] 设备关了终端会话时，有标注的终端仍显示「已停止 · 启动」，点了会失败；应隐藏或说明
+- 实机检查：
+  - [ ] 1. A 上给一个终端改标题和备注，B、iPad 上同一张卡马上变；B 改回来，A 也变
+  - [ ] 2. 退出重开 GUI、重启被控端服务：标注还在
+  - [ ] 3. 「还原」后标题回到默认名，提示「已还原，标题回到 …」；没打开的那张卡消失
+  - [ ] 4. 有标注的终端里 `exit`：每台客户端都出「已停止 · 启动」，点「启动」在家目录新开，标注跟过去，提示「原来的目录没有记下，已在家目录新开」
+  - [ ] 5. 有标注的图形 App 没打开：卡片在设备列末尾写「没有打开 · 打开」，点了打开；不计入顶部计数
+  - [ ] 6. 被控端本机列：被接入的卡片显示标注，右键能改；没人接入的有标注会话列在「有标注的会话」下，能改能还原
+  - [ ] 7. 连一台没升级的设备：卡片没有标注菜单，其他照常
+  - [ ] 8. 设备离线：没打开的标注卡收起；已打开的卡菜单变灰，写「设备离线，连上后再改」
+  - [ ] 9. 标题 65 个字、标题里有换行：对话框里红字说明，不关闭；备注里的换行变成空格
+  - [ ] 10. 按 App 分组时，改了标题的会话仍在原来那个 App 组里
+  - [ ] 11. `service.log` 里只记 `set_label` 这件事，不出现标题、备注和 app
+
+## Linux 0.15.42 统一会话卡片、rapp update 命令与设备系统图标对齐与发布（2026-11-26）
+
+- [x] 对齐 macOS 0.15.39–0.15.41：顶栏、侧栏「会话」页与总览统一 `SessionBlock` / `FavoriteBlock` 卡片；补齐 Linux 启动脚本 `rapp update` 分发与 `rapp-cli` 在 Linux 下的当前版本回报及发布页链接映射（`not_launchd`，退出码 `7`）；核对实机 `/usr/share/omarchy/shell` 识别 `omarchy` 系统图标。
+- [x] 补充 `TargetPlatform.linux` 侧栏统一卡片/常用终端回归用例（`gui/test/ui/side_panel_test.dart`）及打包启动器/集成断言（`scripts/test-linux-launcher.py`、`scripts/test-linux-bundle.py`）；Flutter 3.50.0 全量 3282 项通过（4 跳过），Rust 全套 clippy `-D warnings` 与测试通过。
+- [x] [Linux v0.15.42](https://github.com/wizlijun/rapp/releases/tag/v0.15.42) 已发布（源码 `018e8d3b`，`--latest=false`）；两包 41 文件逐字节一致、14 个 ELF 依赖完整、`BUILD-INFO.json` 与隔离网络命名空间测试通过；三个远端附件大小与 SHA256 与本地一致，保留 macOS Latest。
+- [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01542-parity.md`。
+
+## Linux 0.15.44 会话标注与官方设备系统标志对齐与发布（2026-11-26）
+
+- [x] 对齐 macOS 0.15.43：被控端持久化会话标注（`local/labels.json` `0600`、`watch_labels`/`set_label`/`reset_label` 与 `open_term` `label_from` 原子搬迁）、全卡片统一 `SessionCard` 标题/备注/右键菜单、分组末尾待机与已停止终端一键「启动」恢复，以及总览设备系统标志改用官方图形（含 `omarchy.org` MIT 图形）。
+- [x] 补充 `TargetPlatform.linux` 会话标注/Omarchy 标志/`ghostty` 重启回归用例（`gui/test/ui/session_labels_test.dart`）及打包服务本机 `labels` IPC 与日志脱敏校验（`scripts/test-linux-bundle.py`）；Flutter 3.50.0 全量测试与 Rust 全套 clippy `-D warnings` / 测试全部通过。
+- [x] [Linux v0.15.44](https://github.com/wizlijun/rapp/releases/tag/v0.15.44) 已发布（源码 `2e2e7513`，`--latest=false`）；两包 41 文件逐字节一致、14 个 ELF 依赖完整、`BUILD-INFO.json` 与隔离网络命名空间测试通过；三个远端附件大小与 SHA256 与本地一致，保留 macOS Latest。
+- [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01544-parity.md`。
+
+## 常用语条命令（feat/strip-commands，2026-11-26）实机检查（规格 `docs/superpowers/specs/2026-11-26-rapp-strip-commands-design.md` §13）
+
+- 默认常用语改成 7 条短的（继续 · 按你推荐来 · 进度 · 全做完别问我 · 先写方案别改代码 · 跑下测试 · 提交并推送）；只有新用户和点「恢复默认」的人会看到，老用户的列表不动
+- [ ] 1. 文字终端里开 Claude Code：条上前面是 6 个命令按钮；点「新对话」，Claude Code 真的清空并开始新对话
+- [ ] 2. 同一个终端退出到 zsh：命令按钮消失，条上只剩常用语，画面高度不变
+- [ ] 3. 开 Codex：「新对话」发的是 `/new`；Codex 没有的意图按钮是灰的，点了提示原因
+- [ ] 4. 「换模型」：弹出模型列表，用 ↑ ↓ ⏎ 能选中
+- [ ] 5. 「搜历史」：Claude Code 和 Codex 里进入 ⌃R 搜索
+- [ ] 6. 1 秒内连点两次命令，只发一次；断网冻结时命令按钮也是灰的
+- [ ] 7. 命令不进输入历史：↑ 翻不到 `/clear`，历史列表里也没有
+- [ ] 8. 管理页：拖动让命令和常用语交叉排序，条上的顺序跟着变；新建一个命令「审查」（Codex `/review`），在 Codex 里能用
+- [ ] 9. 改内置命令在某个工具上的写法后能生效；「恢复这一项」和「恢复默认」都能用
+- [ ] 10. 老用户升级：原来的常用语还在，6 个命令出现在最前面，只插一次
+- [ ] 11. App 会话（远程 iTerm2 里跑 claude）：不出现命令按钮
+- [ ] 12. macOS、Linux 的 PC 按键区上同样能用
+- [ ] 13. Claude Code 被 `kill -9` 后在同一终端开 vim / ssh：常用语条不显示命令
+
+## 输入法跟着意图走（feat/ime-intent，2026-11-26）实机检查（规格 `docs/superpowers/specs/2026-11-26-rapp-ime-intent-design.md`）
+
+- 终端（终端、iTerm2、Ghostty、Warp）默认不再因字母开写作版；用户自己改过开关的以用户的为准
+- [ ] 1. 本机停在 ABC 时开写作版，直接打出中文
+- [ ] 2. 按字母开写作版，第一个字母进拼音（`nihao` → 你好）
+- [ ] 3. 鼠须管、搜狗下同上；切不过去时第一个字母照现状上屏，不丢字
+- [ ] 4. 回到画面后本机是英文；在写作版里自己按 ⌃空格 切成英文后不会被切回中文
+- [ ] 5. A 在拼音时直接打 `ls`，得到 `ls`；打 `y` 回答 Claude Code，不弹写作版
+- [ ] 6. 点「切回 拼音」后在 A 上直接打中文；打开写作版后恢复自动切英文
+- [ ] 7. Linux 被控端：开头几个字不丢（并在 Linux 机器上编译、跑 clippy `host-linux`）
+- [ ] 8. iOS「内」模式下开写作版回到「中」
+- [ ] 9. Linux 客户端（fcitx5 / ibus）进出写作版能切换
+- [ ] 10. 设置开关关掉后回到老行为
+- [ ] 11. 重连时光标从旧写作版交给新写作版（冻结舞台重连），本机不出现先英文再中文的来回切换
+- [ ] 12. Linux 客户端：光标在写作版里时切到别的应用（Alt-Tab），别的应用的输入法不被改；切回 rApp 只切一次中文
+- [ ] 13. 离开写作版后约 200 ms 才切回英文，期间点进另一个写作版不切
+- [ ] 14. 密码框（解锁对话框）从写作版拿走光标、再回到画面时，本机输入法是否回到英文（已知可能停在中文）
+- [ ] 15. Mac：按字母开写作版时，原生编辑器拿到焦点的顺序是否让第一个字母进中文（focus 事件早于 readyForInput）
+- [ ] 16. Linux 客户端：按字母开写作版，第一个字母不被拆开（输入法保持原样）
+
+开发侧遗留：Linux 被控端 `rust/host-linux/src/input_source.rs` 只在 Mac 上写过、没在 Linux 上编译过，需要在 Linux 机器上 `cargo build`、`cargo clippy -p host-linux -- -D warnings`、`cargo test -p host-linux`。另外 `select` 排队等满 300 ms 仍忙时，`server.rs:714` 的 `?` 会结束会话；应改成记一行日志、丢掉这次 select（规格 §3.2 实现偏差），同样要在 Linux 上改和验证。
+
+## 设备负载（规格 `docs/superpowers/specs/2026-11-26-rapp-device-load-design.md`，计划 `docs/superpowers/plans/2026-11-26-rapp-device-load.md`，分支 `feat/device-load`）
+
+- [x] 服务采样 CPU / GPU / 内存 / 磁盘 / 温度 / 电池，算余力和警告；hub 每台在线设备一条 `watch_load`；`rapp load` / `rapp load pick`；总览设备列的余力行和明细；资源警告进「需要你」，带建议动作和「1小时内不再提醒」。
+- 实机检查：
+  - [ ] 1. 本机列显示余力
+  - [ ] 2. 另一台 Mac 和 Linux 机器的列显示余力
+  - [ ] 3. 把一块盘写到剩不到 10% 且不到 20 GB：余力行变橙，「需要你」里有这一行
+  - [ ] 4. 点「1小时内不再提醒」：这一行不见了
+  - [ ] 5. 点「到 <设备> 上新建终端」：终端开在那台设备上
+  - [ ] 6. `rapp load`、`rapp load pick --json` 能用
+  - [ ] 7. 活动监视器里服务 CPU 一直低于 0.5%，开 1 小时后内存（RSS）涨不到 5 MB
+  - [ ] 8. 没升级的旧设备：没有余力行，日志里也没有相关记录
+  - [ ] 9. 开着约 20 个终端跑 1 小时：服务的 CPU 和 RSS 仍在预算内（平均 < 0.5% 一个核，RSS 涨不到 5 MB）
+  - [ ] 10. macOS 上余力明细的「内存」可用 % 和活动监视器对得上
+  - [ ] 11. Linux 采样器跑一遍：CPU / 内存 / 磁盘 / 温度 / 电池的数都合理，读不到的项是「—」
+  - [ ] 12. 停掉对端的服务，或者断开中继：那一列的余力在约 20 秒内消失，「需要你」里不留资源行
+
+## rapp-state 状态服务（2026-11-26，规格 `docs/superpowers/specs/2026-11-26-rapp-state-design.md`，分支 `feat/rapp-state-p1`）
+
+- [x] P1：`rapp-state` 服务、`rapp-service` 的发件箱（终端程序状态）、附带服务（`local/services.json`）、`Share.kind` 和 `Op::StateSink` 找服务、`rapp state [on|off]`、进 macOS 和 Linux 安装包。release 构建的 `rapp-state` 二进制 1,850,784 字节（约 1.8 MB，本机 Apple 芯片）。规格 §18 第 4 条“hyper 进来以后安装包大多少”：还要打一次包，对比 zip 或 pkg 前后的大小
+- [ ] P1 实机检查：
+  - [ ] ① 两台真机，一台 `rapp state on`，另一台跑 Claude Code，`curl localhost:<分享号>/v1/queue` 里有 working、blocked、done
+  - [ ] ② 停状态服务期间让状态变 3 次，服务恢复后补到
+  - [ ] ③ 纯服务器上 `rapp state on`，在 Mac 上 `rapp hosts` 一次后，别的设备的 `rapp state` 都看到它
+  - [ ] ④ 没开状态服务的网里，`rapp state` 显示发件箱没在发
+- [ ] P1 遗留小问题（总审查记下的，不挡合并）：
+  - [x] Linux 机器上跑一遍 `scripts/test-linux-build.py`、`test-linux-bundle.py`（已加 `rapp-state`，macOS 上跑不了）
+  - [ ] 状态服务反复起不来时，本机发件箱一直对着本机那个死端口，不会改投别台的状态服务；`rapp state` 还列着“本机的 <端口>”
+  - [ ] 开着时改 `local/services.json` 的端口要先 `rapp state off` 再 `on` 才生效（写进配置参考）
+  - [ ] 用户手动建的分享备注恰好是“状态服务”时，`off` 会把它当成自己的删掉
+  - [ ] 知道有状态服务、又开着终端时，发件箱会让终端 worker 一直活着（设计如此，看耗电/资源）
+  - [ ] 服务停时留下的 kind state 分享，若下次以 off 状态启动不会被收回
+- [x] P2：app 接入（设置里的“状态服务”块、`/v1/watch`、`/v1/seen`，队列和“需要你”在连上时改从服务来，iOS 经内嵌 hub 的分享找服务）。P2 决定不借 `list_apps` 带出分享表：iPad 自己看得到 hub 的 `ports` 事件里 `kind: state` 的分享，就能找到服务。
+  - 纯服务器上开的状态服务，仍要等一台 GUI 设备看过一次它的分享表（`rapp hosts` 或分享页）才传得开（P2 不改这一条）
+  - 规格 §18 第 3 条（iOS 前台 SSE 长连接是否稳）见实机检查 6
+- [ ] P2 实机检查：
+  - [ ] 1. Mac 和 iPad 的队列逐行相同
+  - [ ] 2. “需要你”的先后相同
+  - [ ] 3. Mac 上看过，iPad 上不再是新的
+  - [ ] 4. Mac 的 rApp 退出后终端完成一轮，iPad 看到
+  - [ ] 5. 关掉状态服务，两边各用各的队列，只记一行中断
+  - [ ] 6. iPad 进后台再回来，没有重复行，重连所需时间记下来（规格 §18 第 3 条）
+- [ ] P2 遗留小问题（总审查记下的，不挡合并）：
+  - [ ] “新”用设备时钟比服务时钟（`StateSync.fresh`），两台时钟差大时看过的行可能还粗体（规格 §18 第 1 条）
+  - [ ] 连到 P1 的旧状态服务时 `/v1/watch` 是 404，只显示“连不上”，没有“版本太旧”的提示
+  - [ ] 旧服务的推送不带 `id`/`device` 时补拉一次 `/v1/state`；补拉期间到的推送没缓冲，可能被旧快照盖一下，下一条推送就好
+  - [ ] 一次 refresh 后没真正发起连接（落到“没找到”“已关”或接着改配置），那次的宽限会留着，下次真断要晚 2 秒才报
+  - [ ] 补拉完成时若上一轮 `/v1/seen` 还在发，等着的“已看过”要等下一次标记或重连才发
+  - [ ] 连上之后 hello 刚到 watch 就断（iOS hub 端口重建晚于 refresh，或 Mac 睡醒超过 45 秒空闲）仍会记一行“状态服务连不上”
+  - [ ] 设置里手填地址：别处改了 `local/state.json` 的地址，输入框不跟着变；手机上点模式时，失焦会先存一次手填地址（结果对，只是多存一次）
+  - [ ] 监视器已连上、但服务的 `state` 回复当时为空时，要等 60 秒才再找
+- [ ] P3：桌面和代报（`/v1/desk`、“别处开着”那一组、GUI 客户端推断状态代报、远程开启用设备间新请求 `SetService`）。计划还没写；写之前先问用户规格 §17 第 6 条
+- [ ] P4：`rapp emit`（IPC 的 `emit`、命令行、`RAPP_TERM`）。计划还没写
+- [ ] 规格 §18 第 1、2、5 条仍没验证：设备时钟差；发件箱对终端 `watch_terms` 的开销和会话从关到开的跟随；Windows 上 `rapp-service` 的现状
+
+## 总览本机列折叠（分支 `feat/overview-fold-local`，2026-11-26，合并 bf06a8a6）
+
+用户：「作为 pad 或 duo 终端，本机是没有 host 服务的……请默认折叠这种没有 host 会话的列。只显示个图标加标题，尽量少的占横向空间。点开后再展开。」范围选「只折没有 host 的本机」。规格 `docs/superpowers/specs/2026-11-26-overview-fold-local-design.md`。
+
+- [x] `overview_test` 新增 6 条；ui 1478 通过；全量只剩 `linux_detach_test` 2 条（worktree 里没编 `rapp-session`，改动前同样失败）；整分支评审 2 项重要已修
+- [ ] 1 iPad / Duo：总览「本机」列是约 56 宽的小竖条（系统图标、灯、「本机」），右边的设备列紧挨着
+- [ ] 2 点竖条展开成原来的样子；列头右边 ‹ 折回，手指好点
+- [ ] 3 展开后进一个 app 再回全景，仍是展开的；重开 rApp 又是折叠的
+- [ ] 4 Mac / Linux：本机列和以前一样，没有竖条、没有 ‹
+- [ ] 5 VoiceOver 念「展开 本机」「折叠 本机」
+
+## 新建文本终端被授权框卡住（分支 `fix/term-consent`，2026-11-26）
+
+用户：「在新建文本终端时，总会被权限框卡住。应该立即识别出来提醒用户有权限框，跳过去点确认才能继续。否则用户会一直点新建无反应。」原因：被控 Mac 用 AppleScript 驱动「终端」和 System Events，macOS 弹「“rApp”想要控制…」时脚本一直等；10 秒后被掐掉、再等 10 秒才提示，掐掉时授权框可能跟着没了，下次又卡。改成：开窗口前先用 `AEDeterminePermissionToAutomateTarget` 不弹框地问；要问就马上弹框（线程等用户回答），立即回 `ASKING`；GUI 提示「弹出了授权框，点「允许」，点完再新建」，远程设备自动切到它的桌面。
+
+- [x] `consent` 单测 5 条、`overview_test` 新增 3 条（去掉跳转后确实失败）；clippy、cargo 全量（`net_follows_the_relay` 负载偶发，单跑通过）、flutter analyze 通过；flutter 全量只剩 `linux_detach_test` 2 条（main 上同样失败）
+- [ ] 1 被控 Mac 上撤掉授权（`tccutil reset AppleEvents`，再重启 rApp 服务），在另一台设备点新建：1 秒内提示「授权框」，并切到那台 Mac 的桌面，能看到授权框
+- [ ] 2 点「允许」（可能连着两个：终端、System Events），再点新建：终端正常开成新标签
+- [ ] 3 授权框还没点时连点新建：一直是同样的提示，不会堆出多个授权框
+- [ ] 4 点「不允许」后再新建：开成一个新窗口（不是标签），不卡
+- [ ] 5 在 Mac 本机给本机新建：只提示，不切桌面，授权框就在本机屏幕上
+- [ ] 6 「恢复所选」碰到授权框也是同样的提示和切桌面
+- [ ] 7 多屏 Mac（用户截图里框在屏幕 2）：画面上正开着它的屏幕 2 时新建，不被切回主屏，提示「不在这块屏上就换一块屏看看」
+
+## Linux 0.15.45 与 0.15.50 版本跟随对齐与发布（2026-11-26）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），依次将 Linux / Omarchy `x86_64` 产物构建并挂载至已发布的 `v0.15.45` 与 `v0.15.50` GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.45`–`0.15.50`：补齐 `scripts/linux/rapp` 对 `term`、`state`、`load` 三个顶层 CLI 子命令的分发；修复 `rust/term/src/pty/fg.rs` Linux `execve` 测试竞态；补充 `TargetPlatform.linux` 下终端恢复（`term_restore_test.dart`）与常用语条按工具发命令（`phrase_strip_cmds_test.dart`）回归用例；扩充 `scripts/test-linux-launcher.py` 与 `scripts/test-linux-bundle.py` 端到端校验（覆盖 `rapp term restore --list/--forget`、`rapp state on/off` + `rapp-state` 伴随服务、`LinuxSampler` + `rapp load --json` / `rapp load pick --json`）。
+- [x] [v0.15.45](https://github.com/wizlijun/rapp/releases/tag/v0.15.45)（源码 `47f5046a`）与 [v0.15.50](https://github.com/wizlijun/rapp/releases/tag/v0.15.50)（源码 `e8b1627d`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致。
+- [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01545-parity.md`、`docs/superpowers/plans/2026-11-26-linux-01546-parity.md` 与 `docs/superpowers/plans/2026-11-26-linux-01550-parity.md`。

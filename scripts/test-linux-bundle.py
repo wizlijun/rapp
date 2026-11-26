@@ -25,7 +25,7 @@ version = tomllib.loads((repo / 'rust/Cargo.toml').read_text())['workspace']['pa
 protocol_source = (repo / 'rust/client-core/src/protocol.rs').read_text()
 protocol = re.search(r'^pub const VERSION: u8 = (\d+);$', protocol_source, re.MULTILINE)
 assert protocol, 'client protocol version declaration not found'
-for name in ['rapp', 'rapp-gui', 'rapp-cli', 'rapp-client', 'rapp-session', 'rapp-host', 'rapp-service', 'rapp-hub', 'rapp-term', 'rapp-speech']:
+for name in ['rapp', 'rapp-gui', 'rapp-cli', 'rapp-client', 'rapp-session', 'rapp-host', 'rapp-service', 'rapp-hub', 'rapp-term', 'rapp-state', 'rapp-speech']:
     assert (bundle / name).is_file() and os.access(bundle / name, os.X_OK), name
 assert subprocess.check_output([bundle / 'rapp', '--version'], text=True).strip() == f'rapp {version}'
 assert json.loads(subprocess.check_output([bundle / 'rapp-client', 'version', '--json'], text=True)) == {
@@ -154,6 +154,8 @@ with tempfile.TemporaryDirectory(prefix='rapp-bundle-') as td, EchoServer(('127.
                         host = status['id']
                         ask({'cmd': 'add_host', 'id': f'{host}@127.0.0.1:{status["port"]}', 'password': 'test-only'})
                         apps = ask({'cmd': 'apps', 'id': host})
+                        expected_os = 'omarchy' if Path('/usr/share/omarchy/shell').exists() else 'linux'
+                        assert apps.get('os') == expected_os, apps
                         assert apps['capabilities']['applications'] is False, apps
                         assert any(a['app'] == 'desktop:' and a['displays'] for a in apps['apps']), apps
                         opened = ask({'cmd': 'open', 'id': host, 'app': 'desktop:', 'embed': True})
@@ -190,6 +192,73 @@ with tempfile.TemporaryDirectory(prefix='rapp-bundle-') as td, EchoServer(('127.
                             hub.kill()
                             hub.wait(timeout=5)
                 cli('hosts')
+                upd_status = json.loads(cli('update', 'status', '--json'))
+                assert upd_status['ok'] is True and upd_status['state'] == 'off' and upd_status['current'] == version, upd_status
+                upd_apply = subprocess.run([bundle / 'rapp', 'update', '--json'],
+                    env=env, text=True, capture_output=True, timeout=15)
+                assert upd_apply.returncode == 7, upd_apply
+                upd_err = json.loads(upd_apply.stdout)
+                assert upd_err['ok'] is False and upd_err['error'] == 'not_launchd', upd_err
+                assert upd_err['page'] == 'https://github.com/wizlijun/rapp/releases', upd_err
+                lbl0 = ipc({'cmd': 'labels'})
+                assert lbl0 == {'ok': True, 'rev': 0, 'labels': {}}, lbl0
+                lbl_set = ipc({'cmd': 'set_label', 'app': 'term:pty:linux1', 'title': 'Linux 后端', 'note': '仅存本机加密表'})
+                assert lbl_set == {'ok': True, 'rev': 1}, lbl_set
+                assert (local / 'labels.json').stat().st_mode & 0o777 == 0o600
+                lbl1 = ipc({'cmd': 'labels'})
+                assert lbl1['rev'] == 1 and lbl1['labels']['term:pty:linux1']['title'] == 'Linux 后端', lbl1
+                lbl_rst = ipc({'cmd': 'reset_label', 'app': 'term:pty:linux1'})
+                assert lbl_rst == {'ok': True, 'rev': 2}, lbl_rst
+                assert ipc({'cmd': 'labels'})['labels'] == {}
+                assert cli('term', 'restore', '--list') == '没有可以恢复的终端\n'
+                assert cli('term', 'restore') == '没有可以恢复的终端\n'
+                assert cli('term', 'restore', '--forget') == '已清掉 0 个\n'
+                saved_dir = local / 'term' / 'saved'
+                saved_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
+                btime = next(int(l.split()[1]) for l in Path('/proc/stat').read_text().splitlines() if l.startswith('btime '))
+                now_ts = int(time.time())
+                saved_ts = btime - 60 if now_ts - (btime - 60) <= 29 * 86400 else now_ts - 3600
+                snap_key = '00000000000000a1'
+                snap_file = saved_dir / f'{snap_key}.json'
+                snap_file.write_text(json.dumps({
+                    'v': 1, 'key': snap_key, 'name': 'linux-snap', 'named': True,
+                    'shell': '/bin/sh', 'cwd': str(root), 'prog': 'claude', 'cmd': 'claude -c',
+                    'started': saved_ts - 10, 'saved': saved_ts,
+                }))
+                snap_file.chmod(0o600)
+                term_saved = ipc({'cmd': 'term_saved'})
+                assert term_saved['ok'] is True and len(term_saved['saved']) == 1, term_saved
+                assert term_saved['saved'][0]['key'] == snap_key and term_saved['saved'][0]['boot'] is (saved_ts < btime), term_saved
+                assert term_saved['saved'][0]['cwd'] == str(root) and term_saved['saved'][0]['prog'] == 'claude', term_saved
+                listed = cli('term', 'restore', '--list')
+                assert 'linux-snap' in listed and 'claude' in listed and str(root) in listed, listed
+                assert cli('term', 'restore', '--forget') == '已清掉 1 个\n'
+                assert not snap_file.exists()
+                assert cli('term', 'restore', '--list') == '没有可以恢复的终端\n'
+                state0 = cli('state')
+                assert '状态服务：没开' in state0, state0
+                state_on = cli('state', 'on')
+                assert '已打开状态服务' in state_on, state_on
+                state_off = cli('state', 'off')
+                assert '已关掉状态服务' in state_off, state_off
+                assert not ipc({'cmd': 'shares'})['shares'], 'state off left a share behind'
+                load_end = time.monotonic() + 8
+                load_json = None
+                while time.monotonic() < load_end:
+                    load_json = json.loads(cli('load', '--json'))
+                    assert load_json['ok'] is True, load_json
+                    if 'load' in load_json['devices'][0]:
+                        break
+                    time.sleep(.2)
+                assert load_json and 'load' in load_json['devices'][0], load_json
+                local_load = load_json['devices'][0]['load']
+                assert local_load['term'] is True and local_load['items']['mem']['total'] > 0, local_load
+                assert len(local_load['disks']) >= 1, local_load
+                picked = json.loads(cli('load', 'pick', '--json'))
+                assert picked['ok'] is True and picked['id'] == status['id'], picked
+                svc_log = (root / 'logs' / 'service.log').read_text()
+                assert 'Linux 后端' not in svc_log and '仅存本机加密表' not in svc_log, svc_log
+                assert 'linux-snap' not in svc_log and snap_key not in svc_log and str(root) not in svc_log, svc_log
                 cli('share', str(port), '--note', 'bundle smoke')
                 item = row()
                 number = item['local']

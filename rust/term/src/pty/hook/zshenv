@@ -1,0 +1,18 @@
+# rApp shell integration: the first file of a zsh that rapp-term started (its ZDOTDIR points here). It puts ZDOTDIR
+# back the way it was, reads the user's own .zshenv and, in an interactive shell, loads rapp.zsh. zsh then reads
+# the user's .zprofile, .zshrc and .zlogin from the user's own ZDOTDIR (or HOME) by itself.
+# Written by rapp-term; changes here are overwritten.
+if (( ${+RAPP_ZDOTDIR} )); then
+  export ZDOTDIR="$RAPP_ZDOTDIR"
+else
+  unset ZDOTDIR
+fi
+unset RAPP_ZDOTDIR
+typeset -g _rapp_hook="${${(%):-%x}:A:h}/../rapp.zsh"
+if [[ -r "${ZDOTDIR:-$HOME}/.zshenv" ]]; then
+  source "${ZDOTDIR:-$HOME}/.zshenv"
+fi
+if [[ -o interactive && -r "$_rapp_hook" ]]; then
+  source "$_rapp_hook"
+fi
+unset _rapp_hook
