@@ -1263,3 +1263,10 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] 补充 `TargetPlatform.linux` 侧栏统一卡片/常用终端回归用例（`gui/test/ui/side_panel_test.dart`）及打包启动器/集成断言（`scripts/test-linux-launcher.py`、`scripts/test-linux-bundle.py`）；Flutter 3.50.0 全量 3282 项通过（4 跳过），Rust 全套 clippy `-D warnings` 与测试通过。
 - [x] [Linux v0.15.42](https://github.com/wizlijun/rapp/releases/tag/v0.15.42) 已发布（源码 `018e8d3b`，`--latest=false`）；两包 41 文件逐字节一致、14 个 ELF 依赖完整、`BUILD-INFO.json` 与隔离网络命名空间测试通过；三个远端附件大小与 SHA256 与本地一致，保留 macOS Latest。
 - [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01542-parity.md`。
+
+## Linux 0.15.44 会话标注与官方设备系统标志对齐与发布（2026-11-26）
+
+- [x] 对齐 macOS 0.15.43：被控端持久化会话标注（`local/labels.json` `0600`、`watch_labels`/`set_label`/`reset_label` 与 `open_term` `label_from` 原子搬迁）、全卡片统一 `SessionCard` 标题/备注/右键菜单、分组末尾待机与已停止终端一键「启动」恢复，以及总览设备系统标志改用官方图形（含 `omarchy.org` MIT 图形）。
+- [x] 补充 `TargetPlatform.linux` 会话标注/Omarchy 标志/`ghostty` 重启回归用例（`gui/test/ui/session_labels_test.dart`）及打包服务本机 `labels` IPC 与日志脱敏校验（`scripts/test-linux-bundle.py`）；Flutter 3.50.0 全量测试与 Rust 全套 clippy `-D warnings` / 测试全部通过。
+- [x] [Linux v0.15.44](https://github.com/wizlijun/rapp/releases/tag/v0.15.44) 已发布（源码 `2e2e7513`，`--latest=false`）；两包 41 文件逐字节一致、14 个 ELF 依赖完整、`BUILD-INFO.json` 与隔离网络命名空间测试通过；三个远端附件大小与 SHA256 与本地一致，保留 macOS Latest。
+- [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01544-parity.md`。
