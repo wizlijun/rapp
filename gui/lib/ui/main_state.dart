@@ -968,6 +968,16 @@ class MainState extends ChangeNotifier {
   /// The stage shows the overview wall instead of the current session's picture.
   bool overview = false;
 
+  /// The overview's 本机 column, folded when there is no local service (iPad/Duo), has been opened.
+  /// Kept for this run only, so leaving 全景 for an app and coming back does not fold it again.
+  bool localColumnOpen = false;
+
+  void openLocalColumn(bool open) {
+    if (localColumnOpen == open) return;
+    localColumnOpen = open;
+    notifyListeners();
+  }
+
   /// The 日志 screen fills the stage (reached from 访问记录's 更多); no session is on stage meanwhile.
   bool logs = false;
 

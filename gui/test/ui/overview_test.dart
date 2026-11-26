@@ -517,6 +517,9 @@ void main() {
     versions = {'m1': '0.14.8'};
     await boot(tester, apps: ['m1/a']);
     await show(tester);
+    // No local service here: 本机 starts folded, so open it to see its version.
+    await tester.tap(find.byKey(const Key('column-local-folded')));
+    await tester.pump();
     final m1 = tester.widget<Text>(find.byKey(const Key('version-m1')));
     expect(m1.data, '0.14.8');
     expect(m1.style!.color, tokens(tester).muted);
@@ -1293,6 +1296,80 @@ void main() {
     await tester.drag(find.byKey(const Key('wall')), const Offset(0, -200));
     await tester.pump();
     expect(dy('column-m1'), lessThan(before));
+  });
+
+  group('local column fold', () {
+    testWidgets('no local service: the 本机 column starts folded, 56 wide', (tester) async {
+      hubVersion = '0.14.7';
+      await boot(tester);
+      await show(tester);
+      expect(find.byKey(const Key('column-local-folded')), findsOneWidget);
+      expect(tester.getSize(find.byKey(const Key('column-local'))).width, 56);
+      expect(inside('column-local', find.text('本机')), findsOneWidget);
+      expect(find.byKey(const Key('os-mark-local')), findsOneWidget);
+      expect(inside('column-local', find.text('没有打开的 app')), findsNothing);
+      expect(find.byKey(const Key('version-local')), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a tap opens it; the fold button closes it again', (tester) async {
+      hubVersion = '0.14.7';
+      await boot(tester);
+      await show(tester);
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      expect(tester.getSize(find.byKey(const Key('column-local'))).width, 220);
+      expect(find.byKey(const Key('version-local')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('column-local-fold')));
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsOneWidget);
+    });
+
+    testWidgets('stays open across rebuilds', (tester) async {
+      await boot(tester);
+      await show(tester);
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      s.say('x');
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsNothing);
+      expect(find.byKey(const Key('column-local-fold')), findsOneWidget);
+    });
+
+    testWidgets('stays open after leaving the overview and coming back', (tester) async {
+      await boot(tester);
+      await show(tester);
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      // Leaving 全景 unmounts the overview (the stage takes its place); coming back mounts a fresh one.
+      await tester.pumpWidget(wrap(const SizedBox()));
+      await tester.pumpWidget(wrap(SizedBox(width: 1194, height: 700, child: Overview(state: s))));
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsNothing);
+      expect(find.byKey(const Key('column-local-fold')), findsOneWidget);
+    });
+
+    testWidgets('the fold button is a touch-sized target', (tester) async {
+      await boot(tester);
+      await show(tester);
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      final size = tester.getSize(find.byKey(const Key('column-local-fold')));
+      expect(size.height, greaterThanOrEqualTo(44));
+      expect(size.width, greaterThanOrEqualTo(44));
+    });
+
+    testWidgets('a local service keeps the column open, with no fold button', (tester) async {
+      await boot(tester);
+      s.toggleOverview();
+      final m = ServiceMonitor(readToken: () async => null);
+      addTearDown(m.dispose);
+      await tester.pumpWidget(wrap(SizedBox(width: 1194, height: 700, child: Overview(state: s, monitor: m))));
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsNothing);
+      expect(find.byKey(const Key('column-local-fold')), findsNothing);
+      expect(tester.getSize(find.byKey(const Key('column-local'))).width, 220);
+    });
   });
 }
 
