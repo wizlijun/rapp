@@ -882,7 +882,7 @@ void main() {
     await tester.tap(find.byKey(const Key('new-shell-bash')));
     await tester.pumpAndSettle();
     final m = t.sent.firstWhere((m) => m['cmd'] == 'open_term');
-    expect(m, {'cmd': 'open_term', 'id': '111', 'shell': '/bin/bash', 'app': 'iTerm', 'req': anything});
+    expect(m, {'cmd': 'open_term', 'id': '111', 'shell': '/bin/bash', 'app': 'iTerm', 'from': 'last', 'req': anything});
     expect(t.sent.map((m) => m['cmd']), containsAllInOrder(['open_term', 'terms', 'open']));
     expect(t.sent.lastWhere((m) => m['cmd'] == 'open')['app'], 'term:pty:c');
   });
@@ -899,6 +899,23 @@ void main() {
     expect(find.byKey(const Key('term-app-iTerm')), findsOneWidget);
   });
 
+  testWidgets('new_term_from_devices_tab_keeps_button_shell', (tester) async {
+    termRows = [{'id': 'term:pty:k', 'name': 'k', 'command': 'zsh', 'activity': 0}];
+    await pumpTab(tester);
+    await selectMini(tester);
+    await emitTerms(tester, termRows, hosts: [
+      {'host': null, 'launchers': ['Terminal'], 'shells': shellsZshBash}
+    ]);
+    await s.openOrSwitch('111', 'term:pty:k', 'k');
+    await tester.pump();
+    t.sent.clear();
+    await tester.ensureVisible(find.byKey(const Key('new-shell-bash')));
+    await tester.tap(find.byKey(const Key('new-shell-bash')));
+    await tester.pumpAndSettle();
+    final m = t.sent.firstWhere((m) => m['cmd'] == 'open_term');
+    expect(m, {'cmd': 'open_term', 'id': '111', 'shell': '/bin/bash', 'app': 'Terminal', 'from': 'term:pty:k', 'req': anything});
+  });
+
   testWidgets('an old device gets one 默认 shell button', (tester) async {
     await pumpTab(tester);
     await selectMini(tester);
@@ -908,7 +925,7 @@ void main() {
     await tester.tap(find.byKey(const Key('new-shell-default')));
     await tester.pumpAndSettle();
     final m = t.sent.firstWhere((m) => m['cmd'] == 'open_term');
-    expect(m, {'cmd': 'open_term', 'id': '111', 'app': 'Terminal', 'req': anything});
+    expect(m, {'cmd': 'open_term', 'id': '111', 'app': 'Terminal', 'from': 'last', 'req': anything});
   });
 
   testWidgets('no new row without launchers', (tester) async {

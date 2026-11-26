@@ -697,6 +697,7 @@ class MainState extends ChangeNotifier {
       markingInput = null;
       _followCurrentKey();
     }
+    _noteLastTerm();
     if (embeds) _entries = _mapEntries();
     // The session list has nothing to show once the last session is gone.
     if (corner == Corner.sessions && _entries.isEmpty) corner = null;
@@ -2841,7 +2842,7 @@ class MainState extends ChangeNotifier {
           return;
         }
         try {
-          await openText(id, shell: shell);
+          await openText(id, shell: shell, from: newTermSource(id));
         } catch (e) {
           if (_disposed) return;
           hint = newTermWords(e);
@@ -2881,6 +2882,29 @@ class MainState extends ChangeNotifier {
     final row = hub?.termLists[id]?.terms.where((r) => r.id == term).firstOrNull;
     final shown = row == null ? '已结束' : termDisplayName(row.shown, row.host);
     unawaited(openOrSwitch(id, term, shown));
+  }
+
+  /// The last text terminal each device showed on the stage this run (device id to term id).
+  final Map<String, String> _lastTerm = {};
+
+  /// Every change of the current session ends in [notifyListeners], which calls this: a text terminal on the stage
+  /// becomes its device's last one.
+  void _noteLastTerm() {
+    final r = current;
+    if (r != null && isTermApp(r.app)) _lastTerm[r.id] = r.app;
+  }
+
+  bool _termListed(String device, String term) =>
+      hub?.termLists[device]?.terms.any((t) => t.id == term) ?? false;
+
+  /// Where a 新建 on [device] starts: the terminal on the stage when it is one of the device's listed text
+  /// terminals, else the last one this run showed there (still listed), else 'last' (serve's own pick).
+  String newTermSource(String device) {
+    final r = current;
+    if (r != null && r.id == device && isTermApp(r.app) && _termListed(device, r.app)) return r.app;
+    final last = _lastTerm[device];
+    if (last != null && _termListed(device, last)) return last;
+    return 'last';
   }
 
   Future<void> _newTerms = Future<void>.value();

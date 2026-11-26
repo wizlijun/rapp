@@ -509,7 +509,7 @@ class _DevicesTabState extends State<DevicesTab> {
       _shellErrors.remove(id);
     });
     try {
-      await state.openText(id, shell: path);
+      await state.openText(id, shell: path, from: state.newTermSource(id));
     } catch (e) {
       if (mounted) setState(() => _shellErrors[id] = e is HubException ? e.message : '$e');
     } finally {
