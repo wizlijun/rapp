@@ -252,6 +252,32 @@ with tempfile.TemporaryDirectory(prefix='rapp-bundle-') as td, EchoServer(('127.
                     assert hello_line.startswith('data:') and json.loads(hello_line[5:].strip()) == {'what': 'hello'}, hello_line
                 finally:
                     sse.close()
+                desk_http = http.client.HTTPConnection('127.0.0.1', 8102, timeout=3)
+                try:
+                    desk_body = json.dumps({
+                        'device': 'linux-box',
+                        'sessions': [{'id': '123456789', 'app': 'term:pty:t1', 'name': 'claude'}],
+                    })
+                    desk_http.request('PUT', '/v1/desk/linuxfp1', body=desk_body, headers={'Content-Type': 'application/json'})
+                    desk_resp = desk_http.getresponse()
+                    desk_resp.read()
+                    assert desk_resp.status == 204, desk_resp.status
+                    desk_http.request('GET', '/v1/state')
+                    state_resp = desk_http.getresponse()
+                    state_snap = json.loads(state_resp.read().decode('utf-8'))
+                    assert state_resp.status == 200, state_resp.status
+                    assert any(
+                        d.get('fp') == 'linuxfp1'
+                        and d.get('device') == 'linux-box'
+                        and d.get('sessions') == [{'id': '123456789', 'app': 'term:pty:t1', 'name': 'claude'}]
+                        for d in state_snap.get('desks', [])
+                    ), state_snap
+                finally:
+                    desk_http.close()
+                st_off_ipc = ipc({'cmd': 'state', 'on': False})
+                assert st_off_ipc.get('on') is False and st_off_ipc.get('running') is False, st_off_ipc
+                st_on_ipc = ipc({'cmd': 'state', 'on': True})
+                assert st_on_ipc.get('on') is True and st_on_ipc.get('running') is True, st_on_ipc
                 state_off = cli('state', 'off')
                 assert '已关掉状态服务' in state_off, state_off
                 assert ipc({'cmd': 'state'})['url'] is None

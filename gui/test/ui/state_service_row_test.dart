@@ -235,4 +235,28 @@ void main() {
     await tester.pump();
     expect(api.calls.length, 2);
   });
+
+  testWidgets('on Linux desktop StateServiceRow toggles local and remote state service with 40px row height',
+      (tester) async {
+    final api = FakeSwitch()
+      ..onHost = (() async => '222222222')
+      ..onState = (to, on) async => {
+            'ok': true,
+            'on': on ?? false,
+            'running': on == true,
+            if (on == true) 'port': 8102,
+          };
+    await tester.pumpWidget(wrap(
+      StateServiceRow(key: UniqueKey(), api: api, to: null, nameOf: (id) => 'dev-$id', localId: '111111111'),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('状态服务'), findsOneWidget);
+    expect(find.text('已经有一个在 dev-222222222 上'), findsOneWidget);
+    expect(tester.getSize(find.byType(Switch)).height, lessThanOrEqualTo(48));
+    await tester.tap(find.byType(Switch));
+    await tester.pumpAndSettle();
+    expect(api.calls, ['state null null', 'state null true']);
+    expect(switchOn(tester), isTrue);
+    expect(find.text('运行中，端口 8102'), findsOneWidget);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 }

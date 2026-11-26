@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -14,7 +15,7 @@ const _card = Key('wait-card');
 
 void main() {
   late Waits w;
-  setUp(() => w = Waits());
+  setUp(() => w = Waits(now: () => clock.now()));
   tearDown(() => w.dispose());
 
   Widget stage({VoidCallback? onTap}) => SizedBox(
