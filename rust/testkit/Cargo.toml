@@ -31,11 +31,6 @@ path = "src/bin/test-rapp-state.rs"
 name = "measure-forward"
 path = "src/bin/measure_forward.rs"
 
-# host-core itself on the fake platform: stands in as `rapp-host` for the service contract test.
-[[bin]]
-name = "fake-host-core"
-path = "src/bin/fake_host_core.rs"
-
 [lib]
 name = "rapp_testkit"
 path = "src/lib.rs"
@@ -49,9 +44,6 @@ serde_json.workspace = true
 rapp-net.workspace = true
 # Only for the `test-rapp-state` binary; rApp itself never depends on it.
 rapp-state = { path = "../../services/state" }
-# The host-core fake platform, the in-process worker harness and its plain-TCP client.
-rapp-host-core.workspace = true
-rapp-client-core = { path = "../client-core" }
 
 [dev-dependencies]
 quinn.workspace = true

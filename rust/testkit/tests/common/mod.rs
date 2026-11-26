@@ -43,20 +43,6 @@ pub fn bins() -> TempDir {
     dir
 }
 
-/// `bins()`, with `rapp-host` linked to `program` instead of the fake echo worker.
-pub fn bins_with_host(program: &str) -> TempDir {
-    let dir = tempfile::tempdir().unwrap();
-    for (name, target) in [
-        ("rapp-host", program),
-        ("rapp-client", env!("CARGO_BIN_EXE_fake-rapp-client")),
-        ("rapp-term", env!("CARGO_BIN_EXE_fake-rapp-term")),
-        ("rapp-state", env!("CARGO_BIN_EXE_test-rapp-state")),
-    ] {
-        std::os::unix::fs::symlink(target, dir.path().join(name)).unwrap();
-    }
-    dir
-}
-
 pub fn host_log(bins: &Path) -> String {
     std::fs::read_to_string(bins.join("host.log")).unwrap_or_default()
 }
