@@ -21,6 +21,9 @@ pub struct Host {
     pub fp: Option<Fp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub route: Option<String>,
+    /// What system the host last said it is (`list_apps` `os`), for its mark in B's overview.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub os: Option<String>,
 }
 
 impl Host {
@@ -74,6 +77,9 @@ impl Hosts {
             if h.forced_relay() {
                 v["route"] = "relay".into();
             }
+            if let Some(os) = &h.os {
+                v["os"] = os.as_str().into();
+            }
             v
         };
         Value::Array(list.iter().map(row).collect())
@@ -104,6 +110,17 @@ impl Hosts {
     }
 
     /// Sets the `route` of a host that is still saved; true when that changed the file.
+    /// Saves what system a saved host said it is; written only when it changed. False for a host not saved.
+    pub fn set_os(&self, id: &str, os: &str) -> Result<bool> {
+        let mut state = self.state.lock().unwrap();
+        let (path, list) = &mut *state;
+        match list.iter_mut().find(|h| h.id == id) {
+            Some(h) if h.os.as_deref() != Some(os) => h.os = Some(os.into()),
+            _ => return Ok(false),
+        }
+        rapp_net::config::write_json(path, &*list)?;
+        Ok(true)
+    }
     pub fn set_route(&self, id: &str, route: Option<String>) -> Result<bool> {
         let mut state = self.state.lock().unwrap();
         let (path, list) = &mut *state;
@@ -132,7 +149,7 @@ mod tests {
     use super::*;
 
     fn host(name: &str) -> Host {
-        Host { id: "1".into(), name: name.into(), password: "p".into(), lan: vec![], fp: None, route: None }
+        Host { id: "1".into(), name: name.into(), password: "p".into(), lan: vec![], fp: None, route: None, os: None }
     }
 
     #[test]
@@ -148,6 +165,7 @@ mod tests {
                 lan: vec!["192.168.1.5:22028".into()],
                 fp: None,
                 route: None,
+                os: None,
             })
             .unwrap();
         assert_eq!(
@@ -171,6 +189,23 @@ mod tests {
         // A host without a password reads (`password` is written, not required).
         let h: Host = serde_json::from_str(r#"{"id":"2","name":"b"}"#).unwrap();
         assert_eq!((h.password.as_str(), h.fp), ("", None));
+    }
+
+    #[test]
+    fn os_is_listed_saved_and_set_only_on_a_saved_host() {
+        let dir = tempfile::tempdir().unwrap();
+        let hosts = Hosts::load(dir.path()).unwrap();
+        hosts.upsert(host("a")).unwrap();
+        assert!(hosts.set_os("1", "macos").unwrap());
+        assert!(!hosts.set_os("1", "macos").unwrap());
+        assert!(!hosts.set_os("gone", "macos").unwrap());
+        assert!(hosts.get("gone").is_none());
+        assert_eq!(hosts.summary(), json!([{"id": "1", "name": "a", "os": "macos"}]));
+        assert_eq!(Hosts::load(dir.path()).unwrap().get("1").unwrap().os.as_deref(), Some("macos"));
+        assert!(hosts.set_os("1", "omarchy").unwrap());
+        assert_eq!(hosts.get("1").unwrap().os.as_deref(), Some("omarchy"));
+        let h: Host = serde_json::from_str(r#"{"id":"2","name":"b"}"#).unwrap();
+        assert_eq!(h.os, None);
     }
 
     #[test]
@@ -206,8 +241,10 @@ mod tests {
             #[serde(default)]
             lan: Vec<String>,
         }
-        let text =
-            format!(r#"[{{"id":"1","name":"a","password":"","lan":[],"fp":"{}","route":"relay"}}]"#, "ab".repeat(32));
+        let text = format!(
+            r#"[{{"id":"1","name":"a","password":"","lan":[],"fp":"{}","route":"relay","os":"macos"}}]"#,
+            "ab".repeat(32)
+        );
         let old: Vec<OldHost> = serde_json::from_str(&text).unwrap();
         assert_eq!(old.len(), 1);
     }
@@ -222,6 +259,7 @@ mod tests {
             lan: vec![],
             fp: None,
             route: None,
+            os: None,
         };
         rapp_net::config::write_json(&a.path().join("hosts.json"), &[h("x")]).unwrap();
         rapp_net::config::write_json(&b.path().join("hosts.json"), &[h("y")]).unwrap();
