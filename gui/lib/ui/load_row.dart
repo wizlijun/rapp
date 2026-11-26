@@ -39,13 +39,18 @@ class LoadRow extends StatefulWidget {
 class _LoadRowState extends State<LoadRow> {
   /// What an open detail shows: it follows the row's load, and closes when the load goes.
   late final _live = ValueNotifier<DeviceLoad?>(widget.load);
-  BuildContext? _dialog;
+
+  /// The open detail's route: closing it closes that route, never one pushed over it.
+  Route<Object?>? _detail;
 
   @override
   void didUpdateWidget(LoadRow old) {
     super.didUpdateWidget(old);
-    _live.value = widget.load;
-    if (widget.load == null) _closeDetail();
+    if (widget.load == null) return _closeDetail();
+    // The detail is in another route: telling it now, inside this build, would rebuild it from the wrong place.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _live.value = widget.load;
+    });
   }
 
   @override
@@ -56,11 +61,14 @@ class _LoadRowState extends State<LoadRow> {
   }
 
   void _closeDetail() {
-    final d = _dialog;
-    _dialog = null;
-    if (d == null) return;
+    final r = _detail;
+    _detail = null;
+    if (r == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (d.mounted) Navigator.of(d).pop();
+      final nav = r.navigator;
+      if (nav == null || !r.isActive) return;
+      // On top it is popped, so the dialog's future completes; under another route it is taken out from there.
+      r.isCurrent ? nav.pop() : nav.removeRoute(r);
     });
   }
 
@@ -75,7 +83,7 @@ class _LoadRowState extends State<LoadRow> {
       barrierColor: Colors.transparent,
       transitionDuration: Duration.zero,
       pageBuilder: (context, _, _) {
-        _dialog = context;
+        _detail = ModalRoute.of(context);
         return CustomSingleChildLayout(
           delegate: _DetailLayout(rect, MediaQuery.viewInsetsOf(context).bottom),
           child: ValueListenableBuilder(
@@ -86,7 +94,7 @@ class _LoadRowState extends State<LoadRow> {
         );
       },
     );
-    _dialog = null;
+    _detail = null;
   }
 
   @override

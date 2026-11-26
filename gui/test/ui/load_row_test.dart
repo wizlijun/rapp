@@ -141,6 +141,51 @@ void main() {
     });
   });
 
+  group('an open detail', () {
+    DeviceLoad cpuAt(double pct) {
+      final m = snapshot();
+      (m['items'] as Map)['cpu'] = {'pct': pct, 'cores': 8};
+      return DeviceLoad.fromJson(m);
+    }
+
+    Future<void> openWith(WidgetTester tester, DeviceLoad l) async {
+      await tester.pumpWidget(wrap(LoadRow(id: 'm1', load: l)));
+      await tester.tap(find.byKey(const Key('load-row-m1')));
+      await tester.pumpAndSettle();
+      expect(find.byType(LoadDetail), findsOneWidget);
+    }
+
+    testWidgets('follows a new load without notifying during build', (tester) async {
+      await openWith(tester, cpuAt(42));
+      expect(find.textContaining('42%'), findsWidgets);
+      await tester.pumpWidget(wrap(LoadRow(id: 'm1', load: cpuAt(77))));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(find.textContaining('77%'), findsWidgets);
+      expect(find.byType(LoadDetail), findsOneWidget);
+    });
+
+    testWidgets('closes when the load goes', (tester) async {
+      await openWith(tester, cpuAt(42));
+      await tester.pumpWidget(wrap(const LoadRow(id: 'm1', load: null)));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byType(LoadDetail, skipOffstage: false), findsNothing);
+    });
+
+    testWidgets('closing it leaves a route pushed on top alone', (tester) async {
+      await openWith(tester, cpuAt(42));
+      Navigator.of(tester.element(find.byType(LoadDetail)))
+          .push(MaterialPageRoute<void>(builder: (_) => const Text('other route')));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(wrap(const LoadRow(id: 'm1', load: null)));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('other route'), findsOneWidget);
+      expect(find.byType(LoadDetail, skipOffstage: false), findsNothing);
+    });
+  });
+
   group('the overview column', () {
     late FakeTransport t;
     late MainState s;
