@@ -26,7 +26,7 @@
 |---|---|---|---|---|
 | P 探针 | 有 | 没有 | —— | 没跑。要一台 Windows 11 和一台 Server 2022（实机或虚拟机） |
 | A 地基 | 有 | **草稿，写完了** | 分支 `feat/windows-foundation`，worktree `.worktrees/windows-foundation` | 没编译、没测试、没在 Windows 上碰过。任务 2–7 的代码都写了；任务 1、8、9 里要上机器的步骤没做（见 3.1） |
-| B 主机核心 | 有 | **草稿**，分两个分支 | `feat/windows-host-core`（任务 1–6，之后接 13–19）；`feat/windows-host-core-rules`（任务 7–12） | 同上；Swift 样本文件一个都还没生成 |
+| B 主机核心 | 有 | **草稿，写完了**（任务 1–19；任务 20 收尾要上机器，没做） | `feat/windows-host-core`（任务 7–12 写在 `feat/windows-host-core-rules` 上，已合进来，那个分支可以不用再看） | 同上；Swift 样本文件一个都还没生成；任务 19 的真机走查没做（见 3.2） |
 | C–H | 有 | 没有 | —— | 等接手的人按计划做 |
 
 所有代码草稿都从 main 的 `7ed6c7e4` 分出来，**没有合并进 main**。草稿的每个提交标题都带 `(草稿，未编译未验证)`。
@@ -55,12 +55,12 @@
 
 ### 3.2 B 段草稿的实际情况
 
-B 段分三批写，前两批在两个分支上并行，互相没看过对方的代码。
+B 段分三批写，前两批在两个分支上并行，互相没看过对方的代码；第三批把两边合到 `feat/windows-host-core` 上接着写。现在只看这一个分支就行。下面按批写，是因为每批的风险不一样。
 
 **编码组：任务 1–6，分支 `feat/windows-host-core`**（说明文件 `docs/superpowers/plans/notes/2026-11-26-windows-b1-draft-notes.md`）
 
 - **写了的**：crate 外壳、时钟、Swift 样本工具、边界测试（任务 1）；画面协议编解码和“不处理”的消息表（2）；deflate 流，直接绑 `libz-sys`（3）；量化（4）；分块编码和滚动检测（5）；发送节奏、弱网档、省流阶梯、暂停队列（6）。每个任务都有 Swift 样本生成器和 Rust 对照测试。
-- **现在编不过，原因是已知的**：`lib.rs` 在任务 1 就把任务 7–19 的模块全声明了，`tile.rs` 还用了任务 7 的 `geometry::Rect`（假定字段是 `x, y, width, height: f64`）。两个分支合到一起、任务 13–19 也写完之后才可能编过。
+- **现在编不过，原因是已知的**：`lib.rs` 在任务 1 就把任务 7–19 的模块全声明了，`tile.rs` 还用了任务 7 的 `geometry::Rect`（假定字段是 `x, y, width, height: f64`）。写这一批时编不过；现在三批都在一个分支上了，模块齐了，但整个 crate 一次都没编过。
 - **样本文件一个都没生成**（不许跑 swift）。生成命令：`RAPP_WRITE_FIXTURES=1 swift test --filter 'Fixtures/'`。
 - **和计划不同的名字**：说明文件第 3 节有完整清单。要紧的几处已经按 Swift 改回计划 B：`encode` 返回 `Option`、`region` 可空；`offer` 多一个 `captured`；`SenderOutput::Frame` 带 `region`；`set_paused`/`set_pinned`/`set_steps` 有返回值；`take_stats` 要 `now`。
 - **草稿没照计划做的三处，接手的人要改或者认下来**：
@@ -80,9 +80,9 @@ B 段分三批写，前两批在两个分支上并行，互相没看过对方的
 **规则组：任务 7–12，分支 `feat/windows-host-core-rules`**（说明文件 `docs/superpowers/plans/notes/2026-11-26-windows-b2-draft-notes.md`）
 
 - **写了的**：几何、窗口表、桌面、命中测试、提示（7）；焦点窗格和跟踪器（8）；输入规则和 worker 命令行（9）；剪贴板规则、传输存储、可移植文件名（10）；锁屏和解锁规则（11）；应用状态规则引擎，在 `src/state/` 下八个文件（12）。每组都有 Swift 样本生成器和 Rust 对照测试。`src/` 里没有平台相关写法，取时间只在 `clock.rs`。
-- **现在编不过，原因是已知的**：它用的协议类型（`CanvasRect`、`WindowInfo`、`Message`、`APP_STATE_LIMIT` 等）和 `tile::EncodeReport` 在另一个分支上，字段名是照编码组早先的提交猜的。两边对不上的地方由第三批在合并后先改齐（见下）。
+- **现在编不过，原因是已知的**：它用的协议类型（`CanvasRect`、`WindowInfo`、`Message`、`APP_STATE_LIMIT` 等）和 `tile::EncodeReport` 在另一个分支上，字段名是照编码组早先的提交猜的。两边对不上的地方第三批合并后改过一遍（见下）。
 - **要 Rust 1.89 以上**：`File::lock`（计划 B 指定用它，为了不碰 `libc`）和 `Option::is_none_or`。仓库没有固定工具链版本，Mac 和 Windows 构建机都要先确认版本够。
-- **草稿和 Swift 不一样的一处**：`resolve_regions` 收的是区域表，Swift 的 `resolveRegions` 收整个规则包（`Sources/RappCore/StateRules/Regions.swift:5`）。已让第三批照 Swift 改或者写明理由。
+- **草稿和 Swift 不一样的一处**：`resolve_regions` 收的是区域表，Swift 的 `resolveRegions` 收整个规则包（`Sources/RappCore/StateRules/Regions.swift:5`）。第三批已照 Swift 改回（提交 `a81f1f81`）。
 - **计划里错的，已经改回计划 B**（提交 `48b5c6eb`）：`Input` 事件没有字段；找不到程序时的文字按规格 §6.4 写 `<id> not found`；`with_unlock_lock` 多一个 `log` 参数；`RuleImage::sample` 可能返回空；Swift 的 `PutSink` 不自己续传；计划漏列了 `view_region`、`clamp_size`、`shareable_apps`、`apps_text`、`ListedWindow`；`lock_json` 用到的 `LockOutcome` 要在任务 9 就定义。
 - **样本测不到的两条上限**：一次最多 100 个文件、图片不超过 64 MiB。这两条在 Swift 的 `rapp-host` 里，不在 `RappCore`，样本生成器调不到。Rust 这边只核对了常量，行为要靠任务 16 的会话测试。
 - **最先会撞上的**：
@@ -93,7 +93,33 @@ B 段分三批写，前两批在两个分支上并行，互相没看过对方的
   5. 任务 12 的 Swift 生成器有几处类型推断可疑（`Any` 字典字面量、`as?` 区分两种字典）。
 - **没有样本的场景**：传输测试里靠 `chmod` 造失败的一例（只能在 POSIX 上跑）；状态引擎单次耗时的测试（只移植了场景，没测时间）。
 
-**第三批：任务 13–19**（会话、假平台、画面循环、输入和提示、剪贴板和文件传输、锁屏解锁、`PORTING.md`、`fake-host-core`）在 `feat/windows-host-core` 上接着写：先把规则组的分支合进来，改齐两组互相猜错的名字，再逐个任务提交。说明文件是 `docs/superpowers/plans/notes/2026-11-26-windows-b3-draft-notes.md`。任务 20（收尾）要上机器，草稿不做。
+**第三批：任务 13–19，分支 `feat/windows-host-core`**（说明文件 `docs/superpowers/plans/notes/2026-11-26-windows-b3-draft-notes.md`）
+
+- **先做的两件**：把规则组的分支合进来（提交 `aad5c90b`，两组没有改到同一个文件）；改齐两组互相猜错的类型（`a81f1f81`：`resolve_regions` 改回收整个规则包、剪贴板的上限改用协议里的常量、`hints` 里一处消息匹配）。我抽查了 `geometry::Rect`、`EncodeReport`、`WindowInfo`、`CanvasRect`、`APP_STATE_LIMIT` 这几处两边的用法，字段对得上；没有逐个文件查，编译会给出其余的。
+- **写了的**：平台接口、入口 `run.rs`、握手和接管、testkit 里的假平台（13）；采集、编码、发送的循环，含暂停、视区、省流（14）；输入、遮挡提示、焦点窗格、状态规则接进会话（15）；剪贴板、粘贴、文件传输（16）；锁屏和解锁（17）；`PORTING.md` 和摘要测试（18）；`fake-host-core` 程序和服务对接测试（19 的步骤 1、2、5）。会话代码在 `rust/host-core/src/session/` 下十一个文件，会话测试在 `rust/testkit/tests/host_session.rs` 和 `host_service.rs`。
+- **没做的**：任务 19 步骤 4，用真的 Mac 控制端连 `fake-host-core` 走一遍（五种模式、滚动、打字、粘贴文件），只能手工做；任务 20 收尾；所有“运行”步骤。
+- **草稿和 Swift 不一样、接手的人要补或者认下来的**：
+  1. **锁着时开始的会话，画布总是按主显示器报**。Swift 会先找这个程序的窗口在哪块屏上（`Server.swift:676-697`）。草稿的平台接口在锁屏时拿不到窗口位置，所以没用上已经移植好的 `locked_start_display`。多显示器的机器上会和 macOS 表现不同。D 段做平台层时，如果 Windows 锁屏下能列出窗口，就给平台接口加这个入口并接上。
+  2. **焦点窗格没有控件角色**：起点写成 `-`，选中的写成 `depth<n>`。角色要平台层给，属于 D 段。
+  3. `menuPick` 既没处理也没拦（计划说收到后忽略、会话继续）。要确认它确实什么都不改。
+  4. 移植了 `lock::StayAwake`，但会话直接调平台的 `stay_awake`，前者没用上，这两处调用也没有测试。
+  5. 语言固定取 `en` 或环境变量 `RAPP_LOCALE`。
+  6. “目标程序不在最前时复制不通知”这条路径没有测试。
+  7. 焦点区的会话测试用 Rust 自己算的期望值，允许差 8 点，不是和 Swift 样本逐值比。
+- **计划里错的，已经改回计划 B**（提交 `cdbed67e`）：密码输错后不会再发一次“已锁”（Swift 只在状态变了才发）；鼠标坐标换算用的是“显示器原点 + 窗口左上角 + (x, y)”，不是 `global_point`；状态报告里没有 `os` 字段；超大的规则包在协议解码时就被拒，会话以 `bad data from client: rules too large` 结束；收到不该收的消息时文字是 `unexpected message from client`；`stats` 事件里没有在途帧数。
+- **最先会撞上的**：
+  1. 借用和类型推断：`session/unlock.rs` 里几个闭包（`is_locked` 被移进另一个闭包、`with_unlock_lock` 的 `FnOnce`/`FnMut` 约束），`run.rs` 里读标准输入那段。
+  2. `Cargo.lock` 会变：testkit 加了依赖和一个新程序。照 3.1 第 1 条处理。
+  3. 会话测试用 20 倍速的时钟，几处时间窗很紧（输错密码后的 8–10 秒、暂停 2 秒、每 5 毫秒 20 个单位、粘贴后 0.15 秒和 2 秒恢复）。失败时先单独重跑，分清是负载还是逻辑。
+  4. `host_service.rs` 对真的服务有四个假定：正好两个程序且 `desktop:` 在前；权限正好是录屏和辅助功能两项为真；`session_start` 带 `name`；`worker_exit` 的原因是 `stdin closed`。对不上先看服务这边实际输出什么。
+  5. 比较时类型不一致（`&String` 对 `&str`、`Vec<String>` 对数组）。
+- **B 段整体先验的顺序**：
+  1. `cargo check -p rapp-host-core --all-targets`，再 `-p rapp-testkit --all-targets`，把编译错误改完，让 `Cargo.lock` 更新。
+  2. 生成 Swift 样本：`RAPP_WRITE_FIXTURES=1 swift test --filter 'Fixtures/'`，修生成器。
+  3. `cargo test -p rapp-host-core --no-fail-fast`。先看边界测试和 deflate（决定走不走退路），再看其余。
+  4. `cargo test -p rapp-testkit --test host_session`，再 `--test host_service`。
+  5. `clippy -D warnings`。
+  6. 任务 19 步骤 4 的真机走查，然后任务 20。
 
 ## 4. 边界
 
@@ -145,11 +171,11 @@ B 段分三批写，前两批在两个分支上并行，互相没看过对方的
    6. 两个门禁都绿了再合并（`merge: …（feat/windows-foundation）`，文字见计划 A）。
 
 **4. B 段草稿**，在 Mac 上：
-   1. 把 `feat/windows-host-core-rules` 合进 `feat/windows-host-core`（冲突只会在 `src/lib.rs` 的导出和 `Cargo.toml` 的依赖上）。
+   1. 两个分支已经合好了，只用 `feat/windows-host-core`。先读 3.2 节和分支上的三个说明文件（`…windows-b1/b2/b3-draft-notes.md`）。
    2. 任务 3（压缩）要先有探针 C1 的结论。
    3. 生成样本：`RAPP_WRITE_FIXTURES=1 swift test`（每个任务里写了各自的 `--filter`），然后不带那个变量再跑一遍（比对方式）。生成器只调用 `Sources/RappCore/` 的代码；Swift 符号在测试里看不到时，照计划 B 任务 2 的办法绕，**不改 Swift 的访问级别**。
    4. `cargo test -p rapp-host-core`。红的地方：以 Swift 为准改 Rust。做不到一个字节不差的，按计划 B“Fixture rules”最后一条处理并写进 `PORTING.md`。
-   5. 任务 13–19（会话、假平台、`fake-host-core`、对照表）如果草稿还没写完，按计划补。
+   5. 任务 13–19 的草稿写完了：`cargo test -p rapp-testkit --test host_session`，再 `--test host_service`。然后补 3.2 节“草稿和 Swift 不一样”的七条。
    6. 用真的控制端连 `fake-host-core` 试一次（计划 B 任务 19）。
    7. `host-core` 是共用代码：过完整的 Mac 门禁，合并后照常发 macOS 版。Mac 门禁不能明显变慢（`host-core` 的测试加会话测试 60 秒以内）。
 
