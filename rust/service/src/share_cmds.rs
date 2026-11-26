@@ -112,6 +112,9 @@ pub async fn shares(state: &Arc<State>, cmd: &Value) -> Value {
                 let mut v = row(&me, s.port, s.protocol(), &s.note, allow, listening, s.local);
                 v["proto"] = json!(s.protocol().as_str());
                 v["proto_auto"] = json!(s.proto_auto);
+                if let Some(kind) = &s.kind {
+                    v["kind"] = json!(kind);
+                }
                 if state.own.taken(s.port) {
                     v["taken"] = json!(true);
                 }
@@ -184,6 +187,9 @@ pub fn told(v: &mut Value, item: &Value, proto: Proto, local: Option<u16>, wante
         if local != wanted {
             v["wanted"] = json!(wanted);
         }
+    }
+    if let Some(kind) = item["kind"].as_str() {
+        v["kind"] = json!(kind);
     }
 }
 
