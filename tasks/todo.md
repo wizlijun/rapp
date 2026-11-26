@@ -1208,3 +1208,8 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] 补充 `TargetPlatform.linux` 回归用例（覆盖总览终端块 `claude · ~/git/rapp · 2` 前台标题、`CLI · …` 副标题与「新建」单并发防重开提示）；Flutter 3.50.0 全量 3266 项通过（3 跳过），`analyze` 无 error/warning；Rust 全套 clippy `-D warnings` 与测试通过。
 - [x] [Linux v0.15.38](https://github.com/wizlijun/rapp/releases/tag/v0.15.38) 已发布（源码 `8ac509fe`，`--latest=false`）；两包 41 文件逐字节一致、14 个 ELF 依赖完整、`BUILD-INFO.json` 与隔离网络命名空间服务/CLI/端口共享测试通过；三个远端附件大小与 SHA256 与本地一致，macOS Latest 保留 `v0.15.37`。
 - [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01538-parity.md`。
+
+## 设备系统图标（2026-11-26，规格 `docs/superpowers/specs/2026-11-26-rapp-device-os-marks-design.md`，计划 `docs/superpowers/plans/2026-11-26-device-os-marks.md`）
+
+- [x] service 的 `list_apps` 回报 `os`（macos / windows / linux / omarchy）；hub 记进 hosts.json 并转给 GUI；总览每个设备列在状态灯左边画单色系统图标（9 种，含「未知」），悬停显示系统名。分支 `feat/device-os-marks`。
+- [ ] 实机检查：① Mac 本机列显示苹果；② 已升级的另一台 Mac / Omarchy / Linux 列显示对的图标；③ 未升级的设备显示「未知」，升级后变对；④ 设备离线后图标还在；⑤ iPad、iPhone 本机列是平板 / 手机外形加苹果；⑥ 三套主题下都看得清；⑦ 悬停显示系统名。
