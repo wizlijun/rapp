@@ -4,7 +4,9 @@
 //! On: the program is started (`kill_on_drop`), asked `GET /v1/health` every 200 ms for at most
 //! 5 s, then its port is shared (kind `"state"`) and it becomes this device's own sink. A start
 //! that fails, or a crash later, is tried again after `outbox::backoff`; a run of 60 s resets it.
-//! Off: the program is stopped and its share removed (only a share of kind `"state"`).
+//! While it is tried again it stays this device's sink, so the outboxes wait and resend.
+//! Off: the program is stopped, it is no sink any more, and its share is taken back: removed when
+//! the companion made it, only unmarked when the user had shared the port (`take_back`).
 //! `rapp-service` never links `rapp-state`: it only starts the program.
 
 use crate::outbox::send;
@@ -289,7 +291,7 @@ async fn supervise(state: Arc<State>, c: &'static Companion, cfg: ServiceCfg, st
                 state.log.event(Lvl::Warn, "companion_failed", json!({"name": c.name, "why": why}));
                 // Not answering: no share says it is here (one left by an earlier run neither).
                 // `ready` shares it again once it answers. A crash after it ran keeps its share.
-                unshare_ours(&state, c, cfg.port.unwrap_or(c.port));
+                take_back(&state, c, cfg.port.unwrap_or(c.port));
                 fails += 1;
                 phase(&state, c, Phase::Waiting, Some(say));
             }
@@ -307,7 +309,8 @@ async fn supervise(state: Arc<State>, c: &'static Companion, cfg: ServiceCfg, st
             _ = stop.notified() => break,
         }
     }
-    // Stopped: the program (if one runs) ends now, not at some drop later.
+    // Stopped for good (`set` turned it off): the program (if one runs) ends now, not at some
+    // drop later, and it is no sink any more.
     if let Some(mut ch) = child.take() {
         let _ = ch.kill().await;
         let code = ch.wait().await.ok().and_then(|s| s.code());
@@ -388,8 +391,9 @@ async fn run_once(state: &Arc<State>, c: &'static Companion, cfg: &ServiceCfg, c
     };
     *child = None;
     state.log.event(Lvl::Info, "companion_exit", json!({"name": c.name, "code": status.and_then(|s| s.code())}));
-    // Its share stays: the next start answers on the same port.
-    sink::set_local(state, None);
+    // Its share and the local sink stay: the supervisor starts it again on the same port. Every
+    // outbox meanwhile finds it down, keeps its cache and sends it once it answers again. Telling
+    // the devices it is gone would make each of them drop its cache.
     Outcome::Ended(up.elapsed())
 }
 
@@ -411,12 +415,21 @@ fn ready(state: &Arc<State>, c: &'static Companion, port: u16) {
     state.log.event(Lvl::Info, "companion_ready", json!({"name": c.name}));
 }
 
-/// Removes the share of `port` when it is `c`'s (its kind is `c.kind`); any other share stays.
-fn unshare_ours(state: &State, c: &'static Companion, port: u16) {
-    if state.shares.get(port).is_some_and(|s| s.kind.as_deref() == Some(c.kind)) {
+/// Takes back what `ready` did to the share of `port` (one of kind `c.kind`): the share is removed
+/// when the companion made it (its note is `c.note`); a share the user made of that port stays,
+/// an ordinary one again. Any other share is not touched.
+fn take_back(state: &State, c: &'static Companion, port: u16) {
+    let Some(share) = state.shares.get(port).filter(|s| s.kind.as_deref() == Some(c.kind)) else { return };
+    if share.note == c.note {
         if let Err(e) = sharing::unshare(state, &json!(port), &By::Local) {
             state.log.event(Lvl::Warn, "companion_unshare_failed", json!({"name": c.name, "port": port, "error": e}));
         }
+        return;
+    }
+    match state.shares.set_kind(port, None) {
+        Ok(true) => sharing::sync_own(state),
+        Ok(false) => {}
+        Err(e) => state.log.event(Lvl::Warn, "companion_unshare_failed", json!({"name": c.name, "port": port, "error": format!("{e:#}")})),
     }
 }
 
@@ -543,7 +556,7 @@ pub async fn set(state: &Arc<State>, name: &str, on: bool) -> Value {
         }
         state.companions.with(c.name, |s| s.pid = None);
         sink::set_local(state, None);
-        unshare_ours(state, c, port);
+        take_back(state, c, port);
         state.companions.bump();
         state.notify();
     }

@@ -293,6 +293,8 @@ impl Service {
             t.abort();
         }
         self.state.companions.stop_all();
+        // Its own state service is gone with it (in memory only: the tell loop is stopped).
+        crate::sink::set_local(&self.state, None);
         self.state.maps.stop();
         self.state.own.stop();
         self.state.outbound.close();
