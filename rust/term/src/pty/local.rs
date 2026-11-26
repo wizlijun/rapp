@@ -27,9 +27,10 @@ pub fn default_dir() -> PathBuf {
     rapp_net::config::local(&rapp_net::config::home()).join("term")
 }
 
-/// Creates `term/`, `pty/` and `launch/`, all 0700 (also when they exist already).
+/// Creates `term/`, `pty/`, `launch/`, `ended/`, `saved/` and `shell/`, all 0700 (also when they exist already).
 pub fn ensure_dirs(term_dir: &Path) -> anyhow::Result<()> {
-    for d in [term_dir.to_path_buf(), term_dir.join("pty"), term_dir.join("launch"), term_dir.join("ended")] {
+    let subs = ["pty", "launch", "ended", "saved", "shell"].map(|s| term_dir.join(s));
+    for d in std::iter::once(term_dir.to_path_buf()).chain(subs) {
         std::fs::create_dir_all(&d).with_context(|| format!("cannot create {}", d.display()))?;
         std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700))
             .with_context(|| format!("cannot protect {}", d.display()))?;
@@ -126,6 +127,13 @@ pub struct Status {
     /// The holder's window tty, like `/dev/ttys012`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tty: Option<String>,
+    /// The Unix second of the last input; absent when there was none.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub input: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// Why a socket gave no status.
@@ -375,6 +383,7 @@ mod tests {
         assert_eq!(mode(&d.path().join("pty.token")), 0o600);
         assert_eq!(mode(&d.path().join("pty")), 0o700);
         assert_eq!(mode(&d.path().join("launch")), 0o700);
+        assert_eq!((mode(&d.path().join("saved")), mode(&d.path().join("shell"))), (0o700, 0o700));
     }
 
     #[test]
@@ -446,6 +455,7 @@ mod tests {
                     cwd: None,
                     shell: None,
                     tty: None,
+                    input: 0,
                 };
                 w.write_all(format!("{}\n", serde_json::to_string(&st).unwrap()).as_bytes()).await.unwrap();
             }

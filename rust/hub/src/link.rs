@@ -127,6 +127,8 @@ impl std::error::Error for Relayed {}
 fn reply_wait(op: &Op) -> Duration {
     match op {
         Op::OpenTerm { .. } => OPEN_TERM_WAIT,
+        // Each restored terminal may queue for its own open.
+        Op::RestoreTerms { keys, .. } => OPEN_TERM_WAIT * u32::try_from(keys.len().max(1)).unwrap_or(u32::MAX),
         _ => REPLY_WAIT,
     }
 }
@@ -134,7 +136,7 @@ fn reply_wait(op: &Op) -> Duration {
 /// Whether `op` may be sent again after a try that may have reached the host. Not when doing it twice does it twice:
 /// each `open_term` opens a terminal window, and a second `end_term` answers that the terminal is gone.
 fn repeatable(op: &Op) -> bool {
-    !matches!(op, Op::OpenTerm { .. } | Op::EndTerm { .. })
+    !matches!(op, Op::OpenTerm { .. } | Op::RestoreTerms { .. } | Op::EndTerm { .. })
 }
 
 /// One request/reply on a new stream; the stream stays open for `open`.
@@ -932,12 +934,38 @@ fn relay_failure(e: anyhow::Error) -> anyhow::Error {
 }
 
 fn finish((s, r): (Pipe, Value), path: &'static str) -> Result<(Pipe, Value, &'static str)> {
-    if r["ok"] == true {
-        Ok((s, r, path))
-    } else {
-        Err(anyhow!(error_of(&r)))
+    accepted(r).map(|r| (s, r, path))
+}
+
+/// A device's reply: itself when `ok`, else a `Refused`.
+pub(crate) fn accepted(r: Value) -> Result<Value> {
+    match r["ok"] == true {
+        true => Ok(r),
+        false => Err(Refused::of(r).into()),
     }
 }
+
+/// The device answered and refused: its error, which is what this shows, and the whole reply (a restore that stopped
+/// part way still names the terminals it opened).
+#[derive(Debug)]
+pub(crate) struct Refused {
+    pub error: String,
+    pub reply: Value,
+}
+
+impl Refused {
+    fn of(reply: Value) -> Refused {
+        Refused { error: error_of(&reply), reply }
+    }
+}
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.error)
+    }
+}
+
+impl std::error::Error for Refused {}
 
 /// Whether a link a request failed on is dropped: always after a repeatable one (the next try dials afresh), and
 /// after any other only when the connection is closed.
@@ -956,6 +984,8 @@ mod tests {
     fn opening_and_ending_a_terminal_are_never_sent_twice() {
         assert!(!repeatable(&Op::OpenTerm { shell: None, from: None, app: "Terminal".into(), label_from: None }));
         assert!(!repeatable(&Op::EndTerm { term: "term:pty:k".into() }));
+        assert!(!repeatable(&Op::RestoreTerms { keys: vec![], app: None }));
+        assert!(repeatable(&Op::ForgetTerms { keys: vec!["k".into()] }));
         assert!(repeatable(&Op::ListTerms));
         assert!(repeatable(&Op::Ping));
     }
@@ -966,6 +996,16 @@ mod tests {
         assert!(!must_forget(false, false));
         assert!(must_forget(false, true));
         assert!(must_forget(true, false));
+    }
+
+    #[test]
+    fn restore_terms_is_not_repeatable_and_waits_per_key() {
+        let r = |n: usize| Op::RestoreTerms { keys: vec!["k".into(); n], app: None };
+        assert!(!repeatable(&r(1)));
+        assert!(repeatable(&Op::ForgetTerms { keys: vec![] }));
+        assert_eq!(reply_wait(&r(0)), OPEN_TERM_WAIT);
+        assert_eq!(reply_wait(&r(3)), OPEN_TERM_WAIT * 3);
+        assert_eq!(reply_wait(&Op::ForgetTerms { keys: vec!["k".into(); 3] }), REPLY_WAIT);
     }
 
     /// The host's service waits 30 s for its terminal worker: B waits longer than that for `open_term`.

@@ -12,12 +12,14 @@ use crate::list::TermRow;
 use crate::proto::{self, Out, MAX_LINE};
 use crate::pty::launch;
 use crate::pty::local::{self, Status};
+use crate::pty::saved;
 use crate::pty::sweep;
 use crate::shells::{self, Shell};
 use crate::unread::Unread;
 use crate::wire::{Got, Lines, MAX_IN_LINE};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -48,6 +50,10 @@ const OLD_RUN: &str = "this window was opened by an older version and cannot be 
 const INVALID_NAME: &str = "invalid name";
 const UNKNOWN_APP: &str = "unknown terminal app";
 const NOT_STARTED: &str = "the terminal window did not start in 10 s";
+const NO_LAUNCHER: &str = "terminal app unavailable: a graphical desktop and installed terminal are required";
+const NO_SHELL: &str = "this shell is not found any more";
+/// `open`'s `from` for 新建: beside the terminal used last, else where the newest saved one was.
+const FROM_LAST: &str = "last";
 /// An open whose asker closed before its turn; nobody reads it.
 const ASKER_GONE: &str = "the asker left before the terminal window was opened";
 
@@ -58,16 +64,18 @@ pub struct ServeOpts {
     pub poll: Duration,
     /// The directory `rapp-term run` keeps its sockets and token in (`pty/<pid>.sock`, `pty.token`).
     pub pty_dir: PathBuf,
-    /// Run instead of `open -a`, for tests: `<program> <app> <file>`.
+    /// Run instead of `open -a`, for tests: `<program> <app> <file> [<tty to open beside>]`.
     pub launch_with: Option<PathBuf>,
     /// Look up the installed shells with this instead of the machine's own, for tests.
     pub shells_with: Option<Arc<dyn Fn() -> Vec<Shell> + Send + Sync>>,
+    /// Read the boot time with this instead of the machine's own, for tests.
+    pub boot_with: Option<fn() -> Option<u64>>,
 }
 
 impl ServeOpts {
     pub fn new(config: PathBuf) -> ServeOpts {
         let pty_dir = config.parent().unwrap_or(&config).join("term");
-        ServeOpts { config, poll: Duration::from_secs(2), pty_dir, launch_with: None, shells_with: None }
+        ServeOpts { config, poll: Duration::from_secs(2), pty_dir, launch_with: None, shells_with: None, boot_with: None }
     }
 }
 
@@ -86,6 +94,21 @@ enum Req {
     },
     End { term: String },
     Rename { term: String, name: String },
+    /// Restore these saved terminals (all there are when none is named), one tab beside the other, in `app`.
+    Restore {
+        #[serde(default)]
+        keys: Vec<String>,
+        #[serde(default)]
+        app: Option<String>,
+    },
+    /// Delete these saved terminals (all there are when none is named).
+    Forget {
+        #[serde(default)]
+        keys: Vec<String>,
+    },
+    /// The saved terminals with their directory and command, for this machine's own CLI: the service never
+    /// forwards it from a peer.
+    Saved,
 }
 
 /// The session list: this machine's sessions, and what it offers.
@@ -96,15 +119,32 @@ pub struct TermList {
 }
 
 /// One host of a `TermList`: this machine (`host` null).
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct HostRow {
     pub host: Option<String>,
     /// The terminal programs this host offers to start a session with.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub launchers: Vec<String>,
     /// The shells installed here, the user's own first, looked up on every list.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shells: Vec<Shell>,
+    /// The terminals that can be restored here, oldest start first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub saved: Vec<SavedRow>,
+}
+
+/// A terminal that can be restored, as a list shows it: never its directory, environments or command.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct SavedRow {
+    pub key: String,
+    pub name: String,
+    /// The program it last ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prog: Option<String>,
+    /// When it was saved last (Unix seconds).
+    pub saved: u64,
+    /// Whether it was saved before this machine last started.
+    pub boot: bool,
 }
 
 /// What every connection shares.
@@ -116,7 +156,7 @@ pub struct Worker {
     events: UnboundedSender<Value>,
     /// macOS launcher discovery is unchanged; Linux rechecks the desktop on demand.
     launchers: Vec<String>,
-    /// One `open` at a time.
+    /// One window opening at a time (an `open`, or one terminal of a `restore`).
     opening: tokio::sync::Mutex<()>,
     /// Bumped when a rename is done, so every watch hears it and a watch does not wait out its `poll` to show the new name.
     rescan: tokio::sync::watch::Sender<u64>,
@@ -201,7 +241,7 @@ impl Worker {
             Some(pid) => {
                 local::socket_path(dir, pid).is_ok_and(|p| p.exists())
                     && !statuses.iter().any(|s| s.pid == pid)
-                    && pid_alive(pid)
+                    && saved::pid_alive(pid)
             }
             // Never seen by this worker: it may be the socket that did not answer.
             None => busy,
@@ -282,6 +322,30 @@ impl Worker {
                 };
                 reply(&mut w, &v).await
             }
+            Req::Restore { keys, app } => {
+                let v = match cfg {
+                    Ok(_) => match self.restore(&keys, app.as_deref(), closed(&mut r)).await {
+                        (ids, None) => json!({ "ok": true, "ids": ids }),
+                        (ids, Some(e)) => json!({ "error": e, "ids": ids }),
+                    },
+                    Err(e) => json!({ "error": e }),
+                };
+                reply(&mut w, &v).await
+            }
+            Req::Forget { keys } => {
+                let v = match cfg {
+                    Ok(_) => json!({ "ok": true, "forgot": self.forget(&keys).await }),
+                    Err(e) => json!({ "error": e }),
+                };
+                reply(&mut w, &v).await
+            }
+            Req::Saved => {
+                let v = match cfg {
+                    Ok(_) => json!({ "ok": true, "saved": self.saved_local().await }),
+                    Err(e) => json!({ "error": e }),
+                };
+                reply(&mut w, &v).await
+            }
         };
         let _ = w.shutdown().await;
     }
@@ -297,13 +361,81 @@ impl Worker {
     /// This machine's sessions and what it offers.
     pub async fn list(&self) -> TermList {
         let statuses = self.pty_statuses().await;
-        TermList { terms: pty_rows(&self.unread, &statuses, unix_now()), hosts: self.hosts().await }
+        TermList { terms: pty_rows(&self.unread, &statuses, unix_now()), hosts: self.hosts(&statuses).await }
     }
 
-    /// This machine as a host, with the shells it has now.
-    async fn hosts(&self) -> Vec<HostRow> {
-        let shells = self.opts.shells_with.as_ref().map_or_else(installed_shells, |f| f());
-        vec![HostRow { host: None, launchers: self.available_launchers().await, shells }]
+    /// This machine as a host, with the shells it has now and the terminals that can be restored: not those of
+    /// `live` or of any other holder still there.
+    async fn hosts(&self, live: &[Status]) -> Vec<HostRow> {
+        let boot = self.boot_time();
+        let saved = self
+            .restorable(live)
+            .into_iter()
+            .map(|s| SavedRow { boot: boot.is_some_and(|b| s.saved < b), key: s.key, name: s.name, prog: s.prog, saved: s.saved })
+            .collect();
+        vec![HostRow { host: None, launchers: self.available_launchers().await, shells: self.shells(), saved }]
+    }
+
+    fn shells(&self) -> Vec<Shell> {
+        self.opts.shells_with.as_ref().map_or_else(installed_shells, |f| f())
+    }
+
+    fn boot_time(&self) -> Option<u64> {
+        self.opts.boot_with.map_or_else(saved::boot_time, |f| f())
+    }
+
+    /// The keys of the terminals alive now: those of `live`, and those of every holder whose socket a scan saw and
+    /// is still there (one too slow to answer is not gone).
+    fn live_keys(&self, live: &[Status]) -> HashSet<String> {
+        let mut keys: HashSet<String> = live.iter().filter_map(|s| s.key.clone()).collect();
+        keys.extend(lock(&self.seen).keys().cloned());
+        keys
+    }
+
+    /// The saved terminals that are not alive, oldest start first (pruning the old ones as it goes).
+    fn restorable(&self, live: &[Status]) -> Vec<saved::Snapshot> {
+        saved::restorable(&self.opts.pty_dir, &self.live_keys(live), self.boot_time(), unix_now())
+    }
+
+    /// The saved terminals not alive now, freshly scanned.
+    async fn restorable_now(&self) -> Vec<saved::Snapshot> {
+        let live = self.pty_statuses().await;
+        self.restorable(&live)
+    }
+
+    /// Delete the saved terminals `keys` (all of them for none) that are not alive; how many went.
+    async fn forget(&self, keys: &[String]) -> usize {
+        let mut n = 0;
+        for s in self.restorable_now().await {
+            if keys.is_empty() || keys.contains(&s.key) {
+                saved::remove(&self.opts.pty_dir, &s.key);
+                n += 1;
+            }
+        }
+        n
+    }
+
+    /// The saved terminals not alive, with their directory and command: only for this machine's own CLI.
+    async fn saved_local(&self) -> Vec<Value> {
+        let boot = self.boot_time();
+        self.restorable_now()
+            .await
+            .into_iter()
+            .map(|s| {
+                let mut v = json!({
+                    "key": s.key,
+                    "name": s.name,
+                    "saved": s.saved,
+                    "boot": boot.is_some_and(|b| s.saved < b),
+                });
+                for (k, x) in [("prog", s.prog), ("cmd", s.cmd), ("cwd", s.cwd)] {
+                    if let Some(x) = x {
+                        v[k] = json!(x);
+                    }
+                }
+                v
+            })
+            .collect()
     }
 
     async fn available_launchers(&self) -> Vec<String> {
@@ -356,8 +488,9 @@ impl Worker {
             let Some(terms) = lock(&pty).clone() else {
                 continue;
             };
-            // The shells are looked up on every pass: one installed or removed is a change too.
-            let list = fit(TermList { terms, hosts: self.hosts().await });
+            // The shells and the saved terminals are looked up on every pass: one installed or removed, or one
+            // restored or forgotten, is a change too. The watch's own scans keep the live holders in `seen`.
+            let list = fit(TermList { terms, hosts: self.hosts(&[]).await });
             if sent.as_ref() != Some(&list) {
                 reply(w, &serde_json::to_value(&list).expect("a list always serializes")).await?;
                 sent = Some(list);
@@ -435,10 +568,25 @@ impl Worker {
         });
     }
 
+    /// Whether a window of `app` can be opened here, as `launchers` (this machine's now) says.
+    fn app_ok(&self, app: &str, launchers: &[String]) -> Result<(), &'static str> {
+        let test = self.opts.launch_with.is_some();
+        if !launch::known(app) && !(test && ["Terminal", "iTerm"].contains(&app)) {
+            return Err(UNKNOWN_APP);
+        }
+        if !test && !launchers.iter().any(|l| l == app) {
+            return Err(NO_LAUNCHER);
+        }
+        Ok(())
+    }
+
     /// Open a window of `app` that runs `rapp-term run` with `shell` (the default one when none is named) as a login
     /// shell, and wait for that `run` to show itself: the id of its session. One at a time, so each wait has only its
     /// own ticket to look for. When `gone` completes before this open's turn (its asker gave up waiting), no window
     /// is opened: nobody would be told of it, and a backlog of such opens would all start at once.
+    ///
+    /// `from` is a session to open beside, or [`FROM_LAST`]: beside the one typed in last, else in the directory of
+    /// the newest saved terminal, else at home.
     async fn open(
         &self,
         shell: Option<&str>,
@@ -446,17 +594,17 @@ impl Worker {
         from: Option<&str>,
         gone: impl Future<Output = ()>,
     ) -> Result<String, String> {
-        let known = launch::known(app) || (self.opts.launch_with.is_some() && ["Terminal", "iTerm"].contains(&app));
-        if !known { return Err(UNKNOWN_APP.into()); }
-        if self.opts.launch_with.is_none() && !self.available_launchers().await.iter().any(|l| l == app) {
-            return Err("terminal app unavailable: a graphical desktop and installed terminal are required".into());
-        }
-        let shells = self.opts.shells_with.as_ref().map_or_else(installed_shells, |f| f());
-        let source = match from.and_then(|f| TermId::parse(f).ok()).filter(|id| id.backend == PTY && id.host.is_none()) {
-            Some(id) => {
-                let statuses = self.pty_statuses().await;
-                source_of(statuses.iter().find(|s| is_session(s, &id.name)), &shells)
-            }
+        self.app_ok(app, &self.available_launchers().await)?;
+        let shells = self.shells();
+        let source = match from {
+            Some(FROM_LAST) => self.last_source(&shells).await,
+            Some(f) => match TermId::parse(f).ok().filter(|id| id.backend == PTY && id.host.is_none()) {
+                Some(id) => {
+                    let statuses = self.pty_statuses().await;
+                    source_of(statuses.iter().find(|s| is_session(s, &id.name)), &shells)
+                }
+                None => Source::default(),
+            },
             None => Source::default(),
         };
         let shell = shell.or(source.shell.as_deref());
@@ -464,30 +612,100 @@ impl Worker {
             Some(p) => shells.iter().find(|s| s.path == p),
             None => shells.iter().find(|s| s.default),
         };
-        let shell = found.ok_or("this shell is not found any more")?.path.clone();
-        const FAILED: &str = "could not open the terminal window";
+        let shell = found.ok_or(NO_SHELL)?.path.clone();
         tokio::pin!(gone);
         let _one = tokio::select! {
             biased;
             _ = &mut gone => return Err(ASKER_GONE.into()),
             one = self.opening.lock() => one,
         };
+        self.start(app, &shell, source.cwd.as_deref(), None, source.tty.as_deref()).await.map(|s| pty_id(&s))
+    }
+
+    /// What 新建 takes after: the live terminal typed in last (moved last, when none was typed in); with none, the
+    /// directory of the newest saved terminal, if it still is one; with none of those, nothing (home).
+    async fn last_source(&self, shells: &[Shell]) -> Source {
+        let statuses = self.pty_statuses().await;
+        if let Some(st) = statuses.iter().max_by_key(|s| (s.input, s.activity)) {
+            return source_of(Some(st), shells);
+        }
+        let newest = self.restorable(&statuses).into_iter().max_by_key(|s| s.saved);
+        Source { cwd: newest.and_then(|s| s.cwd).map(PathBuf::from).filter(|p| p.is_dir()), ..Source::default() }
+    }
+
+    /// Restore the saved terminals `keys` (all of them for none), oldest start first, each a tab beside the one
+    /// before, in `app` (when it is not one this machine has, its first). One window at a time, under the same lock
+    /// as `open`, so a 新建 can go in between; a terminal that came alive meanwhile (another restore) is passed over.
+    /// The ids opened, and the first failure, which ends it.
+    async fn restore(
+        &self,
+        keys: &[String],
+        app: Option<&str>,
+        gone: impl Future<Output = ()>,
+    ) -> (Vec<String>, Option<String>) {
+        let mut ids = Vec::new();
+        let launchers = self.available_launchers().await;
+        let app = match app.filter(|a| self.app_ok(a, &launchers).is_ok()) {
+            Some(a) => a.to_string(),
+            None => match launchers.first() {
+                Some(a) => a.clone(),
+                None if self.opts.launch_with.is_some() => "Terminal".into(),
+                None => return (ids, Some(NO_LAUNCHER.into())),
+            },
+        };
+        // A key that is no snapshot's (a bad one among them) is passed over.
+        let wanted: Vec<String> = self
+            .restorable_now()
+            .await
+            .into_iter()
+            .map(|s| s.key)
+            .filter(|k| keys.is_empty() || keys.contains(k))
+            .collect();
+        let shells = self.shells();
+        let mut tty: Option<String> = None;
+        tokio::pin!(gone);
+        for key in wanted {
+            let _one = tokio::select! {
+                biased;
+                _ = &mut gone => return (ids, Some(ASKER_GONE.into())),
+                one = self.opening.lock() => one,
+            };
+            let Some(snap) = self.restorable_now().await.into_iter().find(|s| s.key == key) else { continue };
+            // Its shell when it is still installed, else the default one.
+            let shell = shells.iter().find(|s| s.path == snap.shell).or_else(|| shells.iter().find(|s| s.default));
+            let Some(shell) = shell.map(|s| s.path.clone()) else { return (ids, Some(NO_SHELL.into())) };
+            let cwd = snap.cwd.map(PathBuf::from).filter(|p| p.is_dir());
+            match self.start(&app, &shell, cwd.as_deref(), Some(&key), tty.as_deref()).await {
+                Ok(st) => {
+                    ids.push(pty_id(&st));
+                    tty = st.tty.filter(|t| !t.is_empty()).or(tty);
+                }
+                Err(e) => return (ids, Some(e)),
+            }
+        }
+        (ids, None)
+    }
+
+    /// Open the window (the caller holds `opening`) and wait for its `run`: its status.
+    async fn start(
+        &self,
+        app: &str,
+        shell: &str,
+        cwd: Option<&std::path::Path>,
+        restore: Option<&str>,
+        tty: Option<&str>,
+    ) -> Result<Status, String> {
+        const FAILED: &str = "could not open the terminal window";
         let dir = &self.opts.pty_dir;
         local::ensure_dirs(dir).map_err(|_| FAILED)?;
         sweep_launch(&dir.join("launch"));
         let token = local::token(dir).map_err(|_| FAILED)?;
         let bin = std::env::current_exe().map_err(|_| FAILED)?;
         let ticket = ticket();
-        let body = launch::command_file(
-            &bin,
-            dir,
-            &ticket,
-            &shell,
-            source.cwd.as_deref(),
-        );
+        let body = launch::command_file(&bin, dir, &ticket, shell, cwd, restore);
         let file = dir.join("launch").join(format!("{ticket}.command"));
         write_private(&file, &body).map_err(|_| FAILED)?;
-        let res = self.wait_for(&file, app, &ticket, dir, &token, source.tty.as_deref()).await;
+        let res = self.wait_for(&file, app, &ticket, dir, &token, tty).await;
         // A window that is slow to start may still read it after the wait: that one is left for the sweep.
         if !matches!(&res, Err(e) if e == NOT_STARTED || e == launch::NO_ANSWER || e == launch::START_TIMEOUT) {
             let _ = std::fs::remove_file(&file);
@@ -503,7 +721,7 @@ impl Worker {
         dir: &std::path::Path,
         token: &str,
         source_tty: Option<&str>,
-    ) -> Result<String, String> {
+    ) -> Result<Status, String> {
         let (app, file, with) = (app.to_string(), file.to_path_buf(), self.opts.launch_with.clone());
         let tty = source_tty.map(str::to_string);
         let started =
@@ -518,7 +736,7 @@ impl Worker {
         loop {
             let found = local::scan(dir, token).await.into_iter().find(|s| s.ticket.as_deref() == Some(ticket));
             if let Some(s) = found {
-                return Ok(pty_id(&s));
+                return Ok(s);
             }
             if tokio::time::Instant::now() >= end {
                 return Err(if cut_off { launch::NO_ANSWER } else { NOT_STARTED }.into());
@@ -672,14 +890,6 @@ async fn scan_pty(dir: &std::path::Path, seen: &Seen) -> (Vec<Status>, bool) {
         seen.insert(s.key.clone().unwrap_or_else(|| s.name.clone()), s.pid);
     }
     got
-}
-
-/// Whether process `pid` is alive (one of another user counts).
-fn pid_alive(pid: u32) -> bool {
-    let Ok(pid) = libc::pid_t::try_from(pid) else { return false };
-    // SAFETY: signal 0 only checks that the process exists.
-    let ok = unsafe { libc::kill(pid, 0) == 0 };
-    ok || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 /// The id of a `run` session: its key, or its name when it was started by a version that has no key.
@@ -1022,6 +1232,7 @@ mod tests {
             cwd: None,
             shell: None,
             tty: None,
+            input: 0,
         }
     }
 
@@ -1117,7 +1328,7 @@ mod tests {
             fg: None,
             shell: None,
         };
-        let hosts = vec![HostRow { host: None, launchers: Vec::new(), shells: installed_shells() }];
+        let hosts = vec![HostRow { host: None, launchers: Vec::new(), shells: installed_shells(), saved: Vec::new() }];
         let list = TermList { terms: (0..1000).map(row).collect(), hosts };
         let cut = fit(list.clone());
         assert!(!cut.terms.is_empty() && cut.terms.len() < 1000);
@@ -1177,6 +1388,128 @@ mod tests {
         let r: Req = serde_json::from_str(r#"{"op":"open","app":"Terminal","from":"term:pty:ab"}"#).unwrap();
         assert!(matches!(r, Req::Open { from: Some(_), .. }));
         assert!(matches!(serde_json::from_str(r#"{"op":"end","term":"x"}"#).unwrap(), Req::End { .. }));
+    }
+
+    #[test]
+    fn req_parses_restore_forget_saved() {
+        let r: Req = serde_json::from_str(r#"{"op":"restore"}"#).unwrap();
+        assert!(matches!(r, Req::Restore { ref keys, app: None } if keys.is_empty()), "{r:?}");
+        let r: Req = serde_json::from_str(r#"{"op":"restore","keys":["0123456789abcdef"],"app":"Terminal"}"#).unwrap();
+        assert!(
+            matches!(r, Req::Restore { ref keys, app: Some(ref a) } if keys == &["0123456789abcdef"] && a == "Terminal"),
+            "{r:?}"
+        );
+        let r: Req = serde_json::from_str(r#"{"op":"forget"}"#).unwrap();
+        assert!(matches!(r, Req::Forget { ref keys } if keys.is_empty()), "{r:?}");
+        let r: Req = serde_json::from_str(r#"{"op":"forget","keys":["0123456789abcdef"]}"#).unwrap();
+        assert!(matches!(r, Req::Forget { ref keys } if keys.len() == 1), "{r:?}");
+        assert!(matches!(serde_json::from_str(r#"{"op":"saved"}"#).unwrap(), Req::Saved));
+        assert!(serde_json::from_str::<Req>(r#"{"op":"restore","keys":"x"}"#).is_err());
+    }
+
+    #[test]
+    fn host_row_saved_is_optional() {
+        let h = HostRow { host: None, launchers: vec!["Terminal".into()], shells: shells_for_test(), saved: Vec::new() };
+        let v = serde_json::to_value(&h).unwrap();
+        assert!(v.get("saved").is_none(), "{v}");
+        let old = r#"{"host":null,"launchers":["Terminal"],"shells":[{"name":"zsh","path":"/bin/zsh","default":true}]}"#;
+        let back: HostRow = serde_json::from_str(old).unwrap();
+        assert!(back.saved.is_empty());
+        assert_eq!(back.launchers, ["Terminal"]);
+        let row = SavedRow { key: "0123456789abcdef".into(), name: "t".into(), prog: None, saved: 5, boot: true };
+        let h = HostRow { saved: vec![row.clone()], ..back };
+        let v = serde_json::to_value(&h).unwrap();
+        assert_eq!(v["saved"], json!([{"key": "0123456789abcdef", "name": "t", "saved": 5, "boot": true}]));
+        let back: HostRow = serde_json::from_value(v).unwrap();
+        assert_eq!(back.saved, [row]);
+    }
+
+    /// A worker on `dir`, with the test shells, a launcher that does nothing and `boot` for the boot time.
+    fn worker_in(dir: &std::path::Path, boot: Option<fn() -> Option<u64>>) -> Worker {
+        let mut opts = ServeOpts::new(dir.join("term.json"));
+        opts.launch_with = Some(PathBuf::from("/usr/bin/true"));
+        opts.shells_with = Some(Arc::new(shells_for_test));
+        opts.boot_with = boot;
+        Worker::new("t".into(), opts, tokio::sync::mpsc::unbounded_channel().0)
+    }
+
+    fn snapshot(key: &str, cwd: Option<&str>, saved: u64) -> crate::pty::saved::Snapshot {
+        crate::pty::saved::Snapshot {
+            v: 1,
+            key: key.into(),
+            name: format!("n{}", &key[15..]),
+            shell: "/bin/zsh".into(),
+            cwd: cwd.map(Into::into),
+            cmd: Some("vim /secret/notes.txt".into()),
+            prog: Some("vim".into()),
+            venv: Some("/secret/venv".into()),
+            started: saved - 10,
+            saved,
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn hosts_lists_restorable_without_cwd() {
+        let d = tempfile::tempdir().unwrap();
+        let w = worker_in(d.path(), None);
+        let now = unix_now();
+        let (dead, live) = ("0123456789abcde1", "0123456789abcde2");
+        crate::pty::saved::write(&w.opts.pty_dir, &snapshot(dead, Some("/secret/dir"), now - 60)).unwrap();
+        crate::pty::saved::write(&w.opts.pty_dir, &snapshot(live, Some("/secret/dir"), now - 30)).unwrap();
+        let mut st = status_with(None);
+        st.key = Some(live.into());
+        let hosts = w.hosts(&[st]).await;
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(
+            hosts[0].saved,
+            [SavedRow { key: dead.into(), name: "n1".into(), prog: Some("vim".into()), saved: now - 60, boot: false }]
+        );
+        let json = serde_json::to_string(&hosts).unwrap();
+        assert!(!json.contains("secret") && !json.contains("venv") && !json.contains("cmd"), "{json}");
+        // The live one's file is still there.
+        assert!(crate::pty::saved::read(&w.opts.pty_dir, live).is_some());
+    }
+
+    #[tokio::test]
+    async fn a_busy_live_holder_is_not_pruned_offered_or_restored() {
+        let d = tempfile::Builder::new().prefix("rt").tempdir_in("/tmp").unwrap();
+        let w = worker_in(d.path(), Some(|| Some(1)));
+        let now = unix_now();
+        // A holder (this process) whose socket takes connections but never answers: busy, so no scan lists it.
+        let sock = crate::pty::local::socket_path(&w.opts.pty_dir, std::process::id()).unwrap();
+        std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+        let _busy = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        let k = "0123456789abcde0";
+        let held = crate::pty::saved::Snapshot { pid: Some(std::process::id()), ..snapshot(k, None, now - 40 * 86_400) };
+        crate::pty::saved::write(&w.opts.pty_dir, &held).unwrap();
+        for i in 1..=50u64 {
+            crate::pty::saved::write(&w.opts.pty_dir, &snapshot(&format!("{:016x}", 0x100 + i), None, now - i)).unwrap();
+        }
+        let live = w.pty_statuses().await;
+        assert!(live.iter().all(|s| s.key.as_deref() != Some(k)), "it is busy: no scan lists it");
+        let hosts = w.hosts(&live).await;
+        assert_eq!(hosts[0].saved.len(), 50);
+        assert!(hosts[0].saved.iter().all(|s| s.key != k), "not offered");
+        assert_eq!(crate::pty::saved::read(&w.opts.pty_dir, k), Some(held.clone()), "neither 30 days nor 50 prune it");
+        let (ids, err) = w.restore(&[k.to_string()], None, std::future::pending()).await;
+        assert_eq!((ids, err), (Vec::<String>::new(), None), "no second holder");
+        assert!(crate::pty::saved::read(&w.opts.pty_dir, k).is_some());
+    }
+
+    #[tokio::test]
+    async fn boot_flag_from_boot_time() {
+        let d = tempfile::tempdir().unwrap();
+        let now = unix_now();
+        let (before, after) = ("0123456789abcde1", "0123456789abcde2");
+        let w = worker_in(d.path(), Some(|| Some(unix_now() - 500)));
+        crate::pty::saved::write(&w.opts.pty_dir, &snapshot(before, None, now - 1000)).unwrap();
+        crate::pty::saved::write(&w.opts.pty_dir, &snapshot(after, None, now - 10)).unwrap();
+        let boot: Vec<_> = w.hosts(&[]).await[0].saved.iter().map(|s| (s.key.clone(), s.boot)).collect();
+        assert_eq!(boot, [(before.to_string(), true), (after.to_string(), false)]);
+        // The boot time unknown: none is from before it.
+        let w = worker_in(d.path(), Some(|| None));
+        assert!(w.hosts(&[]).await[0].saved.iter().all(|s| !s.boot));
     }
 
     #[test]

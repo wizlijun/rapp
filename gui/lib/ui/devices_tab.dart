@@ -14,6 +14,7 @@ import 'lifecycle.dart';
 import 'main_state.dart';
 import 'session_model.dart';
 import 'tab_chip.dart';
+import 'term_restore_dialog.dart';
 import 'term_status.dart';
 import 'shares_section.dart';
 import 'terms_entry.dart';
@@ -405,6 +406,23 @@ class _DevicesTabState extends State<DevicesTab> {
                   onRename: shells == null ? null : (v) => _rename(id, r, v),
                 ),
               ),
+            if (state.savedTerms(id).isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text('上次没关的 ${state.savedTerms(id).length} 个终端', key: const Key('saved-terms-label'), style: TextStyle(color: t.text)),
+                    RappButton.secondary(
+                      key: const Key('saved-terms-restore'),
+                      label: '恢复…',
+                      onPressed: state.hubUsable ? () => showTermRestore(context, state, id) : null,
+                    ),
+                  ],
+                ),
+              ),
             if (_renameErrors[id] != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
@@ -509,7 +527,7 @@ class _DevicesTabState extends State<DevicesTab> {
       _shellErrors.remove(id);
     });
     try {
-      await state.openText(id, shell: path);
+      await state.openText(id, shell: path, from: state.newTermSource(id));
     } catch (e) {
       if (mounted) setState(() => _shellErrors[id] = e is HubException ? e.message : '$e');
     } finally {
