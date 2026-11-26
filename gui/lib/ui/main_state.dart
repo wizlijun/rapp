@@ -11,6 +11,7 @@ import 'package:flutter/services.dart' show Clipboard;
 import 'package:flutter/widgets.dart' show StringCharacters;
 
 import '../embed/phrases.dart';
+import '../embed/strip_cmds.dart';
 import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../embed/stream_choice.dart';
@@ -3929,15 +3930,18 @@ class MainState extends ChangeNotifier {
   }
 
   /// 常用语 replaced (edited, reordered, deleted, 恢复默认); saved.
-  void setPhrases(List<Phrase> v) {
+  void setPhrases(List<Phrase> v) => setStripItems([...prefs.phrases.whereType<StripCmd>(), ...v]);
+
+  /// The whole strip list (commands and phrases) replaced; saved.
+  void setStripItems(List<StripItem> v) {
     prefs.phrases = List.of(v);
     _save();
   }
 
   /// 加到常用语: [text] at the end unless a phrase already has it. False when it was there (or blank).
   bool addPhrase(String text) {
-    if (text.trim().isEmpty || prefs.phrases.any((p) => p.text == text)) return false;
-    setPhrases([...prefs.phrases, Phrase(text)]);
+    if (text.trim().isEmpty || prefs.phrases.whereType<Phrase>().any((p) => p.text == text)) return false;
+    setStripItems([...prefs.phrases, Phrase(text)]);
     return true;
   }
 

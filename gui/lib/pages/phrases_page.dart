@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 
 import '../embed/phrases.dart';
+import '../embed/strip_cmds.dart';
 import '../ui/controls.dart';
 import '../ui/main_state.dart';
 import '../ui/tokens.dart';
@@ -81,7 +82,7 @@ class PhrasesPage extends StatelessWidget {
   const PhrasesPage({super.key, required this.state});
   final MainState state;
 
-  List<Phrase> get _list => state.prefs.phrases;
+  List<Phrase> get _list => state.prefs.phrases.whereType<Phrase>().toList();
 
   Future<void> _edit(BuildContext context, int? i) async {
     final p = await editPhrase(context, p: i == null ? null : _list[i]);
@@ -157,7 +158,7 @@ class PhrasesPage extends StatelessWidget {
               RappButton.quiet(
                   key: const Key('phrase-reset'),
                   label: '恢复默认',
-                  onPressed: () => state.setPhrases(defaultPhrases)),
+                  onPressed: () => state.setStripItems(defaultStripItems)),
             ]),
             const SizedBox(height: 16),
             Text('常用语发出后总会按一次回车。远端停在菜单或选择框上时，回车会选中当前高亮的那一项，点之前看一眼画面。',

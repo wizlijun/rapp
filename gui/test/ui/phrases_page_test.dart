@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/phrases.dart';
+import 'package:rapp/embed/strip_cmds.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/pages/phrases_page.dart';
 import 'package:rapp/paths.dart';
@@ -11,6 +12,11 @@ import 'package:rapp/ui/prefs.dart';
 
 import '../fakes.dart';
 import 'helpers.dart';
+
+const _oldTen = [
+  Phrase('继续'), Phrase('确认'), Phrase('听你的'), Phrase('按你推荐的来'), Phrase('进度'),
+  Phrase('全部做完，中途不用问我'), Phrase('先出方案，别改代码'), Phrase('跑一下测试'), Phrase('提交并推送'), Phrase('总结一下改了什么'),
+];
 
 void main() {
   late Directory tmp;
@@ -21,6 +27,7 @@ void main() {
     Directory('${tmp.path}/local').createSync();
     File('${tmp.path}/local/service.json').writeAsStringSync('{"id":"dev1"}');
     s = MainState(hub: HubClient(FakeTransport()), data: DataDir(tmp.path), prefs: UiPrefs(), port: FakeSessionPort());
+    s.setStripItems(_oldTen); // the list these tests were written for: phrases only
   });
 
   tearDown(() {
@@ -39,7 +46,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  List<String> texts() => [for (final p in s.prefs.phrases) p.text];
+  List<String> texts() => [for (final p in s.prefs.phrases.whereType<Phrase>()) p.text];
 
   testWidgets('the switch turns the strip off; the list is the defaults', (tester) async {
     await open(tester);
@@ -63,10 +70,10 @@ void main() {
     await tester.tap(find.byKey(const Key('phrase-save')));
     await tester.pumpAndSettle();
     expect(s.prefs.phrases.last, const Phrase('帮我看看日志', put: true));
-    expect(s.prefs.phrases, hasLength(defaultPhrases.length + 1));
+    expect(s.prefs.phrases, hasLength(_oldTen.length + 1));
   });
 
-  testWidgets('tap a row edits it; swipe deletes; 恢复默认 brings the ten back', (tester) async {
+  testWidgets('tap a row edits it; swipe deletes; 恢复默认 brings the defaults back', (tester) async {
     await open(tester);
     await tester.tap(find.byKey(const Key('phrase-row-0')));
     await tester.pumpAndSettle();
@@ -78,10 +85,10 @@ void main() {
     await tester.drag(find.byKey(const Key('phrase-row-1')), const Offset(-600, 0));
     await tester.pumpAndSettle();
     expect(texts(), isNot(contains('确认')));
-    expect(texts(), hasLength(defaultPhrases.length - 1));
+    expect(texts(), hasLength(_oldTen.length - 1));
 
     await tester.tap(find.byKey(const Key('phrase-reset')));
     await tester.pumpAndSettle();
-    expect(s.prefs.phrases, defaultPhrases);
+    expect(s.prefs.phrases, defaultStripItems);
   });
 }

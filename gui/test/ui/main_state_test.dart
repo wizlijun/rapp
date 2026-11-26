@@ -111,7 +111,7 @@ void main() {
   test('addPhrase appends once and saves; a repeat or a blank is refused', () {
     Directory('${tmp.path}/local').createSync(recursive: true);
     File('${tmp.path}/local/service.json').writeAsStringSync('{"id":"dev1"}');
-    s.setPhrases(const [Phrase('继续')]);
+    s.setStripItems(const [Phrase('继续')]);
     expect(s.addPhrase('跑一下测试'), isTrue);
     expect(s.addPhrase('继续'), isFalse);
     expect(s.addPhrase('  '), isFalse);

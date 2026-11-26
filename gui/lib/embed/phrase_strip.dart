@@ -40,7 +40,7 @@ class _PhraseStripState extends State<PhraseStrip> {
     super.dispose();
   }
 
-  List<Phrase> get _list => widget.state.prefs.phrases;
+  List<Phrase> get _list => widget.state.prefs.phrases.whereType<Phrase>().toList();
 
   /// One tap on [p] (the [i]th; null from the 全部 sheet).
   PhraseOutcome _tap(Phrase p, int? i) {
