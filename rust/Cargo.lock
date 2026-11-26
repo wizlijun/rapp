@@ -1509,6 +1509,7 @@ dependencies = [
  "anyhow",
  "rapp-net",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 

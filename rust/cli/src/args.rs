@@ -1,10 +1,14 @@
-//! The command line: `rapp share|unshare|hosts|pipe`.
+//! The command line: `rapp share|unshare|hosts|pipe|update`.
 
 pub const USAGE: &str = "\
 rapp share [端口…] [--allow 设备,设备] [--raw] [--note 备注] [--proto http|https|tcp|ssh]
 rapp unshare <端口>
 rapp hosts
-rapp pipe <名字> <端口>";
+rapp pipe <名字> <端口>
+rapp update [--yes] [--timeout 秒] [--json]      立即升级到最新版
+rapp update check [--timeout 秒] [--json]       只检查（并下载），不装
+rapp update status [--json]                     看升级状态
+rapp update rollback [--timeout 秒] [--json]    回到上一版";
 
 #[derive(Debug, PartialEq)]
 pub enum Cmd {
@@ -13,6 +17,15 @@ pub enum Cmd {
     Unshare { port: u16 },
     Hosts,
     Pipe { to: String, port: u16 },
+    Update { what: Upd, yes: bool, timeout: Option<u64>, json: bool },
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum Upd {
+    Install,
+    Check,
+    Status,
+    Rollback,
 }
 
 /// The one line for a `--proto` that is missing or not a protocol the service knows: the
@@ -42,8 +55,44 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
             [to, p] => Ok(Cmd::Pipe { to: to.clone(), port: port(p)? }),
             [_, _, extra, ..] => Err(format!("多写了：{extra}")),
         },
+        "update" => update(rest),
         other => Err(format!("不认识的命令：{other}")),
     }
+}
+
+const TIMEOUT_ERROR: &str = "--timeout 后面要写秒数";
+
+fn update(args: &[String]) -> Result<Cmd, String> {
+    let (mut what, mut yes, mut timeout, mut json) = (None, false, None, false);
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--yes" => yes = true,
+            "--json" => json = true,
+            "--timeout" => {
+                let n = it.next().and_then(|v| v.parse::<u64>().ok()).filter(|&n| n >= 1).ok_or(TIMEOUT_ERROR)?;
+                timeout = Some(n);
+            }
+            flag if flag.starts_with("--") => return Err(format!("不认识的选项：{flag}")),
+            word if what.is_none() => {
+                what = Some(match word {
+                    "check" => Upd::Check,
+                    "status" => Upd::Status,
+                    "rollback" => Upd::Rollback,
+                    _ => return Err(format!("不认识的命令：update {word}")),
+                })
+            }
+            extra => return Err(format!("多写了：{extra}")),
+        }
+    }
+    let what = what.unwrap_or(Upd::Install);
+    if yes && what != Upd::Install {
+        return Err("只有 rapp update 能用 --yes".into());
+    }
+    if timeout.is_some() && what == Upd::Status {
+        return Err("rapp update status 不用 --timeout".into());
+    }
+    Ok(Cmd::Update { what, yes, timeout, json })
 }
 
 fn share(args: &[String]) -> Result<Cmd, String> {
@@ -133,5 +182,25 @@ mod tests {
         }
         assert_eq!(p("pipe gpu1").unwrap_err(), "要写名字和端口");
         assert_eq!(p("frobnicate").unwrap_err(), "不认识的命令：frobnicate");
+    }
+
+    #[test]
+    fn update_commands() {
+        let u = |what, yes, timeout, json| Ok(Cmd::Update { what, yes, timeout, json });
+        assert_eq!(p("update"), u(Upd::Install, false, None, false));
+        assert_eq!(p("update --yes --timeout 30 --json"), u(Upd::Install, true, Some(30), true));
+        assert_eq!(p("update check --json"), u(Upd::Check, false, None, true));
+        assert_eq!(p("update --json check"), u(Upd::Check, false, None, true));
+        assert_eq!(p("update status"), u(Upd::Status, false, None, false));
+        assert_eq!(p("update rollback --timeout 5"), u(Upd::Rollback, false, Some(5), false));
+        assert_eq!(p("update status --timeout 3").unwrap_err(), "rapp update status 不用 --timeout");
+        assert_eq!(p("update check --yes").unwrap_err(), "只有 rapp update 能用 --yes");
+        assert_eq!(p("update rollback --yes").unwrap_err(), "只有 rapp update 能用 --yes");
+        for bad in ["update --timeout 0", "update --timeout x", "update --timeout", "update --timeout -3"] {
+            assert_eq!(p(bad).unwrap_err(), "--timeout 后面要写秒数", "{bad}");
+        }
+        assert_eq!(p("update now").unwrap_err(), "不认识的命令：update now");
+        assert_eq!(p("update check status").unwrap_err(), "多写了：status");
+        assert_eq!(p("update --force").unwrap_err(), "不认识的选项：--force");
     }
 }
