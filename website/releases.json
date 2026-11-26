@@ -2,6 +2,30 @@
   {
     "assets": [
       {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.38/rapp-0.15.38-omarchy-x86_64-SHA256SUMS",
+        "name": "rapp-0.15.38-omarchy-x86_64-SHA256SUMS",
+        "size": 209
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.38/rapp-0.15.38-omarchy-x86_64.tar.gz",
+        "name": "rapp-0.15.38-omarchy-x86_64.tar.gz",
+        "size": 25379064
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.38/rapp-omarchy-0.15.38-1-x86_64.pkg.tar.zst",
+        "name": "rapp-omarchy-0.15.38-1-x86_64.pkg.tar.zst",
+        "size": 24200139
+      }
+    ],
+    "draft": false,
+    "html_url": "https://github.com/wizlijun/rapp/releases/tag/v0.15.38",
+    "prerelease": false,
+    "published_at": "2026-11-26T03:27:10Z",
+    "tag_name": "v0.15.38"
+  },
+  {
+    "assets": [
+      {
         "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.37/latest.json",
         "name": "latest.json",
         "size": 984

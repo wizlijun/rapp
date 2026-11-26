@@ -1201,3 +1201,10 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] [Linux v0.15.36](https://github.com/wizlijun/rapp/releases/tag/v0.15.36) 已发布（源码 `5b9ce64e`，`--latest=false`）；两包 41 文件逐字节一致、14 个 ELF 依赖完整、`BUILD-INFO.json`、协议 v16 版本校验与隔离网络命名空间服务/CLI/端口共享测试通过；三个远端附件大小与 SHA256 与本地一致，macOS Latest 保留 `v0.15.35`。
 - [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01536-parity.md`。
 - [ ] 实机验收：Linux 连接 macOS 0.15.35 验证协议 v16 状态规则推断显示；Linux 本地验证 `Ctrl+Shift+T`/`Ctrl+Shift+W`、宿主终端 `<目录> · <程序>` 标题与总览本机列「正在被接入」。
+
+## Linux 0.15.38 新建终端防重开与前台程序标题对齐与发布（2026-11-26）
+
+- [x] 对齐 macOS 0.15.37：`rapp-term serve` 跳过请求方已断开的排队 `open`、`rapp-hub` 禁止重发 `open_term`/`end_term` 并将 `open_term` 超时放宽至 45 秒、GUI 单设备「新建」串行互斥（提示「正在新建终端，请稍候」），以及文字终端标题显示前台程序 `<程序> · <标题>` 且 `CLI` 移至副标题。
+- [x] 补充 `TargetPlatform.linux` 回归用例（覆盖总览终端块 `claude · ~/git/rapp · 2` 前台标题、`CLI · …` 副标题与「新建」单并发防重开提示）；Flutter 3.50.0 全量 3266 项通过（3 跳过），`analyze` 无 error/warning；Rust 全套 clippy `-D warnings` 与测试通过。
+- [x] [Linux v0.15.38](https://github.com/wizlijun/rapp/releases/tag/v0.15.38) 已发布（源码 `8ac509fe`，`--latest=false`）；两包 41 文件逐字节一致、14 个 ELF 依赖完整、`BUILD-INFO.json` 与隔离网络命名空间服务/CLI/端口共享测试通过；三个远端附件大小与 SHA256 与本地一致，macOS Latest 保留 `v0.15.37`。
+- [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01538-parity.md`。
