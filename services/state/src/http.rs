@@ -1,5 +1,6 @@
 use std::convert::Infallible;
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -11,7 +12,9 @@ use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
+use tokio::sync::Notify;
 
+use crate::disk;
 use crate::event::parse_line;
 use crate::store::Store;
 use crate::{Config, Log};
@@ -26,13 +29,54 @@ fn reply(status: StatusCode, body: Value) -> Response<Full<Bytes>> {
 
 const MAX_BODY: usize = 256 * 1024;
 const MAX_EVENTS: usize = 50;
+const SAVE_AFTER: Duration = Duration::from_secs(1);
 const EXPIRE_EVERY: Duration = Duration::from_secs(600);
 
 type Shared = Arc<Mutex<Store>>;
 
-/// The one place the store is built; Task 4 swaps in loading from disk.
-fn make_store(cfg: &Config) -> Store {
-    Store::new(cfg.keep_days, cfg.keep_events)
+/// The one place the store is built: loaded from `cfg.data` when set, with this run's limits.
+fn make_store(cfg: &Config, log: &Log) -> Store {
+    let loaded = cfg.data.as_deref().and_then(|dir| {
+        let (store, why) = disk::load(dir);
+        if let Some(kind) = why {
+            log.emit("load_failed", json!({"kind": kind}));
+        }
+        store
+    });
+    match loaded {
+        Some(mut st) => {
+            st.set_limits(cfg.keep_days, cfg.keep_events);
+            st.expire(now());
+            st
+        }
+        None => Store::new(cfg.keep_days, cfg.keep_events),
+    }
+}
+
+/// Wakes the saver; `None` in memory mode.
+type Dirty = Option<Arc<Notify>>;
+
+fn mark(dirty: &Dirty) {
+    if let Some(n) = dirty {
+        n.notify_one();
+    }
+}
+
+/// After a change, wait 1 s (batching further changes), then save a snapshot.
+async fn saver(store: Shared, dir: PathBuf, notify: Arc<Notify>, log: Log) {
+    loop {
+        notify.notified().await;
+        tokio::time::sleep(SAVE_AFTER).await;
+        let json = serde_json::to_vec(&*lock(&store));
+        let written = match json {
+            Ok(j) => disk::write_bytes(&dir, &j),
+            Err(e) => Err(std::io::Error::other(e)),
+        };
+        match written {
+            Ok(bytes) => log.emit("saved", json!({"bytes": bytes})),
+            Err(e) => log.emit("save_failed", json!({"kind": format!("{:?}", e.kind())})),
+        }
+    }
 }
 
 fn now() -> u64 {
@@ -48,7 +92,7 @@ fn rejected(log: &Log, status: StatusCode, count: usize, msg: &str) -> Response<
     reply(status, json!({"error": msg}))
 }
 
-async fn post_events(store: &Shared, log: &Log, req: Request<Incoming>) -> Response<Full<Bytes>> {
+async fn post_events(store: &Shared, dirty: &Dirty, log: &Log, req: Request<Incoming>) -> Response<Full<Bytes>> {
     let too_many = |log: &Log| rejected(log, StatusCode::PAYLOAD_TOO_LARGE, 0, "too many events");
     let body = match Limited::new(req.into_body(), MAX_BODY).collect().await {
         Ok(b) => b.to_bytes(),
@@ -83,6 +127,9 @@ async fn post_events(store: &Shared, log: &Log, req: Request<Incoming>) -> Respo
             }
         }
     }
+    if accepted > 0 {
+        mark(dirty);
+    }
     log.emit("events", json!({"from": from, "accepted": accepted, "dup": dup}));
     Response::builder().status(StatusCode::NO_CONTENT).body(Full::new(Bytes::new())).expect("static response parts are valid")
 }
@@ -107,7 +154,7 @@ fn get_queue(store: &Shared, query: Option<&str>) -> Response<Full<Bytes>> {
     }
 }
 
-async fn route(store: &Shared, log: &Log, req: Request<Incoming>) -> Response<Full<Bytes>> {
+async fn route(store: &Shared, dirty: &Dirty, log: &Log, req: Request<Incoming>) -> Response<Full<Bytes>> {
     let path = req.uri().path().to_string();
     let allowed = match path.as_str() {
         "/v1/health" | "/v1/state" | "/v1/queue" => &Method::GET,
@@ -121,7 +168,7 @@ async fn route(store: &Shared, log: &Log, req: Request<Incoming>) -> Response<Fu
         "/v1/health" => reply(StatusCode::OK, json!({"name": "rapp-state", "v": 1})),
         "/v1/state" => reply(StatusCode::OK, lock(store).state()),
         "/v1/queue" => get_queue(store, req.uri().query()),
-        _ => post_events(store, log, req).await,
+        _ => post_events(store, dirty, log, req).await,
     }
 }
 
@@ -130,28 +177,41 @@ pub async fn serve(cfg: Config, listener: TcpListener) -> anyhow::Result<()> {
 }
 
 pub async fn serve_with_log(cfg: Config, listener: TcpListener, log: Log) -> anyhow::Result<()> {
-    let store: Shared = Arc::new(Mutex::new(make_store(&cfg)));
+    let store: Shared = Arc::new(Mutex::new(make_store(&cfg, &log)));
+    let dirty: Dirty = cfg.data.as_ref().map(|_| Arc::new(Notify::new()));
+    let saver_task = match (&cfg.data, &dirty) {
+        (Some(dir), Some(n)) => {
+            mark(&dirty); // the load may have expired rows
+            Some(tokio::spawn(saver(store.clone(), dir.clone(), n.clone(), log.clone())))
+        }
+        _ => None,
+    };
     let sweeper = store.clone();
+    let sweep_dirty = dirty.clone();
     let task = tokio::spawn(async move {
         let mut tick = tokio::time::interval(EXPIRE_EVERY);
         loop {
             tick.tick().await;
             lock(&sweeper).expire(now());
+            mark(&sweep_dirty);
         }
     });
-    let result = accept_loop(store, log, listener).await;
+    let result = accept_loop(store, dirty, log, listener).await;
     task.abort();
+    if let Some(t) = saver_task {
+        t.abort();
+    }
     result
 }
 
-async fn accept_loop(store: Shared, log: Log, listener: TcpListener) -> anyhow::Result<()> {
+async fn accept_loop(store: Shared, dirty: Dirty, log: Log, listener: TcpListener) -> anyhow::Result<()> {
     loop {
         let (stream, _) = listener.accept().await?;
-        let (store, log) = (store.clone(), log.clone());
+        let (store, dirty, log) = (store.clone(), dirty.clone(), log.clone());
         tokio::spawn(async move {
             let svc = service_fn(move |req| {
-                let (store, log) = (store.clone(), log.clone());
-                async move { Ok::<_, Infallible>(route(&store, &log, req).await) }
+                let (store, dirty, log) = (store.clone(), dirty.clone(), log.clone());
+                async move { Ok::<_, Infallible>(route(&store, &dirty, &log, req).await) }
             });
             let _ = http1::Builder::new().serve_connection(TokioIo::new(stream), svc).await;
         });

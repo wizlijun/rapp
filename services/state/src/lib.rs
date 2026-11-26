@@ -1,5 +1,6 @@
 //! rapp-state: a headless state-queue service. Listens on 127.0.0.1 only.
 
+mod disk;
 mod http;
 pub mod event;
 pub mod store;

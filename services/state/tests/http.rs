@@ -117,3 +117,19 @@ async fn the_log_has_counts_not_text() {
     assert!(all.contains(r#""event":"events""#) && all.contains(r#""accepted":5"#), "{all}");
     assert!(all.contains(r#""event":"rejected""#) && all.contains(r#""status":400"#), "{all}");
 }
+
+#[tokio::test]
+async fn a_restart_keeps_the_queue() {
+    let d = tempfile::tempdir().unwrap();
+    let cfg = Config { data: Some(d.path().join("data")), ..old_ok() };
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    let first = tokio::spawn(serve(cfg.clone(), l));
+    assert_eq!(post(addr, "/v1/events", SAMPLES).await, (204, Value::Null));
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    first.abort();
+    let _ = first.await;
+    let addr = start(cfg).await;
+    let (c, st) = get(addr, "/v1/state").await;
+    assert_eq!((c, st["queued"].as_u64()), (200, Some(4)));
+}
