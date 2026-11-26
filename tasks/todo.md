@@ -1326,6 +1326,28 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 12. macOS、Linux 的 PC 按键区上同样能用
 - [ ] 13. Claude Code 被 `kill -9` 后在同一终端开 vim / ssh：常用语条不显示命令
 
+## 输入法跟着意图走（feat/ime-intent，2026-11-26）实机检查（规格 `docs/superpowers/specs/2026-11-26-rapp-ime-intent-design.md`）
+
+- 终端（终端、iTerm2、Ghostty、Warp）默认不再因字母开写作版；用户自己改过开关的以用户的为准
+- [ ] 1. 本机停在 ABC 时开写作版，直接打出中文
+- [ ] 2. 按字母开写作版，第一个字母进拼音（`nihao` → 你好）
+- [ ] 3. 鼠须管、搜狗下同上；切不过去时第一个字母照现状上屏，不丢字
+- [ ] 4. 回到画面后本机是英文；在写作版里自己按 ⌃空格 切成英文后不会被切回中文
+- [ ] 5. A 在拼音时直接打 `ls`，得到 `ls`；打 `y` 回答 Claude Code，不弹写作版
+- [ ] 6. 点「切回 拼音」后在 A 上直接打中文；打开写作版后恢复自动切英文
+- [ ] 7. Linux 被控端：开头几个字不丢（并在 Linux 机器上编译、跑 clippy `host-linux`）
+- [ ] 8. iOS「内」模式下开写作版回到「中」
+- [ ] 9. Linux 客户端（fcitx5 / ibus）进出写作版能切换
+- [ ] 10. 设置开关关掉后回到老行为
+- [ ] 11. 重连时光标从旧写作版交给新写作版（冻结舞台重连），本机不出现先英文再中文的来回切换
+- [ ] 12. Linux 客户端：光标在写作版里时切到别的应用（Alt-Tab），别的应用的输入法不被改；切回 rApp 只切一次中文
+- [ ] 13. 离开写作版后约 200 ms 才切回英文，期间点进另一个写作版不切
+- [ ] 14. 密码框（解锁对话框）从写作版拿走光标、再回到画面时，本机输入法是否回到英文（已知可能停在中文）
+- [ ] 15. Mac：按字母开写作版时，原生编辑器拿到焦点的顺序是否让第一个字母进中文（focus 事件早于 readyForInput）
+- [ ] 16. Linux 客户端：按字母开写作版，第一个字母不被拆开（输入法保持原样）
+
+开发侧遗留：Linux 被控端 `rust/host-linux/src/input_source.rs` 只在 Mac 上写过、没在 Linux 上编译过，需要在 Linux 机器上 `cargo build`、`cargo clippy -p host-linux -- -D warnings`、`cargo test -p host-linux`。另外 `select` 排队等满 300 ms 仍忙时，`server.rs:714` 的 `?` 会结束会话；应改成记一行日志、丢掉这次 select（规格 §3.2 实现偏差），同样要在 Linux 上改和验证。
+
 ## 设备负载（规格 `docs/superpowers/specs/2026-11-26-rapp-device-load-design.md`，计划 `docs/superpowers/plans/2026-11-26-rapp-device-load.md`，分支 `feat/device-load`）
 
 - [x] 服务采样 CPU / GPU / 内存 / 磁盘 / 温度 / 电池，算余力和警告；hub 每台在线设备一条 `watch_load`；`rapp load` / `rapp load pick`；总览设备列的余力行和明细；资源警告进「需要你」，带建议动作和「1小时内不再提醒」。
@@ -1352,7 +1374,7 @@ macOS、Linux、Duo、iPad 各一遍。
   - [ ] ③ 纯服务器上 `rapp state on`，在 Mac 上 `rapp hosts` 一次后，别的设备的 `rapp state` 都看到它
   - [ ] ④ 没开状态服务的网里，`rapp state` 显示发件箱没在发
 - [ ] P1 遗留小问题（总审查记下的，不挡合并）：
-  - [ ] Linux 机器上跑一遍 `scripts/test-linux-build.py`、`test-linux-bundle.py`（已加 `rapp-state`，macOS 上跑不了）
+  - [x] Linux 机器上跑一遍 `scripts/test-linux-build.py`、`test-linux-bundle.py`（已加 `rapp-state`，macOS 上跑不了）
   - [ ] 状态服务反复起不来时，本机发件箱一直对着本机那个死端口，不会改投别台的状态服务；`rapp state` 还列着“本机的 <端口>”
   - [ ] 开着时改 `local/services.json` 的端口要先 `rapp state off` 再 `on` 才生效（写进配置参考）
   - [ ] 用户手动建的分享备注恰好是“状态服务”时，`off` 会把它当成自己的删掉
@@ -1380,3 +1402,34 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] P3：桌面和代报（`/v1/desk`、“别处开着”那一组、GUI 客户端推断状态代报、远程开启用设备间新请求 `SetService`）。计划还没写；写之前先问用户规格 §17 第 6 条
 - [ ] P4：`rapp emit`（IPC 的 `emit`、命令行、`RAPP_TERM`）。计划还没写
 - [ ] 规格 §18 第 1、2、5 条仍没验证：设备时钟差；发件箱对终端 `watch_terms` 的开销和会话从关到开的跟随；Windows 上 `rapp-service` 的现状
+
+## 总览本机列折叠（分支 `feat/overview-fold-local`，2026-11-26，合并 bf06a8a6）
+
+用户：「作为 pad 或 duo 终端，本机是没有 host 服务的……请默认折叠这种没有 host 会话的列。只显示个图标加标题，尽量少的占横向空间。点开后再展开。」范围选「只折没有 host 的本机」。规格 `docs/superpowers/specs/2026-11-26-overview-fold-local-design.md`。
+
+- [x] `overview_test` 新增 6 条；ui 1478 通过；全量只剩 `linux_detach_test` 2 条（worktree 里没编 `rapp-session`，改动前同样失败）；整分支评审 2 项重要已修
+- [ ] 1 iPad / Duo：总览「本机」列是约 56 宽的小竖条（系统图标、灯、「本机」），右边的设备列紧挨着
+- [ ] 2 点竖条展开成原来的样子；列头右边 ‹ 折回，手指好点
+- [ ] 3 展开后进一个 app 再回全景，仍是展开的；重开 rApp 又是折叠的
+- [ ] 4 Mac / Linux：本机列和以前一样，没有竖条、没有 ‹
+- [ ] 5 VoiceOver 念「展开 本机」「折叠 本机」
+
+## 新建文本终端被授权框卡住（分支 `fix/term-consent`，2026-11-26）
+
+用户：「在新建文本终端时，总会被权限框卡住。应该立即识别出来提醒用户有权限框，跳过去点确认才能继续。否则用户会一直点新建无反应。」原因：被控 Mac 用 AppleScript 驱动「终端」和 System Events，macOS 弹「“rApp”想要控制…」时脚本一直等；10 秒后被掐掉、再等 10 秒才提示，掐掉时授权框可能跟着没了，下次又卡。改成：开窗口前先用 `AEDeterminePermissionToAutomateTarget` 不弹框地问；要问就马上弹框（线程等用户回答），立即回 `ASKING`；GUI 提示「弹出了授权框，点「允许」，点完再新建」，远程设备自动切到它的桌面。
+
+- [x] `consent` 单测 5 条、`overview_test` 新增 3 条（去掉跳转后确实失败）；clippy、cargo 全量（`net_follows_the_relay` 负载偶发，单跑通过）、flutter analyze 通过；flutter 全量只剩 `linux_detach_test` 2 条（main 上同样失败）
+- [ ] 1 被控 Mac 上撤掉授权（`tccutil reset AppleEvents`，再重启 rApp 服务），在另一台设备点新建：1 秒内提示「授权框」，并切到那台 Mac 的桌面，能看到授权框
+- [ ] 2 点「允许」（可能连着两个：终端、System Events），再点新建：终端正常开成新标签
+- [ ] 3 授权框还没点时连点新建：一直是同样的提示，不会堆出多个授权框
+- [ ] 4 点「不允许」后再新建：开成一个新窗口（不是标签），不卡
+- [ ] 5 在 Mac 本机给本机新建：只提示，不切桌面，授权框就在本机屏幕上
+- [ ] 6 「恢复所选」碰到授权框也是同样的提示和切桌面
+- [ ] 7 多屏 Mac（用户截图里框在屏幕 2）：画面上正开着它的屏幕 2 时新建，不被切回主屏，提示「不在这块屏上就换一块屏看看」
+
+## Linux 0.15.45 与 0.15.50 版本跟随对齐与发布（2026-11-26）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），依次将 Linux / Omarchy `x86_64` 产物构建并挂载至已发布的 `v0.15.45` 与 `v0.15.50` GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.45`–`0.15.50`：补齐 `scripts/linux/rapp` 对 `term`、`state`、`load` 三个顶层 CLI 子命令的分发；修复 `rust/term/src/pty/fg.rs` Linux `execve` 测试竞态；补充 `TargetPlatform.linux` 下终端恢复（`term_restore_test.dart`）与常用语条按工具发命令（`phrase_strip_cmds_test.dart`）回归用例；扩充 `scripts/test-linux-launcher.py` 与 `scripts/test-linux-bundle.py` 端到端校验（覆盖 `rapp term restore --list/--forget`、`rapp state on/off` + `rapp-state` 伴随服务、`LinuxSampler` + `rapp load --json` / `rapp load pick --json`）。
+- [x] [v0.15.45](https://github.com/wizlijun/rapp/releases/tag/v0.15.45)（源码 `47f5046a`）与 [v0.15.50](https://github.com/wizlijun/rapp/releases/tag/v0.15.50)（源码 `e8b1627d`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致。
+- [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01545-parity.md`、`docs/superpowers/plans/2026-11-26-linux-01546-parity.md` 与 `docs/superpowers/plans/2026-11-26-linux-01550-parity.md`。

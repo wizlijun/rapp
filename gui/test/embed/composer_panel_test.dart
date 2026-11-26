@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:rapp/paths.dart';
@@ -9,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/platform_caps.dart';
 import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/composer_panel.dart';
+import 'package:rapp/embed/local_ime.dart';
 import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/embed/geometry.dart';
 import 'package:rapp/embed/input_dock.dart' show desktopComposerAt, dockMove;
@@ -25,6 +27,7 @@ import 'package:rapp/hub_client.dart';
 import 'package:rapp/llm_api.dart';
 import 'package:rapp/pages/phrases_page.dart';
 import 'package:rapp/ui/controls.dart';
+import 'package:rapp/ui/ime_intent.dart' show ImeIntent;
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/stage.dart';
@@ -1404,6 +1407,90 @@ void main() {
       await tester.pump(const Duration(seconds: 2));
     });
 
+    testWidgets('compose_key: the replay waits for the switch to Chinese', (tester) async {
+      es.dispose();
+      final ime = _GatedIme();
+      es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, localIme: ime);
+      await showPicture(tester);
+      port.calls.clear();
+      port.emit(const ComposeKeyEvent(1));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      expect(es.currentRemote!.composer.editorFocused, isTrue);
+      await tester.pump(Duration.zero); // the switch is settled on a zero timer
+      expect(ime.calls, ['toChinese']);
+      expect(callsOf('compose_replay'), isEmpty); // the input method is still switching
+      ime.gate.complete('im.rime');
+      await tester.pump();
+      expect(callsOf('compose_replay'), [
+        {'sid': 1}
+      ]);
+      await tester.pump(const Duration(seconds: 2));
+      // The panel going away with the caret in it switches back.
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(Duration.zero);
+      expect(ime.calls, ['toChinese']); // a leave waits its grace: another panel may take the caret
+      await tester.pump(ImeIntent.defaultLeaveGrace);
+      expect(ime.calls, ['toChinese', 'toEnglish']);
+    });
+
+    testWidgets('compose_key: the wait for the input method is bounded to 300 ms in all', (tester) async {
+      es.dispose();
+      final ime = _HungIme();
+      es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, localIme: ime);
+      await showPicture(tester);
+      port.emit(const ComposeKeyEvent(1));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(callsOf('compose_replay'), hasLength(1));
+      // Back to the picture (Ctrl+Enter): the leave fires after its grace, and its two calls hang 300 ms each.
+      es.composerKey();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(ime.calls, ['toChinese', 'current']);
+      port.calls.clear();
+      port.emit(const ComposeKeyEvent(1));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 320));
+      // The switch to Chinese is still queued behind the leave, but the letter does not wait for it.
+      expect(ime.calls, ['toChinese', 'current', 'toEnglish']);
+      expect(callsOf('compose_replay'), [
+        {'sid': 1}
+      ]);
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets('compose_key: no replay when the caret left the panel while the switch was settling', (tester) async {
+      es.dispose();
+      final ime = _GatedIme();
+      es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, localIme: ime);
+      await showPicture(tester);
+      port.calls.clear();
+      port.emit(const ComposeKeyEvent(1));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(Duration.zero);
+      expect(ime.calls, ['toChinese']);
+      es.composerKey(); // Ctrl+Enter: the caret goes back to the picture before the switch ended
+      await tester.pump();
+      expect(es.currentRemote!.composer.editorFocused, isFalse);
+      ime.gate.complete('im.rime');
+      await tester.pump(Duration.zero); // the leave's settle runs, and the wait ends
+      await tester.pump();
+      expect(callsOf('compose_replay'), isEmpty);
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 2));
+    });
+
     testWidgets('compose_key with the panel open but the picture focused', (tester) async {
       await showPicture(tester);
       await openPanel(tester);
@@ -2311,4 +2398,45 @@ class _Api extends LlmApi {
           Duration firstByte = const Duration(seconds: 10),
           bool think = false}) =>
       LlmCall.manual();
+}
+
+/// A local input method whose switch to Chinese ends when the test says so.
+class _GatedIme implements LocalIme {
+  final calls = <String>[];
+  final gate = Completer<String?>();
+
+  @override
+  Future<String?> toChinese(String? preferredId) {
+    calls.add('toChinese');
+    return gate.future;
+  }
+
+  @override
+  Future<void> toEnglish() async => calls.add('toEnglish');
+
+  @override
+  Future<({String id, bool ascii})?> current() async => null;
+}
+
+/// A local input method whose every call hangs (ImeIntent gives up on each after 300 ms).
+class _HungIme implements LocalIme {
+  final calls = <String>[];
+
+  @override
+  Future<String?> toChinese(String? preferredId) {
+    calls.add('toChinese');
+    return Completer<String?>().future;
+  }
+
+  @override
+  Future<void> toEnglish() {
+    calls.add('toEnglish');
+    return Completer<void>().future;
+  }
+
+  @override
+  Future<({String id, bool ascii})?> current() {
+    calls.add('current');
+    return Completer<({String id, bool ascii})?>().future;
+  }
 }

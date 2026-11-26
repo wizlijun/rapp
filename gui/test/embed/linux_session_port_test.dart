@@ -30,6 +30,7 @@ Future<SessionEvent> nextWhere(StreamIterator<SessionEvent> it, bool Function(Se
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  englishFirstTests();
   testWidgets('Linux picture voice holds cancel, edit and preserve ordinary Alt combinations', (t) async {
     final port = LinuxSessionPort('unused', framePresented: () async {});
     final proc = (await t.runAsync(() => Process.start('cat', const [])))!;
@@ -199,6 +200,8 @@ void main() {
     expect(port.handleKeyEvent(3, upA), true); // its release is not A's either
     await tester.runAsync(() => Future<void>.delayed(Duration.zero));
     expect(events.whereType<ComposerInsertEvent>().map((e) => e.insert.text), ['a']);
+    // Typed in as text, not replayed through the input method: the panel keeps the input method as it is.
+    expect(events.whereType<ComposerInsertEvent>().single.letter, isTrue);
 
     // The panel takes the keys before the letter is let go; back on the picture, a letter is a fresh one.
     expect(port.handleKeyEvent(3, a), true);
@@ -759,4 +762,98 @@ void main() {
       await server.close(); await second.close();
     }
   }, skip: !Platform.isLinux || !File(worker).existsSync() ? 'Build rapp-session first on Linux' : false);
+}
+
+// English first: the Linux client has no native layer, so the port does what the Swift session does.
+void englishFirstTests() {
+  const aDown = KeyDownEvent(physicalKey: PhysicalKeyboardKey.keyA,
+      logicalKey: LogicalKeyboardKey.keyA, character: 'a', timeStamp: Duration.zero);
+  const aRepeat = KeyRepeatEvent(physicalKey: PhysicalKeyboardKey.keyA,
+      logicalKey: LogicalKeyboardKey.keyA, character: 'a', timeStamp: Duration.zero);
+  const aUp = KeyUpEvent(physicalKey: PhysicalKeyboardKey.keyA,
+      logicalKey: LogicalKeyboardKey.keyA, timeStamp: Duration.zero);
+  const shiftDown = KeyDownEvent(physicalKey: PhysicalKeyboardKey.shiftLeft,
+      logicalKey: LogicalKeyboardKey.shiftLeft, timeStamp: Duration.zero);
+
+  /// What the worker received, as `cmd` or `cmd:down` strings, in order.
+  Future<List<String>> sent(Future<void> Function(LinuxSessionPort port) body) async {
+    final process = await Process.start('cat', const []);
+    final output = process.stdout.transform(utf8.decoder).transform(const LineSplitter()).toList();
+    final port = LinuxSessionPort('unused', framePresented: () async {});
+    port.seedSessionForTest(3, process);
+    try {
+      await body(port);
+    } finally {
+      port.dispose();
+    }
+    return [
+      for (final line in await output.timeout(const Duration(seconds: 5)))
+        if (jsonDecode(line) case final Map m)
+          m['cmd'] == 'key' ? 'key:${m['keyCode']}:${m['down']}' : '${m['cmd']}:${m['id'] ?? ''}',
+    ];
+  }
+
+  group('English first', () {
+    test('the first key-down after a non-English report selects English first', () async {
+      final out = await sent((port) async {
+        port.inputSourceForTest(3, false);
+        port.handleKeyEvent(3, aDown);
+        port.handleKeyEvent(3, aUp);
+      });
+      expect(out, ['select_input:', 'key:0:true', 'key:0:false']);
+    });
+
+    test('repeat sends one select', () async {
+      final out = await sent((port) async {
+        port.inputSourceForTest(3, false);
+        port.handleKeyEvent(3, aDown);
+        port.handleKeyEvent(3, aRepeat);
+        port.handleKeyEvent(3, aRepeat);
+      });
+      expect(out.where((e) => e.startsWith('select_input')), hasLength(1));
+    });
+
+    test('a fresh non-English report re-arms it', () async {
+      final out = await sent((port) async {
+        port.inputSourceForTest(3, false);
+        port.handleKeyEvent(3, aDown);
+        port.inputSourceForTest(3, false);
+        port.handleKeyEvent(3, aDown);
+      });
+      expect(out.where((e) => e.startsWith('select_input')), hasLength(2));
+    });
+
+    test('nothing extra when A is English, never reported, a modifier alone, Ctrl combo or key-up', () async {
+      final out = await sent((port) async {
+        port.handleKeyEvent(3, aDown); // never reported
+        port.inputSourceForTest(3, true);
+        port.handleKeyEvent(3, aDown); // ascii
+        port.inputSourceForTest(3, false);
+        port.handleKeyEvent(3, shiftDown); // modifier alone
+        port.handleKeyEvent(3, aUp); // up
+        await port.invoke('key', {'sid': 3, 'keyCode': 0, 'modifiers': 1 << 20}); // remote Command
+      });
+      expect(out.where((e) => e.startsWith('select_input')), isEmpty);
+    });
+
+    test('the key command (key bar) selects first, unless it is an up', () async {
+      final out = await sent((port) async {
+        port.inputSourceForTest(3, false);
+        await port.invoke('key', {'sid': 3, 'keyCode': 36, 'modifiers': 0, 'down': false});
+        await port.invoke('key', {'sid': 3, 'keyCode': 36, 'modifiers': 0});
+      });
+      expect(out, ['key:36:false', 'select_input:', 'key:36:null']);
+    });
+
+    test('auto_english pauses and resumes, and is not sent to the worker', () async {
+      final out = await sent((port) async {
+        port.inputSourceForTest(3, false);
+        await port.invoke('auto_english', {'sid': 3, 'on': false});
+        port.handleKeyEvent(3, aDown);
+        await port.invoke('auto_english', {'sid': 3, 'on': true});
+        port.handleKeyEvent(3, aDown);
+      });
+      expect(out.take(3), ['key:0:true', 'select_input:', 'key:0:true']);
+    });
+  });
 }

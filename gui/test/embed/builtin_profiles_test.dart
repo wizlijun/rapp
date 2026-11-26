@@ -35,6 +35,11 @@ void main() {
         ['终端', 'iTerm2', 'Ghostty', 'Warp', 'ChatGPT', 'Claude', 'Cursor', 'VS Code']);
   });
 
+  test('streamed terminals default to no type-to-compose, every other app unchanged', () {
+    expect([for (final p in apps) if (p.typeToCompose == false) p.name], ['终端', 'iTerm2', 'Ghostty', 'Warp']);
+    expect([for (final p in apps) if (p.typeToCompose != null && p.typeToCompose != false) p.name], isEmpty);
+  });
+
   test('the §9 ids and pictures', () {
     String key(AppProfile p) => '${p.ids.join(',')} ${p.mode}/${p.density}/${p.fps}';
     expect(apps.map(key), [
@@ -59,10 +64,9 @@ void main() {
     ]);
   });
 
-  test('terminal emulators compose too: what stops it is the adaptive rule, not the profile', () {
-    // Letters open the panel everywhere; a panel closed unused turns them off for that session (RemoteSession.composeArmed).
-    expect([for (final p in apps) if (p.typeToCompose == false) p.name], isEmpty);
-    expect(resolveProfile('com.apple.Terminal', mine: const [], builtin: apps).typeToCompose, isTrue);
+  test('streamed terminals resolve to typeToCompose false; other apps stay true', () {
+    expect(resolveProfile('com.apple.Terminal', mine: const [], builtin: apps).typeToCompose, isFalse);
+    expect(resolveProfile('com.google.Chrome', mine: const [], builtin: apps).typeToCompose, isTrue);
   });
 
   test('no id appears in two built-in profiles', () {

@@ -237,6 +237,18 @@ mod tests {
             .stdout(std::process::Stdio::null())
             .spawn()
             .unwrap();
+        #[cfg(target_os = "linux")]
+        let got = {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            loop {
+                let g = launch_info(child.id() as i32);
+                if g.as_ref().is_some_and(|(argv, _)| argv.len() > 1) || std::time::Instant::now() >= deadline {
+                    break g;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        };
+        #[cfg(not(target_os = "linux"))]
         let got = launch_info(child.id() as i32);
         let _ = child.kill();
         let _ = child.wait();

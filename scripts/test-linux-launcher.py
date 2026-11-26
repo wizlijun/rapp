@@ -23,10 +23,20 @@ with tempfile.TemporaryDirectory(prefix='rapp launcher ') as root:
                          (['share', '8000', '--note', "a ' $HOME ; $(false)"], 'rapp-cli'),
                          (['unshare', '8000'], 'rapp-cli'), (['hosts'], 'rapp-cli'),
                          (['pipe', 'device', '22'], 'rapp-cli'),
+                         (['term', 'restore'], 'rapp-cli'),
+                         (['term', 'restore', '--list'], 'rapp-cli'),
+                         (['term', 'restore', '--forget'], 'rapp-cli'),
+                         (['term', 'restore', '1', 'rapp'], 'rapp-cli'),
                          (['update'], 'rapp-cli'),
                          (['update', 'status', '--json'], 'rapp-cli'),
                          (['update', 'check', '--timeout', '5', '--json'], 'rapp-cli'),
-                         (['update', 'rollback', '--json'], 'rapp-cli')]:
+                         (['update', 'rollback', '--json'], 'rapp-cli'),
+                         (['state'], 'rapp-cli'),
+                         (['state', 'on'], 'rapp-cli'),
+                         (['state', 'off'], 'rapp-cli'),
+                         (['load'], 'rapp-cli'),
+                         (['load', '--top', '--json'], 'rapp-cli'),
+                         (['load', 'pick', '--json'], 'rapp-cli')]:
         out = json.loads(subprocess.check_output([entry, *args], text=True))
         assert out == [str(bundle / binary), *args], out
 print('PASS packaged GUI/CLI dispatch and literal argument preservation')

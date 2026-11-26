@@ -8,8 +8,21 @@ import 'package:flutter/services.dart';
 abstract final class SecureInput {
   static const channel = MethodChannel('rapp/secure-input');
 
-  static void begin() => _call('begin');
-  static void end() => _call('end');
+  /// Open `begin`s not yet ended.
+  static int _depth = 0;
+
+  /// A password field holds the keyboard: the input method is not switched meanwhile (ImeIntent).
+  static bool get active => _depth > 0;
+
+  static void begin() {
+    _depth++;
+    _call('begin');
+  }
+
+  static void end() {
+    if (_depth > 0) _depth--;
+    _call('end');
+  }
 
   static void _call(String method) {
     channel.invokeMethod<void>(method).catchError((Object _) {}, test: (e) => e is MissingPluginException);

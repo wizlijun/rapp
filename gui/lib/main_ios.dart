@@ -5,8 +5,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:rapp_rime/rapp_rime.dart' show RappRime;
 
 import 'data_dir.dart';
+import 'embed/local_ime.dart';
 import 'embed/rime_glue.dart';
 import 'embed/session_port.dart';
 import 'embed/state_rules.dart';
@@ -109,6 +111,8 @@ Future<void> mainIos() async {
       stateRules: await StateRulesLibrary.load(data, builtinRules),
       builtinStateRules: builtinRules,
       localOs: localDeviceOs(iosIdiom: idiom),
+      // The writing panel turns the built-in Rime to Chinese (the system keyboards cannot be switched).
+      localIme: RimeLocalIme(RappRime.instance),
       log: _log);
   state.overview = true;
   // The built-in input method follows 全局设置 and the session on the stage. Lives as long as the app.

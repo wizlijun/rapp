@@ -160,4 +160,64 @@ void main() {
     expect(find.text('新对话'), findsNothing);
     expect(find.descendant(of: ph('phrase-6'), matching: find.text('继续')), findsOneWidget);
   });
+
+  testWidgets('linux desktop KeyBar sends tool commands and Ctrl-R while preserving TextField caret', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    try {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (c) async => null);
+      tester.view.physicalSize = const Size(1000, 900);
+      tester.view.devicePixelRatio = 1;
+      final focus = FocusNode();
+      final ctl = TextEditingController(text: '草稿文字');
+      addTearDown(() {
+        focus.dispose();
+        ctl.dispose();
+      });
+      await tester.pumpWidget(wrap(Column(mainAxisSize: MainAxisSize.min, children: [
+        SizedBox(width: 400, child: TextField(focusNode: focus, controller: ctl)),
+        SizedBox(width: 900, child: KeyBar(state: s, session: tsess, port: term)),
+      ])));
+      focus.requestFocus();
+      await tester.pump();
+      ctl.selection = const TextSelection(baseOffset: 1, extentOffset: 3);
+      await tester.pump();
+      expect(focus.hasFocus, isTrue);
+
+      // Claude Code: 新对话 sends /clear via terminal paste, caret and selection stay in the editor.
+      await tester.tap(ph('phrase-0'));
+      await tester.pump();
+      expect(term.calls.where((c) => c.$1 == 'paste').last.$2['data'], '/clear');
+      tsess.composer.done(1, null);
+      expect(focus.hasFocus, isTrue);
+      expect(ctl.selection, const TextSelection(baseOffset: 1, extentOffset: 3));
+
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 1050)));
+      // Claude Code: 搜历史 sends Ctrl-R over TermSessionPort.
+      await tester.tap(ph('phrase-5'));
+      await tester.pump();
+      expect(term.calls.where((c) => c.$1 == 'keys').last.$2['keys'], ['Ctrl-R']);
+      expect(focus.hasFocus, isTrue);
+
+      await tester.pump(const Duration(seconds: 3));
+      // Antigravity (agy) on Linux: 搜历史 is unsupported -> greyed + hint; bash shell hides commands.
+      fg('agy');
+      s.setStripItems(List.of(s.prefs.phrases));
+      await tester.pump();
+      await tester.tap(ph('phrase-5'));
+      await tester.pump();
+      expect(tester.widget<Text>(ph('phrase-hint')).data, 'Antigravity 没有这个命令');
+      await tester.pump(const Duration(seconds: 5));
+
+      fg('bash', shell: true);
+      s.setStripItems(List.of(s.prefs.phrases));
+      await tester.pump();
+      expect(find.text('新对话'), findsNothing);
+      expect(find.descendant(of: ph('phrase-6'), matching: find.text('继续')), findsOneWidget);
+      expect(focus.hasFocus, isTrue);
+    } finally {
+      tester.view.reset();
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null);
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
 }
