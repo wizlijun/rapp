@@ -8,7 +8,7 @@ import 'dart:ui' show Offset, Size;
 import '../paths.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show Clipboard;
-import 'package:flutter/widgets.dart' show AppLifecycleListener, StringCharacters;
+import 'package:flutter/widgets.dart' show AppLifecycleListener, AppLifecycleState, StringCharacters;
 
 import '../embed/local_ime.dart';
 import '../embed/phrases.dart';
@@ -221,7 +221,7 @@ class MainState extends ChangeNotifier {
     final ime = localIme ?? (Platform.environment.containsKey('FLUTTER_TEST') ? const NoLocalIme() : localImeForPlatform());
     // No input method to switch (Windows, Android, tests): no intent, nothing queued, nothing to listen for.
     if (ime is NoLocalIme) return;
-    final intent = imeIntent = ImeIntent(ime,
+    imeIntent = ImeIntent(ime,
         enabled: () => prefs.imeIntent,
         secure: () => SecureInput.active,
         lastId: () => prefs.chineseIme,
@@ -230,8 +230,8 @@ class MainState extends ChangeNotifier {
           prefs.chineseIme = id;
           _save();
         });
-    // Another app may change the input method while rApp is away.
-    _imeResume = AppLifecycleListener(onResume: intent.appResumed);
+    // Away, the focus moves are another app's; back, the caret decides once.
+    _imeResume = AppLifecycleListener(onStateChange: imeLifecycle);
   }
 
   /// The writing panel switches this device's input method: Chinese in it, English back on the picture.
@@ -241,6 +241,15 @@ class MainState extends ChangeNotifier {
 
   /// The input method switches asked for so far have ended (each bounded): a compose replay waits for it, so
   /// the letter that opened the panel lands in the Chinese input method.
+  /// The app's lifecycle as [imeIntent] needs it: only resumed is in front.
+  void imeLifecycle(AppLifecycleState s) {
+    if (s == AppLifecycleState.resumed) {
+      imeIntent?.appResumed();
+    } else {
+      imeIntent?.appInactive();
+    }
+  }
+
   Future<void> get imeSettled => imeIntent?.settled ?? Future.value();
 
   /// The input record: what the writing panel sends, and the drafts it leaves.
@@ -4939,6 +4948,7 @@ class MainState extends ChangeNotifier {
     _tidies.clear();
     voice?.dispose();
     _imeResume?.dispose();
+    imeIntent?.dispose();
     _voiceKeys.close();
     _voiceEnds.close();
     composerZoom.dispose();

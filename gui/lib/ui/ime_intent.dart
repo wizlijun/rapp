@@ -1,7 +1,10 @@
 // What the user means to type decides the local input method: the writing panel (写作版) is Chinese, the
 // picture is English (spec: IME intent). Only the edges count: the first panel to take the caret switches to
 // Chinese, the last one to lose it switches back, and a move from one panel to another in the same turn
-// switches nothing. Every call to the input method is queued, bounded and never throws.
+// switches nothing. A leave waits [ImeIntent.defaultLeaveGrace] first: a panel handing the caret to another one
+// (a reconnect, a stage switch) takes longer than a turn, and the input method is left alone if it arrives. While
+// the app is not in front nothing is switched at all (the focused window, and its input method, are another
+// app's); coming back reconciles once. Every call to the input method is queued, bounded and never throws.
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -16,10 +19,15 @@ class ImeIntent {
       required this.secure,
       required this.lastId,
       required this.saveId,
-      this.callTimeout = const Duration(milliseconds: 300)});
+      this.callTimeout = const Duration(milliseconds: 300),
+      this.leaveGrace = defaultLeaveGrace});
+
+  /// How long the last panel losing the caret waits before switching to English: another panel taking it by
+  /// then means the caret only moved, and the input method stays Chinese.
+  static const defaultLeaveGrace = Duration(milliseconds: 200);
 
   final LocalIme ime;
-  final Duration callTimeout;
+  final Duration callTimeout, leaveGrace;
   final bool Function() enabled, secure;
   final String? Function() lastId;
   final void Function(String id) saveId;
@@ -32,6 +40,16 @@ class ImeIntent {
 
   /// The settle waiting for the end of this turn; completes when it ran.
   Completer<void>? _pending;
+  Timer? _pendingTimer;
+
+  /// A leave waiting out [leaveGrace].
+  Timer? _leave;
+
+  /// The app is in front (lifecycle resumed); otherwise nothing is switched.
+  bool _front = true;
+
+  /// The app came back: the next settle reconciles instead of looking for an edge.
+  bool _resync = false;
 
   /// The tail of the queued calls (it never fails), and how many of them have not ended.
   Future<void>? _chain;
@@ -40,22 +58,39 @@ class ImeIntent {
   /// The writing panel of session [sid] took ([on]) or lost the caret.
   void focus(Object sid, bool on) {
     final changed = on ? _inside.add(sid) : _inside.remove(sid);
-    if (!changed || _pending != null) return;
-    final c = _pending = Completer<void>();
-    Timer(Duration.zero, () {
-      _pending = null;
-      _settle();
-      c.complete();
-    });
+    // Not in front: only tracked; coming back reconciles.
+    if (changed && _front) _schedule();
   }
 
-  /// The app came back: another app may have changed the input method meanwhile.
+  /// The app went inactive, hidden or paused: the focus moves now belong to another window's input method.
+  void appInactive() {
+    _front = false;
+    _leave?.cancel();
+    _leave = null;
+  }
+
+  /// The app came back: once, at the end of this turn (so a caret restored just before or after coalesces),
+  /// the caret in a panel switches to Chinese, as another app may have changed it meanwhile; outside, nothing.
   void appResumed() {
-    if (_inside.isEmpty || !_on) return;
-    _queue(_toChinese);
+    _front = true;
+    _resync = true;
+    _schedule();
+  }
+
+  /// Nothing more is switched; a settle being waited for completes.
+  void dispose() {
+    _front = false;
+    _leave?.cancel();
+    _leave = null;
+    _pendingTimer?.cancel();
+    _pendingTimer = null;
+    final p = _pending;
+    _pending = null;
+    p?.complete();
   }
 
   /// Done when the queued settle and every call queued so far have ended (each call at most [callTimeout]).
+  /// A leave still waiting out [leaveGrace] is not waited for.
   Future<void> get settled async {
     for (;;) {
       final p = _pending;
@@ -71,12 +106,47 @@ class ImeIntent {
 
   bool get _on => enabled() && !secure();
 
+  void _schedule() {
+    if (_pending != null) return;
+    final c = _pending = Completer<void>();
+    _pendingTimer = Timer(Duration.zero, () {
+      _pending = null;
+      _pendingTimer = null;
+      _settle();
+      c.complete();
+    });
+  }
+
   void _settle() {
+    if (!_front) return;
     final inside = _inside.isNotEmpty;
-    if (inside == _wasInside) return;
-    _wasInside = inside;
-    if (!_on) return;
-    _queue(inside ? _toChinese : _toEnglish);
+    if (_resync) {
+      _resync = false;
+      _leave?.cancel();
+      _leave = null;
+      _wasInside = inside;
+      if (inside && _on) _queue(_toChinese);
+      return;
+    }
+    if (inside) {
+      if (_leave != null) {
+        // The caret only moved to another panel: still Chinese.
+        _leave!.cancel();
+        _leave = null;
+        return;
+      }
+      if (_wasInside) return;
+      _wasInside = true;
+      if (_on) _queue(_toChinese);
+    } else {
+      if (!_wasInside || _leave != null) return;
+      _leave = Timer(leaveGrace, () {
+        _leave = null;
+        if (!_front || _inside.isNotEmpty) return;
+        _wasInside = false;
+        if (_on) _queue(_toEnglish);
+      });
+    }
   }
 
   Future<void> _toChinese() async {

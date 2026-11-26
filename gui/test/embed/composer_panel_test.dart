@@ -27,6 +27,7 @@ import 'package:rapp/hub_client.dart';
 import 'package:rapp/llm_api.dart';
 import 'package:rapp/pages/phrases_page.dart';
 import 'package:rapp/ui/controls.dart';
+import 'package:rapp/ui/ime_intent.dart' show ImeIntent;
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/stage.dart';
@@ -1429,6 +1430,8 @@ void main() {
       // The panel going away with the caret in it switches back.
       await tester.pumpWidget(const SizedBox());
       await tester.pump(Duration.zero);
+      expect(ime.calls, ['toChinese']); // a leave waits its grace: another panel may take the caret
+      await tester.pump(ImeIntent.defaultLeaveGrace);
       expect(ime.calls, ['toChinese', 'toEnglish']);
     });
 

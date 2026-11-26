@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:fake_async/fake_async.dart';
+import 'package:flutter/widgets.dart' show AppLifecycleState;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/local_ime.dart';
 import 'package:rapp/hub_client.dart';
@@ -239,6 +240,198 @@ void main() {
     });
   });
 
+  group('a leave waits a grace', () {
+    test('an enter several turns and ~100 ms after the leave: no native calls', () {
+      fakeAsync((a) {
+        final intent = make();
+        intent.focus(1, true);
+        a.flushTimers();
+        ime.calls.clear();
+        intent.focus(1, false); // the old panel unmounts
+        a.flushMicrotasks();
+        a.elapse(Duration.zero);
+        a.elapse(const Duration(milliseconds: 50));
+        a.flushMicrotasks();
+        a.elapse(const Duration(milliseconds: 50));
+        intent.focus(2, true); // the new one gets the caret after its native focus round trip
+        a.flushTimers();
+        expect(ime.calls, isEmpty);
+        expect(saved, isEmpty);
+      });
+    });
+
+    test('an enter at 250 ms: leave then enter, as before', () {
+      fakeAsync((a) {
+        final intent = make();
+        intent.focus(1, true);
+        a.flushTimers();
+        ime.calls.clear();
+        ime.now = (id: 'sogou', ascii: false);
+        intent.focus(1, false);
+        a.elapse(const Duration(milliseconds: 199));
+        expect(ime.calls, isEmpty);
+        a.elapse(const Duration(milliseconds: 51));
+        expect(ime.calls, ['current', 'toEnglish']);
+        intent.focus(2, true);
+        a.flushTimers();
+        expect(ime.calls, ['current', 'toEnglish', 'toChinese:im.rime']);
+      });
+    });
+
+    test('settled does not wait out the grace', () {
+      fakeAsync((a) {
+        final intent = make();
+        intent.focus(1, true);
+        a.flushTimers();
+        intent.focus(1, false);
+        var done = false;
+        intent.settled.then((_) => done = true);
+        a.elapse(Duration.zero);
+        expect(done, isTrue);
+        expect(ime.calls, ['toChinese:im.rime']);
+        a.flushTimers();
+        expect(ime.calls, ['toChinese:im.rime', 'current', 'toEnglish']);
+      });
+    });
+
+    test('dispose drops a pending leave', () {
+      fakeAsync((a) {
+        final intent = make();
+        intent.focus(1, true);
+        a.flushTimers();
+        intent.focus(1, false);
+        a.elapse(Duration.zero);
+        intent.dispose();
+        expect(a.pendingTimers, isEmpty);
+        expect(ime.calls, ['toChinese:im.rime']);
+      });
+    });
+  });
+
+  group('while the app is not in front', () {
+    test('inactive then the caret leaving: no calls', () {
+      fakeAsync((a) {
+        final intent = make();
+        intent.focus(1, true);
+        a.flushTimers();
+        ime.calls.clear();
+        intent.appInactive();
+        intent.focus(1, false); // the window lost focus and so did the text field
+        a.flushTimers();
+        expect(ime.calls, isEmpty);
+      });
+    });
+
+    test('inactive cancels a leave already waiting its grace', () {
+      fakeAsync((a) {
+        final intent = make();
+        intent.focus(1, true);
+        a.flushTimers();
+        ime.calls.clear();
+        intent.focus(1, false);
+        a.elapse(const Duration(milliseconds: 100));
+        intent.appInactive();
+        a.flushTimers();
+        expect(ime.calls, isEmpty);
+      });
+    });
+
+    test('resume with the caret restored before appResumed: one toChinese', () {
+      fakeAsync((a) {
+        final intent = make();
+        intent.focus(1, true);
+        a.flushTimers();
+        ime.calls.clear();
+        intent.appInactive();
+        intent.focus(1, false);
+        a.flushTimers();
+        intent.focus(1, true);
+        intent.appResumed();
+        a.flushTimers();
+        expect(ime.calls, ['toChinese:im.rime']);
+      });
+    });
+
+    test('resume with the caret restored after appResumed: one toChinese', () {
+      fakeAsync((a) {
+        final intent = make();
+        intent.focus(1, true);
+        a.flushTimers();
+        ime.calls.clear();
+        intent.appInactive();
+        intent.focus(1, false);
+        a.flushTimers();
+        intent.appResumed();
+        a.flushMicrotasks();
+        intent.focus(1, true);
+        a.flushTimers();
+        expect(ime.calls, ['toChinese:im.rime']);
+      });
+    });
+
+    test('resume with the caret restored a turn after appResumed: one toChinese', () {
+      fakeAsync((a) {
+        final intent = make();
+        intent.focus(1, true);
+        a.flushTimers();
+        ime.calls.clear();
+        intent.appInactive();
+        intent.focus(1, false);
+        a.flushTimers();
+        intent.appResumed();
+        a.flushTimers();
+        intent.focus(1, true);
+        a.flushTimers();
+        expect(ime.calls, ['toChinese:im.rime']);
+      });
+    });
+
+    test('inactive with the caret inside, resumed with it still inside: one toChinese', () {
+      fakeAsync((a) {
+        final intent = make();
+        intent.focus(1, true);
+        a.flushTimers();
+        ime.calls.clear();
+        intent.appInactive();
+        a.flushTimers();
+        intent.appResumed();
+        a.flushTimers();
+        expect(ime.calls, ['toChinese:im.rime']);
+      });
+    });
+
+    test('resumed with the caret outside: nothing, and the next enter switches', () {
+      fakeAsync((a) {
+        final intent = make();
+        intent.focus(1, true);
+        a.flushTimers();
+        ime.calls.clear();
+        intent.appInactive();
+        intent.focus(1, false);
+        a.flushTimers();
+        intent.appResumed();
+        a.flushTimers();
+        expect(ime.calls, isEmpty);
+        intent.focus(1, true);
+        a.flushTimers();
+        expect(ime.calls, ['toChinese:im.rime']);
+      });
+    });
+
+    test('an enter while inactive does not switch until resumed', () {
+      fakeAsync((a) {
+        final intent = make();
+        intent.appInactive();
+        intent.focus(1, true);
+        a.flushTimers();
+        expect(ime.calls, isEmpty);
+        intent.appResumed();
+        a.flushTimers();
+        expect(ime.calls, ['toChinese:im.rime']);
+      });
+    });
+  });
+
   group('MainState wiring', () {
     late Directory tmp;
     setUp(() => tmp = Directory.systemTemp.createTempSync('ime_intent_test'));
@@ -285,6 +478,23 @@ void main() {
         st.composerFocusChanged(rs, true);
         a.flushTimers();
         expect(ime.calls.length, 3);
+      });
+    });
+
+    test('the app going inactive stops switching until it is back', () {
+      env((a, st) {
+        final rs = st.currentRemote!;
+        st.composerFocusChanged(rs, true);
+        a.flushTimers();
+        ime.calls.clear();
+        st.imeLifecycle(AppLifecycleState.inactive);
+        st.composerFocusChanged(rs, false);
+        a.flushTimers();
+        expect(ime.calls, isEmpty);
+        st.composerFocusChanged(rs, true);
+        st.imeLifecycle(AppLifecycleState.resumed);
+        a.flushTimers();
+        expect(ime.calls, ['toChinese:null']);
       });
     });
 
