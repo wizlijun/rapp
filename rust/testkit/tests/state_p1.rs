@@ -239,7 +239,6 @@ async fn a_taken_port_is_said_and_not_shared() {
     wait_log(a.home.path(), "companion_failed", |v| v["name"] == "state").await;
     // The port is free again: `on` once more tries at once, not after the backoff.
     drop(hold);
-    tokio::time::sleep(Duration::from_millis(300)).await;
     ipc(&a, json!({"cmd":"state","on":true})).await;
     let r = wait_state(&a, Duration::from_secs(5), |r| r["running"] == true).await;
     assert_eq!(r["error"], Value::Null, "{r}");
@@ -285,7 +284,10 @@ async fn state_on_tells_the_known_devices() {
 #[tokio::test]
 async fn two_companions_pick_the_same_one() {
     let key = rapp_wire::Key::new_local();
-    let (pb, pc) = (free_port(), free_port());
+    // Both held at once, so they differ.
+    let (hb, hc) = (std::net::TcpListener::bind("127.0.0.1:0").unwrap(), std::net::TcpListener::bind("127.0.0.1:0").unwrap());
+    let (pb, pc) = (hb.local_addr().unwrap().port(), hc.local_addr().unwrap().port());
+    drop((hb, hc));
     let a = start_on(29060, &key, |_| {}).await;
     let b = start_on(29070, &key, |h| services(h, pb, "memory", false)).await;
     // C's is on in the file: it is started with the service.
@@ -312,4 +314,76 @@ async fn two_companions_pick_the_same_one() {
         let local: Vec<bool> = r["sinks"].as_array().unwrap().iter().map(|x| x["local"] == true).collect();
         assert_eq!(local.iter().filter(|l| **l).count(), 1, "{r}");
     }
+}
+
+/// A `rapp-state` this service did not start (a foreign one, or an orphan of an earlier run), on
+/// `port`; ended on drop.
+struct Foreign(std::process::Child);
+
+impl Foreign {
+    async fn on(port: u16) -> Foreign {
+        let child = std::process::Command::new(env!("CARGO_BIN_EXE_test-rapp-state"))
+            .args(["--port", &port.to_string()])
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let f = Foreign(child);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while health(port).await.is_none() {
+            assert!(tokio::time::Instant::now() < deadline, "the foreign rapp-state does not answer");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        f
+    }
+}
+
+impl Drop for Foreign {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[tokio::test]
+async fn a_failed_start_takes_back_its_old_share() {
+    let key = rapp_wire::Key::new_local();
+    let hold = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let p = hold.local_addr().unwrap().port();
+    // An earlier run left its share; this start finds the port taken.
+    let a = start_on(29090, &key, |h| {
+        share_file(h, json!([{"port": p, "note": "状态服务", "kind": "state", "local": 29091}]));
+        services(h, p, "memory", true);
+    })
+    .await;
+    let want = format!("端口 {p} 被占用");
+    let r = wait_state(&a, Duration::from_secs(5), |r| r["error"] == want.as_str()).await;
+    assert_eq!((r["running"].clone(), r["share"].clone()), (json!(false), Value::Null), "{r}");
+    assert!(share_of(&a, p).await.is_none(), "the old share is taken back");
+    // A plain share of the port (not the companion's) is never touched.
+    ipc(&a, json!({"cmd":"share","ports":[p],"note":"我的"})).await;
+    ipc(&a, json!({"cmd":"state","on":true})).await;
+    wait_state(&a, Duration::from_secs(5), |r| r["error"] == want.as_str()).await;
+    let s = share_of(&a, p).await.expect("the user's share stays");
+    assert_eq!((s["kind"].clone(), s["note"].as_str()), (Value::Null, Some("我的")), "{s}");
+    drop(hold);
+}
+
+#[tokio::test]
+async fn a_rapp_state_already_on_the_port_is_not_ours() {
+    let key = rapp_wire::Key::new_local();
+    let p = free_port();
+    let foreign = Foreign::on(p).await;
+    let a = start_on(29380, &key, |h| services(h, p, "memory", false)).await;
+    let r = ipc(&a, json!({"cmd":"state","on":true})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let want = format!("端口 {p} 被占用");
+    let r = wait_state(&a, Duration::from_secs(5), |r| r["error"] == want.as_str()).await;
+    assert_eq!((r["running"].clone(), r["share"].clone()), (json!(false), Value::Null), "{r}");
+    assert_eq!(r["sinks"], json!([]), "not this device's sink: {r}");
+    assert!(share_of(&a, p).await.is_none(), "not shared");
+    wait_log(a.home.path(), "companion_failed", |v| v["why"] == "port taken").await;
+    let log = log_events(a.home.path());
+    assert!(log.iter().all(|v| v["ev"] != "companion_ready"), "never ready");
+    assert!(log.iter().all(|v| !(v["ev"] == "state_sink" && v["from"] == "local")), "never the local sink");
+    drop(foreign);
 }

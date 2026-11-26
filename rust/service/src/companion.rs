@@ -287,6 +287,9 @@ async fn supervise(state: Arc<State>, c: &'static Companion, cfg: ServiceCfg, st
         match outcome {
             Outcome::Failed(why, say) => {
                 state.log.event(Lvl::Warn, "companion_failed", json!({"name": c.name, "why": why}));
+                // Not answering: no share says it is here (one left by an earlier run neither).
+                // `ready` shares it again once it answers. A crash after it ran keeps its share.
+                unshare_ours(&state, c, cfg.port.unwrap_or(c.port));
                 fails += 1;
                 phase(&state, c, Phase::Waiting, Some(say));
             }
@@ -336,24 +339,17 @@ async fn run_once(state: &Arc<State>, c: &'static Companion, cfg: &ServiceCfg, c
     let last = Arc::new(Mutex::new(String::new()));
     let reader = ch.stderr.take().map(|err| tokio::spawn(keep_stderr(state.log_dir.join(format!("{}.log", c.program)), err, last.clone())));
 
-    let started = Instant::now();
+    // Ready: the health check answers AND this program still runs `QUICK_EXIT` after its start.
+    // Another `rapp-state` already on the port (a foreign one, or an orphan of an earlier run)
+    // answers too, while this one ends at once with "address in use": that is not ours.
+    let started = tokio::time::Instant::now();
+    let (grace, deadline) = (started + QUICK_EXIT, started + READY_WAIT);
+    let mut answered = false;
     loop {
-        if let Ok(Some(status)) = ch.try_wait() {
-            if let Some(r) = reader {
-                let _ = tokio::time::timeout(Duration::from_millis(500), r).await;
-            }
-            *child = None;
-            state.log.event(Lvl::Info, "companion_exit", json!({"name": c.name, "code": status.code()}));
-            let line = last.lock().unwrap().clone();
-            if started.elapsed() < QUICK_EXIT && (line.contains("Address already in use") || line.contains("AddrInUse")) {
-                return Outcome::Failed("port taken", format!("端口 {port} 被占用"));
-            }
-            return Outcome::Failed("exited", "没有起来".into());
-        }
-        if healthy(port).await {
+        if answered && tokio::time::Instant::now() >= grace {
             break;
         }
-        if started.elapsed() >= READY_WAIT {
+        if tokio::time::Instant::now() >= deadline {
             if let Some(mut ch) = child.take() {
                 let _ = ch.kill().await;
                 let code = ch.wait().await.ok().and_then(|s| s.code());
@@ -361,7 +357,26 @@ async fn run_once(state: &Arc<State>, c: &'static Companion, cfg: &ServiceCfg, c
             }
             return Outcome::Failed("not ready", "没有起来".into());
         }
-        tokio::time::sleep(PROBE_EVERY).await;
+        let exited = tokio::select! {
+            status = ch.wait() => Some(status),
+            a = probe(port, answered, grace) => {
+                answered = a;
+                None
+            }
+        };
+        let Some(status) = exited else { continue };
+        // Measured when it ended, not when that was noticed.
+        let quick = started.elapsed() < QUICK_EXIT;
+        if let Some(r) = reader {
+            let _ = tokio::time::timeout(Duration::from_millis(500), r).await;
+        }
+        *child = None;
+        state.log.event(Lvl::Info, "companion_exit", json!({"name": c.name, "code": status.ok().and_then(|s| s.code())}));
+        let line = last.lock().unwrap().clone();
+        if quick && (line.contains("Address already in use") || line.contains("AddrInUse")) {
+            return Outcome::Failed("port taken", format!("端口 {port} 被占用"));
+        }
+        return Outcome::Failed("exited", "没有起来".into());
     }
 
     ready(state, c, port);
@@ -396,6 +411,15 @@ fn ready(state: &Arc<State>, c: &'static Companion, port: u16) {
     state.log.event(Lvl::Info, "companion_ready", json!({"name": c.name}));
 }
 
+/// Removes the share of `port` when it is `c`'s (its kind is `c.kind`); any other share stays.
+fn unshare_ours(state: &State, c: &'static Companion, port: u16) {
+    if state.shares.get(port).is_some_and(|s| s.kind.as_deref() == Some(c.kind)) {
+        if let Err(e) = sharing::unshare(state, &json!(port), &By::Local) {
+            state.log.event(Lvl::Warn, "companion_unshare_failed", json!({"name": c.name, "port": port, "error": e}));
+        }
+    }
+}
+
 /// Appends every stderr line of the program to `path`; `last` keeps the latest one.
 async fn keep_stderr(path: std::path::PathBuf, err: tokio::process::ChildStderr, last: Arc<Mutex<String>>) {
     let mut file = tokio::fs::OpenOptions::new().create(true).append(true).open(&path).await.ok();
@@ -419,6 +443,21 @@ async fn conn(port: u16) -> Option<send::Conn> {
 
 async fn healthy(port: u16) -> bool {
     conn(port).await.is_some()
+}
+
+/// One step of the start: until the service has `answered`, one health check (then the pause
+/// before the next when it did not answer); after, the rest of the grace period. Whether it has
+/// answered now.
+async fn probe(port: u16, answered: bool, grace: tokio::time::Instant) -> bool {
+    if answered {
+        tokio::time::sleep_until(grace).await;
+        return true;
+    }
+    if healthy(port).await {
+        return true;
+    }
+    tokio::time::sleep(PROBE_EVERY).await;
+    false
 }
 
 /// What the running service holds: counts from `GET /v1/state`, None when it does not answer.
@@ -454,26 +493,28 @@ pub async fn set(state: &Arc<State>, name: &str, on: bool) -> Value {
     }
     let cfg = cfg_in(&map, c);
     if on {
-        let (running, waiting) = state.companions.with(c.name, |s| {
+        let alive = state.companions.with(c.name, |s| {
             s.on = true;
-            let alive = s.run.as_ref().is_some_and(|r| !r.task.is_finished());
-            if !alive {
-                s.cfg = cfg;
-                s.run = None;
-            }
-            (alive, alive && s.phase == Phase::Waiting)
-        });
-        if !running {
-            start(state, c);
-        } else if waiting {
-            // On but not running: try again now, not after the backoff.
-            state.companions.with(c.name, |s| {
-                s.phase = Phase::Starting;
-                if let Some(r) = &s.run {
-                    r.retry.notify_one();
+            match &s.run {
+                Some(r) if !r.task.is_finished() => {
+                    // On but not running: try again now, not after the backoff.
+                    if s.phase == Phase::Waiting {
+                        s.phase = Phase::Starting;
+                        r.retry.notify_one();
+                    }
+                    true
                 }
-            });
+                _ => {
+                    s.cfg = cfg;
+                    s.run = None;
+                    false
+                }
+            }
+        });
+        if alive {
             state.companions.bump();
+        } else {
+            start(state, c);
         }
         let mut rx = state.companions.changed.subscribe();
         let _ = tokio::time::timeout(SET_WAIT, async {
@@ -502,11 +543,7 @@ pub async fn set(state: &Arc<State>, name: &str, on: bool) -> Value {
         }
         state.companions.with(c.name, |s| s.pid = None);
         sink::set_local(state, None);
-        if state.shares.get(port).is_some_and(|s| s.kind.as_deref() == Some(c.kind)) {
-            if let Err(e) = sharing::unshare(state, &json!(port), &By::Local) {
-                state.log.event(Lvl::Warn, "companion_unshare_failed", json!({"name": c.name, "port": port, "error": e}));
-            }
-        }
+        unshare_ours(state, c, port);
         state.companions.bump();
         state.notify();
     }
