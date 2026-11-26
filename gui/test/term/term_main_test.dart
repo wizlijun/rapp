@@ -1040,6 +1040,28 @@ void main() {
       expect(t.sent.where((m) => m['cmd'] == 'open_term').single['from'], app);
       await tester.pump(const Duration(seconds: 1));
     }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
+    testWidgets('Ctrl+Shift+W ends a terminal off the mac and confirms when a program is running', (tester) async {
+      await tester.pumpWidget(wrap(window()));
+      t.emit(listOf(shell: false, fg: 'claude'));
+      await openTerm(tester, two);
+      hubAnswers(list: listOf(shell: false, fg: 'claude'));
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.keyW);
+      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyW);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.keyW);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await settle(tester);
+      expect(find.text('结束终端？'), findsOneWidget);
+      expect(find.text('里面还在跑 claude，结束后它也会被关掉。'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('end-term-ok')));
+      await settle(tester);
+      expect(t.sent.where((m) => m['cmd'] == 'end_term'), hasLength(1));
+      expect(s.entryFor(key), isNull);
+      await tester.pump(const Duration(seconds: 1));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
   });
 
   group('with the real terminal port', () {
