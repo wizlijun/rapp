@@ -11,16 +11,18 @@
 //! The exit code is the program's, 1 when the program was killed by a signal; 128 + the signal when `run` itself
 //! got SIGHUP (129), SIGINT (130), SIGQUIT (131) or SIGTERM (143).
 
+use super::fg::LaunchInfo;
 use super::fit::Window;
 use super::grid::Emu;
 use super::ps::{Fed, Tracker, MAX_REPLIES, PROBE_REPLY};
+use super::saved::{self, Snapshot};
 use super::{local, view, Meta, Shared};
 use crate::id::{clean_name, default_name, session_name};
 use anyhow::{anyhow, Context};
 use portable_pty::{native_pty_system, CommandBuilder, ExitStatus, MasterPty, PtySize};
 use std::io::{Read, Write};
 use std::panic::AssertUnwindSafe;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -40,6 +42,14 @@ const DRAIN_WAIT: Duration = Duration::from_secs(1);
 const KILL_WAIT: Duration = Duration::from_secs(1);
 /// The size when the window's cannot be read.
 const DEFAULT_SIZE: (u16, u16) = (80, 24);
+/// A snapshot is written once nothing changed for this long.
+const SNAPSHOT_QUIET: Duration = Duration::from_secs(2);
+/// ... or once things kept changing for this long, so a program that never settles is still saved.
+const SNAPSHOT_MAX_WAIT: Duration = Duration::from_secs(10);
+/// How long a restored terminal waits for its shell's first prompt before it pre-types the command anyway.
+const PREFILL_WAIT: Duration = Duration::from_secs(2);
+/// The shells a snapshot names as its shell when one is the command.
+const SHELLS: [&str; 8] = ["zsh", "bash", "fish", "sh", "dash", "ksh", "tcsh", "csh"];
 
 pub struct RunOpts {
     pub name: Option<String>,
@@ -54,8 +64,8 @@ pub struct RunOpts {
     pub program_status: bool,
     /// Start zsh, bash and fish through the shell hook (`shellHook` in term.json).
     pub shell_hook: bool,
-    /// The environment a restored terminal activates; only with the shell hook.
-    pub restore: Option<super::shell::Restore>,
+    /// The key of the terminal to restore (`saved/<key>.json`): its key, name, directory, environments and command.
+    pub restore: Option<String>,
 }
 
 /// Standard input is not a terminal.
@@ -72,7 +82,7 @@ impl std::error::Error for NoTerminal {}
 
 /// How to start the command through the shell hook; none when it is not a hooked shell or the hook files cannot be
 /// written (the shell then starts as it is).
-fn hook_launch(opts: &RunOpts) -> Option<super::shell::Launch> {
+fn hook_launch(opts: &RunOpts, restore: Option<&super::shell::Restore>) -> Option<super::shell::Launch> {
     let zdotdir = std::env::var_os("ZDOTDIR");
     // A ZDOTDIR that is not UTF-8 could not be put back as it was: no hook rather than the wrong startup files.
     let zdotdir = match &zdotdir {
@@ -80,7 +90,7 @@ fn hook_launch(opts: &RunOpts) -> Option<super::shell::Launch> {
         None => None,
     };
     let dir = super::shell::install(&opts.dir).ok()?;
-    super::shell::launch(&opts.command, &dir, zdotdir, opts.restore.as_ref())
+    super::shell::launch(&opts.command, &dir, zdotdir, restore)
 }
 
 /// Run the program until it exits or the window goes; its exit code.
@@ -107,18 +117,28 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
         None => session_name(default_name(&command)).unwrap_or_else(|| "shell".into()),
     };
     let (cols, rows) = window_size().unwrap_or(DEFAULT_SIZE);
+    // The terminal to restore: its snapshot, unless there is none for the key.
+    let mut restoring = opts.restore.as_deref().and_then(|k| saved::read(&opts.dir, k).filter(|s| s.key == k));
 
-    // The name: picked and bound under the lock, so two runs starting together never get the same one.
+    // The name (and a restored key): picked and bound under the lock, so two runs starting together never get the same.
     let dir = opts.dir.clone();
     let lock = tokio::task::spawn_blocking(move || local::name_lock(&dir)).await??;
-    let taken: Vec<String> = local::scan(&opts.dir, &token).await.into_iter().map(|s| s.name).collect();
+    let live = local::scan(&opts.dir, &token).await;
+    // A key that is live already is that terminal's: this one starts as a new terminal.
+    if restoring.as_ref().is_some_and(|r| live.iter().any(|s| s.key.as_deref() == Some(r.key.as_str()))) {
+        restoring = None;
+    }
+    let taken: Vec<String> = live.into_iter().map(|s| s.name).collect();
+    let base = restoring.as_ref().and_then(|r| session_name(&r.name)).unwrap_or(base);
     let name = local::pick_name(&base, &taken);
+    let key = restoring.as_ref().map_or_else(local::new_key, |r| r.key.clone());
+    let named = restoring.as_ref().map_or(opts.name.is_some(), |r| r.named);
     let (input, input_rx) = mpsc::unbounded_channel();
     let shared = Arc::new(Shared {
         emu: Mutex::new(Emu::new(cols, rows)),
         rev: watch::channel(0).0,
         input,
-        meta: Meta { key: local::new_key(), name: Mutex::new(name), command, pid, ticket: opts.ticket.clone(), named: AtomicBool::new(opts.name.is_some()) },
+        meta: Meta { key, name: Mutex::new(name), command, pid, ticket: opts.ticket.clone(), named: AtomicBool::new(named) },
         viewers: AtomicU32::new(0),
         ended: watch::channel(false).0,
         activity: AtomicU64::new(now()),
@@ -132,6 +152,7 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
         dirty: watch::channel(0).0,
         tty: tty_name(),
         end: tokio::sync::Notify::new(),
+        prompted: tokio::sync::Notify::new(),
     });
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path).with_context(|| format!("cannot listen on {}", path.display()))?;
@@ -143,7 +164,21 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
     let pair = native_pty_system()
         .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(|_| anyhow!("cannot open a pty"))?;
-    let hook = if opts.shell_hook { hook_launch(&opts) } else { None };
+    let restore = restoring.as_ref().map(|r| super::shell::Restore { venv: r.venv.clone(), conda: r.conda.clone() });
+    let hook = if opts.shell_hook { hook_launch(&opts, restore.as_ref()) } else { None };
+    // The restored command waits for the user, pre-typed; its directory and (through the hook) environments are
+    // the snapshot's until the shell reports its own.
+    let prefill_text = restoring.as_ref().and_then(|r| {
+        let mut st = shared.shell.lock().unwrap_or_else(|e| e.into_inner());
+        st.pending = r.cmd.clone().or_else(|| r.prog.clone());
+        st.cwd = r.cwd.clone();
+        if hook.is_some() {
+            (st.venv, st.conda, st.conda_name) = (r.venv.clone(), r.conda.clone(), r.conda_name.clone());
+        }
+        st.pending.as_deref().map(super::resume::prefill)
+    });
+    let started = restoring.as_ref().map_or_else(now, |r| r.started);
+    let start_dir = restoring.as_ref().and_then(|r| r.cwd.as_ref()).map(PathBuf::from).filter(|d| d.is_dir());
     let mut cmd = match opts.command.split_first() {
         None => CommandBuilder::new_default_prog(),
         Some((program, args)) => {
@@ -163,7 +198,7 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
             c
         }
     };
-    if let Some(d) = opts.cwd.clone().or_else(|| std::env::var_os("HOME").map(PathBuf::from)) {
+    if let Some(d) = opts.cwd.clone().or(start_dir).or_else(|| std::env::var_os("HOME").map(PathBuf::from)) {
         cmd.cwd(d);
     }
     // The program's own words may quote the command, so they are not passed on.
@@ -218,18 +253,34 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
         let _ = exit_tx.send(child.wait());
     });
 
+    // The only writer of this terminal's snapshot (`saved::write` has one temporary file per key and process).
+    let snapshots = tokio::spawn(keep_snapshot(shared.clone(), opts.dir.clone(), shell_of(&opts.command), started));
+    if let Some(text) = prefill_text {
+        let sh = shared.clone();
+        tokio::spawn(async move {
+            let _ = tokio::time::timeout(PREFILL_WAIT, sh.prompted.notified()).await;
+            // Typed, never run: no line end, nor any other control character.
+            let text: String = text.chars().filter(|c| !c.is_control()).collect();
+            if !text.is_empty() {
+                let _ = sh.input.send(text.into_bytes());
+            }
+        });
+    }
+
     let mut tick = tokio::time::interval(TICK);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut fg_tick = tokio::time::interval(FG_EVERY);
     fg_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let end = loop {
         tokio::select! {
-            status = &mut exited => break End::Exited(exit_code(status)),
+            // A signal first: a shutdown that stops everything ends the program too, and the snapshot is kept then.
+            biased;
             _ = hup.recv() => break End::Signal(libc::SIGHUP),
-            _ = shared.end.notified() => break End::Signal(libc::SIGHUP),
             _ = term.recv() => break End::Signal(libc::SIGTERM),
             _ = int.recv() => break End::Signal(libc::SIGINT),
             _ = quit.recv() => break End::Signal(libc::SIGQUIT),
+            _ = shared.end.notified() => break End::Ended,
+            status = &mut exited => break End::Exited(exit_code(status)),
             _ = winch.recv() => resize(pair.master.as_ref(), &shared),
             _ = fg_tick.tick() => probe_fg(&shared, pair.master.process_group_leader(), child_pid.unwrap_or(0)),
             _ = tick.tick() => {
@@ -239,9 +290,15 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
             }
         }
     };
+    // Stopped before the program is: what it looks like while it goes is not what to restore.
+    snapshots.abort();
     let code = match end {
         End::Exited(code) => code,
-        End::Signal(sig) => {
+        End::Ended | End::Signal(_) => {
+            let sig = match end {
+                End::Signal(s) => s,
+                _ => libc::SIGHUP,
+            };
             let _ = killer.kill();
             if tokio::time::timeout(KILL_WAIT, &mut exited).await.is_err() {
                 if let Some(p) = child_pid {
@@ -252,6 +309,7 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
             128 + sig
         }
     };
+    finish_snapshot(&end, &opts.dir, &shared.meta.key);
     // The last screen is in before anyone is told it was the last; each viewer sends it before saying so.
     let _ = tokio::time::timeout(DRAIN_WAIT, drained).await;
     shared.ended.send_replace(true);
@@ -296,11 +354,111 @@ fn probe_fg(shared: &Shared, pgrp: Option<i32>, child_pid: u32) {
 }
 
 /// Why the main loop stopped.
+#[derive(Debug)]
 enum End {
     /// The program exited, with this code.
     Exited(i32),
+    /// The `end` op (结束终端, ⌘W): the program is stopped like on SIGHUP.
+    Ended,
     /// run got this signal.
     Signal(i32),
+}
+
+/// The snapshot after a run ended: gone when the user ended the terminal (the program exited, or `end`), kept for a
+/// signal from outside (a closed window, a logout or shutdown, an upgrade), so the terminal can be restored.
+fn finish_snapshot(end: &End, dir: &Path, key: &str) {
+    match end {
+        End::Exited(_) | End::Ended => saved::remove(dir, key),
+        End::Signal(_) => {}
+    }
+}
+
+/// The shell a snapshot names: the command when it is one, else the login shell.
+fn shell_of(command: &[String]) -> String {
+    match command.first() {
+        Some(c) if SHELLS.contains(&super::fg::prog_name(c).as_str()) => c.clone(),
+        _ => std::env::var("SHELL").unwrap_or_default(),
+    }
+}
+
+/// Keeps `saved/<key>.json` up to date: written at start, then each time things settle after a change, when the
+/// snapshot (its time aside) is not the one written last. Ends when aborted.
+async fn keep_snapshot(shared: Arc<Shared>, dir: PathBuf, shell: String, started: u64) {
+    let mut changes = shared.dirty.subscribe();
+    let mut last: Option<Snapshot> = None;
+    loop {
+        let s = snapshot_of(&shared, &shell, started, now());
+        if last.as_ref().map(|l| Snapshot { saved: s.saved, ..l.clone() }).as_ref() != Some(&s) {
+            // Written here, not on a blocking thread: once aborted, no write is left half done.
+            if saved::write(&dir, &s).is_ok() {
+                last = Some(s);
+            }
+        }
+        if changes.changed().await.is_err() {
+            return;
+        }
+        let cap = tokio::time::Instant::now() + SNAPSHOT_MAX_WAIT;
+        loop {
+            let quiet = (tokio::time::Instant::now() + SNAPSHOT_QUIET).min(cap);
+            tokio::select! {
+                r = changes.changed() => if r.is_err() { return },
+                _ = tokio::time::sleep_until(quiet) => break,
+            }
+        }
+    }
+}
+
+/// What the terminal looks like now, for `saved/<key>.json`.
+pub fn snapshot_of(shared: &Shared, shell_path: &str, started: u64, now: u64) -> Snapshot {
+    snapshot_with(shared, shell_path, started, now, super::fg::launch_info)
+}
+
+/// `snapshot_of` with the foreground program's argv and environment read by `launch_info`.
+fn snapshot_with(
+    shared: &Shared,
+    shell_path: &str,
+    started: u64,
+    now: u64,
+    launch_info: impl Fn(i32) -> Option<LaunchInfo>,
+) -> Snapshot {
+    let st = shared.shell.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let fg = shared.fg.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let fg_cwd = fg.cwd.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let cwd = if st.hooked { st.cwd.clone().or(fg_cwd) } else { fg_cwd.or(st.cwd.clone()) };
+    let (mut venv, mut conda, mut conda_name) = (st.venv.clone(), st.conda.clone(), st.conda_name.clone());
+    let (cmd, prog) = if let Some(p) = &st.pending {
+        (Some(p.clone()), saved::clean_cmd(p).1)
+    } else if let Some(r) = &st.running {
+        saved::clean_cmd(r)
+    } else if !st.hooked && fg.probed && !fg.shell {
+        // No hook: what the program in front was started with. Only with no hook: a hooked shell keeps out what it
+        // does not report (a command kept out of history).
+        match fg.pgrp.and_then(&launch_info) {
+            Some((argv, env)) => {
+                let get = |k: &str| env.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
+                (venv, conda, conda_name) = (get("VIRTUAL_ENV"), get("CONDA_PREFIX"), get("CONDA_DEFAULT_ENV"));
+                saved::clean_cmd(&argv.join(" "))
+            }
+            None => (None, None),
+        }
+    } else {
+        (None, None)
+    };
+    Snapshot {
+        v: 1,
+        key: shared.meta.key.clone(),
+        name: shared.meta.name(),
+        named: shared.meta.named.load(Ordering::Relaxed),
+        shell: shell_path.to_string(),
+        cwd,
+        venv,
+        conda,
+        conda_name,
+        cmd,
+        prog,
+        started,
+        saved: now,
+    }
 }
 
 fn now() -> u64 {
@@ -430,6 +588,7 @@ fn pump_output<W: Write>(
                         shared.touch();
                     }
                     super::ps::Event::Prompt => {
+                        shared.prompted.notify_one();
                         let mut st = shared.shell.lock().unwrap_or_else(|e| e.into_inner());
                         let was = st.running.clone();
                         st.prompt();
@@ -633,6 +792,119 @@ mod tests {
     }
 
     #[test]
+    fn ended_and_exited_remove_the_snapshot_signals_keep_it() {
+        let key = "0123456789abcdef";
+        let cases = [(End::Exited(0), false), (End::Ended, false), (End::Signal(libc::SIGHUP), true), (End::Signal(libc::SIGTERM), true)];
+        for (end, kept) in cases {
+            let d = tempfile::tempdir().unwrap();
+            saved::write(d.path(), &Snapshot { v: 1, key: key.into(), ..Default::default() }).unwrap();
+            finish_snapshot(&end, d.path(), key);
+            assert_eq!(saved::path(d.path(), key).exists(), kept, "{end:?}");
+        }
+    }
+
+    fn fg_of(prog: &str, cwd: &str, shell: bool, pgrp: i32) -> super::super::fg::Fg {
+        super::super::fg::Fg { prog: Some(prog.into()), cwd: Some(cwd.into()), shell, probed: true, pgrp: Some(pgrp) }
+    }
+
+    type Info = Option<LaunchInfo>;
+
+    fn no_info(_: i32) -> Info {
+        panic!("the foreground program is not read here")
+    }
+
+    fn state(cwd: &str, venv: Option<&str>) -> super::super::shell::Report {
+        super::super::shell::Report::State {
+            cwd: Some(cwd.into()),
+            venv: venv.map(Into::into),
+            conda: Some("/c/ml".into()),
+            conda_name: Some("ml".into()),
+        }
+    }
+
+    #[test]
+    fn snapshot_of_prefers_hook_state_over_fg() {
+        let sh = shared(30, 4);
+        *sh.fg.lock().unwrap() = fg_of("zsh", "/fg/dir", true, 5);
+        sh.shell.lock().unwrap().apply(state("/hook/dir", Some("/hook/.venv")));
+        let s = snapshot_with(&sh, "/bin/zsh", 10, 20, no_info);
+        assert_eq!((s.v, s.key.as_str(), s.name.as_str(), s.named, s.shell.as_str()), (1, "0123456789abcdef", "t", false, "/bin/zsh"));
+        assert_eq!((s.started, s.saved), (10, 20));
+        assert_eq!((s.cwd.as_deref(), s.venv.as_deref()), (Some("/hook/dir"), Some("/hook/.venv")));
+        assert_eq!((s.conda.as_deref(), s.conda_name.as_deref()), (Some("/c/ml"), Some("ml")));
+        assert_eq!((s.cmd, s.prog), (None, None));
+        // A program in front elsewhere: the shell's own directory and environments, the hook's command line, cleaned.
+        *sh.fg.lock().unwrap() = fg_of("claude", "/fg/other", false, 9);
+        sh.shell.lock().unwrap().apply(super::super::shell::Report::Run("KEY=x claude --model opus".into()));
+        let s = snapshot_with(&sh, "/bin/zsh", 10, 20, no_info);
+        assert_eq!((s.cwd.as_deref(), s.venv.as_deref()), (Some("/hook/dir"), Some("/hook/.venv")));
+        assert_eq!((s.cmd.as_deref(), s.prog.as_deref()), (Some("claude --model opus"), Some("claude")));
+        // A command line holding a secret keeps only its program.
+        sh.shell.lock().unwrap().apply(super::super::shell::Report::Run("claude --api-key sk-zzz".into()));
+        let s = snapshot_with(&sh, "/bin/zsh", 10, 20, no_info);
+        assert_eq!((s.cmd, s.prog.as_deref()), (None, Some("claude")));
+        // A rename is in it too.
+        *sh.meta.name.lock().unwrap() = "mine".into();
+        sh.meta.named.store(true, Ordering::Relaxed);
+        let s = snapshot_with(&sh, "/bin/zsh", 10, 20, no_info);
+        assert_eq!((s.name.as_str(), s.named), ("mine", true));
+    }
+
+    #[test]
+    fn snapshot_of_pending_wins_until_run() {
+        let sh = shared(30, 4);
+        *sh.fg.lock().unwrap() = fg_of("zsh", "/fg/dir", true, 5);
+        sh.shell.lock().unwrap().pending = Some("claude --continue".into());
+        let s = snapshot_with(&sh, "/bin/zsh", 10, 20, no_info);
+        assert_eq!((s.cmd.as_deref(), s.prog.as_deref()), (Some("claude --continue"), Some("claude")));
+        // The hook comes up and draws a prompt: still waiting for the user.
+        sh.shell.lock().unwrap().apply(state("/w", None));
+        sh.shell.lock().unwrap().prompt();
+        let s = snapshot_with(&sh, "/bin/zsh", 10, 20, no_info);
+        assert_eq!(s.cmd.as_deref(), Some("claude --continue"));
+        // The user runs something: that is the command now; once it is done, none.
+        sh.shell.lock().unwrap().apply(super::super::shell::Report::Run("ls -l".into()));
+        let s = snapshot_with(&sh, "/bin/zsh", 10, 20, no_info);
+        assert_eq!((s.cmd.as_deref(), s.prog.as_deref()), (Some("ls -l"), Some("ls")));
+        sh.shell.lock().unwrap().prompt();
+        let s = snapshot_with(&sh, "/bin/zsh", 10, 20, no_info);
+        assert_eq!((s.cmd, s.prog), (None, None));
+    }
+
+    #[test]
+    fn snapshot_of_fallback_reads_foreground_argv() {
+        let sh = shared(30, 4);
+        *sh.fg.lock().unwrap() = fg_of("npm", "/w/app", false, 42);
+        let info = |pid: i32| -> Info {
+            assert_eq!(pid, 42);
+            let env = vec![("VIRTUAL_ENV".to_string(), "/w/.venv".to_string()), ("CONDA_PREFIX".into(), "/c/ml".into())];
+            Some((vec!["npm".into(), "run".into(), "dev".into()], env))
+        };
+        let s = snapshot_with(&sh, "/bin/zsh", 10, 20, info);
+        assert_eq!((s.cmd.as_deref(), s.prog.as_deref(), s.cwd.as_deref()), (Some("npm run dev"), Some("npm"), Some("/w/app")));
+        assert_eq!((s.venv.as_deref(), s.conda.as_deref(), s.conda_name), (Some("/w/.venv"), Some("/c/ml"), None));
+        // A secret in the argv keeps only the program; an unreadable process gives nothing.
+        let s = snapshot_with(&sh, "/bin/zsh", 10, 20, |_| Some((vec!["tool".into(), "--token".into(), "x".into()], vec![])));
+        assert_eq!((s.cmd, s.prog.as_deref()), (None, Some("tool")));
+        let s = snapshot_with(&sh, "/bin/zsh", 10, 20, |_| None);
+        assert_eq!((s.cmd, s.prog, s.venv, s.cwd.as_deref()), (None, None, None, Some("/w/app")));
+    }
+
+    #[test]
+    fn snapshot_of_shell_idle_has_no_cmd() {
+        let sh = shared(30, 4);
+        // No hook, the shell in front: its directory, nothing else.
+        *sh.fg.lock().unwrap() = fg_of("zsh", "/fg/dir", true, 5);
+        let s = snapshot_with(&sh, "/bin/zsh", 10, 20, no_info);
+        assert_eq!((s.cmd, s.prog, s.venv, s.conda, s.cwd.as_deref()), (None, None, None, None, Some("/fg/dir")));
+        // Hooked, at a prompt.
+        sh.shell.lock().unwrap().apply(state("/hook/dir", None));
+        sh.shell.lock().unwrap().prompt();
+        let s = snapshot_with(&sh, "/bin/zsh", 10, 20, no_info);
+        assert_eq!((s.cmd, s.prog, s.venv, s.cwd.as_deref()), (None, None, None, Some("/hook/dir")));
+    }
+
+    #[test]
     fn marker_name_is_the_tty_basename() {
         assert_eq!(marker_name("/dev/ttys012").as_deref(), Some("ttys012"));
         assert_eq!(marker_name("/dev/"), None);
@@ -663,6 +935,7 @@ mod tests {
             dirty: watch::channel(0).0,
             tty: None,
             end: tokio::sync::Notify::new(),
+            prompted: tokio::sync::Notify::new(),
         };
         (sh, rx)
     }
@@ -700,7 +973,7 @@ mod tests {
     fn a_title_is_credited_to_the_program_in_front_when_it_arrives() {
         use super::super::fg::Fg;
         let (sh, _rx) = shared_with_input(30, 4);
-        let fgd = |prog: &str, shell: bool| Fg { prog: Some(prog.into()), cwd: Some("/h/x".into()), shell, probed: true };
+        let fgd = |prog: &str, shell: bool| Fg { prog: Some(prog.into()), cwd: Some("/h/x".into()), shell, probed: true, pgrp: None };
         // The last once-a-second probe still saw the shell; vim has just started and sets its title.
         *sh.fg.lock().unwrap() = fgd("zsh", true);
         let window = Mutex::new(Window::new(Vec::new()).titles("/h".into()));

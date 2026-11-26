@@ -6,6 +6,7 @@ pub mod launch;
 pub mod local;
 pub mod saved;
 pub mod ps;
+pub mod resume;
 pub mod shell;
 pub mod sweep;
 pub mod title;
@@ -63,6 +64,8 @@ pub struct Shared {
     pub tty: Option<String>,
     /// Notified by the `end` op; the run loop then ends like a closed window.
     pub end: tokio::sync::Notify,
+    /// Notified at each shell prompt (`OSC 133;A`); a restored terminal pre-types its command after the first.
+    pub prompted: tokio::sync::Notify,
 }
 
 impl Meta {

@@ -394,3 +394,178 @@ async fn a_ticketed_run_leaves_a_marker_named_for_its_tty() {
     let text = std::fs::read_to_string(d.path().join("ended").join(name)).expect("the marker");
     assert!(text.trim().parse::<u64>().unwrap() >= before, "{text}");
 }
+
+// Snapshots (`saved/<key>.json`) and `--restore`: a real zsh through the hook, with a home of its own.
+
+use rapp_term::pty::saved::{self, Snapshot};
+use std::path::Path;
+
+/// Taken out of the holder's environment, so a ZDOTDIR or hook variable set where the tests run changes nothing.
+const SEALED: [&str; 5] = ["ZDOTDIR", "RAPP_ZDOTDIR", "RAPP_BASH_LOGIN", "RAPP_RESTORE_VENV", "RAPP_RESTORE_CONDA"];
+
+/// A term dir (`<tmp>/t`, so `term.json` beside it is the test's own) and a home with a plain `.zshrc`.
+fn zsh_setup() -> Option<(tempfile::TempDir, std::path::PathBuf, tempfile::TempDir)> {
+    if !Path::new("/bin/zsh").is_file() {
+        eprintln!("note: /bin/zsh is not installed here; the test is skipped");
+        return None;
+    }
+    let d = short_dir();
+    let term = d.path().join("t");
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(home.path().join(".zshrc"), "PS1='%# '\n").unwrap();
+    Some((d, term, home))
+}
+
+fn zsh_window(term: &Path, home: &Path, args: &[&str]) -> Window {
+    let env = [("HOME", home.display().to_string()), ("PATH", "/usr/bin:/bin:/usr/sbin:/sbin".into()), ("TERM", "xterm-256color".into())];
+    let all: Vec<&str> = args.iter().copied().chain(["--", "/bin/zsh", "-l"]).collect();
+    Window::start_env(term, &all, &env, &SEALED)
+}
+
+/// The snapshot of `key`, waiting up to `within` for one that `ok` takes.
+fn wait_snapshot(term: &Path, key: &str, within: Duration, ok: impl Fn(&Snapshot) -> bool) -> Snapshot {
+    let end = Instant::now() + within;
+    loop {
+        let s = saved::read(term, key);
+        if let Some(s) = s.filter(|s| ok(s)) {
+            return s;
+        }
+        assert!(Instant::now() < end, "no such snapshot of {key} within {within:?}: {:?}", saved::read(term, key));
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+async fn key_of(term: &Path, name: &str) -> String {
+    wait_dir(term);
+    wait_status(term, name).await.key.expect("a key")
+}
+
+/// Until the holder made the term dir (the tests' `<tmp>/t` is not there before).
+fn wait_dir(term: &Path) {
+    let end = Instant::now() + WAIT;
+    while !term.join("pty").is_dir() {
+        assert!(Instant::now() < end, "no term dir");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[tokio::test]
+async fn holder_writes_snapshot_with_cwd() {
+    let Some((_d, term, home)) = zsh_setup() else { return };
+    let mut w = zsh_window(&term, home.path(), &["--name", "t"]);
+    let key = key_of(&term, "t").await;
+    // Written at start.
+    let first = wait_snapshot(&term, &key, WAIT, |_| true);
+    assert_eq!((first.key.as_str(), first.name.as_str(), first.shell.as_str(), first.named), (key.as_str(), "t", "/bin/zsh", true));
+    w.wait_output("\x1b]133;A");
+    w.type_in(b"cd /tmp\r");
+    let s = wait_snapshot(&term, &key, Duration::from_secs(5), |s| s.cwd.as_deref().is_some_and(|c| c.ends_with("/tmp")));
+    assert_eq!(s.started, first.started);
+    let mode = std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(saved::path(&term, &key)).unwrap().permissions());
+    assert_eq!(mode & 0o777, 0o600);
+}
+
+#[tokio::test]
+async fn exit_removes_snapshot() {
+    let Some((_d, term, home)) = zsh_setup() else { return };
+    let mut w = zsh_window(&term, home.path(), &["--name", "t"]);
+    let key = key_of(&term, "t").await;
+    wait_snapshot(&term, &key, WAIT, |_| true);
+    w.wait_output("\x1b]133;A");
+    w.type_in(b"exit\r");
+    assert_eq!(w.wait_exit(), 0);
+    assert!(!saved::path(&term, &key).exists());
+}
+
+#[tokio::test]
+async fn sighup_keeps_snapshot() {
+    let Some((_d, term, home)) = zsh_setup() else { return };
+    let mut w = zsh_window(&term, home.path(), &["--name", "t"]);
+    let key = key_of(&term, "t").await;
+    wait_snapshot(&term, &key, WAIT, |_| true);
+    w.close();
+    assert_eq!(w.wait_exit(), 129);
+    assert!(saved::path(&term, &key).exists());
+}
+
+#[tokio::test]
+async fn sigterm_keeps_and_end_removes_the_snapshot() {
+    let d = short_dir();
+    let mut w = Window::start(d.path(), &["--name", "t", "--", "/bin/cat"]);
+    let key = key_of(d.path(), "t").await;
+    wait_snapshot(d.path(), &key, WAIT, |_| true);
+    unsafe { libc::kill(w.pid() as i32, libc::SIGTERM) };
+    assert_eq!(w.wait_exit(), 143);
+    assert!(saved::path(d.path(), &key).exists());
+
+    let mut w = Window::start(d.path(), &["--name", "u", "--", "/bin/cat"]);
+    let key = key_of(d.path(), "u").await;
+    wait_snapshot(d.path(), &key, WAIT, |_| true);
+    let token = local::token(d.path()).unwrap();
+    local::end(&socket_of(d.path(), w.pid()), &token).await.unwrap();
+    assert_eq!(w.wait_exit(), 129);
+    assert!(!saved::path(d.path(), &key).exists());
+}
+
+#[tokio::test]
+async fn restore_reuses_key_and_prefills_without_running() {
+    let Some((_d, term, home)) = zsh_setup() else { return };
+    let k = "00000000000000a1";
+    let cwd = home.path().join("work dir");
+    std::fs::create_dir(&cwd).unwrap();
+    let snap = Snapshot {
+        v: 1,
+        key: k.into(),
+        name: "work".into(),
+        named: true,
+        shell: "/bin/zsh".into(),
+        cwd: Some(cwd.display().to_string()),
+        cmd: Some("echo RAN".into()),
+        prog: Some("echo".into()),
+        started: 1234,
+        saved: 1300,
+        ..Default::default()
+    };
+    saved::write(&term, &snap).unwrap();
+    let _w = zsh_window(&term, home.path(), &["--restore", k]);
+    wait_dir(&term);
+    let st = wait_status(&term, "work").await;
+    assert_eq!(st.key.as_deref(), Some(k));
+    let mut v = Viewer::connect(&term, "work").await;
+    v.open().await;
+    v.wait_text("echo RAN", 1).await;
+    // Typed, not run: for three seconds no line says RAN alone.
+    let end = Instant::now() + Duration::from_secs(3);
+    while let Some(left) = end.checked_duration_since(Instant::now()) {
+        let _ = tokio::time::timeout(left, v.next()).await;
+        assert!(!v.lines.values().any(|l| l.trim() == "RAN"), "{:?}", v.lines);
+    }
+    assert_eq!(v.count("echo RAN"), 1, "{:?}", v.lines);
+    // Opened in the saved directory; the snapshot goes on under the same key, its start kept, the command still there.
+    let s = wait_snapshot(&term, k, WAIT, |s| s.saved != 1300);
+    assert_eq!((s.started, s.name.as_str(), s.named, s.cmd.as_deref()), (1234, "work", true, Some("echo RAN")));
+    let real = cwd.canonicalize().unwrap();
+    assert!(s.cwd.as_deref().is_some_and(|c| Path::new(c).canonicalize().ok() == Some(real.clone())), "{:?}", s.cwd);
+}
+
+#[tokio::test]
+async fn restore_unknown_key_starts_fresh() {
+    let d = short_dir();
+    let k = "00000000000000b2";
+    let _w = Window::start(d.path(), &["--restore", k, "--", "/bin/cat"]);
+    let key = key_of(d.path(), "cat").await;
+    assert!(key != k && saved::key_ok(&key), "{key}");
+    wait_snapshot(d.path(), &key, WAIT, |_| true);
+    assert!(!saved::path(d.path(), k).exists());
+}
+
+#[tokio::test]
+async fn restore_of_a_live_key_takes_a_new_one() {
+    let d = short_dir();
+    let _a = Window::start(d.path(), &["--name", "a", "--", "/bin/cat"]);
+    let ka = key_of(d.path(), "a").await;
+    wait_snapshot(d.path(), &ka, WAIT, |_| true);
+    let _b = Window::start(d.path(), &["--name", "b", "--restore", &ka, "--", "/bin/cat"]);
+    let kb = key_of(d.path(), "b").await;
+    assert_ne!(ka, kb);
+}

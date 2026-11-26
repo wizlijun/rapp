@@ -350,6 +350,7 @@ mod tests {
             dirty: watch::channel(0).0,
             tty: None,
             end: tokio::sync::Notify::new(),
+            prompted: tokio::sync::Notify::new(),
         };
         (Arc::new(sh), rx)
     }
