@@ -3,6 +3,7 @@
 > **macOS 端已升到协议 v4（多窗口）**：线协议和 host、client 的窗口行为以
 > `2026-11-11-rapp-multiwindow-design.md` 为准，本文第 3 章的 v3 只对还没升级的 Windows、Omarchy 端有效。
 > v3 和 v4 握手时互报版本不一致，连不上。本文其余部分（地址、命令行、编码、档位）在 v4 里不变，除非那份文档另有规定。
+> 现在 macOS、Linux 都是协议 v16。本文里关于 Windows 的话是旧设想，Windows 版以 `2026-11-26-rapp-windows-design.md` 为准（它的 §0.3）。
 
 日期：2026-11-10
 依据：已完成并通过 91 个测试的 Swift 实现（`Sources/`），代码与本文不一致时以代码为准，并回头改本文。
@@ -814,10 +815,10 @@ gray4、color8 不在菜单里，但地址里的 `mode=gray4|color8` 和协议�
 
 ## 7. 平台对照
 
-| 能力 | macOS（参考实现） | Windows host（已定） | Omarchy（Rust 方案） | 手机 client（未定） |
+| 能力 | macOS（参考实现） | Windows host（旧设想，以 Windows 设计为准） | Omarchy（Rust 方案） | 手机 client（未定） |
 |---|---|---|---|---|
 | appID | bundle id | exe 文件名，不区分大小写 | 见 Rust 方案 | — |
-| 找不到在运行的 app | 自动启动 | 报错 | 见 Rust 方案 | — |
+| 找不到在运行的 app | 自动启动 | 照 macOS：按 id 启动（Windows 设计 §6.4） | 见 Rust 方案 | — |
 | 采集 | ScreenCaptureKit | Rust 方案 | Rust 方案 | — |
 | 标题栏高度 | 关闭按钮位置 | Rust 方案 | Rust 方案 | — |
 | 改尺寸 | 辅助功能 API | Rust 方案 | 平铺窗口不改，只记日志（待你确认） | — |
@@ -844,7 +845,7 @@ gray4、color8 不在菜单里，但地址里的 `mode=gray4|color8` 和协议�
 
 ### 9.1 host 常驻
 
-现在 host 是终端里前台跑的命令行，关了终端就没了，口令写在命令行里。每台电脑都装，就需要：开机或登录后自动启动、后台运行、口令存在配置文件里、崩溃后自动拉起。各平台做法不同（macOS LaunchAgent，Windows 计划任务或服务，Linux systemd user unit）。还要注意：macOS 的屏幕录制、辅助功能权限是给"运行 host 的那个程序"的，常驻后要给 host 本身授权。
+现在 host 是终端里前台跑的命令行，关了终端就没了，口令写在命令行里。每台电脑都装，就需要：开机或登录后自动启动、后台运行、口令存在配置文件里、崩溃后自动拉起。各平台做法不同（macOS LaunchAgent，Windows 见 Windows 设计 §7，Linux systemd user unit）。还要注意：macOS 的屏幕录制、辅助功能权限是给"运行 host 的那个程序"的，常驻后要给 host 本身授权。
 
 ### 9.2 选哪个 app、哪个窗口
 
@@ -860,7 +861,7 @@ gray4、color8 不在菜单里，但地址里的 `mode=gray4|color8` 和协议�
 
 ### 9.5 按键与平台无关
 
-Key 消息用的是 macOS 键码和 `CGEventFlags`。Windows host 已经靠翻译表解决。如果 client 在 Windows、Linux 或手机上，它也得把本地按键翻成 macOS 键码。两种做法：保持 v3，由各 client 维护翻译表；或者在 v4 里改成平台无关的键名（如 USB HID 用法码）。
+Key 消息用的是 macOS 键码和 `CGEventFlags`。Windows host 打算靠翻译表解决（Windows 设计 §6）。如果 client 在 Windows、Linux 或手机上，它也得把本地按键翻成 macOS 键码。两种做法：保持 v3，由各 client 维护翻译表；或者在 v4 里改成平台无关的键名（如 USB HID 用法码）。
 
 ### 9.6 断线与重连
 

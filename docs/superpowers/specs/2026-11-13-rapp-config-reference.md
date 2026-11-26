@@ -19,7 +19,7 @@
    2. 先备份成 `<文件>.bak`；
    3. 只改要改的字段，其余原样保留（未知字段也保留）；
    4. 用 `python3 -m json.tool <文件> >/dev/null` 确认 JSON 能解析；
-   5. 权限保持 `0600`（`chmod 600`）；
+   5. 权限保持 `0600`（`chmod 600`）；Windows 上没有权限位，在 `local\` 里改的文件跟着目录的访问列表走，不用管；
    6. 再启动那个程序，看日志里没有报错。
 4. **数据根目录**（下称 `$ROOT`，规格《数据目录》）：所有 rapp 数据都在这一个目录下。找法按顺序：环境变量 `RAPP_HOME` → 指针文件 `<旧配置目录>/data-root`（一行绝对路径）→ `~/rapp`（Windows `%USERPROFILE%\rapp`）。代码：`rust/net/src/config.rs:23-38`、`gui/lib/paths.dart:50-56`、`Sources/RappCore/DataPaths.swift:3-9`。
    - **旧配置目录**：macOS `~/Library/Application Support/rapp`，Linux `$XDG_CONFIG_HOME/rapp`（默认 `~/.config/rapp`），Windows `%APPDATA%\rapp`（`rust/net/src/config.rs:50-63`）。现在只用来放 `data-root` 指针，和作搬家的来源（只复制，旧文件原样留着）。
@@ -38,7 +38,7 @@
    - **进 git 的**：`shared/`、`devices/`、`agent/`、`clipboard/`、`README.md`、`.gitignore`。**不进 git 的**：`files/`、`local/`（写在 `.gitignore` 里）。rapp-service 在改动后 60 秒内合成一次提交（`rust/service/src/data.rs:41`）。
    - **机密只在 `local/`**。rapp 自己不往 `shared/`、`devices/`、`agent/`、`clipboard/` 里写口令、key、secret、token；agent 往这些目录写东西时也一样。例外是用户自己的话：`devices/<id>/inputs/` 里是写作面板发出去的原话，rapp 保证不了里面没有密钥，可能含私事，和钉住的剪贴板同样对待（《输入记录》§8）。
    - 路径函数：Rust `local`/`shared`/`device`/`files`（`rust/net/src/config.rs:79-93`），Dart `DataDir`（`gui/lib/paths.dart:60-72`）。
-   - 文件先写临时文件再改名；机密文件权限 `0600`。
+   - 文件先写临时文件再改名；机密文件权限 `0600`。Windows 上的“私有”（`local\`、日志目录、机密文件）是关掉继承、只给本人、SYSTEM 和 Administrators（`rust/net/src/private.rs`，Windows 设计 §13.2）；Windows 上各样东西放在哪见 Windows 设计 §13.1。
 5. **试验用临时目录。** 在自己机器上验证配置时，设 `RAPP_HOME=<临时目录>`（它优先于指针，所有数据都落在那里），不碰用户真实的 `~/rapp` 和旧配置目录。设了 `RAPP_HOME` 后日志在 `$RAPP_HOME/local/logs`，不用另设。
 
 ## 1. 一览
@@ -279,8 +279,9 @@ agent 规则：可以改，但要先关 GUI（GUI 退出时不回写这个文件
 | `$ROOT/local/project_positions.json` | B | 每个项目上次停在哪个会话、什么时候离开的：`{"version":1,"projects":{"<id>":{"last":"<会话键>","left_at":"<UTC 时间>"}}}`。不同步；已删项目的条目在启动和搬数据目录时丢掉（`gui/lib/ui/project_positions.dart`） | |
 | `$ROOT/local/pin-hint-shown` | B | 「钉住会进 git 历史」的提示已经显示过的标记，没有内容（`gui/lib/ui/pin_files.dart:10`）。删掉它，下次钉住时会再提示 | |
 | `~/Library/Caches/rapp/update` | A（macOS） | 升级包下载缓存 | |
+| `%LOCALAPPDATA%\rapp\update`（没有 `LOCALAPPDATA` 时 `%USERPROFILE%\AppData\Local\rapp\update`）；装成系统服务时 `%ProgramData%\rapp\update`（没有 `ProgramData` 时 `C:\ProgramData\rapp\update`） | A（Windows） | 升级包下载缓存（`rust/service/src/supervise.rs` 的 `update_cache_dir_from`）。G 段之前 Windows 不自己升级，这个目录还不会出现 | |
 | `$ROOT/local/permission-guide-shown` | A | 授权引导已经显示过的标记，没有内容（`gui/lib/pages/permissions_panel.dart:140`）。删掉它，下次启动会再引导一次 | |
-| 日志 `service.log`、`hub.log`、`launchd.log` | A、B | 目录：`RAPP_LOG_DIR`，否则设了 `RAPP_HOME` 时 `$RAPP_HOME/local/logs`，否则 macOS `~/Library/Logs/rapp`、Linux `$XDG_STATE_HOME/rapp`（`rust/net/src/log.rs:236`）。日志不跟着指针搬，不进 git。内容规则见可观测性规格：不记口令、token、剪贴板和打字内容 | |
+| 日志 `service.log`、`hub.log`、`launchd.log` | A、B | 目录：`RAPP_LOG_DIR`，否则设了 `RAPP_HOME` 时 `$RAPP_HOME/local/logs`，否则 macOS `~/Library/Logs/rapp`、Linux `$XDG_STATE_HOME/rapp`、Windows `%LOCALAPPDATA%\rapp\logs`（没有 `LOCALAPPDATA` 时 `%USERPROFILE%\AppData\Local\rapp\logs`，两个都没有时当前目录下的 `rapp\logs`；Windows 上日志目录只给本人、SYSTEM 和管理员）（`rust/net/src/log.rs` 的 `log_dir_from`）。日志不跟着指针搬，不进 git。内容规则见可观测性规格：不记口令、token、剪贴板和打字内容 | |
 
 ## 4. macOS 开机自启：`~/Library/LaunchAgents/com.rapp.service.plist`
 
@@ -395,7 +396,7 @@ relay 只能跑在 Linux 主机上（Mac 和 Windows 上的 Docker 在虚拟机�
 | `rapp-relay`（旧 relay，迁移结束后删除） | `--key`（必填，机密）、`--listen`（默认 `0.0.0.0:22026`）、`--db`（默认 `relay.json`）、`--debug`、`--version` | systemd 单元（§5.2） |
 | `rapp-relay2`（新 relay） | `--data <目录>`（默认 `/data`）；子命令见 §5.1 | Docker / 运维 |
 | `rapp-state` | `--port <端口>`、`--data <目录>`（不给就只放内存）、`--keep-days <天>`、`--keep-events <条>`；由 `rapp-service` 按 §2.12 拉起 | rapp-service |
-| `rapp-service`、`rapp-hub` | 不收参数（给了就以退出码 2 退出）；只看 §6 的环境变量 | launchd / GUI |
+| `rapp-service`、`rapp-hub` | 不收参数（给了就以退出码 2 退出）；只看 §6 的环境变量。例外：Windows 上的 `rapp-service` 收一个 `--supervised`，表示由 `rapp-svc` 拉起，标准输入是监督程序的管道，读到结尾就停；手动启动不带它，标准输入不读（`rust/service/src/supervise.rs`） | launchd / GUI；Windows 上 `rapp-svc` |
 | `rapp-host` | `serve --app <标识> --token-env <变量> --port <端口>（默认 47800，0=随机）--bind <地址> --json`；`list-apps`；`check [--prompt]`；`version [--json]` | rapp-service（`Sources/RappCore/WorkerCLI.swift:97`） |
 | `rapp-client`（Swift、GTK） | `[connect] rapp://… [--token-env <变量>] [--json]`；`version [--json]` | rapp-hub |
 | `rapp-session` | 不收参数，从标准输入读 JSON 命令 | GUI |

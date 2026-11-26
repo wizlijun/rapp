@@ -27,7 +27,7 @@
 - [x] `--cm` 模式
 - [x] 服务的启动、停止、重启；macOS 上用 LaunchAgent
 - 验证：`flutter analyze` 没有问题，`flutter test` 通过，`flutter build macos` 成功，并能实际启动
-- 结果：合并后 `flutter analyze` 没有问题，49 个测试通过；release 只能构建 arm64（这台机器上的 Xcode 做 universal 时 lipo 出错），部署目标提到 macOS 12；提交 ad26352..7d10467（合并 54988c9）。断开按钮没实际点过；Linux 和 Windows 没构建
+- 结果：合并后 `flutter analyze` 没有问题，49 个测试通过；release 只能构建 arm64（这台机器上的 Xcode 做 universal 时 lipo 出错），部署目标提到 macOS 12；提交 ad26352..7d10467（合并 54988c9）。断开按钮没实际点过；Linux 和 Windows 没构建（Windows 的构建现在归 `docs/superpowers/specs/2026-11-26-rapp-windows-design.md`）
 
 ## M4 合并与本机端到端
 - [x] 合并 M1、M2、M3
@@ -55,13 +55,13 @@
 - [x] Task 1 探查（结果在规格附录）；Task 2 协议 v4；Task 3 纯函数（父窗口、摆放）；Task 4 host 窗口表、按窗口注入、focus/close/move/resize；Task 5 client 每个 A 窗口一个 B 窗口；Task 6 菜单栏镜像；Task 7 e2e 和文档
 - 结果：`swift test` 160 个全过。e2e 三轮（lan、relay、id@ip，目标 Calculator）都过，每轮 client 都报 `windows: 1`（client 在 `--json` 时把窗口数写 stderr，hub 日志里能看到；hub 本身不转发事件）。
   实机（TextEdit，空文档、不打字、最后不存关掉）：右键菜单、格式菜单、字体面板、存储 sheet 在 B 上各是独立窗口且位置对；B 上挪窗口 0.5 秒内 A 跟着挪；B 菜单栏和 A 一致（灰掉、快捷键文字），B 上选"File ▸ New"在 A 上开出第二个窗口，B 上也多一个。
-- 没测：Windows、Omarchy 端（仍是 v3，和新 Mac 端连不上）；多块屏；A 上全屏窗口；打开时才填内容的子菜单（Open Recent、Share）在 B 上可能是空的；只有打开面板时按"新建"，2.5 秒内没出新窗口（原因没查）；Safari 读整个菜单栏的耗时只在探查时量过。
+- 没测：Windows（现在见 Windows 设计）、Omarchy 端（当时仍是 v3，和新 Mac 端连不上）；多块屏；A 上全屏窗口；打开时才填内容的子菜单（Open Recent、Share）在 B 上可能是空的；只有打开面板时按"新建"，2.5 秒内没出新窗口（原因没查）；Safari 读整个菜单栏的耗时只在探查时量过。
 
 ## 未经实机验证（交给用户验收）
-跨 NAT 打洞、VPS 部署、Windows 和 Linux 上的服务。
+跨 NAT 打洞、VPS 部署、Windows 和 Linux 上的服务（Windows 的服务见 Windows 设计 §7）。
 
 ## 未来规划
-- **多窗口 / 弹出窗口**：macOS 已做（见上）；Windows、Omarchy 端升到 v4 待做
+- **多窗口 / 弹出窗口**：macOS 已做（见上）；Omarchy 端升到 v4 待做；Windows 见 Windows 设计
 - **按区域选编码**（参考 Xpra）：静止的文字区用无损或低色深，正在变的区域用视频编码；见 `docs/superpowers/specs/2026-11-14-rapp-smooth-streaming-design.md`（第二步）
 - **按焦点分区串流**（U146–U148）：焦点面板彩色，其余灰度低流量。规格见 `docs/superpowers/specs/2026-11-16-rapp-focus-pane-rules.md`（第 2 稿，可实施第 0 步探查和第 1 步"看得见"，入口是预设里的「智能」）；真的省流量（改编码）另写设计
 - **硬件编码**（参考 Sunshine）：A 端用 VideoToolbox 编 H.264/HEVC，作为"看视频"档；B 端用 VideoToolbox 解码。30 fps 全屏动画时比瓦片编码省流量也省 CPU。见 `docs/superpowers/specs/2026-11-14-rapp-smooth-streaming-design.md`（第二步）；暂不排期
@@ -69,7 +69,7 @@
 ## 回顾
 - M1 到 M3 按规格定死的接口分给三个子代理并行做，合并时没有冲突，接口这一步省了很多返工。
 - M4 卡在一个和代码无关的问题上：一直开着的旧 rapp-host 让新进程抓屏被 replayd 断开。先单独跑 `serve`、再跑旧写法，把范围缩到"新进程"，再看系统日志才找到原因。已记进 lessons.md。
-- 没做的：GUI"启停"按钮本身（pkg 已验证装好并启动 LaunchAgent）、卸载脚本和覆盖重装、`--cm` 窗口上的按钮、跨 NAT 打洞、VPS 上的 relay、Windows 和 Linux 的服务，都留给用户实机验收。
+- 没做的：GUI"启停"按钮本身（pkg 已验证装好并启动 LaunchAgent）、卸载脚本和覆盖重装、`--cm` 窗口上的按钮、跨 NAT 打洞、VPS 上的 relay、Windows 和 Linux 的服务，都留给用户实机验收（Windows 的服务现在归 Windows 设计 §7）。
 
 # 权限引导（规格：`docs/superpowers/specs/2026-11-11-rapp-permission-guide-design.md`）
 执行方式：我自己按顺序做（后一步要用前一步的字段），每步先写测试、看到失败再实现，每步单独提交；最后派一个新的审查者看整个改动。
@@ -816,7 +816,7 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [ ] 3. macOS 14/15（如有机器）：显示新图标，不是旧的绿色 r。
 - [ ] 4. iPhone / iPad 主屏：新图标，圆角由系统裁，边缘没有多出来的一圈框。
 - [ ] 5. 装过旧版本的 Mac：升级后 Dock 里图标刷新（不刷新就 `killall Dock` 再看）。
-- [ ] 6. Linux 打包后的桌面图标、Windows 版 exe 图标也是新的。
+- [ ] 6. Linux 打包后的桌面图标、Windows 版 exe 图标也是新的（Windows 的那一半等 Windows 版能构建再看，见 Windows 设计）。
 
 ## iOS 输入/收起 + 按键区（feat/ios-input-toggle，2026-11-21）
 - 实机检查：规格 `docs/superpowers/specs/2026-11-21-rapp-ios-input-toggle-design.md` §7 第 1–22 条，Duo 和 iPad 各一遍
@@ -1471,6 +1471,41 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），将 Linux / Omarchy `x86_64` 产物构建并挂载至已发布的 [v0.15.55](https://github.com/wizlijun/rapp/releases/tag/v0.15.55) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
 - [x] 对齐 macOS `0.15.52`–`0.15.55`（含 Linux `0.15.54` `fix/linux-terminal-paste`）：放大版非阻塞 `WaitCard` 舞台等候卡片（`Ctrl+Shift+T` 排队计数与远端 Mac 授权自动切桌面）、`rapp-host-linux` 终端窗口 `Ctrl+Shift+V` 中文粘贴与 Wayland 选区往返同步、以及 `rapp-state` 第 3 步（`PUT /v1/desk/<fp>` 会话面板「别处开着」一键接力、`StateOut` 应用状态规则代报与「需要你」`推断` 标记、`Op::SetService` 节点间控制及设备页 `StateServiceRow` 开关）；补充 `scripts/test-linux-bundle.py`、`gui/test/term/term_main_test.dart`、`gui/test/ui/state_service_row_test.dart` 与 `gui/test/ui/wait_card_test.dart` Linux 侧回归校验。
 - [x] `v0.15.55`（源码 `1038f30b`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01555-parity.md`。
+
+## Windows 版：现在在 Windows 上关着的测试
+
+计划 A Task 7 规则 2：这些测试在 Windows 上挂了 `#[cfg(unix)]`，macOS / Linux 照常跑。到了写着的那一段，打开它，或者写出 Windows 的版本。
+
+- [ ] `rust/term/tests/cli.rs`、`pty.rs`、`serve.rs`、`shell_hook.rs`（整个文件）—— E 段做完时打开
+- [ ] `rust/term/src/pty/fg.rs::tests::status_roundtrips_without_new_fields` —— E 段做完时打开
+- [ ] `rust/term/src/pty/view.rs::tests::viewers_are_counted` —— E 段做完时打开
+- [ ] `rust/term/src/pty/shell.rs::tests::install_rewrites_on_version_change` —— E 段做完时打开
+- [ ] `rust/update/src/apply.rs::tests::exdev_copy_with_failed_delete_keeps_bundle_whole` —— G 段做完时打开（Windows 上只读目录挡不住删里面的文件，要换个挡法）
+- [ ] `services/state/src/disk.rs::tests::files_are_private`、`loose_modes_are_made_private` —— rapp-state 在 Windows 上自己设私有时打开（现在靠继承 `<数据根>\local` 的访问列表；哪一段做还没定，最晚 G 段打包 rapp-state 之前）
+- [ ] `rust/service/src/load/disks.rs::tests::hung_disk_is_unreadable_and_others_still_come` —— 不跟某一段走：要两块文件系统，等有两块盘的 Windows 测试机再写 Windows 版
+- [ ] `rust/service/src/load/disks.rs::tests::a_symlink_across_file_systems_is_the_target`、`a_symlink_does_not_change_the_mount` —— 不跟某一段走：Windows 上建符号链接要管理员或开发者模式；要测就改用目录联接（junction）
+- [ ] `rust/conn/tests/relay.rs::rotate_key_closes_every_device_with_code_4`、`requests_after_a_key_change_say_key_changed`、`an_open_relayed_stream_says_key_changed_after_a_rotate` —— 不跟某一段走：中继的管理接口只在 unix 上有（这三个靠 `rapp_relay::admin::issue_key` 换钥匙；中继本身不在 Windows 上跑，Windows 上的 `admin` 只有同名的空壳）
+- [ ] `rust/testkit/tests/key_change.rs::service_stops_and_says_key_changed_after_rotate`、`a_new_key_reconnects_with_the_same_id`、`a_wrong_new_key_says_bad_key`、`hub_presence_says_key_changed_and_stops_dialing`、`hub_reports_key_changed`（连同只给它们用的 `rotate`、`audit_events`、`hex`）—— 不跟某一段走：中继的管理接口只在 unix 上有（同上）。要在 Windows 上测换钥匙，得先给测试一个不经管理接口换钥匙的办法
+
+## Windows 版 A 段（地基）（计划 `docs/superpowers/plans/2026-11-26-rapp-windows-a-foundation.md`，分支 `feat/windows-foundation`）
+
+现状（2026-11-27）：代码是草稿，**还没在任何机器上编译、没跑过测试**。草稿笔记在 `docs/superpowers/plans/notes/2026-11-26-windows-a-draft-notes.md`，验证的人先看它的第 6、7 节。
+
+- **已合进本机 `main`，这次合并不发版。** `main` 的文件里只有 Mac 不编译的部分：`rust/host-windows/`、`rust/svc-windows/`（都不在 `rust/Cargo.toml` 的成员表里）、`scripts/check-windows.ps1`、`scripts/stage-windows.ps1`、`.gitattributes` 和文档。Mac 编译的文件和合并前一个字节都不差，所以不影响 macOS 和 iOS 发版。
+- **接线不在 `main` 的文件里。** 对已有 crate 的改动（约 55 个文件）在提交 `118b1f72` 里撤下了，它们在 `main` 的历史里。分支 `feat/windows-foundation` 上已经把这个提交还原好，验证的人直接在分支上编译、修。
+- **接线进 `main` 的条件**：Mac 门禁全绿，Windows 门禁（`scripts\check-windows.ps1`）全绿，再照常合并。那一次合并改的是共用代码，算 macOS 的改动。
+
+- A 段做完后，一台 Windows 机器能：编出全部 Rust crate（`rapp-relay`、`rapp-host-linux`、`rapp-client-gtk`、`rapp-hub-ffi` 除外）、跑过测试和 clippy（`scripts\check-windows.ps1`）、编出 Flutter 界面、用 `scripts\stage-windows.ps1` 摆出开发用的版本目录、从 `bin\rapp.exe` 启动界面、当控制端连别的设备。
+- 还不能：当被控端（没有 `rapp-host`，D 段）、开文本终端（E 段）、自己升级（G 段）、有监督程序和系统服务（`rapp-svc`，C 段）、语音（H 段）、安装包（G 段）。
+- **给 Linux session 的发现**（规格 §6.1、§19.3 第 14 条）：`rust/service/src/workers.rs` 的 `permissions()` 没有把 `applications` 留下，`capabilities()` 读到的永远是“没有”，所以 Linux 被控端一直对外报不能开单个 app，控制端不显示它的 app 入口（`gui/lib/ui/device_apps.dart:16` 等四处）。有意还是漏了，由 Linux 的 session 判断；Windows 这次没有改它。
+- **要在实机上看的**（未验证）：
+  - [ ] 1. 中文用户名（带空格）的账户下：`<数据根>\local` 的访问权限只有本人、SYSTEM、Administrators；数据根搬到 D 盘以后还是这样（规格 §13.2 的验收）。
+  - [ ] 2. `cmd`、Windows PowerShell 5.1、Windows Terminal 里 `rapp --help` 的中文都不乱码（规格 §8.2【未验证】）。
+  - [ ] 3. 从没有窗口的上级启动 `rapp-service` 再连一次：全程没有黑窗口闪过。
+  - [ ] 4. `rapp-service --supervised`：上级关掉它的标准输入后 5 秒内退出，退出码 0；上级被强行结束也一样。
+  - [ ] 5. 同一个登录会话里启动第二个 `rapp-service`：立刻退出，第一个不受影响；远程桌面的会话里另起一个不算“第二个”。
+  - [ ] 6. Server 2022 云主机（没有显卡）上 `scripts\check-windows.ps1 -Build` 也是绿的。
+- Windows 上暂时关着的测试单列在上面的「Windows 版：现在在 Windows 上关着的测试」。
 
 ## Windows B 段（主机核心）（计划 `docs/superpowers/plans/2026-11-26-rapp-windows-b-host-core.md`，分支 `feat/windows-host-core`，2026-11-27）
 

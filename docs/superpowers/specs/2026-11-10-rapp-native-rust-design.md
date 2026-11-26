@@ -198,6 +198,8 @@ Mac 虚拟键码 + 修饰键位（`CGEventFlags`：⇧ `0x20000`、⌃ `0x40000`
 
 ## 6. Windows 主机 `rapp-host-windows`
 
+> 这一节是协议 v3 时的草图，已被 `2026-11-26-rapp-windows-design.md` 取代：系统接口的选择（WGC、`SendInput`、`SetWindowPos`、exe 文件名当 app id）沿用，其余以那份为准。
+
 ### 6.1 找到窗口
 
 1. 地址路径是 exe 文件名，`notepad` 和 `Notepad.exe` 等价（去掉 `.exe` 后不区分大小写比较）。
@@ -248,7 +250,7 @@ Mac 虚拟键码 + 修饰键位（`CGEventFlags`：⇧ `0x20000`、⌃ `0x40000`
 
 ### 6.5 前提条件（写入 README 的 Windows 部分）
 
-- 在登录的桌面会话里运行（不是服务、不是 SSH 会话），不锁屏。WGC 需要 Windows 10 1903 以上，去掉黄框需要 Windows 11。
+- 在登录的桌面会话里运行（不是服务、不是 SSH 会话），不锁屏。WGC 需要 Windows 10 1903 以上，去掉黄框需要 Windows 11。（已改：有系统服务，能过锁屏，系统基准见 Windows 设计 §3.1。）
 - 第一次运行时 Windows 防火墙会询问，只勾"专用网络"。
 - 目标程序以管理员身份运行时，普通权限的主机注入不进去（UIPI）。主机也要以管理员身份运行才能操作它。
 
@@ -439,6 +441,7 @@ Hyprland 上没有"用鼠标拖角或拖边"：平铺窗口的尺寸由布局决
 - 协议、编码格式、Mac 主机和 Mac 客户端的任何行为改动。
 - Windows 版客户端；GNOME、KDE、Sway 等非 Hyprland 的 Linux 桌面（Hyprland 专有接口不通用）；X11。
 - Windows 主机的安装包和签名、开机自启、作为服务运行；Omarchy 的 Debian 容器构建和发布。
+- （已改：Windows 版客户端，以及 Windows 主机的安装包、签名、开机自启、作为服务运行，现在都在 `2026-11-26-rapp-windows-design.md` 的范围内。）
 - 自动启动目标程序；UWP/商店应用（它们的窗口属于 `ApplicationFrameHost.exe`，按 exe 名找不到本体）。
 - 加密、配对、白名单、自动重连、音频、剪贴板（同原规格第 11 节）。
 
