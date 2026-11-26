@@ -670,6 +670,22 @@ void main() {
       });
     }
 
+  group('auto English pause', () {
+    test('pause until editor focus', () {
+      env((a, t, port, st, hints) {
+        final rs = st.currentRemote!;
+        final sid = rs.sid;
+        rs.setAutoEnglish(false);
+        expect(port.calls.last.$1, 'auto_english');
+        expect(port.calls.last.$2, {'sid': sid, 'on': false});
+        st.composerFocusChanged(rs, true);
+        expect(rs.autoEnglish, isTrue);
+        expect(port.calls.last.$1, 'auto_english');
+        expect(port.calls.last.$2, {'sid': sid, 'on': true});
+      });
+    });
+  });
+
   group('app state rules', () {
     final rulesJson = File('assets/state_rules.json').readAsStringSync();
     const codex = 'com.openai.codex';

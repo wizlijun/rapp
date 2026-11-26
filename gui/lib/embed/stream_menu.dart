@@ -575,7 +575,13 @@ class _StreamMenuState extends State<StreamMenu> {
         _Item('现在：${src.ascii ? '英文（${src.name}）' : src.name}', enabled: false),
         _Item('切到英文', enabled: !src.ascii, onTap: () => _then(() => _s.selectInput(''))),
         if (back != null)
-          _Item('切回 ${back.name}', enabled: src.id != back.id, onTap: () => _then(() => _s.selectInput(back.id))),
+          _Item('切回 ${back.name}',
+              enabled: src.id != back.id,
+              onTap: () => _then(() {
+                    _s.setAutoEnglish(false);
+                    _s.selectInput(back.id);
+                  })),
+        if (!_s.autoEnglish) _Item('直接打字不会自动切英文，打开写作版后恢复', enabled: false),
       ],
       _head(t, '输入区'),
       _Item(marked ? '重新标记输入区（再点一下画面）' : '标记输入区（再点一下画面）',

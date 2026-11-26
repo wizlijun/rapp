@@ -904,6 +904,19 @@ void main() {
     expect(submitted, 0);
   });
 
+  test('detach while focused leaves', () async {
+    var blurs = 0;
+    m.onBlur = () => blurs++;
+    m.editorFocused = true;
+    await m.detach(ed);
+    expect(m.editorFocused, isFalse);
+    expect(blurs, 1);
+    final e2 = FakeEditor();
+    await m.attach(e2);
+    await m.detach(e2); // not focused: no leave
+    expect(blurs, 1);
+  });
+
   test('onDraftChanged fires on idle copy, detach and setDraft, not for the same text', () {
     fakeAsync((fa) {
       final seen = <String>[];

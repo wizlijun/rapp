@@ -178,6 +178,9 @@ class ComposerModel extends ChangeNotifier {
   /// Set by the panel from the editor's onFocus.
   bool editorFocused = false;
 
+  /// The editor went away while it had the caret ([detach]): no onFocus(false) comes for that.
+  void Function()? onBlur;
+
   /// The blocks the draft holds, in the order they came; each stands in the text as its mark. One deleted
   /// from the text (Backspace) stays held while an undo can bring it back: until the next send, detach
   /// or [setDraft], which drop it in the runner.
@@ -282,6 +285,7 @@ class ComposerModel extends ChangeNotifier {
       _toCheck = null;
       _closeCopy = null; // open again before the fold ended: the editor is written in again
     } else {
+      keepImeOnFocus = false;
       if (_letterOpenAt != null) {
         _toCheck = _letterOpenAt;
         _letterOpenAt = null;
@@ -433,11 +437,13 @@ class ComposerModel extends ChangeNotifier {
   }
 
   /// The editor goes away: its text is copied into [draft]. It no longer has the focus (its
-  /// dispose drops the focus listener first, so no onFocus(false) comes).
+  /// dispose drops the focus listener first, so no onFocus(false) comes: [onBlur] stands in for it).
   Future<void> detach(ComposerEditor e) {
     if (!identical(_editor, e)) return Future.value();
     _editor = null;
+    final had = editorFocused;
     editorFocused = false;
+    if (had) onBlur?.call();
     _idleTimer?.cancel();
     final closed = _open ? null : _closeCopy;
     _closeCopy = null;
@@ -968,6 +974,10 @@ class ComposerModel extends ChangeNotifier {
   /// A compose letter is held by the runner (type-to-compose): once the field has the caret, the panel asks
   /// for it back ([takeReplay]).
   bool replayPending = false;
+
+  /// The opening letter went in as text (Linux client, no replay): the editor's next taking of the caret
+  /// leaves the local input method alone (ImeIntent). Used up by that, or dropped when the panel closes.
+  bool keepImeOnFocus = false;
 
   /// True once per held compose letter.
   bool takeReplay() {

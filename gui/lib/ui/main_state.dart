@@ -8,8 +8,9 @@ import 'dart:ui' show Offset, Size;
 import '../paths.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show Clipboard;
-import 'package:flutter/widgets.dart' show StringCharacters;
+import 'package:flutter/widgets.dart' show AppLifecycleListener, AppLifecycleState, StringCharacters;
 
+import '../embed/local_ime.dart';
 import '../embed/phrases.dart';
 import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
@@ -38,6 +39,7 @@ import '../term/term_session_port.dart';
 import '../term/term_wire.dart' show TermPane, noSuchTextTerminal;
 import 'app_profile_store.dart';
 import 'device_os.dart';
+import 'ime_intent.dart';
 import 'lamp.dart';
 import 'term_status.dart' show programLamp, programWord, termAskWord;
 import 'lifecycle.dart';
@@ -48,6 +50,7 @@ import '../embed/composer_editor.dart' show ZoomKey;
 import '../embed/tidy_diff.dart' show LearnAction, LearnItem, editLearns;
 import '../embed/voice_fix.dart';
 import 'project_positions.dart';
+import 'secure_text_field.dart' show SecureInput;
 import '../llm_api.dart';
 import 'projects.dart';
 import 'resources_state.dart';
@@ -180,6 +183,7 @@ class MainState extends ChangeNotifier {
     VoiceInput? voice,
     LlmApi? llmApi,
     DeviceOs? localOs,
+    LocalIme? localIme,
     this.monitor,
   })  : localOs = localOs ?? localDeviceOs(),
         _builtinStateRules = builtinStateRules,
@@ -230,7 +234,40 @@ class MainState extends ChangeNotifier {
     _restorePins();
     unawaited(recorder.sweep());
     unawaited(history.refresh()); // never throws; the panel's ↑ has what is read by then
+    // Tests never reach a real input method unless they pass one.
+    final ime = localIme ?? (Platform.environment.containsKey('FLUTTER_TEST') ? const NoLocalIme() : localImeForPlatform());
+    // No input method to switch (Windows, Android, tests): no intent, nothing queued, nothing to listen for.
+    if (ime is NoLocalIme) return;
+    imeIntent = ImeIntent(ime,
+        enabled: () => prefs.imeIntent,
+        secure: () => SecureInput.active,
+        lastId: () => prefs.chineseIme,
+        saveId: (id) {
+          if (_disposed || prefs.chineseIme == id) return;
+          prefs.chineseIme = id;
+          _save();
+        });
+    // Away, the focus moves are another app's; back, the caret decides once.
+    _imeResume = AppLifecycleListener(onStateChange: imeLifecycle);
   }
+
+  /// The writing panel switches this device's input method: Chinese in it, English back on the picture.
+  /// Null where there is none to switch.
+  ImeIntent? imeIntent;
+  AppLifecycleListener? _imeResume;
+
+  /// The app's lifecycle as [imeIntent] needs it: only resumed is in front.
+  void imeLifecycle(AppLifecycleState s) {
+    if (s == AppLifecycleState.resumed) {
+      imeIntent?.appResumed();
+    } else {
+      imeIntent?.appInactive();
+    }
+  }
+
+  /// The input method switches asked for so far have ended (each bounded): a compose replay waits for it, so
+  /// the letter that opened the panel lands in the Chinese input method.
+  Future<void> get imeSettled => imeIntent?.settled ?? Future.value();
 
   /// The input record: what the writing panel sends, and the drafts it leaves.
   late final InputRecorder recorder;
@@ -984,7 +1021,11 @@ class MainState extends ChangeNotifier {
   /// Native blur arrives after the frame that requested it. Let Picture retry its focus guard.
   void composerFocusChanged(RemoteSession session, bool focused) {
     session.composer.editorFocused = focused;
+    final keep = focused && session.composer.keepImeOnFocus;
+    if (focused) session.composer.keepImeOnFocus = false;
+    imeIntent?.focus(session.sid, focused, keepIme: keep);
     if (focused) {
+      session.setAutoEnglish(true);
       blurPicture();
     } else if (pictureFocused == session.sid) {
       notifyListeners();
@@ -2687,6 +2728,9 @@ class MainState extends ChangeNotifier {
         onSelectInput: (id) {
           if (_liveSid(s.sid)) portOf(s.sid)!.selectInput(s.sid, id);
         },
+        onAutoEnglish: (on) {
+          if (_liveSid(s.sid)) portOf(s.sid)!.autoEnglish(s.sid, on);
+        },
         onClick: (w, at) {
           if (!_liveSid(s.sid)) return;
           portOf(s.sid)!.mouse(s.sid, w, 'down', 'left', at.dx, at.dy, 1);
@@ -2697,6 +2741,7 @@ class MainState extends ChangeNotifier {
         },
         onComposeKey: () => tidyIfAny(s.sid)?.closed(),
         followNewTabs: !term);
+    rs.composer.onBlur = () => imeIntent?.focus(rs.sid, false);
     rs.composer.onAiSent = (ai, text) => _offerEditLearns(rs.sid, ai.original, editLearns(ai.original, ai.result, text));
     // Without the AI: what the user changed in the device's fixed words, against what was heard (spec D8).
     rs.composer.onHeardSent = (h, text) => _offerEditLearns(rs.sid, h.heard, editLearns(h.heard, h.fixed, text));
@@ -4141,6 +4186,12 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 「打开写作版时切到中文，回到画面时切回英文」: saved; [imeIntent] reads it at each switch.
+  void setImeIntent(bool v) {
+    prefs.imeIntent = v;
+    _save();
+  }
+
   /// 「实体键盘用内置输入法」 (iOS): saved; the built-in input method follows (`RimeGlue` listens here).
   void setRimeEnabled(bool v) {
     prefs.rimeEnabled = v;
@@ -5109,6 +5160,8 @@ class MainState extends ChangeNotifier {
     }
     _tidies.clear();
     voice?.dispose();
+    _imeResume?.dispose();
+    imeIntent?.dispose();
     _voiceKeys.close();
     _voiceEnds.close();
     composerZoom.dispose();

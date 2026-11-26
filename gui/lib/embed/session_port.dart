@@ -255,8 +255,12 @@ class ComposerStateEvent extends SessionEvent {
 
 /// Something to put into the composer (a clipboard entry's "insert").
 class ComposerInsertEvent extends SessionEvent {
-  const ComposerInsertEvent(super.sid, this.insert);
+  const ComposerInsertEvent(super.sid, this.insert, {this.letter = false});
   final PasteResult insert;
+
+  /// A type-to-compose letter typed in as text (the Linux client has no key replay): the panel taking the
+  /// caret for it keeps the local input method as it is, so the letter is not split from the rest.
+  final bool letter;
 }
 
 /// A compose letter on [sid]'s picture (type-to-compose): the runner held the key; open the writing panel,
@@ -672,6 +676,9 @@ abstract class SessionPort {
 
   /// Switches A's input source to [id]; '' is the plain English (ASCII) keyboard layout.
   void selectInput(Object sid, String id) => _send('select_input', {'sid': sid, 'id': id});
+
+  /// Pauses (false) or resumes (true) the English-first switch before a key-down.
+  void autoEnglish(Object sid, bool on) => _send('auto_english', {'sid': sid, 'on': on});
 
   /// Types A's system password into its lock screen (a desktop session; A drops it when unlocked).
   void unlock(Object sid, String password) => _send('unlock', {'sid': sid, 'password': password});

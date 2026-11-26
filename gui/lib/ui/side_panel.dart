@@ -257,6 +257,10 @@ class _Footer extends StatelessWidget {
                 state.setAutoSaveTraffic),
             toggle(const Key('input-history'), '记下写作面板发出去的话', state.prefs.inputHistory, state.setInputHistory,
                 note: '存在数据目录的 inputs/ 里，会随 git 同步'),
+            // Only where there is a local input method to switch (not Windows/Android).
+            if (state.imeIntent != null)
+              toggle(const Key('ime-intent-switch'), '打开写作版时切到中文，回到画面时切回英文', state.prefs.imeIntent,
+                  state.setImeIntent),
             if (defaultTargetPlatform == TargetPlatform.iOS)
               toggle(const Key('rime-switch'), '实体键盘用内置输入法', state.prefs.rimeEnabled, state.setRimeEnabled,
                   note: 'Rime 雾凇拼音，候选在文字下一行'),

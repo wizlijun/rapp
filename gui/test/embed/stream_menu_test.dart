@@ -49,7 +49,7 @@ void main() {
     if (seed.isNotEmpty) res.addClips('k', seedSid, 'Calc @ mini', [for (final i in seed.reversed) ClipRow(i, 'clip $i', true)]);
     if (other != null) res.addClips('other', 2, 'Notes @ mini', [ClipRow(other, 'clip $other', true)]);
     port = FakeSessionPort();
-    rs = RemoteSession(1, 'Calc', onStream: (c) => port.setStream(1, c.mode, c.fps, c.density));
+    rs = RemoteSession(1, 'Calc', onSelectInput: (id) => port.selectInput(1, id), onStream: (c) => port.setStream(1, c.mode, c.fps, c.density));
     for (final e in events) {
       rs.apply(e);
     }
@@ -181,6 +181,31 @@ void main() {
     expect(find.text('改走中继'), findsNothing);
     await open(tester, disconnected: true, forcedRelay: false);
     expect(find.text('改走中继'), findsOneWidget);
+  });
+
+  group('remote input method', () {
+    const pinyin = InputSourceEvent(1, 'im.pinyin', '拼音', false);
+    const abc = InputSourceEvent(1, 'kl.abc', 'ABC', true);
+    const note = '直接打字不会自动切英文，打开写作版后恢复';
+
+    testWidgets('切回 pauses auto English and still selects the method', (tester) async {
+      await open(tester, events: [pinyin, abc]);
+      await tester.pump();
+      expect(find.text(note), findsNothing);
+      expect(rs.lastInputMethod?.id, 'im.pinyin');
+      await tester.ensureVisible(find.text('切回 拼音'));
+      await tester.tap(find.text('切回 拼音'));
+      await tester.pump();
+      expect(rs.autoEnglish, isFalse);
+      expect(called('select_input', {'sid': 1, 'id': 'im.pinyin'}), isTrue);
+    });
+
+    testWidgets('while paused the group says so on a greyed row', (tester) async {
+      await open(tester, events: [pinyin, abc]);
+      rs.setAutoEnglish(false);
+      await tester.pump();
+      expect(find.text(note), findsOneWidget);
+    });
   });
 
   testWidgets('disconnected menu keeps only the session group with reconnect', (tester) async {

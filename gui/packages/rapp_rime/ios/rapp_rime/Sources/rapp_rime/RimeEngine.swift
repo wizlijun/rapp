@@ -169,6 +169,7 @@ final class RimeEngine {
 
   var ascii: Bool { ready && api.get_option!(session, "ascii_mode") != 0 }
 
+  func setAscii(_ on: Bool) { if ready { api.set_option!(session, "ascii_mode", on ? 1 : 0) } }
   func clear() { if ready { api.clear_composition!(session) } }
   func select(_ index: Int) { if ready { _ = api.select_candidate_on_current_page!(session, index) } }
   func page(next: Bool) { if ready { _ = api.change_page!(session, next ? 0 : 1) } }
