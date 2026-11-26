@@ -79,6 +79,7 @@ class FakeService {
               'update_rollback' ||
               'set_update' ||
               'set_auto_lock' ||
+              'gui_windows' ||
               'permissions_reset':
           s.write('${jsonEncode(replies[m['cmd']] ?? {'ok': true})}\n');
         case 'shares' || 'share' || 'unshare':
@@ -115,6 +116,15 @@ class FakeService {
     for (final s in _subscribers) {
       s.write('{"event":"changed"}\n');
     }
+  }
+
+  /// Drops every connection and keeps listening, as a service restarting on the same port would.
+  void dropAll() {
+    for (final s in _all) {
+      s.destroy();
+    }
+    _all.clear();
+    _subscribers.clear();
   }
 
   Future<void> stop() async {
@@ -385,6 +395,41 @@ void main() {
       await m.permissionsReset();
       expect(svc.received.map((r) => r['cmd']).where((c) => c != 'status' && c != 'subscribe'),
           ['set_update', 'update_check', 'update_apply', 'update_dismiss', 'update_rollback', 'permissions_reset']);
+      await svc.stop();
+      m.dispose();
+    });
+
+    test('gui_windows is sent when it changes and again after a reconnect', () async {
+      final svc = FakeService('tok-gw');
+      await svc.start();
+      final m = ServiceMonitor(readToken: () async => 'tok-gw', port: svc.port, retry: const Duration(milliseconds: 50));
+      m.setGuiWindows(1); // before connecting: sent once connected
+      m.start();
+      await until(() => m.status != null);
+      List<Object?> sent() => svc.received.where((r) => r['cmd'] == 'gui_windows').map((r) => r['count']).toList();
+      await until(() => sent().length == 1);
+      expect(sent(), [1]);
+      m.setGuiWindows(2);
+      m.setGuiWindows(2);
+      await until(() => sent().length == 2);
+      expect(sent(), [1, 2]);
+      svc.dropAll();
+      await until(() => !m.running);
+      await until(() => m.running);
+      await until(() => sent().length == 3);
+      expect(sent(), [1, 2, 2]);
+      await svc.stop();
+      m.dispose();
+    });
+
+    test('a service that does not know gui_windows still connects', () async {
+      final svc = FakeService('tok-gw2')..replies['gui_windows'] = {'ok': false, 'error': 'unknown cmd'};
+      await svc.start();
+      final m = ServiceMonitor(readToken: () async => 'tok-gw2', port: svc.port, retry: const Duration(milliseconds: 50));
+      m.setGuiWindows(3);
+      m.start();
+      await until(() => m.status != null);
+      expect(m.error, isNull);
       await svc.stop();
       m.dispose();
     });
