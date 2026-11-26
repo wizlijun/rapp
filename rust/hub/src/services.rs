@@ -11,7 +11,11 @@ use std::sync::Arc;
 pub(crate) async fn command(hub: &Arc<Hub>, v: &Value) -> Result<Value> {
     let id = v.get("id").and_then(Value::as_str).context("missing id")?;
     let host = hub.host(id)?;
-    let name = v.get("name").and_then(Value::as_str).unwrap_or("state").to_string();
+    let name = match v.get("name") {
+        None | Some(Value::Null) => "state".to_string(),
+        Some(Value::String(s)) => s.clone(),
+        Some(_) => anyhow::bail!("bad name"),
+    };
     let on = match v.get("on") {
         None | Some(Value::Null) => None,
         Some(Value::Bool(b)) => Some(*b),
