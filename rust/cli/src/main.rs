@@ -105,6 +105,26 @@ async fn main() {
             }
             print!("{}", say::hosts(&r));
         }
+        Cmd::State { on } => {
+            let mut c = json!({"cmd":"state"});
+            if let Some(on) = on {
+                c["on"] = json!(on);
+            }
+            let (r, ..) = call(c).await;
+            if r["ok"] != true {
+                fail(&format!("没有成功：{}", error_of(&r)));
+            }
+            match on {
+                Some(true) if r["running"] != true => {
+                    let e = r["error"].as_str().unwrap_or("");
+                    fail(&format!("没有成功：{}", if e.is_empty() { "状态服务没有起来" } else { e }));
+                }
+                Some(true) => println!("已打开状态服务"),
+                Some(false) => println!("已关掉状态服务"),
+                None => {}
+            }
+            print!("{}", say::state(&r));
+        }
         Cmd::Pipe { to, port } => pipe(to, port).await,
         Cmd::Update { what, yes, timeout, json } => update::run(what, yes, timeout, out::Out { json }).await,
     }
