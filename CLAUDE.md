@@ -29,6 +29,7 @@
   - 发版时合并 origin/main 产生的 `merge:` 提交
 - 只改文档（`*.md`、`docs/`、`tasks/`）不发版，攒到下一次代码改动。只影响 Linux 的改动（`cfg(target_os = "linux")` 等）也不发 macOS 版。
 - **版本号协调**：另一台机器的 Linux 也往 `origin/main` 推送，也会占用补丁号。选版本号之前先 `git fetch origin`、合并 origin/main，取 `max(本地 tag, 远端 tag, pubspec)` + 1。pubspec 的 build 号（`+N`）每次加 1。
+- gate 和打包都在专用的 detached worktree `.worktrees/release` 里做，先切到要发的那个提交。不要在主 checkout 里做：别的 session 随时会往里合并，测试跑到一半代码就变了。
 - 发版步骤：
   1. 在合并后的 main 上跑完整门禁：swift、`cargo test --workspace --no-fail-fast`、clippy `-D warnings`、`flutter analyze` + `flutter test`。真失败就停下来报告用户。负载导致的偶发失败先单独重跑，并在 release 提交里注明。
   2. 提交 `release: x.y.z`（改 pubspec / Cargo.toml / Cargo.lock），打 tag。
