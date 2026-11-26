@@ -644,7 +644,7 @@ void main() {
     });
 
     iosTest('no phrases: no strip', (tester) async {
-      s.setPhrases(const []);
+      s.setStripItems(const []);
       expect(phraseStripShown(s, tsess), isFalse);
       s.setStripItems(defaultPhrases);
       expect(phraseStripShown(s, tsess), isTrue);

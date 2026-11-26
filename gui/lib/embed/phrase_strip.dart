@@ -113,8 +113,8 @@ class _PhraseStripState extends State<PhraseStrip> {
       case 'put':
         if (item is Phrase) putIntoComposer(widget.session, item.text);
       case 'edit':
-        if (item is! Phrase) return; // TODO(Task 5): editStripCmd for a command
-        final e = await editPhrase(context, p: item);
+        final StripItem? e =
+            item is StripCmd ? await editStripCmd(context, c: item) : await editPhrase(context, p: item as Phrase);
         if (e == null) return;
         final now = List.of(widget.state.prefs.phrases);
         final j = now.indexOf(item);

@@ -9,7 +9,6 @@ import 'package:flutter/services.dart';
 import '../embed/traffic_label.dart' show formatRate;
 import '../embed/voice_hotkey.dart';
 import '../embed/voice_key_gate.dart';
-import '../embed/phrases.dart';
 import '../pages/phrases_page.dart';
 import 'controls.dart';
 import 'voice_learned_row.dart';
@@ -269,7 +268,7 @@ class _Footer extends StatelessWidget {
                 height: rowHeight,
                 child: Row(children: [
                   Expanded(child: Text('常用语', style: small)),
-                  Text(state.prefs.phraseStrip ? '${state.prefs.phrases.whereType<Phrase>().length} 条' : '已关', style: small.copyWith(color: t.muted)),
+                  Text(state.prefs.phraseStrip ? '${state.prefs.phrases.length} 条' : '已关', style: small.copyWith(color: t.muted)),
                   Icon(Icons.chevron_right, color: t.muted, size: 18),
                 ]),
               ),
