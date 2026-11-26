@@ -154,6 +154,8 @@ with tempfile.TemporaryDirectory(prefix='rapp-bundle-') as td, EchoServer(('127.
                         host = status['id']
                         ask({'cmd': 'add_host', 'id': f'{host}@127.0.0.1:{status["port"]}', 'password': 'test-only'})
                         apps = ask({'cmd': 'apps', 'id': host})
+                        expected_os = 'omarchy' if Path('/usr/share/omarchy/shell').exists() else 'linux'
+                        assert apps.get('os') == expected_os, apps
                         assert apps['capabilities']['applications'] is False, apps
                         assert any(a['app'] == 'desktop:' and a['displays'] for a in apps['apps']), apps
                         opened = ask({'cmd': 'open', 'id': host, 'app': 'desktop:', 'embed': True})
@@ -190,6 +192,14 @@ with tempfile.TemporaryDirectory(prefix='rapp-bundle-') as td, EchoServer(('127.
                             hub.kill()
                             hub.wait(timeout=5)
                 cli('hosts')
+                upd_status = json.loads(cli('update', 'status', '--json'))
+                assert upd_status['ok'] is True and upd_status['state'] == 'off' and upd_status['current'] == version, upd_status
+                upd_apply = subprocess.run([bundle / 'rapp', 'update', '--json'],
+                    env=env, text=True, capture_output=True, timeout=15)
+                assert upd_apply.returncode == 7, upd_apply
+                upd_err = json.loads(upd_apply.stdout)
+                assert upd_err['ok'] is False and upd_err['error'] == 'not_launchd', upd_err
+                assert upd_err['page'] == 'https://github.com/wizlijun/rapp/releases', upd_err
                 cli('share', str(port), '--note', 'bundle smoke')
                 item = row()
                 number = item['local']

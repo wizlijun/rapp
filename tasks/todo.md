@@ -1256,3 +1256,10 @@ macOS、Linux、Duo、iPad 各一遍。
   - [ ] 9. 标题 65 个字、标题里有换行：对话框里红字说明，不关闭；备注里的换行变成空格
   - [ ] 10. 按 App 分组时，改了标题的会话仍在原来那个 App 组里
   - [ ] 11. `service.log` 里只记 `set_label` 这件事，不出现标题、备注和 app
+
+## Linux 0.15.42 统一会话卡片、rapp update 命令与设备系统图标对齐与发布（2026-11-26）
+
+- [x] 对齐 macOS 0.15.39–0.15.41：顶栏、侧栏「会话」页与总览统一 `SessionBlock` / `FavoriteBlock` 卡片；补齐 Linux 启动脚本 `rapp update` 分发与 `rapp-cli` 在 Linux 下的当前版本回报及发布页链接映射（`not_launchd`，退出码 `7`）；核对实机 `/usr/share/omarchy/shell` 识别 `omarchy` 系统图标。
+- [x] 补充 `TargetPlatform.linux` 侧栏统一卡片/常用终端回归用例（`gui/test/ui/side_panel_test.dart`）及打包启动器/集成断言（`scripts/test-linux-launcher.py`、`scripts/test-linux-bundle.py`）；Flutter 3.50.0 全量 3282 项通过（4 跳过），Rust 全套 clippy `-D warnings` 与测试通过。
+- [x] [Linux v0.15.42](https://github.com/wizlijun/rapp/releases/tag/v0.15.42) 已发布（源码 `018e8d3b`，`--latest=false`）；两包 41 文件逐字节一致、14 个 ELF 依赖完整、`BUILD-INFO.json` 与隔离网络命名空间测试通过；三个远端附件大小与 SHA256 与本地一致，保留 macOS Latest。
+- [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01542-parity.md`。
