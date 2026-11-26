@@ -24,6 +24,7 @@ import '../embed/traffic_label.dart' show segments;
 import '../history/input_history.dart';
 import '../history/input_recorder.dart';
 import '../hub_client.dart';
+import '../state/state_sync.dart';
 import '../load_model.dart';
 import '../service_client.dart' show ServiceMonitor;
 import '../permissions.dart';
@@ -71,10 +72,17 @@ enum Corner { stream, needs, session, remote, sessions, hints }
 /// device reported ([device] and [app] name its session, [title] its shown name, [lamp] its state).
 /// [inferred]: read off the screen by rules rather than reported by the program (GUI apps, not built yet).
 class HintRecord {
-  const HintRecord(this.text, this.at, {this.device, this.app, this.title, this.lamp, this.inferred = false});
+  const HintRecord(this.text, this.at,
+      {this.device, this.app, this.title, this.lamp, this.inferred = false, this.term = false, this.eid});
   final String text;
   final DateTime at;
   final String? device, app, title;
+
+  /// Written by [MainState._trackPrograms] from a device's terminal list (the local source of program rows).
+  final bool term;
+
+  /// The service's id for this row; null for every row the app made itself.
+  final String? eid;
   final Lamp? lamp;
   final bool inferred;
 
@@ -181,6 +189,7 @@ class MainState extends ChangeNotifier {
     LlmApi? llmApi,
     DeviceOs? localOs,
     this.monitor,
+    this.stateSync,
   })  : localOs = localOs ?? localDeviceOs(),
         _builtinStateRules = builtinStateRules,
         stateRules = stateRules ?? StateRulesLibrary.parse(builtinStateRules, const {}),
@@ -212,6 +221,7 @@ class MainState extends ChangeNotifier {
     if (defaultTargetPlatform == TargetPlatform.macOS || defaultTargetPlatform == TargetPlatform.linux) port?.setVoiceHotkey(prefs.voiceHotkey);
     hub?.addListener(_onHub);
     monitor?.addListener(_onMonitor);
+    stateSync?.addListener(_onStateSync);
     hub?.askNet();
     _lastError = hub?.lastError;
     _netLevel = hub?.net?.level;
@@ -647,6 +657,82 @@ class MainState extends ChangeNotifier {
 
   static const hintHistoryMax = 50;
 
+  /// The rapp-state service this app follows; null when it is not wired in.
+  final StateSync? stateSync;
+
+  bool get _fromService => stateSync?.status == StateStatus.connected;
+
+  int _outageSeen = 0;
+
+  void _onStateSync() {
+    final sync = stateSync!;
+    if (sync.status == StateStatus.unreachable && sync.outage > _outageSeen) {
+      _outageSeen = sync.outage;
+      _queue(HintRecord('状态服务连不上，先用本机的', _now()));
+    }
+    notifyListeners();
+  }
+
+  /// What the queue shows, newest first: [hintHistory] alone, or, while the service is connected, the app's own
+  /// lines plus the service's program rows.
+  List<HintRecord> get queueRows {
+    if (!_fromService) return hintHistory;
+    final all = [
+      ...hintHistory.where((r) => !r.term),
+      ...stateSync!.rows.map(_serviceRow).whereType<HintRecord>(),
+    ]..sort((a, b) => b.at.compareTo(a.at));
+    return all.take(hintHistoryMax).toList();
+  }
+
+  HintRecord? _serviceRow(Map<String, Object?> row) {
+    final sync = stateSync!;
+    final fp = row['fp'];
+    final rawId = row['id'];
+    final id = rawId is String ? rawId : (fp is String ? sync.idOf(fp) : null);
+    final name = id != null ? deviceName(id) : '${row['device'] ?? ''}';
+    final at = row['at'];
+    final when = DateTime.fromMillisecondsSinceEpoch((at is num ? at : 0).toInt() * 1000);
+    final eid = row['eid'] is String ? row['eid'] as String : null;
+    switch (row['t']) {
+      case 'state':
+        final ps = termPs(row);
+        if (ps == null) return null;
+        final nm = row['title'] ?? row['name'];
+        final host = row['host'];
+        final title = termDisplayName(nm is String ? nm : '', host is String ? host : null);
+        final known = id != null && (hub?.hosts.any((h) => h.id == id) ?? false);
+        final session = row['session'];
+        return HintRecord('$title @ $name：${programWord(ps)}', when,
+            device: known ? id : null,
+            app: known && session is String ? session : null,
+            title: title,
+            lamp: programLamp(ps),
+            eid: eid);
+      case 'gap':
+        return HintRecord('$name 有一段状态没收到', when, eid: eid);
+      default:
+        return null;
+    }
+  }
+
+  /// Why a queued line about [termId] on [device] cannot be followed, in the word the list shows; null when it can.
+  String? offlineWord(String device, String termId) {
+    if (_offlineSince.containsKey(device) || probes[device]?.lamp == Lamp.offline) return '设备离线';
+    if (_records['$device/$termId']?.phase == Phase.disconnected) return '已断开';
+    return null;
+  }
+
+  /// Whether a service row is one the person has not looked at yet.
+  bool queuedFresh(HintRecord r) {
+    final eid = r.eid;
+    final sync = stateSync;
+    if (eid == null || sync == null) return false;
+    for (final row in sync.rows) {
+      if (row['eid'] == eid) return sync.fresh(row);
+    }
+    return false;
+  }
+
   /// The status queue: every line the hint showed this run and every program status change, newest first,
   /// at most [hintHistoryMax].
   final List<HintRecord> hintHistory = [];
@@ -677,8 +763,9 @@ class MainState extends ChangeNotifier {
         _psSeen[k] = now;
         if (first || was == now) continue;
         final title = termDisplayName(r.shown, r.host);
+        if (_fromService) continue;
         _queue(HintRecord('$title @ ${deviceName(device)}：${programWord(ps)}', _now(),
-            device: device, app: r.id, title: title, lamp: programLamp(ps)));
+            device: device, app: r.id, title: title, lamp: programLamp(ps), term: true));
       }
       _psSeen.removeWhere((k, _) => k.startsWith('$device\n') && !live.contains(k));
     }
@@ -686,7 +773,7 @@ class MainState extends ChangeNotifier {
 
   /// A tap on a queued line about a session: that session, opened if it is not, and the list closes.
   void goToQueued(HintRecord r) {
-    if (!r.goes) return;
+    if (!r.goes || offlineWord(r.device!, r.app!) != null) return;
     corner = null;
     openOrSwitch(r.device!, r.app!, r.title ?? r.app!);
     notifyListeners();
@@ -5118,6 +5205,7 @@ class MainState extends ChangeNotifier {
     resources.dispose();
     hub?.removeListener(_onHub);
     monitor?.removeListener(_onMonitor);
+    stateSync?.removeListener(_onStateSync);
     profiles.removeListener(_onProfiles);
     _portSub?.cancel();
     _termSub?.cancel();

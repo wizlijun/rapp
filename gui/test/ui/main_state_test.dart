@@ -18,6 +18,7 @@ import 'package:rapp/history/input_recorder.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/load_model.dart';
 import 'package:rapp/service_client.dart';
+import 'package:rapp/state/state_sync.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/lifecycle.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -6035,6 +6036,106 @@ void main() {
       await expectLater(s.openText('111', shell: '/x'),
           throwsA(isA<HubException>().having((e) => e.message, 'message', 'no such directory: /x')));
       expect(opens(), 0);
+    });
+  });
+
+  group('state service queue', () {
+    late FakeStateSync sync;
+    late MainState st;
+    setUp(() {
+      s.dispose(); // one MainState drains the hub's presence queue
+      sync = FakeStateSync(tmp.path)..ids['F'] = '111';
+      st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), stateSync: sync);
+      addTearDown(st.dispose);
+    });
+
+    Map<String, Object?> row(String eid, String state, {int at = 100, String t = 'state', String session = 't1', String? name = 'rapp'}) =>
+        {'t': t, 'eid': eid, 'fp': 'F', 'id': '111', 'session': session, 'name': name, 'state': state, 'at': at};
+    void connect(List<Map<String, Object?>> rows) {
+      sync
+        ..status = StateStatus.connected
+        ..rows = rows
+        ..push();
+    }
+
+    test('connected: program rows come only from the service', () async {
+      TermRow term(String state) =>
+          TermRow('t1', 'rapp', 'claude', null, 1, 0, 0, false, false, ps: TermPs(state, seq: 1));
+      hub.termLists['111'] = TermList('111', terms: [term('blocked')]);
+      hub.notifyListeners();
+      connect([row('F:e:1', 'working')]);
+      hub.termLists['111'] = TermList('111', terms: [term('working')]);
+      hub.notifyListeners();
+      final progs = st.queueRows.where((r) => r.eid != null || r.lamp != null).toList();
+      expect(progs, hasLength(1));
+      expect(progs.single.eid, 'F:e:1');
+      expect(st.queueRows.where((r) => r.term), isEmpty);
+      expect(progs.single.text, startsWith('rapp @ mini：'));
+      expect(progs.single.goes, isTrue);
+      expect(progs.single.app, 't1');
+    });
+
+    test('own hint lines stay and sort in with service rows', () {
+      st.say('a');
+      final now = st.hintHistory.first.at;
+      connect([row('F:e:1', 'working', at: now.millisecondsSinceEpoch ~/ 1000 + 60), row('F:e:0', 'done', at: 1)]);
+      final texts = st.queueRows.map((r) => r.text).toList();
+      expect(texts, hasLength(3));
+      expect(texts[0], startsWith('rapp @ mini：'));
+      expect(texts[1], 'a');
+      expect(texts[2], startsWith('rapp @ mini：'));
+    });
+
+    test('unreachable: back to local rows and one outage line', () {
+      const line = '状态服务连不上，先用本机的';
+      connect([row('F:e:1', 'working')]);
+      sync
+        ..status = StateStatus.unreachable
+        ..outage = 1
+        ..push();
+      sync.push();
+      sync
+        ..status = StateStatus.connecting
+        ..push();
+      sync
+        ..status = StateStatus.unreachable
+        ..outage = 2
+        ..push();
+      expect(st.hintHistory.where((h) => h.text == line), hasLength(2));
+      expect(st.queueRows, st.hintHistory);
+    });
+
+    test('a row from an offline device is grey and does not go', () async {
+      hub.termLists['111'] = TermList('111', terms: []);
+      t.emit({'event': 'presence', 'id': '111', 'online': true});
+      await pump();
+      t.emit({'event': 'presence', 'id': '111', 'online': false});
+      await pump();
+      connect([row('F:e:1', 'working')]);
+      expect(st.offlineWord('111', 't1'), '设备离线');
+      st.goToQueued(st.queueRows.single);
+      expect(st.currentKey, isNull);
+    });
+
+    test('gap rows read 有一段状态没收到 and gone rows are not shown', () {
+      connect([row('F:e:1', 'working'), row('F:e:2', '', t: 'gap'), row('F:e:3', '', t: 'gone'), row('F:e:4', 'odd')]);
+      final texts = st.queueRows.map((r) => r.text).toList();
+      expect(texts, contains('mini 有一段状态没收到'));
+      expect(texts, hasLength(2));
+    });
+
+    test('queuedFresh follows the service for a service row only', () {
+      connect([row('F:e:1', 'working')]);
+      final r = st.queueRows.single;
+      expect(st.queuedFresh(r), isFalse);
+      sync.freshEids.add('F:e:1');
+      expect(st.queuedFresh(r), isTrue);
+      expect(st.queuedFresh(HintRecord('a', DateTime(2026))), isFalse);
+    });
+
+    test('without a StateSync nothing changes', () {
+      st.say('a');
+      expect(s.queueRows, s.hintHistory);
     });
   });
 

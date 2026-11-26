@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:rapp/embed/composer_editor.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/state/state_sync.dart';
 import 'package:rapp/term/term_model.dart';
 import 'package:rapp/term/term_session_port.dart';
 import 'package:rapp/term/term_wire.dart';
@@ -265,4 +266,40 @@ class FakeTermSessionPort extends TermSessionPort {
 
   @override
   void fetchHistory(Object sid) => calls.add(('fetchHistory', {'sid': sid}));
+}
+
+/// A [StateSync] the test drives by hand: set the fields, then `notifyListeners()`. It never connects.
+class FakeStateSync extends StateSync {
+  FakeStateSync(String localDir) : super(localDir: localDir, find: () async => null);
+
+  StateStatus _status = StateStatus.off;
+  List<Map<String, Object?>> _rows = [];
+  int _outage = 0;
+
+  @override
+  StateStatus get status => _status;
+  @override
+  set status(StateStatus v) => _status = v;
+  @override
+  List<Map<String, Object?>> get rows => _rows;
+  @override
+  set rows(List<Map<String, Object?>> v) => _rows = v;
+  @override
+  int get outage => _outage;
+  @override
+  set outage(int v) => _outage = v;
+
+  /// Device ids by fingerprint.
+  final Map<String, String> ids = {};
+
+  /// Queue rows (by `eid`) that count as unseen.
+  final Set<String> freshEids = {};
+
+  @override
+  String? idOf(String fp) => ids[fp];
+
+  @override
+  bool fresh(Map<String, Object?> row) => freshEids.contains(row['eid']);
+
+  void push() => notifyListeners();
 }
