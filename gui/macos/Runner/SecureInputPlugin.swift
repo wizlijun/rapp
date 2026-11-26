@@ -144,7 +144,10 @@ final class LocalImePlugin {
     }
     if target == nil {
       let list = TISCreateInputSourceList(nil, false)?.takeRetainedValue() as? [TISInputSource]
-      target = list?.first { usable($0) && !isASCII($0) && languages($0).contains { $0.hasPrefix("zh") } }
+      // Keyboard input sources only: never a palette (emoji, character viewer) or handwriting source with zh.
+      target = list?.first {
+        usable($0) && isKeyboard($0) && !isASCII($0) && languages($0).contains { $0.hasPrefix("zh") }
+      }
     }
     guard let target, let targetID = id(target) else { return nil }
     if let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(), id(current) == targetID {
@@ -161,6 +164,12 @@ final class LocalImePlugin {
   private func bool(_ source: TISInputSource, _ key: CFString) -> Bool {
     guard let raw = TISGetInputSourceProperty(source, key) else { return false }
     return CFBooleanGetValue(Unmanaged<CFBoolean>.fromOpaque(raw).takeUnretainedValue())
+  }
+
+  private func isKeyboard(_ source: TISInputSource) -> Bool {
+    guard let raw = TISGetInputSourceProperty(source, kTISPropertyInputSourceCategory) else { return false }
+    let category = Unmanaged<CFString>.fromOpaque(raw).takeUnretainedValue()
+    return CFEqual(category, kTISCategoryKeyboardInputSource)
   }
 
   private func isASCII(_ source: TISInputSource) -> Bool {

@@ -1435,6 +1435,62 @@ void main() {
       expect(ime.calls, ['toChinese', 'toEnglish']);
     });
 
+    testWidgets('compose_key: the wait for the input method is bounded to 300 ms in all', (tester) async {
+      es.dispose();
+      final ime = _HungIme();
+      es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, localIme: ime);
+      await showPicture(tester);
+      port.emit(const ComposeKeyEvent(1));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(callsOf('compose_replay'), hasLength(1));
+      // Back to the picture (Ctrl+Enter): the leave fires after its grace, and its two calls hang 300 ms each.
+      es.composerKey();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(ime.calls, ['toChinese', 'current']);
+      port.calls.clear();
+      port.emit(const ComposeKeyEvent(1));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 320));
+      // The switch to Chinese is still queued behind the leave, but the letter does not wait for it.
+      expect(ime.calls, ['toChinese', 'current', 'toEnglish']);
+      expect(callsOf('compose_replay'), [
+        {'sid': 1}
+      ]);
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets('compose_key: no replay when the caret left the panel while the switch was settling', (tester) async {
+      es.dispose();
+      final ime = _GatedIme();
+      es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, localIme: ime);
+      await showPicture(tester);
+      port.calls.clear();
+      port.emit(const ComposeKeyEvent(1));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(Duration.zero);
+      expect(ime.calls, ['toChinese']);
+      es.composerKey(); // Ctrl+Enter: the caret goes back to the picture before the switch ended
+      await tester.pump();
+      expect(es.currentRemote!.composer.editorFocused, isFalse);
+      ime.gate.complete('im.rime');
+      await tester.pump(Duration.zero); // the leave's settle runs, and the wait ends
+      await tester.pump();
+      expect(callsOf('compose_replay'), isEmpty);
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 2));
+    });
+
     testWidgets('compose_key with the panel open but the picture focused', (tester) async {
       await showPicture(tester);
       await openPanel(tester);
@@ -2360,4 +2416,27 @@ class _GatedIme implements LocalIme {
 
   @override
   Future<({String id, bool ascii})?> current() async => null;
+}
+
+/// A local input method whose every call hangs (ImeIntent gives up on each after 300 ms).
+class _HungIme implements LocalIme {
+  final calls = <String>[];
+
+  @override
+  Future<String?> toChinese(String? preferredId) {
+    calls.add('toChinese');
+    return Completer<String?>().future;
+  }
+
+  @override
+  Future<void> toEnglish() {
+    calls.add('toEnglish');
+    return Completer<void>().future;
+  }
+
+  @override
+  Future<({String id, bool ascii})?> current() {
+    calls.add('current');
+    return Completer<({String id, bool ascii})?>().future;
+  }
 }

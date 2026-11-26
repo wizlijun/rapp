@@ -367,7 +367,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         (_composing ? _printable : _letter).hasMatch(ch)) {
       _composing = true;
       _swallowed.add(event.physicalKey);
-      _emit(ComposerInsertEvent(sid, PasteResult(text: ch)));
+      _emit(ComposerInsertEvent(sid, PasteResult(text: ch), letter: true));
       return true;
     }
     final code = linuxMacKeyCode(event.physicalKey);

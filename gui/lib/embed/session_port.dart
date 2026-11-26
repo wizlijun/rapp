@@ -255,8 +255,12 @@ class ComposerStateEvent extends SessionEvent {
 
 /// Something to put into the composer (a clipboard entry's "insert").
 class ComposerInsertEvent extends SessionEvent {
-  const ComposerInsertEvent(super.sid, this.insert);
+  const ComposerInsertEvent(super.sid, this.insert, {this.letter = false});
   final PasteResult insert;
+
+  /// A type-to-compose letter typed in as text (the Linux client has no key replay): the panel taking the
+  /// caret for it keeps the local input method as it is, so the letter is not split from the rest.
+  final bool letter;
 }
 
 /// A compose letter on [sid]'s picture (type-to-compose): the runner held the key; open the writing panel,

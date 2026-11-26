@@ -1344,5 +1344,6 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 13. 离开写作版后约 200 ms 才切回英文，期间点进另一个写作版不切
 - [ ] 14. 密码框（解锁对话框）从写作版拿走光标、再回到画面时，本机输入法是否回到英文（已知可能停在中文）
 - [ ] 15. Mac：按字母开写作版时，原生编辑器拿到焦点的顺序是否让第一个字母进中文（focus 事件早于 readyForInput）
+- [ ] 16. Linux 客户端：按字母开写作版，第一个字母不被拆开（输入法保持原样）
 
-开发侧遗留：Linux 被控端 `rust/host-linux/src/input_source.rs` 只在 Mac 上写过、没在 Linux 上编译过，需要在 Linux 机器上 `cargo build`、`cargo clippy -p host-linux -- -D warnings`、`cargo test -p host-linux`。
+开发侧遗留：Linux 被控端 `rust/host-linux/src/input_source.rs` 只在 Mac 上写过、没在 Linux 上编译过，需要在 Linux 机器上 `cargo build`、`cargo clippy -p host-linux -- -D warnings`、`cargo test -p host-linux`。另外 `select` 排队等满 300 ms 仍忙时，`server.rs:714` 的 `?` 会结束会话；应改成记一行日志、丢掉这次 select（规格 §3.2 实现偏差），同样要在 Linux 上改和验证。

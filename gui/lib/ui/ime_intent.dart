@@ -51,13 +51,18 @@ class ImeIntent {
   /// The app came back: the next settle reconciles instead of looking for an edge.
   bool _resync = false;
 
+  /// The enter being settled keeps the input method ([focus]'s keepIme).
+  bool _keepEnter = false;
+
   /// The tail of the queued calls (it never fails), and how many of them have not ended.
   Future<void>? _chain;
   int _queued = 0;
 
-  /// The writing panel of session [sid] took ([on]) or lost the caret.
-  void focus(Object sid, bool on) {
+  /// The writing panel of session [sid] took ([on]) or lost the caret. [keepIme]: this enter leaves the
+  /// input method as it is (the Linux client typed the opening letter in as text, with no replay).
+  void focus(Object sid, bool on, {bool keepIme = false}) {
     final changed = on ? _inside.add(sid) : _inside.remove(sid);
+    if (changed && on && keepIme) _keepEnter = true;
     // Not in front: only tracked; coming back reconciles.
     if (changed && _front) _schedule();
   }
@@ -118,6 +123,8 @@ class ImeIntent {
   }
 
   void _settle() {
+    final keep = _keepEnter;
+    _keepEnter = false;
     if (!_front) return;
     final inside = _inside.isNotEmpty;
     if (_resync) {
@@ -137,7 +144,7 @@ class ImeIntent {
       }
       if (_wasInside) return;
       _wasInside = true;
-      if (_on) _queue(_toChinese);
+      if (_on && !keep) _queue(_toChinese);
     } else {
       if (!_wasInside || _leave != null) return;
       _leave = Timer(leaveGrace, () {

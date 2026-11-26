@@ -450,6 +450,7 @@ class RemoteSession extends ChangeNotifier {
         // A clip's 「插入」: into the draft, which opens to show it.
         composer.apply(e.insert);
         composer.open = true;
+        if (e.letter) composer.keepImeOnFocus = true;
         composer.wantFocus();
       case ComposeKeyEvent():
         // A letter on the picture (type-to-compose): the panel opens, takes the caret, then asks for the letter.

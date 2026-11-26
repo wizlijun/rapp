@@ -239,8 +239,6 @@ class MainState extends ChangeNotifier {
   ImeIntent? imeIntent;
   AppLifecycleListener? _imeResume;
 
-  /// The input method switches asked for so far have ended (each bounded): a compose replay waits for it, so
-  /// the letter that opened the panel lands in the Chinese input method.
   /// The app's lifecycle as [imeIntent] needs it: only resumed is in front.
   void imeLifecycle(AppLifecycleState s) {
     if (s == AppLifecycleState.resumed) {
@@ -250,6 +248,8 @@ class MainState extends ChangeNotifier {
     }
   }
 
+  /// The input method switches asked for so far have ended (each bounded): a compose replay waits for it, so
+  /// the letter that opened the panel lands in the Chinese input method.
   Future<void> get imeSettled => imeIntent?.settled ?? Future.value();
 
   /// The input record: what the writing panel sends, and the drafts it leaves.
@@ -824,7 +824,9 @@ class MainState extends ChangeNotifier {
   /// Native blur arrives after the frame that requested it. Let Picture retry its focus guard.
   void composerFocusChanged(RemoteSession session, bool focused) {
     session.composer.editorFocused = focused;
-    imeIntent?.focus(session.sid, focused);
+    final keep = focused && session.composer.keepImeOnFocus;
+    if (focused) session.composer.keepImeOnFocus = false;
+    imeIntent?.focus(session.sid, focused, keepIme: keep);
     if (focused) {
       session.setAutoEnglish(true);
       blurPicture();

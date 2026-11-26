@@ -200,6 +200,10 @@ class _ComposerPanelState extends State<ComposerPanel> {
     if (_m.takePaste()) _paste();
   }
 
+  /// The most a held compose letter waits for the input method switch: the runner drops it after 1.5 s,
+  /// and a leave still queued ahead of the switch can take up to ~900 ms.
+  static const _imeWait = Duration(milliseconds: 300);
+
   /// The editor gets key focus, and the picture loses it (also when the editor already had
   /// Flutter's focus while the picture took the keys).
   Future<void> _takeCaret() async {
@@ -216,13 +220,13 @@ class _ComposerPanelState extends State<ComposerPanel> {
       final state = widget.state;
       if (ed is NativeEditor) {
         ed.readyForInput.then((_) async {
-          await state.imeSettled;
+          await state.imeSettled.timeout(_imeWait, onTimeout: () {});
           if (mounted && _m.editorFocused && !_blocked) widget.port.composeReplay(sid);
         });
       } else {
         WidgetsBinding.instance.addPostFrameCallback((_) async {
-          await state.imeSettled;
-          if (mounted && !_blocked) widget.port.composeReplay(sid);
+          await state.imeSettled.timeout(_imeWait, onTimeout: () {});
+          if (mounted && _m.editorFocused && !_blocked) widget.port.composeReplay(sid);
         });
         WidgetsBinding.instance.scheduleFrame();
       }

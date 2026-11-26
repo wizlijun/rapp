@@ -6,6 +6,7 @@ import 'package:fake_async/fake_async.dart';
 import 'package:flutter/widgets.dart' show AppLifecycleState;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/local_ime.dart';
+import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/ui/ime_intent.dart';
@@ -237,6 +238,36 @@ void main() {
       a.flushTimers();
       expect(done, isTrue);
       expect(bad.calls, ['toChinese', 'current', 'toEnglish']);
+    });
+  });
+
+  group('an enter that keeps the input method (Linux: the opening letter went in as text)', () {
+    test('no switch for that enter; the leave still goes English', () {
+      fakeAsync((a) {
+        final intent = make();
+        intent.focus(1, true, keepIme: true);
+        a.flushTimers();
+        expect(ime.calls, isEmpty);
+        ime.now = (id: 'fcitx5', ascii: false);
+        intent.focus(1, false);
+        a.flushTimers();
+        expect(ime.calls, ['current', 'toEnglish']);
+        expect(saved, ['fcitx5']);
+      });
+    });
+
+    test('only that enter: the next one switches', () {
+      fakeAsync((a) {
+        final intent = make();
+        intent.focus(1, true, keepIme: true);
+        a.flushTimers();
+        intent.focus(1, false);
+        a.flushTimers();
+        ime.calls.clear();
+        intent.focus(1, true);
+        a.flushTimers();
+        expect(ime.calls, ['toChinese:im.rime']);
+      });
     });
   });
 
@@ -493,6 +524,33 @@ void main() {
         expect(ime.calls, isEmpty);
         st.composerFocusChanged(rs, true);
         st.imeLifecycle(AppLifecycleState.resumed);
+        a.flushTimers();
+        expect(ime.calls, ['toChinese:null']);
+      });
+    });
+
+    test('a panel opened by a Linux letter keeps the input method; a later caret switches', () {
+      env((a, st) {
+        final rs = st.currentRemote!;
+        rs.apply(ComposerInsertEvent(rs.sid, const PasteResult(text: 'n'), letter: true));
+        expect(rs.composer.keepImeOnFocus, isTrue);
+        st.composerFocusChanged(rs, true);
+        a.flushTimers();
+        expect(ime.calls, isEmpty);
+        expect(rs.composer.keepImeOnFocus, isFalse); // used up by that enter
+        st.composerFocusChanged(rs, false);
+        a.flushTimers();
+        st.composerFocusChanged(rs, true);
+        a.flushTimers();
+        expect(ime.calls, ['current', 'toEnglish', 'toChinese:null']);
+      });
+    });
+
+    test('a clip inserted (not a letter) still switches', () {
+      env((a, st) {
+        final rs = st.currentRemote!;
+        rs.apply(ComposerInsertEvent(rs.sid, const PasteResult(text: 'clip')));
+        st.composerFocusChanged(rs, true);
         a.flushTimers();
         expect(ime.calls, ['toChinese:null']);
       });

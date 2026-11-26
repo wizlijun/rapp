@@ -200,6 +200,8 @@ void main() {
     expect(port.handleKeyEvent(3, upA), true); // its release is not A's either
     await tester.runAsync(() => Future<void>.delayed(Duration.zero));
     expect(events.whereType<ComposerInsertEvent>().map((e) => e.insert.text), ['a']);
+    // Typed in as text, not replayed through the input method: the panel keeps the input method as it is.
+    expect(events.whereType<ComposerInsertEvent>().single.letter, isTrue);
 
     // The panel takes the keys before the letter is let go; back on the picture, a letter is a fresh one.
     expect(port.handleKeyEvent(3, a), true);
