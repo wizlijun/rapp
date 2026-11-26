@@ -97,16 +97,22 @@ host-persisted session labels (custom title and note on session cards, standby
 and stopped-terminal cards with one-tap restart carrying the label, and Local
 column label management), overview device OS marks using official brand shapes
 (detecting Omarchy via `/usr/share/omarchy/shell` vs Linux), favorite
-Terminal restore/creation, and text terminal restore (pre-boot 常用 · 终端 恢复,
+Terminal restore/creation, text terminal restore (pre-boot 常用 · 终端 恢复,
 Devices-tab saved-terminal recovery, zsh/bash/fish OSC 7502 shell hooks with
 venv/conda reactivation and non-executing command prefill, secret-line filtering,
-and 新建 / Ctrl+Shift+T starting in the current or last terminal's directory)
-share the macOS 0.15.46 layout and rules.
+and 新建 / Ctrl+Shift+T starting in the current or last terminal's directory),
+device headroom/load bars with 1-hour detail sparklines and Needs You resource
+warnings, companion state service (`rapp-state`) and event outbox, intent-following
+IME switching (local `fcitx5-remote` / `ibus` Chinese in the writing panel and
+English on the stage, remote auto-English before stage keys, streamed terminal
+`typeToCompose: false` default, and folded 本机 column when no local service is
+present), and remote macOS Terminal consent prompts with screen preservation
+share the macOS 0.15.50 layout and rules.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and
 reattach without reconnecting. This release uses protocol v16 (compatible with
-macOS 0.15.35–0.15.46); update both peers when coming from protocol v15. Incoming GUI
+macOS 0.15.35–0.15.50); update both peers when coming from protocol v15. Incoming GUI
 state rules are forwarded by the Linux client to compatible hosts (such as
 macOS 0.15.35+) and safely ignored by the Linux desktop/app host. Off-stage and
 hidden/minimized embedded or detached sessions pause pictures but keep activity
@@ -137,7 +143,8 @@ Linux can share ports and text terminals. New terminal windows require a graphic
 session, a supported terminal app, and a working systemd user manager.
 They run in separate transient user services and survive a rapp-service restart.
 Run `rapp share`, `rapp unshare`, `rapp hosts`, `rapp pipe`, `rapp term restore`
-(`--list` / `--forget` / `<number|name>...`), or `rapp update`
+(`--list` / `--forget` / `<number|name>...`), `rapp state` (`on` / `off`),
+`rapp load` (`pick` / `--top` / `--json`), or `rapp update`
 (`status` / `check` / `rollback`, with `--json`) for CLI access; on Linux
 online self-replacement is disabled (`not_launchd`, exit 7) and directs to the
 release packages, while `rapp update status` reports the installed version.

@@ -235,6 +235,27 @@ with tempfile.TemporaryDirectory(prefix='rapp-bundle-') as td, EchoServer(('127.
                 assert cli('term', 'restore', '--forget') == '已清掉 1 个\n'
                 assert not snap_file.exists()
                 assert cli('term', 'restore', '--list') == '没有可以恢复的终端\n'
+                state0 = cli('state')
+                assert '状态服务：没开' in state0, state0
+                state_on = cli('state', 'on')
+                assert '已打开状态服务' in state_on, state_on
+                state_off = cli('state', 'off')
+                assert '已关掉状态服务' in state_off, state_off
+                assert not ipc({'cmd': 'shares'})['shares'], 'state off left a share behind'
+                load_end = time.monotonic() + 8
+                load_json = None
+                while time.monotonic() < load_end:
+                    load_json = json.loads(cli('load', '--json'))
+                    assert load_json['ok'] is True, load_json
+                    if 'load' in load_json['devices'][0]:
+                        break
+                    time.sleep(.2)
+                assert load_json and 'load' in load_json['devices'][0], load_json
+                local_load = load_json['devices'][0]['load']
+                assert local_load['term'] is True and local_load['items']['mem']['total'] > 0, local_load
+                assert len(local_load['disks']) >= 1, local_load
+                picked = json.loads(cli('load', 'pick', '--json'))
+                assert picked['ok'] is True and picked['id'] == status['id'], picked
                 svc_log = (root / 'logs' / 'service.log').read_text()
                 assert 'Linux 后端' not in svc_log and '仅存本机加密表' not in svc_log, svc_log
                 assert 'linux-snap' not in svc_log and snap_key not in svc_log and str(root) not in svc_log, svc_log

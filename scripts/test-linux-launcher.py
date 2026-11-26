@@ -30,7 +30,13 @@ with tempfile.TemporaryDirectory(prefix='rapp launcher ') as root:
                          (['update'], 'rapp-cli'),
                          (['update', 'status', '--json'], 'rapp-cli'),
                          (['update', 'check', '--timeout', '5', '--json'], 'rapp-cli'),
-                         (['update', 'rollback', '--json'], 'rapp-cli')]:
+                         (['update', 'rollback', '--json'], 'rapp-cli'),
+                         (['state'], 'rapp-cli'),
+                         (['state', 'on'], 'rapp-cli'),
+                         (['state', 'off'], 'rapp-cli'),
+                         (['load'], 'rapp-cli'),
+                         (['load', '--top', '--json'], 'rapp-cli'),
+                         (['load', 'pick', '--json'], 'rapp-cli')]:
         out = json.loads(subprocess.check_output([entry, *args], text=True))
         assert out == [str(bundle / binary), *args], out
 print('PASS packaged GUI/CLI dispatch and literal argument preservation')
