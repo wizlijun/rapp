@@ -96,6 +96,17 @@
 - **远程输入**：`rapp-host` 遇到输入时已经会发 `{"event":"input"}`（`WorkerCLI.swift:244`），服务在 `workers.rs` 里收到。现在要在这里更新「最后一次远程活动」的时间。`rapp-term serve` 改发 `{"event":"activity"}`（见上），服务收到后只更新时间。
 - 10 分钟是常量【我定的】。仍然每 `idle_poll`（60 秒）判断一次。
 
+实现时补定的几条（2026-11-26，都是【我定的】）：
+
+- **自动升级退不掉 GUI 就退避 30 分钟**：请 GUI 退出、等满 `gui_wait` 还在，这一次放弃，30 分钟内不再试，免得每分钟都把 GUI 关一次又打开。
+- **`update_check` 可以带 `"wait": true`**：等这次检查（和下载）做完再回复，CLI 用它避免读到检查前的旧状态。已有别的检查或下载在跑时立即回复，CLI 接着轮询状态，直到不再是 checking/downloading。
+- **`update_status` 新增字段**：`launchd`（服务是不是 launchd 启动的，不是就不能在线升级）、`error_code`（`still_open`、`needs_admin`、`not_launchd`、`failed`，给 CLI 定退出码）、`auto_wait`（自动升级正在等什么，比如「最近本机有人操作」；日志 `update_auto_wait` 在原因变化时记一条）、`quit_gui`。
+- **IPC 失败回复带 `code`**（`needs_confirm`、`needs_admin`、`not_launchd`、`nothing_to_install`、`busy`、`no_previous`、`failed`），需要页面时带 `page`。
+- **手动安装等 GUI 期间版本被忽略或换掉**：失败，`nothing_to_install`，不让 CLI 空等。
+- **本机自己的端口分享上的流量不算**活动；只有连进本机的转发、管道、映射、远程输入和会话开始算。
+- **`--cm` 小窗也是 GUI 进程**：看到 `quit_gui` 一样关掉，不然安装会一直等它。
+- **安装记号（marker）记下是谁发起的**（`by`：gui、cli、auto），`update_applied` 日志带上它。
+
 ### 5.2 退出 GUI、安装、再打开（四种入口共用）
 
 1. 服务把 `update_status` 的 `quit_gui` 设为 `true`，然后调用 `notify()`。订阅了变化的 GUI 收到 `changed`，重新取状态，看到 `quit_gui`，就直接退出：调用现有的 `hooks.quitNow()`，不弹 ⌘Q 确认。由 GUI 自己发起的升级照旧是 GUI 先退出，不受影响。
