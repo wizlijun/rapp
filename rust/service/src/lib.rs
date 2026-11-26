@@ -145,7 +145,7 @@ impl UpdateOpts {
         UpdateOpts {
             bundle: version_dir,
             launchd: supervised,
-            cache_dir: supervise::update_cache_dir_from(&|k| std::env::var_os(k).map(Into::into), system_mode),
+            cache_dir: supervise::update_cache_dir_from(&|k: &str| std::env::var_os(k).map(PathBuf::from), system_mode),
             first_check: Duration::from_secs(30),
             tick: Duration::from_secs(3600),
             idle_poll: Duration::from_secs(60),
