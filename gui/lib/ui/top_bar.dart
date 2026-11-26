@@ -380,7 +380,9 @@ class TopBar extends StatelessWidget {
     return state.projects.where((p) => p.id == id).firstOrNull?.name;
   }
 
-  String _routeSub(SessionEntry e) {
+  String _routeSub(SessionEntry e) => e.noted(_route(e));
+
+  String _route(SessionEntry e) {
     final inProject = projectSubtitle(e, state.projects, current: state.currentProject);
     if (inProject != null) return inProject;
     final p = routeWord(e.path, forced: state.forcedRelay(e.id));

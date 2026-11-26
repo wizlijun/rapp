@@ -21,8 +21,13 @@ bool isPtyTerm(String app) => parseTermId(app)?.backend == 'pty';
   return (backend: backend, host: host, name: name);
 }
 
-/// The label of a text terminal in the top bar, the session list, the overview and the favourites.
-String termTitle(String name) => 'CLI · $name';
+/// The label of a text terminal in the top bar, the session list, the overview and the favourites: the program in
+/// front ([fg], such as claude, codex or agy), else [termKindWord] while it is not known, then the name.
+String termTitle(String name, {String? fg}) => '${fg == null || fg.isEmpty ? termKindWord : fg} · $name';
+
+/// What says a row is a text terminal: the title's head until the program in front is known, then the start of the
+/// line under the title.
+const termKindWord = 'CLI';
 
 String termDisplayName(String name, String? host) => host == null ? name : '$name @$host';
 

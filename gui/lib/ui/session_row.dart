@@ -68,8 +68,8 @@ class SessionRow extends StatelessWidget {
 
   String get _second {
     final path = routeWord(entry.path, forced: forced);
-    if (byDevice) return path;
-    return path.isEmpty ? entry.device : '${entry.device} · $path';
+    if (byDevice) return entry.noted(path);
+    return entry.noted(path.isEmpty ? entry.device : '${entry.device} · $path');
   }
 
   bool get _inferredShown => embedded && entry.reason == null && entry.inferred && entry.ps != null && entry.lamp != Lamp.connecting;
