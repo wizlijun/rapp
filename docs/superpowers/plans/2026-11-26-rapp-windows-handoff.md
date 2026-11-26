@@ -17,6 +17,7 @@
 | `…-windows-g-install-upgrade.md` | G 段：安装、升级、退回、卸载、打包 |
 | `…-windows-h-release.md` | H 段：语音、输入法、任务栏、总验收、总审计、首发 |
 | `docs/superpowers/plans/2026-11-27-rapp-windows-kickoff-mac.md` | 给接手 agent 的开工提示词：在 Mac 上验证 A、B 两段草稿。整份贴给新 session 就能开工。Windows 机器上的事（探针、Windows 门禁）不在里面，机器装好后另写 |
+| `docs/superpowers/plans/2026-11-27-rapp-windows-kickoff-windows.md` | 给 Windows 机器上的 agent 的开工提示词：装机器、一级探针，然后是 A 段草稿的 Windows 那一半 |
 | `docs/superpowers/plans/notes/2026-11-26-windows-*-draft-notes.md` | 代码草稿的说明：写了什么、没写什么、哪些没验证、发现的计划错误。**在各自的代码分支上**，不在 main 上 |
 
 每份计划的开头都有：这一段的**硬约束**（Global Constraints）、**重点审查的输入**（Review Focus，每条都挂到了某个任务的测试上）、**文件表**、**组件选择表**（Component choices：用哪个系统接口、哪个库、钉哪个版本）。C–H 六份是在探针跑之前写的，所以各有一张“探针结果不一样时改哪里”的表。
