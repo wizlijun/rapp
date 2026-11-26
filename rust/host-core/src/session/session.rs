@@ -24,7 +24,8 @@ use crate::state::detectors::TextReader;
 use crate::wintable::{capture_region, region_change};
 
 use super::intake::{bad_data_reason, read_timeout, READ_SLICE};
-use super::server::{Inner, SessionHandle};
+use super::clip::ClipState;
+use super::server::{Inner, SessionHandle, TransferSlot};
 use super::hints::{AppStateHandle, FocusPane};
 use super::tracker::window_table;
 use super::{hold, shared, Event, Job, Shared};
@@ -57,6 +58,8 @@ pub enum Timer {
     FocusTick,
     /// The opened-app and password-field polls (`hints`).
     Hints,
+    /// The clipboard restore check after a paste burst (`session/clip.rs`).
+    PasteRestore,
 }
 
 /// The platform handles a session uses after its target opened. Each is shared so a
@@ -159,6 +162,11 @@ pub struct Session {
     /// Rules that came before the state thread started.
     pub(crate) pending_rules: Option<String>,
 
+    // Clipboard, paste, transfers (`session/clip.rs`).
+    pub(crate) clip: Option<ClipState>,
+    /// Shared with the server: where side connections find this session's store.
+    pub(crate) transfers_slot: TransferSlot,
+
     pub(crate) bytes_this_second: usize,
     pub(crate) frames_this_second: i64,
     pub(crate) last_width: usize,
@@ -180,7 +188,8 @@ impl Session {
         let (tx, rx) = channel();
         let started = Arc::new(AtomicBool::new(false));
         let alive = Arc::new(AtomicBool::new(true));
-        let handle = SessionHandle { id, tx: tx.clone(), started: started.clone() };
+        let transfers_slot: TransferSlot = Arc::new(std::sync::Mutex::new(None));
+        let handle = SessionHandle { id, tx: tx.clone(), started: started.clone(), transfers: transfers_slot.clone() };
         let reader = stream.try_clone();
         let _ = stream.set_write_timeout(Some(inner.clock.real(WRITE_TIMEOUT)));
         let lock = shared(inner.platform.lock());
@@ -242,6 +251,8 @@ impl Session {
             focus: None,
             app_state: None,
             pending_rules: None,
+            clip: None,
+            transfers_slot,
             bytes_this_second: 0,
             frames_this_second: 0,
             last_width: 0,
@@ -381,6 +392,7 @@ impl Session {
             }
             Timer::FocusTick => self.focus_tick(),
             Timer::Hints => self.hints_tick(),
+            Timer::PasteRestore => self.paste_restore_check(),
         }
     }
 
@@ -1028,7 +1040,8 @@ impl Session {
         self.ended = true;
         self.alive.store(false, Ordering::SeqCst);
         self.timers.clear();
-        // Each part stops what it started (Tasks 14-17 add theirs here).
+        // Each part stops what it started. The paster goes first, as in Swift (`paster.end`).
+        self.stop_clipboard();
         self.stop_capture();
         // Nothing B pressed stays pressed on A (`releaseAll`).
         self.release_all_input();

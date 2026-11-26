@@ -362,6 +362,11 @@ impl FakePlatform {
         self.st().change
     }
 
+    /// What the clipboard holds now (after the host's writes and restores).
+    pub fn current_clipboard(&self) -> Option<ClipRead> {
+        self.st().clip.clone()
+    }
+
     /// What the clipboard held at each `paste_key`, in order.
     pub fn pastes(&self) -> Vec<Option<ReceivedItem>> {
         self.st().pastes.clone()
@@ -577,6 +582,10 @@ impl TargetOps for FakeTarget {
     fn activate(&mut self) -> bool {
         let mut s = lock_state(&self.0);
         s.log.push("activate".to_string());
+        // Nothing comes to the front over the lock screen.
+        if s.locked {
+            return false;
+        }
         s.frontmost = true;
         true
     }

@@ -972,3 +972,462 @@ fn oversized_rules_are_rejected_with_swift_text() {
     assert_eq!(ended_event(&host)["reason"], "bad data from client: rules too large");
     assert!(c.closes_within(Duration::from_secs(5)));
 }
+
+// MARK: Clipboard, paste and file transfer (Task 16)
+
+use std::io::{ErrorKind, Read as _, Write as _};
+use std::net::{Shutdown, TcpStream};
+
+use rapp_host_core::clipboard::{safe_file_name, ClipSource, CHUNK_SIZE, MAX_SIDE_CONNECTIONS};
+use rapp_host_core::filename::portable_file_name;
+use rapp_host_core::platform::ClipRead;
+use rapp_host_core::protocol::{ClipKind, Message, MessageParser, PasteSource};
+use rapp_host_core::transfers::{FileRef, ReceivedItem, PART_SUFFIX};
+
+fn clip_read(source: ClipSource) -> ClipRead {
+    ClipRead { source, text: None, image_png: None, files: Vec::new(), data: None, concealed: false }
+}
+
+fn text_clip(s: &str) -> ClipRead {
+    ClipRead { text: Some(s.to_string()), ..clip_read(ClipSource::Text) }
+}
+
+/// The start of a PNG: signature and IHDR, which is all the host reads.
+fn tiny_png(width: u32, height: u32) -> Vec<u8> {
+    let mut p = vec![0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n', 0, 0, 0, 13];
+    p.extend(b"IHDR");
+    p.extend(width.to_be_bytes());
+    p.extend(height.to_be_bytes());
+    p.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    p
+}
+
+/// Deterministic bytes (a linear congruential generator).
+fn seeded(n: usize, seed: u32) -> Vec<u8> {
+    let mut x = seed;
+    (0..n)
+        .map(|_| {
+            x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (x >> 24) as u8
+        })
+        .collect()
+}
+
+fn is_clip(m: &Incoming) -> bool {
+    matches!(m, Incoming::Clipboard { .. })
+}
+
+/// A session whose clipboard has started: `screenLocked` goes out right after it.
+fn clip_ready(host: &Host) -> Controller {
+    let mut c = ready(host, 0);
+    c.wait_for(|m| matches!(m, Incoming::ScreenLocked(false)));
+    c
+}
+
+fn next_clip(c: &mut Controller) -> (u32, Option<String>, Value) {
+    match c.wait_for(is_clip) {
+        Incoming::Clipboard { id, text, info, .. } => (id, text, info),
+        _ => unreachable!(),
+    }
+}
+
+fn send_paste(c: &mut Controller, seq: u32, source: PasteSource) {
+    c.send(&Message::Paste { seq, source }.encoded());
+}
+
+fn pasted(c: &mut Controller, want: u32) -> String {
+    match c.wait_for(|m| matches!(m, Incoming::Pasted { seq, .. } if *seq == want)) {
+        Incoming::Pasted { error, .. } => error,
+        _ => unreachable!(),
+    }
+}
+
+fn current_text(platform: &FakePlatform) -> Option<String> {
+    platform.current_clipboard().and_then(|c| c.text)
+}
+
+/// A side connection, spoken in the host's own codec (the controller's reader refuses 24/25).
+struct Side {
+    stream: TcpStream,
+    parser: MessageParser,
+}
+
+impl Side {
+    fn open(host: &Host, first: Message) -> Side {
+        let mut stream = TcpStream::connect(("127.0.0.1", host.port())).expect("connect a side connection");
+        let _ = stream.set_nodelay(true);
+        stream.write_all(&first.encoded()).expect("send the first message");
+        Side { stream, parser: MessageParser::new() }
+    }
+
+    fn send(&mut self, m: &Message) -> bool {
+        self.stream.write_all(&m.encoded()).is_ok()
+    }
+
+    /// The next message within 10 s real time; `None` once the host closed.
+    fn next(&mut self) -> Option<Message> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut buf = vec![0u8; 64 * 1024];
+        loop {
+            match self.parser.next() {
+                Ok(Some(m)) => return Some(m),
+                Ok(None) => {}
+                Err(e) => panic!("bad data from the host: {e:?}"),
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            assert!(!left.is_zero(), "nothing from the side connection within 10 s");
+            let _ = self.stream.set_read_timeout(Some(left.min(Duration::from_millis(100))));
+            match self.stream.read(&mut buf) {
+                Ok(0) => return None,
+                Ok(n) => self.parser.append(&buf[..n]),
+                Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted) => {}
+                Err(_) => return None,
+            }
+        }
+    }
+
+    fn start(&mut self) -> u64 {
+        match self.next() {
+            Some(Message::TransferStart(n)) => n,
+            other => panic!("expected transferStart, got {other:?}"),
+        }
+    }
+
+    fn close(self) {
+        let _ = self.stream.shutdown(Shutdown::Both);
+    }
+}
+
+fn put_message(token: &str, item: u32, name: &str, total: u64) -> Message {
+    Message::Put { token: token.to_string(), item, kind: ClipKind::Files, uti: String::new(), name: name.to_string(), total }
+}
+
+/// Uploads `bytes` as file item `item` on one side connection, from the offset the host
+/// reports; returns that offset.
+fn put_file(host: &Host, item: u32, name: &str, bytes: &[u8]) -> u64 {
+    let mut side = Side::open(host, put_message(TOKEN, item, name, bytes.len() as u64));
+    let have = side.start();
+    for chunk in bytes[have as usize..].chunks(CHUNK_SIZE) {
+        assert!(side.send(&Message::Chunk(chunk.to_vec())), "host closed during the upload");
+    }
+    match side.next() {
+        Some(Message::Chunk(c)) if c.is_empty() => {}
+        other => panic!("expected the closing empty chunk, got {other:?}"),
+    }
+    side.close();
+    have
+}
+
+/// Waits (5 s real time at most) until `path` has `len` bytes.
+fn wait_size(path: &std::path::Path, len: u64) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let size = std::fs::metadata(path).map(|m| m.len()).ok();
+        if size == Some(len) {
+            return;
+        }
+        assert!(Instant::now() < deadline, "{} has {size:?} bytes, not {len}", path.display());
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn file_names(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .map(|r| r.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+        .unwrap_or_default();
+    names.sort();
+    names
+}
+
+fn is_transfer(e: &Value, dir: &str, kind: &str) -> bool {
+    e["event"] == "transfer" && e["dir"] == dir && e["kind"] == kind
+}
+
+#[test]
+fn host_copy_is_announced() {
+    let (platform, host) = serve();
+    let mut c = clip_ready(&host);
+
+    platform.set_clipboard(text_clip("hello from A"));
+    let (_, text, info) = next_clip(&mut c);
+    assert_eq!((text.as_deref(), info["kind"].as_str()), (Some("hello from A"), Some("text")));
+    // Inline text is reported when it is announced.
+    let e = host.wait_event_where(|e| is_transfer(e, "a_to_b", "text"));
+    assert_eq!(e["bytes"], "hello from A".len());
+
+    let png = tiny_png(4, 3);
+    platform.set_clipboard(ClipRead { image_png: Some(png.clone()), ..clip_read(ClipSource::Image) });
+    let (_, _, info) = next_clip(&mut c);
+    assert_eq!(info, json!({"kind": "image", "width": 4, "height": 3, "bytes": png.len()}));
+
+    let dir = platform.data_root().join("copied");
+    std::fs::create_dir_all(&dir).unwrap();
+    let files: Vec<FileRef> = [("a.txt", 5usize), ("b.bin", 300)]
+        .iter()
+        .map(|(name, n)| {
+            let path = dir.join(name);
+            std::fs::write(&path, seeded(*n, 7)).unwrap();
+            FileRef { path, size: *n as u64, modified: std::time::UNIX_EPOCH }
+        })
+        .collect();
+    platform.set_clipboard(ClipRead { files, ..clip_read(ClipSource::Files) });
+    let (_, _, info) = next_clip(&mut c);
+    assert_eq!(
+        info,
+        json!({"kind": "files", "files": [{"name": "a.txt", "bytes": 5}, {"name": "b.bin", "bytes": 300}]})
+    );
+
+    // Copied while another app was in front: not this session's.
+    platform.set_frontmost(false);
+    platform.set_clipboard(text_clip("copied elsewhere"));
+    assert_eq!(c.quiet_for(host_time(2.0), |m| !is_clip(m)), Ok(()));
+    platform.set_frontmost(true);
+    assert_eq!(c.quiet_for(host_time(1.0), |m| !is_clip(m)), Ok(()));
+
+    // A password manager's item.
+    platform.set_clipboard(ClipRead { concealed: true, ..text_clip("concealed item") });
+    assert_eq!(c.quiet_for(host_time(2.0), |m| !is_clip(m)), Ok(()));
+
+    // The host's own paste write, and its restore, are not copies.
+    send_paste(&mut c, 1, PasteSource::Text("typed on B".to_string()));
+    assert_eq!(pasted(&mut c, 1), "");
+    wait_log(&platform, |l| l.iter().any(|x| x == "clipboard restore"));
+    assert_eq!(c.quiet_for(host_time(1.0), |m| !is_clip(m)), Ok(()));
+}
+
+#[test]
+fn paste_text_inline() {
+    let (platform, host) = serve();
+    let mut c = clip_ready(&host);
+    platform.set_clipboard(text_clip("old clipboard"));
+    next_clip(&mut c);
+    platform.clear_log();
+
+    let sent = Instant::now();
+    send_paste(&mut c, 7, PasteSource::Text("from B".to_string()));
+    assert_eq!(pasted(&mut c, 7), "");
+    let answered = Instant::now();
+    // The answer waits 0.15 s after the paste key.
+    assert!(answered - sent >= host_time(0.15), "answered after {:?}", answered - sent);
+    let log = wait_log(&platform, |l| l.iter().any(|x| x == "paste_key"));
+    let order: Vec<&str> = log
+        .iter()
+        .map(String::as_str)
+        .filter(|l| matches!(*l, "clipboard snapshot" | "activate" | "paste_key") || l.starts_with("clipboard write"))
+        .collect();
+    assert_eq!(order, ["clipboard snapshot", "clipboard write text 6", "activate", "paste_key"]);
+    assert_eq!(platform.pastes().last(), Some(&Some(ReceivedItem::Text("from B".to_string()))));
+    let e = host.wait_event_where(|e| is_transfer(e, "b_to_a", "text"));
+    assert_eq!(e["bytes"], 6);
+
+    // About 2 s later the old clipboard is back.
+    wait_log(&platform, |l| l.iter().any(|x| x == "clipboard restore"));
+    assert!(answered.elapsed() >= host_time(2.0), "restored after {:?}", answered.elapsed());
+    assert_eq!(current_text(&platform).as_deref(), Some("old clipboard"));
+}
+
+#[test]
+fn paste_does_not_restore_over_a_newer_copy() {
+    let (platform, host) = serve();
+    let mut c = clip_ready(&host);
+    platform.set_clipboard(text_clip("old clipboard"));
+    next_clip(&mut c);
+
+    send_paste(&mut c, 1, PasteSource::Text("from B".to_string()));
+    assert_eq!(pasted(&mut c, 1), "");
+    // The user copies something new on A before the restore is due.
+    platform.set_clipboard(text_clip("newer copy"));
+    let (_, text, _) = next_clip(&mut c);
+    assert_eq!(text.as_deref(), Some("newer copy"));
+    std::thread::sleep(host_time(3.0));
+    assert!(!platform.log().iter().any(|l| l == "clipboard restore"), "{:?}", platform.log());
+    assert_eq!(current_text(&platform).as_deref(), Some("newer copy"));
+}
+
+#[test]
+fn paste_when_locked_fails_with_the_fixed_text() {
+    // Locked during the session: the target never comes to the front.
+    let (platform, host) = serve();
+    let mut c = clip_ready(&host);
+    platform.set_frontmost(false);
+    platform.set_locked(true);
+    send_paste(&mut c, 3, PasteSource::Text("from B".to_string()));
+    assert_eq!(pasted(&mut c, 3), "screen locked");
+    assert!(!platform.log().iter().any(|l| l == "paste_key"), "{:?}", platform.log());
+
+    // Locked at session start: the app is not attached yet, and B still gets an answer.
+    let (platform, host) = serve();
+    platform.set_locked(true);
+    let mut c = ready(&host, 0);
+    c.wait_for(|m| matches!(m, Incoming::ScreenLocked(true)));
+    send_paste(&mut c, 4, PasteSource::Text("from B".to_string()));
+    assert_eq!(pasted(&mut c, 4), "远程电脑已锁屏，解锁后再发送");
+    assert!(!platform.log().iter().any(|l| l.starts_with("clipboard")), "{:?}", platform.log());
+}
+
+#[test]
+fn paste_item_not_uploaded() {
+    let (platform, host) = serve();
+    let mut c = clip_ready(&host);
+    send_paste(&mut c, 9, PasteSource::Item(77));
+    assert_eq!(pasted(&mut c, 9), "not uploaded");
+    assert!(!platform.log().iter().any(|l| l.starts_with("clipboard write")), "{:?}", platform.log());
+    // The queue goes on after it.
+    send_paste(&mut c, 10, PasteSource::Text("next".to_string()));
+    assert_eq!(pasted(&mut c, 10), "");
+}
+
+#[test]
+fn put_then_paste_a_file() {
+    let (platform, host) = serve();
+    let mut c = clip_ready(&host);
+    let bytes = seeded(700 * 1024, 42);
+    assert_eq!(put_file(&host, 5, "report.bin", &bytes), 0);
+    let e = host.wait_event_where(|e| is_transfer(e, "b_to_a", "files"));
+    assert_eq!((e["bytes"].as_u64(), e["name"].as_str()), (Some(bytes.len() as u64), Some("report.bin")));
+    let path = host.downloads().join("report.bin");
+    assert!(std::fs::read(&path).unwrap() == bytes, "uploaded bytes differ");
+    assert_eq!(file_names(host.downloads()), ["report.bin"]);
+
+    send_paste(&mut c, 2, PasteSource::Item(5));
+    assert_eq!(pasted(&mut c, 2), "");
+    assert_eq!(platform.pastes().last(), Some(&Some(ReceivedItem::File(path))));
+}
+
+#[test]
+fn fetch_a_host_file() {
+    let (platform, host) = serve();
+    let mut c = clip_ready(&host);
+    let dir = platform.data_root().join("copied");
+    std::fs::create_dir_all(&dir).unwrap();
+    let first = seeded(1000, 1);
+    let second = seeded(600 * 1024, 2);
+    let files: Vec<FileRef> = [("one.bin", &first), ("two.bin", &second)]
+        .iter()
+        .map(|(name, b)| {
+            let path = dir.join(name);
+            std::fs::write(&path, b).unwrap();
+            FileRef { path, size: b.len() as u64, modified: std::time::UNIX_EPOCH }
+        })
+        .collect();
+    platform.set_clipboard(ClipRead { files, ..clip_read(ClipSource::Files) });
+    let (id, _, _) = next_clip(&mut c);
+
+    let mut side = Side::open(&host, Message::Fetch { token: TOKEN.to_string(), clip: id, file: 1, offset: 0 });
+    let total = side.start();
+    assert_eq!(total, second.len() as u64);
+    let mut got = Vec::new();
+    while let Some(m) = side.next() {
+        match m {
+            Message::Chunk(c) => {
+                assert!(c.len() <= CHUNK_SIZE);
+                got.extend(c);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    assert!(got == second, "fetched bytes differ ({} of {})", got.len(), second.len());
+    let e = host.wait_event_where(|e| is_transfer(e, "a_to_b", "files"));
+    assert_eq!(e["bytes"].as_u64(), Some(second.len() as u64));
+
+    // From an offset: only the rest.
+    let offset = 300_000u64;
+    let mut side = Side::open(&host, Message::Fetch { token: TOKEN.to_string(), clip: id, file: 1, offset });
+    side.start();
+    let mut rest = Vec::new();
+    while let Some(Message::Chunk(c)) = side.next() {
+        rest.extend(c);
+    }
+    assert!(rest == second[offset as usize..], "fetched rest differs");
+}
+
+#[test]
+fn put_resumes_after_disconnect() {
+    let (_platform, host) = serve();
+    let _c = clip_ready(&host);
+    let bytes = seeded(700 * 1024, 9);
+    let total = bytes.len() as u64;
+
+    let mut side = Side::open(&host, put_message(TOKEN, 3, "big.bin", total));
+    assert_eq!(side.start(), 0);
+    // One whole chunk, then part of the next message, then the connection drops at 300 KiB.
+    assert!(side.send(&Message::Chunk(bytes[..CHUNK_SIZE].to_vec())));
+    let next = Message::Chunk(bytes[CHUNK_SIZE..2 * CHUNK_SIZE].to_vec()).encoded();
+    let cut = next.len() - (2 * CHUNK_SIZE - 300 * 1024);
+    let _ = side.stream.write_all(&next[..cut]);
+    side.close();
+
+    let part = host.downloads().join(format!("big.bin{PART_SUFFIX}"));
+    wait_size(&part, CHUNK_SIZE as u64);
+
+    let have = put_file(&host, 3, "big.bin", &bytes);
+    assert!(have == CHUNK_SIZE as u64 || have == 2 * CHUNK_SIZE as u64, "resumed from {have}");
+    assert!(std::fs::read(host.downloads().join("big.bin")).unwrap() == bytes, "uploaded bytes differ");
+    assert_eq!(file_names(host.downloads()), ["big.bin"]);
+}
+
+#[test]
+fn fifth_side_connection_is_refused() {
+    let (_platform, host) = serve();
+    let _c = clip_ready(&host);
+    let mut open: Vec<Side> = (0..MAX_SIDE_CONNECTIONS as u32)
+        .map(|i| {
+            let mut s = Side::open(&host, put_message(TOKEN, 100 + i, &format!("slot{i}.bin"), 1 << 20));
+            assert_eq!(s.start(), 0);
+            s
+        })
+        .collect();
+    let mut fifth = Side::open(&host, put_message(TOKEN, 200, "fifth.bin", 1 << 20));
+    assert_eq!(fifth.next(), Some(Message::Error("busy".to_string())));
+    assert_eq!(fifth.next(), None);
+    assert!(host.stdout_text().contains("side connection: busy") || host.stderr_text().contains("side connection: busy"));
+
+    // A slot comes back once one of them closes.
+    open.pop().unwrap().close();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let mut again = Side::open(&host, put_message(TOKEN, 201, "again.bin", 1 << 20));
+        match again.next() {
+            Some(Message::TransferStart(0)) => break,
+            Some(Message::Error(e)) if e == "busy" => {}
+            other => panic!("unexpected {other:?}"),
+        }
+        assert!(Instant::now() < deadline, "the slot never came back");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn side_connection_with_wrong_token_is_refused() {
+    let (_platform, host) = serve();
+    let _c = clip_ready(&host);
+    let mut fetch = Side::open(&host, Message::Fetch { token: "not-the-secret".to_string(), clip: 1, file: 0, offset: 0 });
+    assert_eq!(fetch.next(), Some(Message::Error("bad token".to_string())));
+    assert_eq!(fetch.next(), None);
+    let mut put = Side::open(&host, put_message("not-the-secret", 1, "x.bin", 10));
+    assert_eq!(put.next(), Some(Message::Error("bad token".to_string())));
+    assert_eq!(put.next(), None);
+    assert!(file_names(host.downloads()).is_empty(), "{:?}", file_names(host.downloads()));
+}
+
+#[test]
+fn hostile_names_stay_inside() {
+    let (platform, host) = serve();
+    let _c = clip_ready(&host);
+    let raws = ["..\\x", "a/b", "CON", "nul.txt", "a<b>.txt", "C:\\Users\\x\\报告.pdf", "../../escape.txt", "/etc/passwd2"];
+    let mut want: Vec<String> = raws.iter().map(|r| portable_file_name(&safe_file_name(r))).collect();
+    let distinct: std::collections::HashSet<&String> = want.iter().collect();
+    assert_eq!(distinct.len(), want.len(), "the table must map to distinct names: {want:?}");
+    for (i, raw) in raws.iter().enumerate() {
+        put_file(&host, 300 + i as u32, raw, &seeded(10 + i, i as u32));
+    }
+    want.sort();
+    assert_eq!(file_names(host.downloads()), want);
+    // Nothing landed beside the downloads folder or above it.
+    for leaf in ["x", "b", "escape.txt", "passwd2"] {
+        assert!(!platform.data_root().join(leaf).exists(), "{leaf} escaped");
+    }
+    for entry in std::fs::read_dir(host.downloads()).unwrap() {
+        assert!(entry.unwrap().file_type().unwrap().is_file());
+    }
+}
