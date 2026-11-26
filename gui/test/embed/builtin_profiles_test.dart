@@ -35,6 +35,11 @@ void main() {
         ['终端', 'iTerm2', 'Ghostty', 'Warp', 'ChatGPT', 'Claude', 'Cursor', 'VS Code']);
   });
 
+  test('streamed terminals default to no type-to-compose, every other app unchanged', () {
+    expect([for (final p in apps) if (p.typeToCompose == false) p.name], ['终端', 'iTerm2', 'Ghostty', 'Warp']);
+    expect([for (final p in apps) if (p.typeToCompose != null && p.typeToCompose != false) p.name], isEmpty);
+  });
+
   test('the §9 ids and pictures', () {
     String key(AppProfile p) => '${p.ids.join(',')} ${p.mode}/${p.density}/${p.fps}';
     expect(apps.map(key), [
