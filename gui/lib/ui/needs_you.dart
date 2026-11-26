@@ -167,7 +167,11 @@ class _NeedsList extends StatelessWidget {
         constraints: const BoxConstraints(minHeight: 48),
         padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
         alignment: Alignment.centerLeft,
-        child: Text('${n.text} · $grey', maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.muted)),
+        child: Semantics(
+          label: '${n.text}，$grey',
+          excludeSemantics: true,
+          child: Text('${n.text} · $grey', maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.muted)),
+        ),
       );
     }
     return Container(

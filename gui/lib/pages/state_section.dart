@@ -16,6 +16,8 @@ class StateSection extends StatefulWidget {
 
 class _StateSectionState extends State<StateSection> {
   late final _url = TextEditingController(text: widget.sync.config.url);
+  // Leaving the field saves it as Enter does (unless it is what is saved already).
+  late final _focus = FocusNode()..addListener(_onFocus);
   String? _hint;
   // Picking 手填地址 shows the field before an address is saved.
   bool _manual = false;
@@ -24,8 +26,17 @@ class _StateSectionState extends State<StateSection> {
 
   @override
   void dispose() {
+    _focus.dispose();
     _url.dispose();
     super.dispose();
+  }
+
+  void _onFocus() {
+    if (_focus.hasFocus || !mounted) return;
+    final v = _url.text.trim();
+    final c = _sync.config;
+    if (v.isEmpty || (c.mode == StateMode.manual && c.url == v)) return;
+    _submit(v);
   }
 
   String _status() => switch (_sync.status) {
@@ -70,6 +81,7 @@ class _StateSectionState extends State<StateSection> {
         if (mode == StateMode.manual)
           TextField(
             controller: _url,
+            focusNode: _focus,
             decoration: InputDecoration(isDense: true, hintText: 'http://', errorText: _hint),
             onSubmitted: _submit,
           ),

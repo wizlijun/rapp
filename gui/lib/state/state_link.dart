@@ -18,7 +18,8 @@ class StateLink {
 
   final Uri base;
 
-  /// Connect timeout, and the time a plain request may take.
+  /// Connect timeout. A plain request (health, state, queue, seen) may take [connect] + [idle] in all (50 s by
+  /// default) before it fails with `StateLinkError(0)`.
   final Duration connect;
 
   /// A watch that hears nothing (not even a ping) for this long ends with `StateLinkError(0)`.
@@ -39,8 +40,14 @@ class StateLink {
     c.close(force: true);
   }
 
-  Uri _uri(String path, [Map<String, String>? query]) =>
-      base.replace(path: path, queryParameters: query == null || query.isEmpty ? null : query);
+  /// [path] under [base]'s own path, so a manual `https://host/state` reaches `https://host/state/v1/…`.
+  Uri _uri(String path, [Map<String, String>? query]) {
+    var prefix = base.path;
+    while (prefix.endsWith('/')) {
+      prefix = prefix.substring(0, prefix.length - 1);
+    }
+    return base.replace(path: '$prefix$path', queryParameters: query == null || query.isEmpty ? null : query);
+  }
 
   /// True only for a 200 from a rapp-state service. Never throws.
   Future<bool> health() async {

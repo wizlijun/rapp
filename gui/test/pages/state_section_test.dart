@@ -11,8 +11,10 @@ import '../fakes.dart';
 /// Saves the config like the real one but opens no connection.
 class _Sync extends FakeStateSync {
   _Sync(super.localDir);
+  int saves = 0;
   @override
   Future<void> setConfig(StateConfig c) {
+    saves++;
     config = c;
     c.save(localDir);
     return Future.value();
@@ -58,6 +60,35 @@ void main() {
     await t.tap(find.text('自动'));
     await t.pump();
     expect(StateConfig.load(dir.path).mode, StateMode.auto);
+  });
+
+  testWidgets('leaving the address field saves it as Enter does', (t) async {
+    await pump(t);
+    await t.tap(find.text('手填地址'));
+    await t.pump();
+    await t.enterText(find.byType(TextField), 'ftp://x');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await t.pump();
+    expect(find.text('地址要以 http:// 或 https:// 开头'), findsOneWidget);
+    expect(StateConfig.load(dir.path).mode, StateMode.auto);
+
+    await t.tap(find.byType(TextField));
+    await t.enterText(find.byType(TextField), 'http://h:8102');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await t.pump();
+    expect(find.text('地址要以 http:// 或 https:// 开头'), findsNothing);
+    final c = StateConfig.load(dir.path);
+    expect([c.mode, c.url], [StateMode.manual, 'http://h:8102']);
+    final saves = sync.saves;
+
+    // Enter, then leaving the field: one save, not two.
+    await t.tap(find.byType(TextField));
+    await t.enterText(find.byType(TextField), 'http://h:9');
+    await t.testTextInput.receiveAction(TextInputAction.done);
+    FocusManager.instance.primaryFocus?.unfocus();
+    await t.pump();
+    expect(sync.saves, saves + 1);
+    expect(StateConfig.load(dir.path).url, 'http://h:9');
   });
 
   testWidgets('the address field starts with the saved address', (t) async {

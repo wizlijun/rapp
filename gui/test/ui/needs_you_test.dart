@@ -248,6 +248,11 @@ void main() {
     expect(find.text('$text · 设备离线'), findsOneWidget);
     expect(tester.widget<Text>(find.text('$text · 设备离线')).style!.color, RappTokens.of(tester.element(find.text('$text · 设备离线'))).muted);
     expect(find.text('打开'), findsNothing);
+    // Read out as the other rows are, with the word for why it is grey; not a button.
+    final handle = tester.ensureSemantics();
+    expect(find.bySemanticsLabel('$text，设备离线'), findsOneWidget);
+    expect(tester.getSemantics(find.bySemanticsLabel('$text，设备离线')).flagsCollection.isButton, isFalse);
+    handle.dispose();
     expect(tester.widget<Text>(find.byKey(const Key('needs-count'))).data, '${st.needs.length}');
     await tester.tap(find.text('$text · 设备离线'));
     await tester.pump();

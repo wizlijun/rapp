@@ -367,6 +367,7 @@ git add rust docs && git commit -m "feat(service,hub): state service address for
     - 取消订阅时 `close(force: true)`。
   - `void close()`：关掉所有进行中的请求。
   - `class StateLinkError implements Exception { final int status; }`：网络错误、超时、坏 JSON 时 `status = 0`。
+  - 普通请求（`health`、`state`、`queue`、`seen`）整体限时 `connect + idle`（默认 50 秒），连接本身限时 `connect`（5 秒）。
 
 - [ ] **Step 1: 写失败的测试**（假服务：`HttpServer.bind(InternetAddress.loopbackIPv4, 0)`，按路径回写）
 
@@ -435,7 +436,7 @@ git add gui/lib/state gui/test/state && git commit -m "feat(gui): StateLink, the
     - `void start()`
     - `Future<void> refresh()`：前台回来时调。
     - `void pause()`：后台时调，关 watch，status 不变。
-    - `void markSeen(String deviceId, String session)`：`fpOf` 为空就丢掉；没连上时攒着（最多 200 条，丢最旧），连上以后按顺序补发。
+    - `void markSeen(String deviceId, String session)`：按（设备 id, 会话）攒着（最多 200 条，丢最旧；同一会话只留一条），连上以后按顺序补发，发的时候才对 `fp`；那时还对不上（全貌里没有这台设备，也不在重取）就丢掉。（终审 M1/M3 改过：原来记下时就对 `fp`，连上前记的全丢。）
     - `bool fresh(Map<String, Object?> row)`：行的 `session` 在 `session(fp, …)` 里有，并且行的 `at` 大于那一行的 `seen ?? 0`。
     - `void dispose()`
   - 连接步骤（`_connect`）：

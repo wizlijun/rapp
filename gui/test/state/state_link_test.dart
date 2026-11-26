@@ -53,6 +53,21 @@ void main() {
     expect(seen, ['/v1/state', '/v1/queue?before=a%3Ab%3A1&limit=50', '/v1/queue?limit=7']);
   });
 
+  test('a base with a path keeps it in front of the API path', () async {
+    final seen = <String>[];
+    handler = (r) {
+      seen.add(r.uri.toString());
+      return json(r, r.uri.path.endsWith('/v1/health') ? {'name': 'rapp-state'} : {'events': [], 'more': false});
+    };
+    for (final b in ['state', 'state/']) {
+      final l = StateLink(base.replace(path: '/$b'));
+      expect(await l.health(), isTrue);
+      await l.queue(limit: 7);
+      l.close();
+    }
+    expect(seen, ['/state/v1/health', '/state/v1/queue?limit=7', '/state/v1/health', '/state/v1/queue?limit=7']);
+  });
+
   test('state throws StateLinkError on a bad status or bad json', () async {
     handler = (r) => json(r, {'error': 'x'}, 500);
     await expectLater(link.state(), throwsA(isA<StateLinkError>().having((e) => e.status, 'status', 500)));
