@@ -40,7 +40,7 @@
 - 每个 app 手工画矩形。app 配置里只加一个总开关。
 - 读控件里的文字、标题、值。只读控件的种类和位置。
 - 改瓦片编码和帧格式（第 2 步）。
-- Windows、Linux 做 A 端时的控件结构。A 端只做 macOS 的 `rapp-host`。
+- Windows、Linux 做 A 端时的控件结构。A 端只做 macOS 的 `rapp-host`（写本文时如此；Windows 版见 `2026-11-26-rapp-windows-design.md`）。
 - 桌面会话（串整块屏的那种）的焦点。桌面会话选了智能，只有按网络自动省流量。
 - 独立客户端（`Sources/rapp-client`、`rust/client-gtk`）里的「智能」和变灰。它们只要能照常连、照常用（§7.4）。
 - 把智能设成新会话的默认值；在 app 配置里把智能设成某个 app 的默认。

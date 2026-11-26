@@ -19,7 +19,7 @@
    2. 先备份成 `<文件>.bak`；
    3. 只改要改的字段，其余原样保留（未知字段也保留）；
    4. 用 `python3 -m json.tool <文件> >/dev/null` 确认 JSON 能解析；
-   5. 权限保持 `0600`（`chmod 600`）；
+   5. 权限保持 `0600`（`chmod 600`）；Windows 上没有权限位，在 `local\` 里改的文件跟着目录的访问列表走，不用管；
    6. 再启动那个程序，看日志里没有报错。
 4. **数据根目录**（下称 `$ROOT`，规格《数据目录》）：所有 rapp 数据都在这一个目录下。找法按顺序：环境变量 `RAPP_HOME` → 指针文件 `<旧配置目录>/data-root`（一行绝对路径）→ `~/rapp`（Windows `%USERPROFILE%\rapp`）。代码：`rust/net/src/config.rs:23-38`、`gui/lib/paths.dart:50-56`、`Sources/RappCore/DataPaths.swift:3-9`。
    - **旧配置目录**：macOS `~/Library/Application Support/rapp`，Linux `$XDG_CONFIG_HOME/rapp`（默认 `~/.config/rapp`），Windows `%APPDATA%\rapp`（`rust/net/src/config.rs:50-63`）。现在只用来放 `data-root` 指针，和作搬家的来源（只复制，旧文件原样留着）。
@@ -38,7 +38,7 @@
    - **进 git 的**：`shared/`、`devices/`、`agent/`、`clipboard/`、`README.md`、`.gitignore`。**不进 git 的**：`files/`、`local/`（写在 `.gitignore` 里）。rapp-service 在改动后 60 秒内合成一次提交（`rust/service/src/data.rs:41`）。
    - **机密只在 `local/`**。rapp 自己不往 `shared/`、`devices/`、`agent/`、`clipboard/` 里写口令、key、secret、token；agent 往这些目录写东西时也一样。例外是用户自己的话：`devices/<id>/inputs/` 里是写作面板发出去的原话，rapp 保证不了里面没有密钥，可能含私事，和钉住的剪贴板同样对待（《输入记录》§8）。
    - 路径函数：Rust `local`/`shared`/`device`/`files`（`rust/net/src/config.rs:79-93`），Dart `DataDir`（`gui/lib/paths.dart:60-72`）。
-   - 文件先写临时文件再改名；机密文件权限 `0600`。
+   - 文件先写临时文件再改名；机密文件权限 `0600`。Windows 上的“私有”（`local\`、日志目录、机密文件）是关掉继承、只给本人、SYSTEM 和 Administrators（`rust/net/src/private.rs`，Windows 设计 §13.2）；Windows 上各样东西放在哪见 Windows 设计 §13.1。
 5. **试验用临时目录。** 在自己机器上验证配置时，设 `RAPP_HOME=<临时目录>`（它优先于指针，所有数据都落在那里），不碰用户真实的 `~/rapp` 和旧配置目录。设了 `RAPP_HOME` 后日志在 `$RAPP_HOME/local/logs`，不用另设。
 
 ## 1. 一览
