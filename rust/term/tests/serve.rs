@@ -869,3 +869,309 @@ async fn open_from_an_unknown_session_opens_normally() {
     assert!(!body.contains("--cwd"), "{body}");
     w.stop().await;
 }
+
+// ---- Restoring saved terminals, and 新建 from the last one ----
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+}
+
+/// Writes the snapshot of terminal `key` called `name`, as its holder would have.
+fn write_snap(dir: &Path, key: &str, name: &str, shell: &str, cwd: Option<&Path>, started: u64, saved: u64) {
+    let s = rapp_term::pty::saved::Snapshot {
+        v: 1,
+        key: key.into(),
+        name: name.into(),
+        shell: shell.into(),
+        cwd: cwd.map(|c| c.to_string_lossy().into_owned()),
+        started,
+        saved,
+        ..Default::default()
+    };
+    rapp_term::pty::saved::write(dir, &s).unwrap();
+}
+
+/// A launcher that keeps the `n`th `.command` file it is given as `body-<n>.txt` and the tty it is asked to open
+/// beside as `tty-<n>.txt`; then, with `run`, runs the file in a pty of its own as a window would. Call `fail` fails.
+async fn logging_worker(run: bool, fail: Option<u32>) -> (Worker, std::path::PathBuf) {
+    let dir = short_dir();
+    let log = dir.path().join("log");
+    std::fs::create_dir(&log).unwrap();
+    let script = dir.path().join("launch.sh");
+    let start = if !run {
+        ""
+    } else if cfg!(target_os = "linux") {
+        "export RAPP_TEST_COMMAND_FILE=\"$2\"\nsleep 20 | script -q -c 'exec sh \"$RAPP_TEST_COMMAND_FILE\"' /dev/null >/dev/null 2>&1 &\n"
+    } else {
+        "sleep 20 | script -q /dev/null sh \"$2\" >/dev/null 2>&1 &\n"
+    };
+    let fail = fail.map_or(String::new(), |n| format!("[ \"$n\" = {n} ] && exit 1\n"));
+    let body = format!(
+        "#!/bin/sh\nd='{}'\nn=$(( $(cat \"$d/n\" 2>/dev/null || echo 0) + 1 ))\necho $n > \"$d/n\"\n\
+         cp \"$2\" \"$d/body-$n.txt\"\nprintf '%s' \"$3\" > \"$d/tty-$n.txt\"\n{fail}{start}",
+        log.display()
+    );
+    std::fs::write(&script, body).unwrap();
+    std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+    (Worker::start_with(dir, None, None, Some(&script)).await, log)
+}
+
+/// How many times the logging launcher ran, and the `.command` file and tty of its `n`th run.
+fn launches(log: &Path) -> u32 {
+    std::fs::read_to_string(log.join("n")).map_or(0, |s| s.trim().parse().unwrap())
+}
+fn body(log: &Path, n: u32) -> String {
+    std::fs::read_to_string(log.join(format!("body-{n}.txt"))).unwrap()
+}
+fn tty(log: &Path, n: u32) -> String {
+    std::fs::read_to_string(log.join(format!("tty-{n}.txt"))).unwrap()
+}
+
+/// Hangs up every holder in `dir`.
+async fn end_all(dir: &Path) {
+    let token = rapp_term::pty::local::token(dir).unwrap();
+    for s in rapp_term::pty::local::scan(dir, &token).await {
+        unsafe { libc::kill(s.pid as i32, libc::SIGTERM) };
+    }
+}
+
+/// A directory that exists, by its real path.
+fn real_dir() -> (tempfile::TempDir, String) {
+    let d = short_dir();
+    let p = d.path().canonicalize().unwrap().to_string_lossy().into_owned();
+    (d, p)
+}
+
+/// Waits until the holder called `name` reports a directory.
+async fn wait_cwd(dir: &Path, name: &str) {
+    let end = Instant::now() + Duration::from_secs(10);
+    while pty::wait_status(dir, name).await.cwd.is_none() {
+        assert!(Instant::now() < end, "{name} never reported a directory");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+const K1: &str = "00000000000000a1";
+const K2: &str = "00000000000000a2";
+const K3: &str = "00000000000000a3";
+
+#[tokio::test]
+async fn restore_opens_in_started_order_as_tabs() {
+    let (w, log) = logging_worker(true, None).await;
+    let dir = w.pty_dir();
+    let shell = default_shell(&w).await;
+    let (_a, a) = real_dir();
+    let (_b, b) = real_dir();
+    let now = now_secs();
+    // Written newest first: the order is the start order, not the files'.
+    write_snap(&dir, K2, "r2", &shell, Some(Path::new(&b)), now - 100, now - 5);
+    write_snap(&dir, K1, "r1", &shell, Some(Path::new(&a)), now - 200, now - 50);
+    let list = &w.ask(json!({"op": "list"})).await[0];
+    let keys: Vec<_> = list["hosts"][0]["saved"].as_array().unwrap().iter().map(|s| s["key"].clone()).collect();
+    assert_eq!(keys, [json!(K1), json!(K2)], "{list}");
+    assert!(!list.to_string().contains(&a), "{list}");
+    let r = w.ask(json!({"op": "restore"})).await;
+    assert_eq!(r, [json!({"ok": true, "ids": [format!("term:pty:{K1}"), format!("term:pty:{K2}")]})]);
+    assert_eq!(launches(&log), 2);
+    assert!(body(&log, 1).contains(&format!("--restore '{K1}' --cwd '{a}' -- '{shell}' -l")), "{}", body(&log, 1));
+    assert!(body(&log, 2).contains(&format!("--restore '{K2}' --cwd '{b}' -- '{shell}' -l")), "{}", body(&log, 2));
+    // The first opens a window; the second goes in a tab beside it.
+    let first = pty::wait_status(&dir, "r1").await;
+    assert_eq!(tty(&log, 1), "");
+    assert_eq!(Some(tty(&log, 2)), first.tty, "the second opens beside the first");
+    // Both are alive now: nothing is left to restore.
+    let list = &w.ask(json!({"op": "list"})).await[0];
+    assert!(list["hosts"][0].get("saved").is_none(), "{list}");
+    end_all(&dir).await;
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn restore_with_missing_cwd_and_shell() {
+    let (w, log) = logging_worker(true, None).await;
+    let dir = w.pty_dir();
+    let shell = default_shell(&w).await;
+    let now = now_secs();
+    write_snap(&dir, K1, "r1", "/no/such/sh", Some(Path::new("/no/such/dir")), now - 100, now - 5);
+    let r = w.ask(json!({"op": "restore", "keys": [K1], "app": "Warp"})).await;
+    assert_eq!(r, [json!({"ok": true, "ids": [format!("term:pty:{K1}")]})]);
+    let body = body(&log, 1);
+    assert!(!body.contains("--cwd") && body.contains(&format!("--restore '{K1}' -- '{shell}' -l")), "{body}");
+    end_all(&dir).await;
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn restore_stops_at_first_failure() {
+    let (w, log) = logging_worker(true, Some(2)).await;
+    let dir = w.pty_dir();
+    let shell = default_shell(&w).await;
+    let now = now_secs();
+    for (i, k) in [K1, K2, K3].iter().enumerate() {
+        write_snap(&dir, k, &format!("r{i}"), &shell, None, now - 100 + i as u64, now - 5);
+    }
+    let r = w.ask(json!({"op": "restore"})).await;
+    assert_eq!(r.len(), 1, "{r:?}");
+    assert!(r[0]["error"].is_string() && r[0].get("ok").is_none(), "{r:?}");
+    assert_eq!(r[0]["ids"], json!([format!("term:pty:{K1}")]));
+    assert_eq!(launches(&log), 2, "the third is not tried");
+    assert!(rapp_term::pty::saved::read(&dir, K2).is_some() && rapp_term::pty::saved::read(&dir, K3).is_some());
+    end_all(&dir).await;
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn restore_skips_keys_that_came_alive() {
+    let (w, log) = logging_worker(true, None).await;
+    let dir = w.pty_dir();
+    let shell = default_shell(&w).await;
+    let now = now_secs();
+    write_snap(&dir, K1, "r1", &shell, None, now - 100, now - 5);
+    write_snap(&dir, K2, "r2", &shell, None, now - 90, now - 5);
+    // K2 is alive again, started by hand.
+    let _win = Window::start(&dir, &["--restore", K2, "--", "/bin/cat"]);
+    assert_eq!(pty::wait_status(&dir, "r2").await.key.as_deref(), Some(K2));
+    let r = w.ask(json!({"op": "restore", "keys": [K2, "../../etc/x"]})).await;
+    assert_eq!(r, [json!({"ok": true, "ids": []})]);
+    assert_eq!(launches(&log), 0);
+    // Two restores of K1 at once (a double tap): it opens once.
+    let req = json!({"op": "restore", "keys": [K1]});
+    let (mut a, mut b) = (w.connect(&req, TOKEN).await, w.connect(&req, TOKEN).await);
+    let (ra, rb) = (a.line(Duration::from_secs(15)).await.unwrap(), b.line(Duration::from_secs(15)).await.unwrap());
+    let mut ids = [ra["ids"].as_array().unwrap().len(), rb["ids"].as_array().unwrap().len()];
+    ids.sort();
+    assert_eq!(ids, [0, 1], "{ra} {rb}");
+    assert_eq!(launches(&log), 1);
+    end_all(&dir).await;
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn forget_removes_only_restorable() {
+    let w = Worker::start(None).await;
+    let dir = w.pty_dir();
+    let now = now_secs();
+    write_snap(&dir, K1, "r1", "/bin/sh", None, now - 100, now - 5);
+    write_snap(&dir, K2, "r2", "/bin/sh", None, now - 90, now - 5);
+    let _win = Window::start(&dir, &["--restore", K2, "--", "/bin/cat"]);
+    pty::wait_status(&dir, "r2").await;
+    let saved = &w.ask(json!({"op": "saved"})).await[0];
+    assert_eq!(saved["ok"], true);
+    assert_eq!(saved["saved"].as_array().unwrap().iter().map(|s| s["key"].clone()).collect::<Vec<_>>(), [json!(K1)]);
+    assert_eq!(w.ask(json!({"op": "forget", "keys": [K2, "../x"]})).await, [json!({"ok": true, "forgot": 0})]);
+    assert_eq!(w.ask(json!({"op": "forget"})).await, [json!({"ok": true, "forgot": 1})]);
+    assert!(rapp_term::pty::saved::read(&dir, K1).is_none());
+    assert!(rapp_term::pty::saved::read(&dir, K2).is_some(), "a live terminal's snapshot stays");
+    assert_eq!(w.ask(json!({"op": "saved"})).await, [json!({"ok": true, "saved": []})]);
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn restore_forget_and_saved_are_off_with_terminals() {
+    let w = Worker::start(Some(r#"{"allow":false}"#)).await;
+    let off = json!({"error": "terminal sessions are off"});
+    for op in ["restore", "forget", "saved"] {
+        assert_eq!(w.ask(json!({"op": op})).await, std::slice::from_ref(&off), "{op}");
+    }
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn open_from_last_picks_most_recent_input() {
+    let (w, log) = logging_worker(true, None).await;
+    let dir = w.pty_dir();
+    let (_a, a) = real_dir();
+    let (_b, b) = real_dir();
+    let mut win_a = Window::start(&dir, &["--name", "a", "--cwd", &a, "--", "/bin/cat"]);
+    wait_cwd(&dir, "a").await;
+    win_a.type_in(b"x");
+    let end = Instant::now() + WAIT;
+    while pty::wait_status(&dir, "a").await.input == 0 {
+        assert!(Instant::now() < end, "the input never showed");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    // b moves later, but nobody typed in it.
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let _win_b = Window::start(&dir, &["--name", "b", "--cwd", &b, "--", "/bin/cat"]);
+    wait_cwd(&dir, "b").await;
+    let st_a = pty::wait_status(&dir, "a").await;
+    assert!(pty::wait_status(&dir, "b").await.activity > st_a.activity);
+    let r = w.ask(json!({"op": "open", "app": "Terminal", "from": "last"})).await;
+    assert!(r[0]["id"].is_string(), "{r:?}");
+    let body = body(&log, 1);
+    assert!(body.contains(&format!("--cwd '{a}'")) && !body.contains("--restore"), "{body}");
+    assert_eq!(Some(tty(&log, 1)), st_a.tty);
+    end_all(&dir).await;
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn open_from_last_falls_back_to_newest_snapshot_cwd() {
+    let (w, log) = logging_worker(true, None).await;
+    let dir = w.pty_dir();
+    let shell = default_shell(&w).await;
+    let (_a, a) = real_dir();
+    let (_b, b) = real_dir();
+    let (_c, c) = real_dir();
+    let now = now_secs();
+    // Saved last: b, though a started later.
+    write_snap(&dir, K1, "r1", "/no/such/sh", Some(Path::new(&a)), now - 200, now - 100);
+    write_snap(&dir, K2, "r2", "/no/such/sh", Some(Path::new(&b)), now - 3000, now - 50);
+    let r = w.ask(json!({"op": "open", "app": "Terminal", "from": "last"})).await;
+    assert!(r[0]["id"].is_string(), "{r:?}");
+    let body1 = body(&log, 1);
+    assert!(body1.contains(&format!("--cwd '{b}' -- '{shell}' -l")) && !body1.contains("--restore"), "{body1}");
+    assert_eq!(tty(&log, 1), "");
+    // Both snapshots stay restorable.
+    assert!(rapp_term::pty::saved::read(&dir, K1).is_some() && rapp_term::pty::saved::read(&dir, K2).is_some());
+    end_all(&dir).await;
+    w.stop().await;
+    // The newest snapshot's directory is gone: home, not the older one's.
+    let (w, log) = logging_worker(true, None).await;
+    let dir = w.pty_dir();
+    write_snap(&dir, K2, "r2", "/no/such/sh", Some(Path::new(&b)), now - 3000, now - 50);
+    write_snap(&dir, K3, "r3", "/no/such/sh", Some(Path::new(&c)), now - 10, now - 1);
+    drop(_c);
+    let r = w.ask(json!({"op": "open", "app": "Terminal", "from": "last"})).await;
+    assert!(r[0]["id"].is_string(), "{r:?}");
+    assert!(!body(&log, 1).contains("--cwd"), "{}", body(&log, 1));
+    end_all(&dir).await;
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn open_from_last_with_nothing_opens_home() {
+    let (w, log) = logging_worker(true, None).await;
+    let dir = w.pty_dir();
+    let r = w.ask(json!({"op": "open", "app": "Terminal", "from": "last"})).await;
+    assert!(r[0]["id"].is_string(), "{r:?}");
+    let body = body(&log, 1);
+    assert!(!body.contains("--cwd") && !body.contains("--restore"), "{body}");
+    assert_eq!(tty(&log, 1), "");
+    end_all(&dir).await;
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn open_with_shell_and_from_uses_request_shell_and_source_cwd() {
+    let (w, log) = logging_worker(true, None).await;
+    let dir = w.pty_dir();
+    let list = &w.ask(json!({"op": "list"})).await[0];
+    let shells = list["hosts"][0]["shells"].as_array().unwrap().clone();
+    let default = shells.iter().find(|s| s["default"] == true).unwrap()["path"].as_str().unwrap().to_string();
+    let Some(other) = shells.iter().find(|s| s["default"] != true).map(|s| s["path"].as_str().unwrap().to_string())
+    else {
+        eprintln!("only one shell installed: nothing to tell apart");
+        w.stop().await;
+        return;
+    };
+    let (_a, a) = real_dir();
+    let _win = Window::start(&dir, &["--name", "s", "--cwd", &a, "--", &default]);
+    wait_cwd(&dir, "s").await;
+    let r = w.ask(json!({"op": "open", "app": "Terminal", "from": "last", "shell": other})).await;
+    assert!(r[0]["id"].is_string(), "{r:?}");
+    let body = body(&log, 1);
+    assert!(body.contains(&format!("--cwd '{a}' -- '{other}' -l")), "{body}");
+    end_all(&dir).await;
+    w.stop().await;
+}
