@@ -25,7 +25,17 @@ class SessionEntry {
     this.takenOver = false,
     this.ps,
     this.inferred = false,
+    this.fg,
   });
+
+  /// A text terminal's program in front (claude, codex, zsh), from its live row; null when not known.
+  final String? fg;
+
+  /// The line under the title starts with [termKindWord]: a text terminal whose title names its program instead.
+  bool get kindNoted => isTermApp(app) && fg != null && fg!.isNotEmpty;
+
+  /// [line] under the title, with [termKindWord] in front when [kindNoted].
+  String noted(String line) => !kindNoted ? line : (line.isEmpty ? termKindWord : '$termKindWord · $line');
 
   /// A text terminal's program status, from its live row; null when it reports none, is gone, or its device is offline.
   final TermPs? ps;
@@ -54,8 +64,8 @@ class SessionEntry {
 
   String get key => '$id/$app';
 
-  /// What the session is called wherever it is listed: `CLI · <name>` for a text terminal.
-  String get title => isTermApp(app) ? termTitle(appName) : appName;
+  /// What the session is called wherever it is listed: `<program> · <name>` for a text terminal ([termTitle]).
+  String get title => isTermApp(app) ? termTitle(appName, fg: fg) : appName;
 }
 
 /// The open button's word for a row in [lamp]'s state (K10).

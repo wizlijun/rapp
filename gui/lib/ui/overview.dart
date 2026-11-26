@@ -557,7 +557,7 @@ class _Block extends StatelessWidget {
                               Text('推断', maxLines: 1, style: small),
                             ])
                           else
-                            Text(_status, maxLines: 1, overflow: TextOverflow.ellipsis, style: small),
+                            Text(entry.noted(_status), maxLines: 1, overflow: TextOverflow.ellipsis, style: small),
                         ],
                       ),
                     ),
