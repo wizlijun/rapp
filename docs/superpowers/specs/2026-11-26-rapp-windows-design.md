@@ -948,7 +948,7 @@ Swift 的测试 Windows 上不跑。**Mac 上看不到 Windows 专用代码的�
 5. “版本号协调”那条里，“另一台机器的 Linux”改成“另外两台机器的 Linux 和 Windows”；跳过的提交里加上 `docs(release): …`。
 6. “Windows 集成 session”那一小节换成“Windows 发版 session”，内容就是 §14.4 的后一半。
 
-规矩本身用户已经定了（U2、U11）；`CLAUDE.md` 的具体文字要用户点头，这两批到时候各给用户看一次。
+规矩本身用户已经定了（U2、U11）；`CLAUDE.md` 的具体文字要用户点头，这两批到时候各给用户看一次。第一批（1–4）用户 2026-11-27 已同意，已加进 `CLAUDE.md`；Windows 机器上 checkout 的路径还没填。
 
 ### 14.6 第一次发 Windows 版时要一起改的
 

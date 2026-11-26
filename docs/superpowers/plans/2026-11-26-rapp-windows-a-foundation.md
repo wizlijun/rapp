@@ -76,7 +76,7 @@ No probe needed. Done first; plan P's Windows probes depend on it.
 **Interfaces:**
 - Produces: a Windows checkout whose path is written in `CLAUDE.md`; a running integration session on that machine; branch `feat/windows-foundation`.
 
-- [ ] **Step 1: Ask the user to approve the four `CLAUDE.md` changes** (one question, showing the text below). `CLAUDE.md` is not edited without that OK. The wording is spec §14.5 (the last sentence of item 1 is that section's own explanation, moved into the rule so the release session reads it); `<Windows checkout>` is filled in at Step 4.
+- [x] **Step 1 (done 2026-11-27: the user approved the text and it is on main; only the Windows checkout path is still to fill in, Step 5): Ask the user to approve the four `CLAUDE.md` changes** (one question, showing the text below). `CLAUDE.md` is not edited without that OK. The wording is spec §14.5 (the last sentence of item 1 is that section's own explanation, moved into the rule so the release session reads it); `<Windows checkout>` is filled in at Step 4.
 
   1. After the sentence ending “也不发 macOS 版。” on line 30, add:
      > 只影响 Windows 的改动（`rust/host-windows/`、`rust/svc-windows/`、`gui/windows/`、`scripts/` 里 Windows 的脚本、`cfg(windows)` 里的代码）也不发 macOS 版，但要过门禁并立刻推到 `origin/main`，Windows 机器等着用。只改文档的合并同样立刻推。改到共用代码（`rust/host-core/`、`rapp-service` 这些 crate 里不带 `cfg(windows)` 的部分、共用的 Dart）照常算 macOS 的改动。
