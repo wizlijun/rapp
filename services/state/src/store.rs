@@ -111,12 +111,12 @@ impl Store {
             Kind::State => {
                 let session = ev.body["session"].as_str().unwrap_or_default().to_string();
                 put_row(dev, session.clone(), row_data(&ev.body, ev.at, &ev.sender));
-                self.changes.push(session_change(&fp, &session, dev.sessions.get(&session)));
+                self.changes.push(session_change(dev, &session, dev.sessions.get(&session)));
             }
             Kind::Gone => {
                 if let Some(s) = ev.body.get("session").and_then(Value::as_str) {
                     if dev.sessions.remove(s).is_some() {
-                        self.changes.push(session_change(&fp, s, None));
+                        self.changes.push(session_change(dev, s, None));
                     }
                 }
             }
@@ -140,10 +140,10 @@ impl Store {
                 }
                 // A row the snap brought back is pushed once, with its new content.
                 for sid in dropped.iter().filter(|sid| !dev.sessions.contains_key(*sid)) {
-                    self.changes.push(session_change(&fp, sid, None));
+                    self.changes.push(session_change(dev, sid, None));
                 }
                 for sid in &put {
-                    self.changes.push(session_change(&fp, sid, dev.sessions.get(sid)));
+                    self.changes.push(session_change(dev, sid, dev.sessions.get(sid)));
                 }
             }
             Kind::Emit => {}
@@ -225,7 +225,7 @@ impl Store {
         self.devices = kept;
         for d in gone.values() {
             for sid in d.sessions.keys() {
-                self.changes.push(session_change(&d.fp, sid, None));
+                self.changes.push(session_change(d, sid, None));
             }
         }
         self.note_needs(needs_before);
@@ -321,9 +321,17 @@ fn row_json(r: &Row) -> Value {
     Value::Object(m)
 }
 
-/// `{"what":"session",…}`; a `None` row means the session is gone.
-fn session_change(fp: &str, session: &str, row: Option<&Row>) -> Value {
-    json!({"what": "session", "fp": fp, "session": session, "row": row.map(row_json)})
+/// `{"what":"session",…}`; a `None` row means the session is gone. It names the device with the `id` and
+/// `device` that `state()` gives it (left out when unknown), so a watcher can place a device it has not seen yet.
+fn session_change(dev: &Device, session: &str, row: Option<&Row>) -> Value {
+    let mut c = json!({"what": "session", "fp": dev.fp, "session": session, "row": row.map(row_json)});
+    if let Some(v) = &dev.id {
+        c["id"] = json!(v);
+    }
+    if let Some(v) = &dev.device {
+        c["device"] = json!(v);
+    }
+    c
 }
 
 fn queued_json(q: &Queued) -> Value {
@@ -441,6 +449,21 @@ mod tests {
     }
 
     #[test]
+    fn a_session_change_names_its_device_as_state_does() {
+        let mut s = st();
+        feed(&mut s, TERM, 2);
+        let ch = s.take_changes();
+        let c = ch.iter().rev().find(|c| c["what"] == "session").unwrap();
+        let d = &s.state()["devices"][0];
+        assert_eq!((&c["id"], &c["device"]), (&d["id"], &d["device"]));
+        assert_eq!((c["id"].as_str(), c["device"].as_str()), (Some("111111111"), Some("mac")));
+        // A device that never said who it is pushes neither field, as /v1/state leaves them out.
+        feed_one(&mut s, "fpB", "t1", "working", 900);
+        let c = s.take_changes().into_iter().find(|c| c["what"] == "session").unwrap();
+        assert!(c.get("id").is_none() && c.get("device").is_none(), "{c}");
+    }
+
+    #[test]
     fn a_snap_pushes_null_only_for_rows_it_dropped() {
         let mut s = st();
         feed(&mut s, MIXED, 6);
@@ -469,7 +492,10 @@ mod tests {
         s.mark_seen(Look::Eid(&eid), true, 600).unwrap();
         assert_eq!(s.take_changes(), [json!({"what":"seen","eid":eid,"at":600,"handled":true})]);
         s.expire(1764130010 + 31 * 86400);
-        assert_eq!(s.take_changes(), [json!({"what":"session","fp":A,"session":"term:pty:a","row":null})]);
+        assert_eq!(
+            s.take_changes(),
+            [json!({"what":"session","fp":A,"id":"111111111","device":"mac","session":"term:pty:a","row":null})]
+        );
     }
 
     #[test]

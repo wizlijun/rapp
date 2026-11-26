@@ -222,7 +222,7 @@ rapp emit（G8）          ┘                                    给：/v1/stat
 | `POST /v1/events` | 收事件（§7.4）。重复的（发送者、`epoch`、`n`）丢掉。204 |
 | `GET /v1/state` | 当前全貌：设备、各会话的状态和“看过”时间、`needs`、桌面 |
 | `GET /v1/queue?before=<游标>&limit=<n>` | 队列，新的在前，最多 200 条一页。每条带一个标识 `eid`（`<发送者>:<epoch>:<n>`） |
-| `GET /v1/watch` | 长连接（SSE）。有变化就推一条：`what`（`session`、`queue`、`need`、`seen`、`desk`）加变了的那一项。app 在前台时开着 |
+| `GET /v1/watch` | 长连接（SSE）。有变化就推一条：`what`（`session`、`queue`、`need`、`seen`、`desk`）加变了的那一项。`session` 那条还带这台设备的 `id`、`device`（和 `/v1/state` 里设备那一项同名同值，没有就不带），app 靠它认出上次取全貌时还没有的设备。app 在前台时开着 |
 | `PUT /v1/seen` | `{"fp","session"}` 或 `{"eid":"…"}`：记成此刻看过。带 `"handled":true` 时把一条 `ask` 清出“需要你” |
 | `PUT /v1/desk/<app 的设备指纹>` | 这台 app 现在开着的会话清单，整份替换。每项：被控设备的 `fp` 和 `id`、app 标识（终端是会话 id）、显示名 |
 

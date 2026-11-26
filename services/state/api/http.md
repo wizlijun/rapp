@@ -45,15 +45,15 @@ A marked session row in `GET /v1/state` carries `"seen": <Unix seconds>`; it sta
 - One `data: <one-line JSON>` per change, with `what` one of:
 
 ```
-data: {"what":"session","fp":"<fp>","session":"<id>","row":{"session":"<id>","state":"working","seq":1,"since":1764130010,"at":1764130010,"by":"<fp>"}}
-data: {"what":"session","fp":"<fp>","session":"<id>","row":null}
+data: {"what":"session","fp":"<fp>","id":"<device id>","device":"<device name>","session":"<id>","row":{"session":"<id>","state":"working","seq":1,"since":1764130010,"at":1764130010,"by":"<fp>"}}
+data: {"what":"session","fp":"<fp>","id":"<device id>","device":"<device name>","session":"<id>","row":null}
 data: {"what":"queue","row":{"fp":"<fp>","epoch":"e1","n":3,"at":1764130020,"t":"state","session":"<id>","state":"blocked","seq":2,"eid":"<fp>:e1:3"}}
 data: {"what":"need","needs":[{"fp":"<fp>","session":"<id>","since":1764130020,"kind":"permission"}]}
 data: {"what":"seen","fp":"<fp>","session":"<id>","at":1764130100}
 data: {"what":"seen","eid":"<eid>","at":1764130100,"handled":true}
 ```
 
-- `session`: a session row as in `GET /v1/state`; `row: null` means the session is gone.
+- `session`: a session row as in `GET /v1/state`; `row: null` means the session is gone. `id` and `device` are that device's, as its entry in `GET /v1/state` carries them (left out when the device never sent them), so a watcher can place a device it did not have at its last fetch.
 - `queue`: a new queue row, as in `GET /v1/queue`.
 - `need`: the whole `needs` list of `GET /v1/state`, sent whenever it changes.
 - `seen`: a `PUT /v1/seen` mark; `handled` only when true.
