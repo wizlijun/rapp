@@ -259,7 +259,7 @@ class _LoadDetailState extends State<LoadDetail> {
   void initState() {
     super.initState();
     final ask = widget.loadNow;
-    if (widget.top && ask != null) {
+    if (widget.top && ask != null && widget.load.canTop) {
       _asking = true;
       _fetchTop(ask);
     }
@@ -460,14 +460,17 @@ class _LoadDetailState extends State<LoadDetail> {
             row('电池', batteryText, 'battery'),
             if (load.disks.isEmpty) row('磁盘', null, 'disk'),
             for (final (i, d) in load.disks.indexed) disk(d, i == 0),
-            const SizedBox(height: 6),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton(
-                onPressed: widget.loadNow == null || _asking ? null : _askTop,
-                child: const Text('看占用最多的进程'),
+            // Only a device that says it can list its processes offers it (none does yet).
+            if (load.canTop) ...[
+              const SizedBox(height: 6),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: widget.loadNow == null || _asking ? null : _askTop,
+                  child: const Text('看占用最多的进程'),
+                ),
               ),
-            ),
+            ],
             if (top != null)
               if (top.isEmpty)
                 Text('读不到', style: small?.copyWith(color: t.muted))

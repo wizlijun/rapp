@@ -424,7 +424,8 @@ class HubClient extends ChangeNotifier {
   }
 
   /// Each online device's load from its watch (device-load spec §10); a device that went offline, is too old or
-  /// is removed has none. Never a stale number: `gone` and `unsupported` drop it.
+  /// is removed has none. Never a stale number: `gone`, `unsupported` and a stream `error` drop it (a watch that
+  /// just stops sending is [MainState.columnLoad]'s to leave out).
   final loads = <String, DeviceLoad>{};
 
   /// Device [id]'s load once, as the hub answers `load` (`ok` stripped); [top] asks for the process list too. The
@@ -612,13 +613,12 @@ class HubClient extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// One line of device [id]'s load watch: the first (with `history`) starts it, the next ones move it on; `gone` and
-  /// `unsupported` drop it. A stream `error` keeps the last numbers: the hub retries, and says `gone` if it stops.
+  /// One line of device [id]'s load watch: the first (with `history`) starts it, the next ones move it on; `gone`,
+  /// `unsupported` and a stream `error` drop it. The hub retries an error after 30 s, up to 10 min apart: its first
+  /// line then starts the load again.
   void _onLoad(String id, Map<String, dynamic> m) {
-    if (m['gone'] == true || m['unsupported'] == true) {
+    if (m['gone'] == true || m['unsupported'] == true || m['error'] != null) {
       loads.remove(id);
-    } else if (m['error'] != null) {
-      return;
     } else {
       final was = loads[id];
       loads[id] = was == null || m.containsKey('history') ? DeviceLoad.fromJson(m) : was.next(m);

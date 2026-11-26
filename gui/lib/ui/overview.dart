@@ -291,7 +291,7 @@ class _Column extends StatelessWidget {
     final small = Theme.of(context).textTheme.bodySmall;
     final favorites = id == null ? const <AppRef>[] : [for (final f in state.idleFavorites) if (f.device == id) f];
     // 余力 (device-load §7), read where 需要你 reads it.
-    final load = columnLoad(state.hub, monitor, id, offline: col.offline);
+    final load = state.columnLoad(id, local: monitor, offline: col.offline);
     final loadNow = columnLoadNow(state.hub, monitor, id);
     return SizedBox(
       key: Key('column-${id ?? 'local'}'),

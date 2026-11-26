@@ -220,7 +220,8 @@ class _NeedsList extends StatelessWidget {
         : (item.startsWith('inode:') ? item.substring(6) : null);
     final busy = const {'cpu', 'gpu', 'mem', 'heat'}.contains(item);
     final terms = mount == null ? const <(String, String)>[] : state.termsOnDisk(device, mount);
-    final loadNow = busy ? state.loadNowOf(device) : null;
+    // Only a device that says it can list its processes offers 「看占用最多的进程」 (none does yet).
+    final loadNow = busy && (state.deviceLoads[device]?.canTop ?? false) ? state.loadNowOf(device) : null;
     final best = busy ? state.newTermElsewhere(device) : null;
     return Container(
       constraints: const BoxConstraints(minHeight: 48),

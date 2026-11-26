@@ -768,17 +768,26 @@ void main() {
         expect((hub.loads['A']!.at, hub.loads['A']!.headroom, hub.loads['A']!.history.length), (15, 65, 3));
       });
 
-      test('gone and unsupported remove the device; a stream error keeps the last numbers', () async {
+      test('load_error_drops_numbers: a stream error, gone and unsupported each remove the device', () async {
         t.emit(snap(10, extra: {'history': []}));
         t.emit({...snap(10, extra: {'history': []}), 'id': 'B'});
+        t.emit({...snap(10, extra: {'history': []}), 'id': 'C'});
         await Future<void>.delayed(Duration.zero);
+        var told = 0;
+        hub.addListener(() => told++);
+        // The hub retries after 30 s and up to 10 min: the last numbers would be stale all that time.
         t.emit({'event': 'load', 'id': 'A', 'error': 'connection lost'});
         await Future<void>.delayed(Duration.zero);
-        expect(hub.loads['A']!.at, 10);
-        t.emit({'event': 'load', 'id': 'A', 'gone': true});
-        t.emit({'event': 'load', 'id': 'B', 'unsupported': true});
+        expect(hub.loads.containsKey('A'), isFalse);
+        expect(told, 1);
+        t.emit({'event': 'load', 'id': 'B', 'gone': true});
+        t.emit({'event': 'load', 'id': 'C', 'unsupported': true});
         await Future<void>.delayed(Duration.zero);
         expect(hub.loads, isEmpty);
+        // The retry's first line brings it back.
+        t.emit(snap(40, extra: {'history': []}));
+        await Future<void>.delayed(Duration.zero);
+        expect(hub.loads['A']!.at, 40);
       });
 
       test('home_set clears loads', () async {

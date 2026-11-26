@@ -19,8 +19,10 @@ import 'platform_helpers.dart';
 
 const gb = 1000000000;
 
-Map<String, dynamic> snapshot({List<Map<String, dynamic>> warnings = const []}) => {
+/// [top]: the device says it can list its processes.
+Map<String, dynamic> snapshot({List<Map<String, dynamic>> warnings = const [], bool top = false}) => {
       'at': 1764100000, 'headroom': 30, 'tightest': 'disk', 'term': true,
+      if (top) 'top': true,
       'items': {
         'cpu': {'pct': 42.0, 'cores': 8, 'load1': 3.5},
         'mem': {'total': 16 * gb, 'avail': 8 * gb, 'swap_used': gb, 'pressure': 'normal'},
@@ -42,7 +44,7 @@ Map<String, dynamic> snapshot({List<Map<String, dynamic>> warnings = const []}) 
       ],
     };
 
-DeviceLoad load({String? level}) => DeviceLoad.fromJson(snapshot(warnings: [
+DeviceLoad load({String? level, bool top = false}) => DeviceLoad.fromJson(snapshot(top: top, warnings: [
       if (level != null) {'item': 'disk:/', 'level': level, 'text': '磁盘只剩 6.0 GB（/，剩 6%）'},
     ]));
 
@@ -112,7 +114,7 @@ void main() {
       var asked = <bool>[];
       await tester.pumpWidget(wrap(LoadRow(
         id: 'm1',
-        load: load(level: 'warn'),
+        load: load(level: 'warn', top: true),
         loadNow: ({bool top = false}) async {
           asked.add(top);
           return <String, dynamic>{'at': 1};
@@ -139,6 +141,31 @@ void main() {
       expect(asked, [true]);
       expect(find.textContaining('读不到'), findsNWidgets(2)); // the disk, and now the processes
     });
+  });
+
+  testWidgets('load_detail_top_hidden_without_capability', (tester) async {
+    var asked = 0;
+    await tester.pumpWidget(wrap(LoadRow(
+      id: 'm1',
+      load: load(level: 'warn'),
+      loadNow: ({bool top = false}) async {
+        asked++;
+        return <String, dynamic>{'at': 1};
+      },
+    )));
+    await tester.tap(find.byKey(const Key('load-row-m1')));
+    await tester.pumpAndSettle();
+    expect(find.byType(LoadDetail), findsOneWidget);
+    expect(find.text('看占用最多的进程'), findsNothing);
+    expect(asked, 0);
+  });
+
+  test('canTop: false until a line carries `top`, and it stays', () {
+    expect(load().canTop, isFalse);
+    final l = load(top: true);
+    expect(l.canTop, isTrue);
+    expect(l.next({...snapshot(), 'point': {'at': 1764100005}}).canTop, isTrue);
+    expect(load().next({...snapshot(top: true), 'point': {'at': 1764100005}}).canTop, isTrue);
   });
 
   group('an open detail', () {
@@ -191,12 +218,14 @@ void main() {
     late MainState s;
     late Directory tmp;
     var offline = <String>{};
+    var now = DateTime(2026, 11, 26, 12);
 
     Future<void> flush() => Future<void>.delayed(Duration.zero);
 
     setUp(() {
       tmp = Directory.systemTemp.createTempSync('load_row_test');
       offline = {};
+      now = DateTime(2026, 11, 26, 12);
     });
 
     tearDown(() {
@@ -219,7 +248,7 @@ void main() {
               : {'event': 'apps', 'req': m['req'], 'id': m['id'], 'path': 'lan', 'apps': []});
         }
       };
-      s = MainState(hub: HubClient(t), data: DataDir(tmp.path), prefs: UiPrefs(), clock: () => DateTime(2026, 11, 26, 12));
+      s = MainState(hub: HubClient(t), data: DataDir(tmp.path), prefs: UiPrefs(), clock: () => now);
       await tester.runAsync(() async {
         for (var i = 0; i < 8; i++) {
           await flush();
@@ -248,6 +277,25 @@ void main() {
       expect(find.descendant(of: find.byKey(const Key('column-m1')), matching: find.byKey(const Key('load-bar-m1'))),
           findsOneWidget);
       await emit(tester, {'event': 'load', 'id': 'm1', 'gone': true});
+      expect(find.byKey(const Key('load-bar-m1')), findsNothing);
+    });
+
+    testWidgets('load_row_hidden_when_stale: no line for more than 20 s hides it, with no event', (tester) async {
+      await boot(tester);
+      await show(tester);
+      await emit(tester, {'event': 'load', 'id': 'm1', ...snapshot()});
+      expect(find.byKey(const Key('load-bar-m1')), findsOneWidget);
+      // The sampler on m1 stops; nothing arrives, not even an error.
+      now = now.add(const Duration(seconds: 15));
+      await tester.pump(const Duration(seconds: 15));
+      expect(find.byKey(const Key('load-bar-m1')), findsOneWidget);
+      now = now.add(const Duration(seconds: 6));
+      await tester.pump(const Duration(seconds: 6));
+      expect(find.byKey(const Key('load-bar-m1')), findsNothing);
+      // The next line brings it back.
+      await emit(tester, {'event': 'load', 'id': 'm1', ...snapshot()});
+      expect(find.byKey(const Key('load-bar-m1')), findsOneWidget);
+      await emit(tester, {'event': 'load', 'id': 'm1', 'error': 'connection lost'});
       expect(find.byKey(const Key('load-bar-m1')), findsNothing);
     });
 

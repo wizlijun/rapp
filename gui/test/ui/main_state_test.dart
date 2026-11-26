@@ -6162,9 +6162,12 @@ void main() {
       expect(st.needs.single.text, 'mini 磁盘只剩 0.8 GB（/，剩 1%）');
       await emitLoad('111', [('disk:/', 'warn', diskText)]);
       expect(st.needs.where((n) => n.kind == NeedKind.resource), isEmpty);
+      // The device keeps sending (a load with no line for 20 s is not shown at all).
       now = now.add(const Duration(minutes: 59));
+      await emitLoad('111', [('disk:/', 'warn', diskText)]);
       expect(st.needs.where((n) => n.kind == NeedKind.resource), isEmpty);
       now = now.add(const Duration(minutes: 1));
+      await emitLoad('111', [('disk:/', 'warn', diskText)]);
       expect(st.needs.single.text, 'mini $diskText');
     });
 
@@ -6200,6 +6203,73 @@ void main() {
       // The hub has not said `gone` yet: its last numbers are still there, but an offline device has no rows.
       expect(hub.loads.containsKey('111'), isTrue);
       expect(s.needs.where((n) => n.kind == NeedKind.resource), isEmpty);
+    });
+
+    test('load_error_hides_rows: a stream error takes the rows with it', () async {
+      await emitLoad('111', [('disk:/', 'warn', diskText)]);
+      expect(s.needs.where((n) => n.kind == NeedKind.resource), hasLength(1));
+      t.emit({'event': 'load', 'id': '111', 'error': 'connection lost'});
+      await pump();
+      expect(s.deviceLoads, isEmpty);
+      expect(s.needs.where((n) => n.kind == NeedKind.resource), isEmpty);
+    });
+
+    test('stale_load_is_absent: no line for more than 20 s, by the receipt clock', () async {
+      var now = DateTime(2026, 11, 26, 10);
+      final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), clock: () => now);
+      addTearDown(st.dispose);
+      // Two devices, so 到 X 上新建终端 has somewhere to go.
+      await emitLoad('222', [], headroom: 90);
+      await emitLoad('111', [('cpu', 'warn', 'CPU 持续 90% 以上')]);
+      expect(st.needs.where((n) => n.kind == NeedKind.resource), hasLength(1));
+      expect(st.newTermElsewhere('111'), '222');
+      now = now.add(const Duration(seconds: 20));
+      expect(st.deviceLoads.keys.toSet(), {'111', '222'}, reason: '20 s is not more than 20 s');
+      now = now.add(const Duration(seconds: 1));
+      // The snapshot's own `at` is the device's clock; it is not looked at.
+      expect(st.deviceLoads, isEmpty);
+      expect(st.needs.where((n) => n.kind == NeedKind.resource), isEmpty);
+      expect(st.newTermElsewhere('111'), isNull);
+      expect(st.columnLoad('111'), isNull);
+      // A new line brings it back.
+      await emitLoad('111', [('cpu', 'warn', 'CPU 持续 90% 以上')]);
+      expect(st.deviceLoads.keys, ['111']);
+      expect(st.needs.where((n) => n.kind == NeedKind.resource), hasLength(1));
+    });
+
+    test('stale_then_back_is_a_first_load: no rise hint', () async {
+      var now = DateTime(2026, 11, 26, 10);
+      final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), clock: () => now);
+      addTearDown(st.dispose);
+      await emitLoad('111', []);
+      now = now.add(const Duration(seconds: 30));
+      // Back in warn after the gap: it says nothing, as the first load after a device appears does.
+      await emitLoad('111', [('cpu', 'warn', 'CPU 持续 90% 以上')]);
+      expect(st.hint, '');
+      // A rise after that is news again.
+      await emitLoad('111', [('cpu', 'danger', '过热，系统正在降频')]);
+      expect(st.hint, 'mini 过热，系统正在降频');
+    });
+
+    test('local_load_goes_stale the same way', () async {
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      var now = DateTime(2026, 11, 26, 10);
+      final m = _PushMonitor();
+      addTearDown(m.dispose);
+      final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), monitor: m, clock: () => now);
+      addTearDown(st.dispose);
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      m.status = const ServiceStatus(id: 'me', name: 'MacBook');
+      final first = Map<String, dynamic>.from(loadEv('me', [('mem', 'warn', '内存只剩 8%')]))..remove('event');
+      m.load = DeviceLoad.fromJson(first);
+      m.push();
+      expect(st.needs.single.device, 'me');
+      now = now.add(const Duration(seconds: 21));
+      expect(st.needs, isEmpty);
+      expect(st.columnLoad(null), isNull);
+      m.load = m.load!.next({...first, 'point': {'at': 1764100005}});
+      m.push();
+      expect(st.needs.single.device, 'me');
     });
 
     test('the local device has rows on macOS, none on iOS', () async {

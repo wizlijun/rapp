@@ -61,6 +61,7 @@ class DeviceLoad {
     this.disks = const [],
     this.warnings = const [],
     this.history = const [],
+    this.canTop = false,
   });
 
   /// Unix seconds of the sample.
@@ -83,6 +84,10 @@ class DeviceLoad {
   /// Oldest first, at most [loadKeep].
   final List<LoadPoint> history;
 
+  /// The device can list its busiest processes (「看占用最多的进程」): a line of its carried a `top` key. No service
+  /// does yet (no sampler has a process list), so the action is offered nowhere until one says so.
+  final bool canTop;
+
   /// The highest warning level; [LoadLevel.normal] when there is none.
   LoadLevel get level =>
       warnings.fold(LoadLevel.normal, (a, w) => w.level.index > a.index ? w.level : a);
@@ -96,10 +101,10 @@ class DeviceLoad {
   static DeviceLoad fromJson(Map m) {
     final h = m['history'];
     final history = h is List ? [for (final p in h) ?LoadPoint.fromJson(p)] : [?LoadPoint.fromJson(m['point'])];
-    return _fromJson(m, history);
+    return _fromJson(m, history, false);
   }
 
-  static DeviceLoad _fromJson(Map m, List<LoadPoint> history) {
+  static DeviceLoad _fromJson(Map m, List<LoadPoint> history, bool canTop) {
     final items = m['items'];
     final headroom = _int(m['headroom']);
     return DeviceLoad(
@@ -116,13 +121,14 @@ class DeviceLoad {
         for (final w in (m['warnings'] is List ? m['warnings'] as List : const [])) ?LoadWarning.fromJson(w),
       ],
       history: history.length > loadKeep ? history.sublist(history.length - loadKeep) : history,
+      canTop: canTop || (m['top'] != null && m['top'] != false),
     );
   }
 
-  /// The watch's next line: its snapshot replaces this one, its `point` joins the history.
+  /// The watch's next line: its snapshot replaces this one, its `point` joins the history; [canTop] stays.
   DeviceLoad next(Map line) {
     final p = LoadPoint.fromJson(line['point']);
-    return _fromJson(line, [...history, ?p]);
+    return _fromJson(line, [...history, ?p], canTop);
   }
 }
 

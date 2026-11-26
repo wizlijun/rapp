@@ -145,11 +145,9 @@ String openedText(String name) => 'A 上打开了「$name」';
 const desktopLockText = '远程电脑已锁屏；输入系统密码解锁';
 const childLockText = '远程电脑已锁屏；请在主窗口输入系统密码解锁';
 
-/// A device column's load (device-load §7): a remote one's ([id]) from the hub's watch while it is online; this
-/// machine's (no [id]) from its service, which iOS does not have. The overview's columns and 需要你 both read it here.
-DeviceLoad? columnLoad(HubClient? hub, ServiceMonitor? local, String? id, {bool offline = false}) => id != null
-    ? (offline ? null : hub?.loads[id])
-    : (defaultTargetPlatform == TargetPlatform.iOS ? null : local?.load);
+/// A load whose last line came longer ago than this is left out, as if there were none (device-load §7: no stale
+/// numbers). Timed by this GUI's clock when the line arrived, never by the snapshot's `at` (the device's clock).
+const loadStaleAfter = Duration(seconds: 20);
 
 /// How [columnLoad]'s device is asked once (the detail's process list).
 LoadNow? columnLoadNow(HubClient? hub, ServiceMonitor? local, String? id) => id != null
@@ -722,14 +720,41 @@ class MainState extends ChangeNotifier {
   /// This machine's device id while its service gives a load; null on iOS.
   String? get localLoadId => defaultTargetPlatform == TargetPlatform.iOS ? null : monitor?.status?.id;
 
+  /// A device column's load (device-load §7): a remote one's ([id]) from the hub's watch while it is online; this
+  /// machine's (no [id]) from its service ([local], else [monitor]), which iOS does not have. Every reader goes
+  /// through here (the overview's columns, 需要你, the hint, 到 X 上新建终端), so none shows a load whose last line
+  /// is more than [loadStaleAfter] old.
+  DeviceLoad? columnLoad(String? id, {ServiceMonitor? local, bool offline = false}) {
+    final l = id != null
+        ? (offline ? null : hub?.loads[id])
+        : (defaultTargetPlatform == TargetPlatform.iOS ? null : (local ?? monitor)?.load);
+    return l == null || _now().difference(_loadArrived(l)) > loadStaleAfter ? null : l;
+  }
+
+  /// When each load (one per line: a new line is a new object) was first seen here, which is when it arrived:
+  /// [_onHub] and [_onMonitor] look at every one as it comes.
+  final _loadAt = Expando<DateTime>();
+  DateTime _loadArrived(DeviceLoad l) => _loadAt[l] ??= _now();
+
+  /// Wakes once when the first shown load turns stale, so the rows go without a new line to say so.
+  Timer? _loadStale;
+
+  void _stampLoads() {
+    for (final l in hub?.loads.values ?? const <DeviceLoad>[]) {
+      _loadArrived(l);
+    }
+    final l = monitor?.load;
+    if (l != null) _loadArrived(l);
+  }
+
   /// Every online device's load, as the overview's columns show it; this machine's under its own id.
   Map<String, DeviceLoad> get deviceLoads {
     final out = <String, DeviceLoad>{};
     for (final h in hub?.hosts ?? const <HubHost>[]) {
-      final l = columnLoad(hub, monitor, h.id, offline: probes[h.id]?.lamp == Lamp.offline);
+      final l = columnLoad(h.id, offline: probes[h.id]?.lamp == Lamp.offline);
       if (l != null) out[h.id] = l;
     }
-    final me = localLoadId, l = columnLoad(hub, monitor, null);
+    final me = localLoadId, l = columnLoad(null);
     if (me != null && l != null) out.putIfAbsent(me, () => l);
     return out;
   }
@@ -798,11 +823,12 @@ class MainState extends ChangeNotifier {
     unawaited(_openTerms(id, target: const NewText(null)));
   }
 
-  /// Each item's level per device at the last look; a device not here has not given a load since it appeared.
-  final Map<String, Map<String, LoadLevel>> _loadLevels = {};
+  /// Each item's level per device at the last look, and when that load arrived; a device not here has not given a
+  /// load since it appeared, or since its last one went stale.
+  final Map<String, ({Map<String, LoadLevel> levels, DateTime at})> _loadLevels = {};
 
   /// The hint says an item that rose (正常 → 注意 / 危险, 注意 → 危险) since the device's last load; not the first
-  /// load after a device appears, and not a snoozed item.
+  /// load after a device appears or after its last one went stale, and not a snoozed item.
   void _trackLoads() {
     final loads = deviceLoads;
     _loadLevels.removeWhere((id, _) => !loads.containsKey(id));
@@ -811,14 +837,35 @@ class MainState extends ChangeNotifier {
       for (final w in l.warnings) {
         if (w.level.index > (now[w.item] ?? LoadLevel.normal).index) now[w.item] = w.level;
       }
-      final was = _loadLevels[id];
-      _loadLevels[id] = now;
-      if (was == null) continue;
+      final at = _loadArrived(l);
+      final last = _loadLevels[id];
+      _loadLevels[id] = (levels: now, at: at);
+      // A gap longer than the stale line is a fresh start, even if no look fell inside it.
+      if (last == null || at.difference(last.at) > loadStaleAfter) continue;
       for (final w in l.warnings) {
-        if (w.level.index <= (was[w.item] ?? LoadLevel.normal).index || loadSnoozed(id, w.item, w.level)) continue;
+        if (w.level.index <= (last.levels[w.item] ?? LoadLevel.normal).index || loadSnoozed(id, w.item, w.level)) {
+          continue;
+        }
         hint = '${loadDeviceName(id)} ${w.text}';
       }
     }
+    _planLoadStale(loads.values);
+  }
+
+  /// One timer for every shown load: it fires when the oldest turns stale, looks again, and plans the next.
+  void _planLoadStale(Iterable<DeviceLoad> shown) {
+    _loadStale?.cancel();
+    _loadStale = null;
+    if (_disposed || shown.isEmpty) return;
+    final now = _now();
+    final left = [for (final l in shown) loadStaleAfter - now.difference(_loadArrived(l))]
+        .reduce((a, b) => a < b ? a : b);
+    // Just past the line (every shown load is inside it, so [left] is never below zero).
+    _loadStale = Timer(left + const Duration(milliseconds: 10), () {
+      _loadStale = null;
+      _trackLoads();
+      notifyListeners();
+    });
   }
 
   DeviceLoad? _localLoadSeen;
@@ -827,6 +874,7 @@ class MainState extends ChangeNotifier {
   /// This machine's service changed: only a new load or id is news here.
   void _onMonitor() {
     final m = monitor!;
+    _stampLoads();
     if (identical(m.load, _localLoadSeen) && m.status?.id == _localIdSeen) return;
     _localLoadSeen = m.load;
     _localIdSeen = m.status?.id;
@@ -1526,6 +1574,7 @@ class MainState extends ChangeNotifier {
   }
 
   void _onHub() {
+    _stampLoads();
     final back = <String>{};
     for (final p in hub!.takePresence()) {
       if (p.online) back.add(p.id);
@@ -4843,6 +4892,7 @@ class MainState extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _loadStale?.cancel();
     for (final t in _tidies.values) {
       t.dispose();
     }
