@@ -6183,6 +6183,48 @@ void main() {
       expect(sync.refreshCalls, 1);
     });
 
+    test('the state service refreshes after the hub looked at its network again', () async {
+      await st.enterBackground();
+      List<String?>? cmds;
+      sync.onRefresh = () => cmds = [for (final m in t.sent) m['cmd'] as String?];
+      final n = t.sent.length;
+      await st.enterForeground();
+      expect(cmds!.skip(n), containsAllInOrder(['net_changed', 'presence']));
+    });
+
+    test('foreground while connected keeps the service rows and the needs count', () async {
+      sync
+        ..needs = [
+          {'fp': 'F', 'id': '111', 'session': 'x9', 'kind': 'permission', 'since': 5},
+        ]
+        ..hasSnapshot = true;
+      connect([row('F:e:1', 'working'), row('F:e:2', 'done', at: 200)]);
+      final rows = st.queueRows.map((r) => r.text).toList();
+      final count = st.needCount;
+      expect(rows, hasLength(2));
+      expect(count, 1);
+      await st.enterBackground();
+      // What refresh() does to the status while it reconnects with a snapshot in hand.
+      sync.onRefresh = () => sync
+        ..status = StateStatus.connecting
+        ..push();
+      await st.enterForeground();
+      expect(st.queueRows.map((r) => r.text).toList(), rows);
+      expect(st.needCount, count);
+      // Without a snapshot, connecting is the local view again.
+      sync
+        ..hasSnapshot = false
+        ..push();
+      expect(st.queueRows, st.hintHistory);
+    });
+
+    test('an empty title falls back to the name', () {
+      connect([
+        {...row('F:e:1', 'working'), 'title': ''},
+      ]);
+      expect(st.queueRows.single.text, startsWith('rapp @ mini：'));
+    });
+
     test('a GUI app session is never sent as seen', () async {
       t.onSend = (m) {
         if (m['cmd'] == 'open') t.emit({...opened(1, '111', m['app'] as String), 'req': m['req']});

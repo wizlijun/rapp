@@ -667,7 +667,16 @@ class MainState extends ChangeNotifier {
   /// The rapp-state service this app follows; null when it is not wired in.
   final StateSync? stateSync;
 
-  bool get _fromService => stateSync?.status == StateStatus.connected;
+  /// Whether the queue and the needs follow the service: connected, or reconnecting (a refresh) with the last
+  /// snapshot still in hand, so coming back to the foreground does not flip them to the local view and back.
+  bool get _fromService {
+    final sync = stateSync;
+    if (sync == null) return false;
+    return sync.status == StateStatus.connected || (sync.status == StateStatus.connecting && sync.hasSnapshot);
+  }
+
+  /// [v] when it is a non-empty string, else null: a blank title is no title.
+  static String? _text(Object? v) => v is String && v.isNotEmpty ? v : null;
 
   int _outageSeen = 0;
 
@@ -695,6 +704,13 @@ class MainState extends ChangeNotifier {
   void _markCurrentSeen({bool again = false}) {
     final sync = stateSync;
     if (sync == null) return;
+    // Called on every notify: the session is only looked up when there is something to mark.
+    final key = currentKey;
+    if (key == null) {
+      _seenSent = null;
+      return;
+    }
+    if (!again && _seenSent == key) return;
     final r = _shownTerm;
     if (r == null) {
       final c = current;
@@ -714,6 +730,7 @@ class MainState extends ChangeNotifier {
   void _markPushedRows(StateSync sync) {
     final live = <String>{};
     final r = _shownTerm;
+    var mark = false;
     for (final row in sync.rows) {
       final eid = row['eid'];
       if (eid is! String) continue;
@@ -723,8 +740,10 @@ class MainState extends ChangeNotifier {
       final id = rawId is String ? rawId : (fp is String ? sync.idOf(fp) : null);
       if (id != r.id) continue;
       _rowsMarked.add(eid);
-      sync.markSeen(r.id, r.app);
+      mark = true;
     }
+    // However many new rows it has, the shown terminal is marked once.
+    if (mark) sync.markSeen(r!.id, r.app);
     _rowsMarked.retainAll(live);
   }
 
@@ -752,7 +771,7 @@ class MainState extends ChangeNotifier {
       case 'state':
         final ps = termPs(row);
         if (ps == null) return null;
-        final nm = row['title'] ?? row['name'];
+        final nm = _text(row['title']) ?? _text(row['name']);
         final host = row['host'];
         final title = termDisplayName(nm is String ? nm : '', host is String ? host : null);
         final known = id != null && (hub?.hosts.any((h) => h.id == id) ?? false);
@@ -1521,7 +1540,7 @@ class MainState extends ChangeNotifier {
   }
 
   /// Blocked terminals of devices this app does not read itself (dropped, or not listed), from the service.
-  Iterable<NeedItem> _serviceNeeds(Set<String> seen) sync* {
+  Iterable<NeedItem> _serviceNeeds() sync* {
     final sync = stateSync!;
     final local = {...?hub?.termLists.keys}..removeAll(_offlineSince.keys);
     final hosts = {for (final h in hub?.hosts ?? const <HubHost>[]) h.id};
@@ -1534,12 +1553,11 @@ class MainState extends ChangeNotifier {
       final ps = termPs({'state': 'blocked', 'kind': n['kind'], 'app': n['app'], 'msg': n['msg']});
       if (ps == null) continue;
       final row = fp is String ? sync.session(fp, session) : null;
-      final nm = row?['title'] ?? row?['name'] ?? n['title'] ?? n['name'] ?? session;
+      final nm = _text(row?['title']) ?? _text(row?['name']) ?? _text(n['title']) ?? _text(n['name']) ?? session;
       final host = row?['host'] ?? n['host'];
-      final title = termDisplayName(nm is String ? nm : session, host is String ? host : null);
+      final title = termDisplayName(nm, host is String ? host : null);
       final since = n['since'];
       final seq = n['seq'];
-      seen.add('svc\n$id\n$session');
       yield NeedItem(NeedKind.terminal, session, '$title @ ${deviceName(id)}：${termAskWord(ps)}', seq is num ? seq.toInt() : 0,
           device: id, title: title, at: since is num ? since.toInt() : 0, greyWord: offlineWord(id, session));
     }
@@ -1592,7 +1610,7 @@ class MainState extends ChangeNotifier {
                   device: id, title: w.item, at: _firstSeen(key));
             }(),
     ];
-    if (_fromService) out.addAll(_serviceNeeds(seen));
+    if (_fromService) out.addAll(_serviceNeeds());
     for (final r in _records.values) {
       if (r.phase == Phase.disconnected) seen.add('sess\n${r.key}');
     }
@@ -3103,12 +3121,13 @@ class MainState extends ChangeNotifier {
   Future<void> enterForeground({Duration stagger = const Duration(milliseconds: 300)}) async {
     if (!backgrounded) return;
     backgrounded = false;
-    stateSync?.refresh();
-    _markCurrentSeen(again: true);
     final h = hub;
     // iOS took the hub's socket while the app was away: a new one, and every device asked again.
     h?.netChanged();
     h?.pausePresence(false);
+    // After the hub has its network again: on iOS the service is reached through the hub's port map.
+    stateSync?.refresh();
+    _markCurrentSeen(again: true);
     bool closedByBackground(SessionRecord r) => r.phase == Phase.disconnected && r.reason == 'background';
     final cur = currentRecord;
     final list = [
