@@ -64,10 +64,9 @@ void main() {
     ]);
   });
 
-  test('terminal emulators compose too: what stops it is the adaptive rule, not the profile', () {
-    // Letters open the panel everywhere; a panel closed unused turns them off for that session (RemoteSession.composeArmed).
-    expect([for (final p in apps) if (p.typeToCompose == false) p.name], isEmpty);
-    expect(resolveProfile('com.apple.Terminal', mine: const [], builtin: apps).typeToCompose, isTrue);
+  test('streamed terminals resolve to typeToCompose false; other apps stay true', () {
+    expect(resolveProfile('com.apple.Terminal', mine: const [], builtin: apps).typeToCompose, isFalse);
+    expect(resolveProfile('com.google.Chrome', mine: const [], builtin: apps).typeToCompose, isTrue);
   });
 
   test('no id appears in two built-in profiles', () {
