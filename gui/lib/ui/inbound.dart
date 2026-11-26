@@ -1,14 +1,16 @@
 // 正在被接入: the sessions other devices hold on this machine, as the overview's 本机 column lists them.
 // They are not tasks: nothing opens on a tap; each one can only be cut off (断开).
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../hub_client.dart';
+import '../labels.dart';
 import '../service_client.dart';
 import '../term/term_id.dart';
 import 'controls.dart';
+import 'lamp.dart';
+import 'session_block.dart' show LabelEdit, SessionCard;
 import 'tokens.dart';
 
 /// The card's first line: a text terminal as it is titled everywhere else, an app by its id.
@@ -40,16 +42,42 @@ String inboundAge(Object? since, DateTime now) {
 String inboundSubtitle(ServiceSession s, List<HubHost> hosts, DateTime now) =>
     '${inboundWho(s, hosts)} · ${inboundAge(s.since, now)}${s.side ? ' · 传文件' : ''}';
 
-const _cardHeight = 56.0;
+/// This machine's labels, and how to change them (over the local service): the 本机 column's cards show them and
+/// their menu changes them (spec §7.4).
+class LocalLabels {
+  const LocalLabels({required this.table, required this.set, required this.reset, required this.say});
+  final LabelTable table;
+  final Future<void> Function(String app, String title, String note) set;
+  final Future<void> Function(String app) reset;
+  final void Function(String words) say;
 
-/// 正在被接入 · N and one card per session; nothing at all when [sessions] is empty. The ages tick once a second
-/// while there is something to show.
+  LabelEdit edit(String app) => LabelEdit(
+    label: table.labels[app],
+    defaultTitle: inboundTitle(app),
+    save: (title, note) => set(app, title, note),
+    reset: () => reset(app),
+    say: say,
+  );
+}
+
+/// 正在被接入 · N and one card per session, then the labelled sessions nobody is in on (with [labels]); nothing at
+/// all when there are neither. The ages tick once a second while someone is in.
 class InboundGroup extends StatefulWidget {
-  const InboundGroup({super.key, required this.sessions, required this.hosts, required this.now, required this.onKick});
+  const InboundGroup({
+    super.key,
+    required this.sessions,
+    required this.hosts,
+    required this.now,
+    required this.onKick,
+    this.labels,
+  });
   final List<ServiceSession> sessions;
   final List<HubHost> hosts;
   final DateTime Function() now;
   final Future<void> Function(Object sid) onKick;
+
+  /// Null while the service has not said (or predates labels): no label shows and there is no menu.
+  final LocalLabels? labels;
 
   @override
   State<InboundGroup> createState() => _InboundGroupState();
@@ -95,37 +123,85 @@ class _InboundGroupState extends State<InboundGroup> {
     }
   }
 
+  Widget _heading(BuildContext context, String text, Key key) {
+    final t = RappTokens.of(context);
+    final small = Theme.of(context).textTheme.bodySmall?.copyWith(color: t.muted);
+    return Padding(
+      padding: const EdgeInsets.only(top: 14, bottom: 6),
+      child: Text(
+        text,
+        key: key,
+        style: small?.copyWith(letterSpacing: t.labelSpacing * t.textSize),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final sessions = widget.sessions;
-    if (sessions.isEmpty) return const SizedBox.shrink();
+    final labels = widget.labels;
+    final inApps = {for (final s in sessions) s.app};
+    final idle = [
+      for (final app in labels?.table.labels.keys ?? const <String>[])
+        if (!inApps.contains(app)) app,
+    ];
+    if (sessions.isEmpty && idle.isEmpty) return const SizedBox.shrink();
     final t = RappTokens.of(context);
     final small = Theme.of(context).textTheme.bodySmall?.copyWith(color: t.muted);
     final now = widget.now();
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Padding(
-        padding: const EdgeInsets.only(top: 14, bottom: 6),
-        child: Text('正在被接入 · ${sessions.length}',
-            key: const Key('inbound-title'), style: small?.copyWith(letterSpacing: t.labelSpacing * t.textSize)),
-      ),
-      for (final (i, s) in sessions.indexed) ...[
-        if (i > 0) const SizedBox(height: 8),
-        _InboundCard(
-          session: s,
-          title: inboundTitle(s.app),
-          subtitle: inboundSubtitle(s, widget.hosts, now),
-          spoken: '${inboundWho(s, widget.hosts)}${s.side ? '，传文件' : ''}',
-          onKick: () => _kick(s.sid),
-        ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (sessions.isNotEmpty) _heading(context, '正在被接入 · ${sessions.length}', const Key('inbound-title')),
+        for (final (i, s) in sessions.indexed) ...[
+          if (i > 0) const SizedBox(height: 8),
+          _InboundCard(
+            session: s,
+            title: inboundTitle(s.app),
+            subtitle: inboundSubtitle(s, widget.hosts, now),
+            spoken: '${inboundWho(s, widget.hosts)}${s.side ? '，传文件' : ''}',
+            onKick: () => _kick(s.sid),
+            labels: labels,
+          ),
+        ],
+        if (idle.isNotEmpty) _heading(context, '有标注的会话 · ${idle.length}', const Key('local-labels-title')),
+        for (final (i, app) in idle.indexed) ...[
+          if (i > 0) const SizedBox(height: 8),
+          KeyedSubtree(
+            key: Key('local-label-$app'),
+            child: SessionCard(
+              frameKey: Key('frame-local-label-$app'),
+              lamp: Lamp.notOpened,
+              title: _titled(labels!, app),
+              note: labels.table.labels[app]?.note ?? '',
+              second: Text(inboundTitle(app), maxLines: 1, overflow: TextOverflow.ellipsis, style: small),
+              spoken: '有标注，${_titled(labels, app)}，${inboundTitle(app)}',
+              dashed: true,
+              labels: labels.edit(app),
+            ),
+          ),
+        ],
       ],
-    ]);
+    );
   }
 }
 
-/// A dashed, inert card: it reads 正在被接入 to a screen reader and only its 断开 does anything.
+/// [app]'s label title on this machine, else what it is titled with none.
+String _titled(LocalLabels? labels, String app) {
+  final t = labels?.table.labels[app]?.title;
+  return t == null || t.isEmpty ? inboundTitle(app) : t;
+}
+
+/// A dashed, inert card: it reads 正在被接入 to a screen reader and only its 断开 does anything (and its label menu).
 class _InboundCard extends StatelessWidget {
-  const _InboundCard(
-      {required this.session, required this.title, required this.subtitle, required this.spoken, required this.onKick});
+  const _InboundCard({
+    required this.session,
+    required this.title,
+    required this.subtitle,
+    required this.spoken,
+    required this.onKick,
+    this.labels,
+  });
   final ServiceSession session;
   final String title;
   final String subtitle;
@@ -133,65 +209,29 @@ class _InboundCard extends StatelessWidget {
   /// Who is in, for a screen reader: without the age, so the label does not change every second.
   final String spoken;
   final VoidCallback onKick;
+  final LocalLabels? labels;
 
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     final small = Theme.of(context).textTheme.bodySmall?.copyWith(color: t.muted);
-    return SizedBox(
+    final shown = _titled(labels, session.app);
+    return KeyedSubtree(
       key: Key('inbound-${session.sid}'),
-      height: _cardHeight,
-      child: Semantics(
-        container: true,
-        label: '正在被接入，$title，$spoken',
-        child: CustomPaint(
-          painter: _DashedFrame(color: t.muted, radius: t.r),
-          child: Padding(
-            padding: const EdgeInsets.only(left: 10, right: 2),
-            child: Row(children: [
-              ExcludeSemantics(child: Icon(Icons.login, size: 16, color: t.muted)),
-              const SizedBox(width: 10),
-              Expanded(
-                child: ExcludeSemantics(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.text)),
-                      Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: small),
-                    ],
-                  ),
-                ),
-              ),
-              RappButton.quiet(key: Key('inbound-kick-${session.sid}'), label: '断开', onPressed: onKick),
-            ]),
-          ),
-        ),
+      child: SessionCard(
+        frameKey: Key('frame-inbound-${session.sid}'),
+        lamp: Lamp.notOpened,
+        leading: Icon(Icons.login, size: 16, color: t.muted),
+        title: shown,
+        titleColor: t.text,
+        note: labels?.table.labels[session.app]?.note ?? '',
+        second: Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: small),
+        spoken: '正在被接入，$shown，$spoken',
+        dashed: true,
+        border: t.muted,
+        trailing: RappButton.quiet(key: Key('inbound-kick-${session.sid}'), label: '断开', onPressed: onKick),
+        labels: labels?.edit(session.app),
       ),
     );
   }
-}
-
-class _DashedFrame extends CustomPainter {
-  const _DashedFrame({required this.color, required this.radius});
-  final Color color;
-  final double radius;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = RRect.fromRectAndRadius(Offset.zero & size, Radius.circular(radius)).deflate(.5);
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    const dash = 4.0, gap = 3.0;
-    for (final metric in (Path()..addRRect(rect)).computeMetrics()) {
-      for (var d = 0.0; d < metric.length; d += dash + gap) {
-        canvas.drawPath(metric.extractPath(d, math.min(d + dash, metric.length)), paint);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_DashedFrame old) => old.color != color || old.radius != radius;
 }

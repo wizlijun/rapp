@@ -13,7 +13,7 @@ class SessionSwitcher extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // By device whatever the side panel groups by: the list answers "what is open where".
-    final groups = groupSessions(state.entries, Grouping.device, projects: state.projects);
+    final groups = standLast(groupSessions(state.listed, Grouping.device, projects: state.projects));
     return ListView(
       shrinkWrap: true,
       padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),

@@ -46,7 +46,8 @@ class Overview extends StatelessWidget {
         final cols = deviceColumns(
           hosts: hosts,
           probes: state.probes,
-          entries: entries,
+          // The labelled sessions that are not open stand at the end of their device's column (not counted).
+          entries: state.listed,
           name: state.deviceName,
           localVersion: state.hub?.version,
           localOs: state.localOs,
@@ -334,6 +335,14 @@ class _Column extends StatelessWidget {
               hosts: state.hub?.hosts ?? const [],
               now: state.now,
               onKick: monitor!.kick,
+              labels: monitor!.labels == null
+                  ? null
+                  : LocalLabels(
+                      table: monitor!.labels!,
+                      set: (app, title, note) => monitor!.setLabel(app, title: title, note: note),
+                      reset: monitor!.resetLabel,
+                      say: state.say,
+                    ),
             ),
           if (favorites.isNotEmpty) ...[
             Padding(
