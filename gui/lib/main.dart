@@ -137,9 +137,12 @@ Future<void> main(List<String> args) async {
   trayManager.addListener(shell);
   await shell.setupTray();
   // The service installs once the GUI is gone (cli-update §5.2): it asks, the GUI quits without asking.
-  monitor.addListener(() {
+  void quitIfAsked() {
     if (monitor.status?.update?.quitGui == true) shell._quitNow();
-  });
+  }
+  monitor.addListener(quitIfAsked);
+  // The first status may have come in while the window was being set up.
+  quitIfAsked();
   void reportWindows() => monitor.setGuiWindows(remoteWindows(hub?.sessions ?? const []));
   hub?.addListener(reportWindows);
   reportWindows();

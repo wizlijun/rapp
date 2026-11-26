@@ -1085,3 +1085,36 @@ async fn gui_windows_is_acknowledged() {
     assert_eq!(gui.call(json!({"cmd":"gui_windows","count":2})).await, json!({"ok": true}));
     assert_eq!(gui.call(json!({"cmd":"gui_windows"})).await["ok"], false);
 }
+
+/// Review I2: a bundle process quitting the GUI would not take away (an orphaned client) means
+/// the GUI is never asked to go for an install that cannot happen.
+#[tokio::test]
+async fn stray_process_waits_without_quitting_the_gui() {
+    let mut e = Env::new(Knobs::default());
+    let b = s(&e.bundle);
+    e.ps_extra.lock().unwrap().push(format!("  880     1 {b}/Contents/MacOS/rapp-client"));
+    e.start().await;
+    e.wait_log_wait("还有别的 rApp 进程开着").await;
+    for _ in 0..4 {
+        tokio::time::sleep(POLL).await;
+        assert_eq!(e.update().await["quit_gui"], false);
+    }
+    assert_eq!(marker_of(&e.bundle), "current");
+}
+
+/// Review I1: an earlier failed check is not reported as the rollback's failure.
+#[tokio::test]
+async fn rollback_clears_an_earlier_failure() {
+    let mut e = Env::new(Knobs { curl_code: 22, ..Default::default() });
+    make_app(&e.previous(), "prev");
+    e.start().await;
+    e.wait_state("failed").await;
+    let mut gui = Ipc::open(e.svc(), &e.home).await;
+    assert_eq!(gui.call(json!({"cmd":"update_rollback"})).await, json!({"ok": true}));
+    let u = e.update().await;
+    assert_ne!(u["state"], "failed", "{u}");
+    assert!(u["error"].is_null(), "{u}");
+    drop(gui);
+    e.wait_restart().await;
+    assert_eq!(marker_of(&e.bundle), "prev");
+}

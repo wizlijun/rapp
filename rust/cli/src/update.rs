@@ -98,7 +98,12 @@ pub async fn run(what: Upd, yes: bool, timeout: Option<u64>, out: Out) -> ! {
             }
             let (from, to) = (u["current"].clone(), u["latest"].clone());
             out.progress("安装中…");
-            send(&c, json!({"cmd":"update_apply","confirm_signature_change":yes,"by":"cli"})).await;
+            match c.call(json!({"cmd":"update_apply","confirm_signature_change":yes,"by":"cli"})).await {
+                // An auto install got there first, or finished just now: wait for its version.
+                Ok(r) if r["code"] == "busy" => out.progress("已经在装了，等它装好…"),
+                Err(Gone) => {}
+                Ok(r) => refused(&c, &r),
+            }
             wait_restart(&c, |n| same_version(&n["current"], &to)).await;
             let line = format!("已升级到 {}（原来 {}）", text(&to), text(&from));
             out.ok(json!({"result": "updated", "from": from, "to": to}), &line)
@@ -109,7 +114,10 @@ pub async fn run(what: Upd, yes: bool, timeout: Option<u64>, out: Out) -> ! {
             }
             let from = u["current"].clone();
             out.progress("回滚中…");
-            send(&c, json!({"cmd":"update_rollback","by":"cli"})).await;
+            match c.call(json!({"cmd":"update_rollback","by":"cli"})).await {
+                Ok(r) => refused(&c, &r),
+                Err(Gone) => c.out.fail("not_running", NOT_RUNNING, None),
+            }
             let n = wait_restart(&c, |n| n["current"].is_string() && !same_version(&n["current"], &from)).await;
             let to = n["current"].clone();
             let line = format!("已回到 {}（原来 {}）", text(&to), text(&from));
@@ -122,6 +130,10 @@ pub async fn run(what: Upd, yes: bool, timeout: Option<u64>, out: Out) -> ! {
 /// What has to be settled by hand before anything can install.
 fn preflight(u: &Value, out: Out) {
     if u["state"] == "off" {
+        // Spec §2: Linux has no launchd to restart the service after a swap.
+        if cfg!(target_os = "linux") {
+            out.fail("not_launchd", "Linux 上还不能在线升级，请从页面下载安装包", page_of(u));
+        }
         out.fail("failed", NOT_BUNDLED, None);
     }
     // Missing (an older service): it was started by launchd as far as we know.
@@ -191,12 +203,8 @@ async fn check(c: &Clock) -> Value {
     }
 }
 
-/// Sends an install or rollback; the connection closes with the reply, which lets it start.
-async fn send(c: &Clock, cmd: Value) {
-    let r = match c.call(cmd).await {
-        Ok(r) => r,
-        Err(Gone) => c.out.fail("not_running", NOT_RUNNING, None),
-    };
+/// The reply to an install or rollback; the connection closes with it, which lets it start.
+fn refused(c: &Clock, r: &Value) {
     if r["ok"] != true {
         let code = r["code"].as_str().unwrap_or("failed");
         c.out.fail(code, &format!("没有成功：{}", text(&r["error"])), r["page"].as_str());

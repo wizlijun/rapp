@@ -520,6 +520,8 @@ struct Procs {
     blocking: bool,
     /// The GUI is among them.
     gui: bool,
+    /// One that quitting the GUI would not take away: neither a GUI nor started under one.
+    stray: bool,
 }
 
 /// None when the output does not show this service (`me`) under `<bundle>/Contents/`.
@@ -530,7 +532,22 @@ fn read_procs(ps: &str, me: u32, bundle: &str) -> Option<Procs> {
     if !procs.iter().any(|&(pid, _, comm)| pid == me && comm.starts_with(&prefix)) {
         return None;
     }
-    let mut p = Procs { blocking: false, gui: false };
+    let parent: std::collections::HashMap<u32, u32> = procs.iter().map(|&(pid, ppid, _)| (pid, ppid)).collect();
+    let guis: Vec<u32> = procs.iter().filter(|&&(_, _, comm)| comm == gui).map(|&(pid, ..)| pid).collect();
+    // The hub and its clients go with the GUI that started them.
+    let under_gui = |mut pid: u32| {
+        for _ in 0..8 {
+            if guis.contains(&pid) {
+                return true;
+            }
+            match parent.get(&pid) {
+                Some(&pp) if pp > 1 => pid = pp,
+                _ => return false,
+            }
+        }
+        false
+    };
+    let mut p = Procs { blocking: false, gui: false, stray: false };
     for &(pid, ppid, comm) in &procs {
         let name = comm.rsplit('/').next().unwrap_or(comm);
         if pid == me || ppid == me || !comm.starts_with(&prefix) || NEVER_BLOCK.contains(&name) {
@@ -538,6 +555,7 @@ fn read_procs(ps: &str, me: u32, bundle: &str) -> Option<Procs> {
         }
         p.blocking = true;
         p.gui |= comm == gui;
+        p.stray |= !under_gui(pid);
     }
     Some(p)
 }
@@ -580,10 +598,12 @@ async fn auto_busy(state: &State, o: &UpdateOpts) -> Option<String> {
         Some(d) if d < o.quiet => return Some("最近本机有人操作".into()),
         Some(_) => {}
     }
-    if procs(state).await.is_none() {
-        return Some("查不了进程表".into());
+    match procs(state).await {
+        None => Some("查不了进程表".into()),
+        // Quitting the GUI would not free the bundle: asking it would only close it for nothing.
+        Some(p) if p.stray => Some("还有别的 rApp 进程开着".into()),
+        Some(_) => None,
     }
-    None
 }
 
 /// Every `idle_poll`: a ready version installs itself when allowed and nobody has used this Mac
@@ -594,7 +614,7 @@ async fn try_auto(state: &Arc<State>, o: &UpdateOpts) {
         return set_auto_wait(state, None);
     }
     if state.update.lock().unwrap().auto_after.is_some_and(|t| Instant::now() < t) {
-        return;
+        return set_auto_wait(state, Some("刚才 rApp 没能关掉，过一会儿再试".into()));
     }
     let why = auto_busy(state, o).await;
     set_auto_wait(state, why.clone());
@@ -878,6 +898,14 @@ pub async fn rollback(state: &Arc<State>, by: By, closed: watch::Receiver<()>) -
         return code_err("failed", LEFTOVER);
     }
     let Some(busy) = Busy::begin(state) else { return code_err("busy", BUSY) };
+    // An earlier failure (a check, say) is not this rollback's: `rapp update rollback` reads
+    // `failed` as its own.
+    modify(state, |u| {
+        if u.state == "failed" {
+            u.state = "idle";
+            (u.error, u.failed_stage) = (None, None);
+        }
+    });
     let state = state.clone();
     tokio::spawn(async move {
         match quit_gui_and_wait(&state, &o, Some(closed), by).await {
@@ -950,16 +978,27 @@ mod tests {
     fn which_bundle_processes_block_and_which_is_the_gui() {
         let b = "/Applications/rApp.app";
         let ps = |extra: &str| format!("  10     1 {b}/Contents/MacOS/rapp-service\n  11    10 {b}/Contents/MacOS/rapp-host\n{extra}");
-        let free = Some(Procs { blocking: false, gui: false });
+        let free = Some(Procs { blocking: false, gui: false, stray: false });
         // Its own children, text terminals, the CLI (by either path) and other apps never block.
         let quiet = format!(
             "  20     1 {b}/Contents/MacOS/rapp-term\n  21     1 {b}/Contents/MacOS/rapp-cli\n  22     1 {}\n  23     1 /bin/zsh\n",
             up::CLI_LINK
         );
         assert_eq!(read_procs(&ps(&quiet), 10, b), free);
-        assert_eq!(read_procs(&ps(&format!("  30     1 {b}/Contents/MacOS/rapp\n")), 10, b), Some(Procs { blocking: true, gui: true }));
+        assert_eq!(
+            read_procs(&ps(&format!("  30     1 {b}/Contents/MacOS/rapp\n")), 10, b),
+            Some(Procs { blocking: true, gui: true, stray: false })
+        );
+        // The GUI's hub and the hub's clients go with it.
+        let family = format!(
+            "  30     1 {b}/Contents/MacOS/rapp\n  32    30 {b}/Contents/MacOS/rapp-hub\n  33    32 {b}/Contents/MacOS/rapp-client\n"
+        );
+        assert_eq!(read_procs(&ps(&family), 10, b), Some(Procs { blocking: true, gui: true, stray: false }));
+        // One left behind by nobody stays whatever the GUI does.
         let helper = format!("  31     1 {b}/Contents/Helpers/x\n");
-        assert_eq!(read_procs(&ps(&helper), 10, b), Some(Procs { blocking: true, gui: false }));
+        assert_eq!(read_procs(&ps(&helper), 10, b), Some(Procs { blocking: true, gui: false, stray: true }));
+        let orphan = format!("  30     1 {b}/Contents/MacOS/rapp\n  34     1 {b}/Contents/MacOS/rapp-client\n");
+        assert_eq!(read_procs(&ps(&orphan), 10, b), Some(Procs { blocking: true, gui: true, stray: true }));
         // ps that does not show this service cannot be trusted.
         assert_eq!(read_procs(&ps(""), 99, b), None);
         assert_eq!(read_procs("", 10, b), None);

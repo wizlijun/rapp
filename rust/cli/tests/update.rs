@@ -100,11 +100,18 @@ impl Fake {
             } else {
                 self.replies.lock().unwrap().get(&name).cloned().unwrap_or(json!({"ok": true}))
             };
+            let mut steps = self.after.lock().unwrap().remove(&name);
+            // Steps due at once land before the reply, as a service finishing its work would.
+            while let Some(v) = steps.as_mut() {
+                match v.first() {
+                    Some((0, p)) if p["restart"].is_null() => merge(&mut self.status.lock().unwrap(), &v.remove(0).1),
+                    _ => break,
+                }
+            }
             if w.write_all(format!("{reply}\n").as_bytes()).await.is_err() {
                 return;
             }
-            let steps = self.after.lock().unwrap().remove(&name);
-            if let Some(steps) = steps {
+            if let Some(steps) = steps.filter(|s| !s.is_empty()) {
                 let me = self.clone();
                 tokio::spawn(async move {
                     for (ms, patch) in steps {
@@ -315,12 +322,26 @@ async fn failed_install_exits_1() {
     let v = r.json();
     assert_eq!(v["error"], "still_open");
     assert!(v["message"].as_str().unwrap().contains("窗口没有关掉"));
-    // The service refusing at once (busy) is a plain failure too.
+}
+
+#[tokio::test]
+async fn busy_auto_install_is_waited_for() {
+    // Review I3: the auto install holds the service; `rapp update` waits for the version it brings.
+    let dir = tempfile::tempdir().unwrap();
     let f = Fake::new(dir.path(), ready()).await;
     f.reply("update_apply", json!({"ok": false, "error": "正在忙", "code": "busy"}));
+    f.then(
+        "update_apply",
+        vec![(100, json!({"state": "installing", "quit_gui": true})), (200, json!({"restart": 300})), (0, json!({"state": "idle", "current": "0.15.36", "quit_gui": false}))],
+    );
     let r = rapp(dir.path(), "update --json").await;
-    assert_eq!(r.code, 1);
-    assert_eq!(r.json()["error"], "busy");
+    assert_eq!(r.code, 0, "{}", r.stdout);
+    assert_eq!(r.json()["result"], "updated");
+    // Busy with nothing coming still ends at the deadline, not forever.
+    let f = Fake::new(dir.path(), ready()).await;
+    f.reply("update_apply", json!({"ok": false, "error": "正在忙", "code": "busy"}));
+    let r = rapp(dir.path(), "update --timeout 2 --json").await;
+    assert_eq!(r.code, 5);
 }
 
 #[tokio::test]
