@@ -1,6 +1,6 @@
 # 输入法跟着意图走：直接打字 = 英文，写作版 = 中文
 
-状态：草稿，待用户批准（2026-11-26）
+状态：用户已批准（2026-11-26）
 相关规格：`2026-11-15-rapp-type-to-compose-design.md`（§1.1 中文交给本机、远端一律英文；§2.1 内置终端默认关字母开面板）、`2026-11-14-rapp-composer-writing-panel-design.md`、`2026-11-14-rapp-terminal-gui-design.md` K5、`2026-11-14-rapp-terminal-gui-review.md` R9、`2026-11-20-rapp-ios-rime-ime-design.md`。
 
 ## 1. 为什么做
