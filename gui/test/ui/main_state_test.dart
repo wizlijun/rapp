@@ -6133,6 +6133,66 @@ void main() {
       expect(st.queuedFresh(HintRecord('a', DateTime(2026))), isFalse);
     });
 
+    Future<void> openTerm() async {
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') t.emit({...opened(1, '111', m['app'] as String), 'req': m['req']});
+      };
+      await st.openOrSwitch('111', 'term:pty:t1', 'rapp');
+      await pump();
+    }
+
+    test('opening a terminal marks it seen with the service', () async {
+      hub.termLists['111'] = TermList('111', terms: [TermRow('term:pty:t1', 'rapp', 'claude', null, 1, 0, 0, false, false)]);
+      await openTerm();
+      expect(st.currentKey, '111/term:pty:t1');
+      expect(sync.seenCalls, [('111', 'term:pty:t1')]);
+      sync.push();
+      st.say('x');
+      expect(sync.seenCalls, hasLength(1));
+    });
+
+    test('a pushed row for the shown terminal is marked seen again, once', () async {
+      await openTerm();
+      sync.seenCalls.clear();
+      connect([row('F:e:1', 'working', session: 'term:pty:t1')]);
+      expect(sync.seenCalls, [('111', 'term:pty:t1')]);
+      sync.push();
+      sync.push();
+      expect(sync.seenCalls, hasLength(1));
+      connect([row('F:e:1', 'working', session: 'term:pty:t1'), row('F:e:2', 'done', session: 'term:pty:t1')]);
+      expect(sync.seenCalls, hasLength(2));
+      connect([row('F:e:3', 'done', session: 'other')]);
+      expect(sync.seenCalls, hasLength(2));
+    });
+
+    test('a hidden window marks nothing; showing it again marks the shown terminal', () async {
+      st.mainVisible = false;
+      await openTerm();
+      expect(sync.seenCalls, isEmpty);
+      connect([row('F:e:1', 'working', session: 'term:pty:t1')]);
+      expect(sync.seenCalls, isEmpty);
+      st.mainVisible = true;
+      expect(sync.seenCalls, [('111', 'term:pty:t1')]);
+    });
+
+    test('background pauses and foreground refreshes the state service', () async {
+      await st.enterBackground();
+      expect(sync.pauseCalls, 1);
+      expect(sync.refreshCalls, 0);
+      await st.enterForeground();
+      expect(sync.refreshCalls, 1);
+    });
+
+    test('a GUI app session is never sent as seen', () async {
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') t.emit({...opened(1, '111', m['app'] as String), 'req': m['req']});
+      };
+      await st.openOrSwitch('111', 'gedit', 'gedit');
+      await pump();
+      expect(st.currentKey, isNotNull);
+      expect(sync.seenCalls, isEmpty);
+    });
+
     test('without a StateSync nothing changes', () {
       st.say('a');
       expect(s.queueRows, s.hintHistory);

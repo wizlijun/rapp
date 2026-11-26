@@ -670,7 +670,55 @@ class MainState extends ChangeNotifier {
       _outageSeen = sync.outage;
       _queue(HintRecord('状态服务连不上，先用本机的', _now()));
     }
+    _markPushedRows(sync);
     notifyListeners();
+  }
+
+  /// The text terminal on show, or null: a GUI app session, no session, or a window nobody can see.
+  SessionEntry? get _shownTerm {
+    final r = current;
+    if (r == null || r.standby != null || !isTermApp(r.app) || !_mainVisible || backgrounded) return null;
+    return r;
+  }
+
+  /// The terminal last told to the service as seen, so one change of [currentKey] sends once.
+  String? _seenSent;
+
+  /// Tells the service the shown terminal was looked at; the one place every way of switching ends up in.
+  void _markCurrentSeen({bool again = false}) {
+    final sync = stateSync;
+    if (sync == null) return;
+    final r = _shownTerm;
+    if (r == null) {
+      final c = current;
+      if (c == null || !isTermApp(c.app)) _seenSent = null;
+      return;
+    }
+    if (!again && _seenSent == r.key) return;
+    _seenSent = r.key;
+    sync.markSeen(r.id, r.app);
+  }
+
+  /// Queue rows (by `eid`) already looked at because their terminal was on show.
+  final Set<String> _rowsMarked = {};
+
+  /// A pushed row for the terminal on show is marked seen at once, once per row. A `seen` or `session`
+  /// push brings no new row, so it never comes back here as a mark.
+  void _markPushedRows(StateSync sync) {
+    final live = <String>{};
+    final r = _shownTerm;
+    for (final row in sync.rows) {
+      final eid = row['eid'];
+      if (eid is! String) continue;
+      live.add(eid);
+      if (r == null || _rowsMarked.contains(eid) || row['session'] != r.app) continue;
+      final fp = row['fp'], rawId = row['id'];
+      final id = rawId is String ? rawId : (fp is String ? sync.idOf(fp) : null);
+      if (id != r.id) continue;
+      _rowsMarked.add(eid);
+      sync.markSeen(r.id, r.app);
+    }
+    _rowsMarked.retainAll(live);
   }
 
   /// What the queue shows, newest first: [hintHistory] alone, or, while the service is connected, the app's own
@@ -995,6 +1043,7 @@ class MainState extends ChangeNotifier {
       markingInput = null;
       _followCurrentKey();
     }
+    _markCurrentSeen();
     _noteLastTerm();
     if (embeds) _entries = _mapEntries();
     // The session list has nothing to show once the last session is gone.
@@ -1294,6 +1343,7 @@ class MainState extends ChangeNotifier {
     if (v == _mainVisible) return;
     _mainVisible = v;
     _applyFps();
+    if (v) _markCurrentSeen(again: true);
   }
 
   /// Sends each started session's effective rate when it differs from the last one sent: the
@@ -2929,6 +2979,7 @@ class MainState extends ChangeNotifier {
   Future<void> enterBackground({Future<void> Function()? begin, Future<void> Function()? end}) async {
     if (backgrounded) return;
     backgrounded = true;
+    stateSync?.pause();
     final epoch = ++_backgroundEpoch;
     try {
       await begin?.call();
@@ -2991,6 +3042,8 @@ class MainState extends ChangeNotifier {
   Future<void> enterForeground({Duration stagger = const Duration(milliseconds: 300)}) async {
     if (!backgrounded) return;
     backgrounded = false;
+    stateSync?.refresh();
+    _markCurrentSeen(again: true);
     final h = hub;
     // iOS took the hub's socket while the app was away: a new one, and every device asked again.
     h?.netChanged();

@@ -301,5 +301,17 @@ class FakeStateSync extends StateSync {
   @override
   bool fresh(Map<String, Object?> row) => freshEids.contains(row['eid']);
 
+  /// What the app told the service, without any network.
+  final List<(String, String)> seenCalls = [];
+  int pauseCalls = 0;
+  int refreshCalls = 0;
+
+  @override
+  void markSeen(String deviceId, String session) => seenCalls.add((deviceId, session));
+  @override
+  void pause() => pauseCalls++;
+  @override
+  Future<void> refresh() async => refreshCalls++;
+
   void push() => notifyListeners();
 }
