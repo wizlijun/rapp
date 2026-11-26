@@ -69,7 +69,14 @@ class Overview extends StatelessWidget {
                   key: const Key('wall'),
                   spacing: _gap,
                   runSpacing: _gap,
-                  children: [for (final c in cols) _Column(state: state, col: c, monitor: monitor)],
+                  children: [
+                    for (final c in cols)
+                      // No local service (iPad/Duo): 本机 holds nothing, so it starts as a narrow strip.
+                      if (c.id == null && monitor == null)
+                        _LocalFold(state: state, col: c)
+                      else
+                        _Column(state: state, col: c, monitor: monitor),
+                  ],
                 ),
               ),
             ),
@@ -280,11 +287,84 @@ class _CountCell extends StatelessWidget {
   }
 }
 
+/// The 本机 column without a local service: folded to a strip until tapped; open for the rest of this run.
+class _LocalFold extends StatefulWidget {
+  const _LocalFold({required this.state, required this.col});
+  final MainState state;
+  final DeviceColumn col;
+
+  @override
+  State<_LocalFold> createState() => _LocalFoldState();
+}
+
+class _LocalFoldState extends State<_LocalFold> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) => _open
+      ? _Column(state: widget.state, col: widget.col, onFold: () => setState(() => _open = false))
+      : _FoldedColumn(col: widget.col, onOpen: () => setState(() => _open = true));
+}
+
+const _foldedWidth = 56.0;
+
+/// A folded column: system mark, lamp and name, stacked in a narrow strip. One tap opens it.
+class _FoldedColumn extends StatelessWidget {
+  const _FoldedColumn({required this.col, required this.onOpen});
+  final DeviceColumn col;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    final small = Theme.of(context).textTheme.bodySmall;
+    final key = col.id ?? 'local';
+    return SizedBox(
+      key: Key('column-$key'),
+      width: _foldedWidth,
+      child: Semantics(
+        button: true,
+        label: '展开 ${col.name}',
+        excludeSemantics: true,
+        onTap: onOpen,
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            key: Key('column-$key-folded'),
+            onTap: onOpen,
+            borderRadius: BorderRadius.circular(t.r),
+            child: Container(
+              decoration: t.panelBox(border: t.line),
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+              child: Column(children: [
+                OsMark(col.os, key: Key('os-mark-$key')),
+                const SizedBox(height: 6),
+                StatusLamp(col.lamp),
+                const SizedBox(height: 6),
+                Text(
+                  col.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: small?.copyWith(fontWeight: FontWeight.w600, color: col.offline ? t.muted : t.text),
+                ),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _Column extends StatelessWidget {
-  const _Column({required this.state, required this.col, this.monitor});
+  const _Column({required this.state, required this.col, this.monitor, this.onFold});
   final MainState state;
   final DeviceColumn col;
   final ServiceMonitor? monitor;
+
+  /// Set when the column can fold back to a strip: a small button beside the name.
+  final VoidCallback? onFold;
 
   @override
   Widget build(BuildContext context) {
@@ -302,12 +382,29 @@ class _Column extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(
-              col.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontWeight: FontWeight.w600, color: col.offline ? t.muted : t.text),
-            ),
+            Row(children: [
+              Expanded(
+                child: Text(
+                  col.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontWeight: FontWeight.w600, color: col.offline ? t.muted : t.text),
+                ),
+              ),
+              if (onFold != null)
+                Semantics(
+                  button: true,
+                  label: '折叠 ${col.name}',
+                  excludeSemantics: true,
+                  onTap: onFold,
+                  child: InkWell(
+                    key: Key('column-${id ?? 'local'}-fold'),
+                    borderRadius: BorderRadius.circular(t.r),
+                    onTap: onFold,
+                    child: Icon(Icons.chevron_left, size: 18, color: t.muted),
+                  ),
+                ),
+            ]),
             const SizedBox(height: 2),
             Row(children: [
               OsMark(col.os, key: Key('os-mark-${id ?? 'local'}')),
