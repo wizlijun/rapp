@@ -487,7 +487,7 @@ impl Worker {
         write_private(&file, &body).map_err(|_| FAILED)?;
         let res = self.wait_for(&file, app, &ticket, dir, &token, source.tty.as_deref()).await;
         // A window that is slow to start may still read it after the wait: that one is left for the sweep.
-        if !matches!(&res, Err(e) if e == NOT_STARTED || e == launch::START_TIMEOUT) {
+        if !matches!(&res, Err(e) if e == NOT_STARTED || e == launch::NO_ANSWER || e == launch::START_TIMEOUT) {
             let _ = std::fs::remove_file(&file);
         }
         res
@@ -506,12 +506,12 @@ impl Worker {
         let tty = source_tty.map(str::to_string);
         let started =
             tokio::task::spawn_blocking(move || launch::open(&app, &file, with.as_deref(), tty.as_deref())).await;
-        match started {
-            Ok(Ok(())) => {}
+        let cut_off = match started {
+            Ok(Ok(l)) => l == launch::Launched::CutOff,
             Ok(Err(e)) if e.to_string() == launch::NO_DESKTOP => return Err(launch::NO_DESKTOP.into()),
             Ok(Err(e)) if e.to_string() == launch::START_TIMEOUT => return Err(launch::START_TIMEOUT.into()),
             _ => return Err("could not open the terminal window".into()),
-        }
+        };
         let end = tokio::time::Instant::now() + OPEN_WAIT;
         loop {
             let found = local::scan(dir, token).await.into_iter().find(|s| s.ticket.as_deref() == Some(ticket));
@@ -519,7 +519,7 @@ impl Worker {
                 return Ok(pty_id(&s));
             }
             if tokio::time::Instant::now() >= end {
-                return Err(NOT_STARTED.into());
+                return Err(if cut_off { launch::NO_ANSWER } else { NOT_STARTED }.into());
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }

@@ -11,6 +11,18 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 pub const START_TIMEOUT: &str = "terminal launcher did not respond within 5 s";
+/// The Terminal tab script was cut off and no window came: macOS is most likely still asking, on that Mac,
+/// whether rApp may control Terminal or System Events.
+pub const NO_ANSWER: &str = "Terminal did not answer: on that Mac, allow rApp to control Terminal and System Events";
+
+/// How [`open`] went when it did not fail.
+#[derive(Debug, PartialEq)]
+pub enum Launched {
+    /// The launcher answered.
+    Yes,
+    /// The Terminal tab script was cut off: `file` may or may not run.
+    CutOff,
+}
 pub const NO_DESKTOP: &str = "no graphical desktop session is available";
 const LINUX_APPS: &[&str] = &["ghostty", "kitty", "alacritty", "foot", "wezterm", "gnome-terminal", "konsole", "xterm"];
 const DESKTOP_ENV: &[&str] = &["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "XDG_SESSION_ID", "XDG_SESSION_TYPE", "DBUS_SESSION_BUS_ADDRESS", "XAUTHORITY", "PATH"];
@@ -279,13 +291,15 @@ fn terminal_tab(file: &Path, source_tty: Option<&str>) -> TabOutcome {
 
 /// Open `file`; a test launcher is synchronous and has no platform dependencies.
 /// With `source_tty`, the new tab goes beside the tab on that tty.
-pub fn open(app: &str, file: &Path, launch_with: Option<&Path>, source_tty: Option<&str>) -> anyhow::Result<()> {
+pub fn open(app: &str, file: &Path, launch_with: Option<&Path>, source_tty: Option<&str>) -> anyhow::Result<Launched> {
     // A new terminal goes in a tab beside the ones rapp already opened; the first one gets a window.
     // Unsure leaves the holder's own start-up wait to tell whether it started.
-    if cfg!(target_os = "macos") && launch_with.is_none() && app == "Terminal"
-        && terminal_tab(file, source_tty) != TabOutcome::NotOpened
-    {
-        return Ok(());
+    if cfg!(target_os = "macos") && launch_with.is_none() && app == "Terminal" {
+        match terminal_tab(file, source_tty) {
+            TabOutcome::Opened => return Ok(Launched::Yes),
+            TabOutcome::Unsure => return Ok(Launched::CutOff),
+            TabOutcome::NotOpened => {}
+        }
     }
     let mut c = match launch_with {
         Some(p) => {
@@ -302,7 +316,7 @@ pub fn open(app: &str, file: &Path, launch_with: Option<&Path>, source_tty: Opti
     };
     if cfg!(target_os = "linux") && launch_with.is_none() {
         return match bounded_command(&mut c, Duration::from_secs(5)) {
-            Ok(_) => Ok(()),
+            Ok(_) => Ok(Launched::Yes),
             Err(CommandFailure::TimedOut) => bail!(START_TIMEOUT),
             Err(CommandFailure::Failed) => bail!("the program that opens the window failed"),
         };
@@ -310,7 +324,7 @@ pub fn open(app: &str, file: &Path, launch_with: Option<&Path>, source_tty: Opti
     let status = c.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
         .status().context("cannot start the program that opens the window")?;
     if !status.success() { bail!("the program that opens the window failed"); }
-    Ok(())
+    Ok(Launched::Yes)
 }
 
 #[cfg(test)]
