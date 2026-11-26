@@ -126,6 +126,13 @@ pub struct Status {
     /// The holder's window tty, like `/dev/ttys012`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tty: Option<String>,
+    /// The Unix second of the last input; absent when there was none.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub input: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// Why a socket gave no status.
@@ -446,6 +453,7 @@ mod tests {
                     cwd: None,
                     shell: None,
                     tty: None,
+                    input: 0,
                 };
                 w.write_all(format!("{}\n", serde_json::to_string(&st).unwrap()).as_bytes()).await.unwrap();
             }

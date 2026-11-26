@@ -218,6 +218,7 @@ impl<W: AsyncWrite + Unpin> Viewer<'_, W> {
             self.ended().await?;
             return Ok(false);
         }
+        self.shared.note_input();
         let now = std::time::Instant::now();
         self.shared.fit.lock().unwrap_or_else(|e| e.into_inner()).input(self.conn, now);
         Ok(true)
@@ -344,6 +345,9 @@ mod tests {
             title: Mutex::new(None),
             fg: Mutex::default(),
             fg_rev: watch::channel(0).0,
+            shell: Mutex::default(),
+            input_at: AtomicU64::new(0),
+            dirty: watch::channel(0).0,
             tty: None,
             end: tokio::sync::Notify::new(),
         };

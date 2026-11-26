@@ -110,6 +110,9 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
         title: Mutex::new(None),
         fg: Mutex::default(),
         fg_rev: watch::channel(0).0,
+        shell: Mutex::default(),
+        input_at: AtomicU64::new(0),
+        dirty: watch::channel(0).0,
         tty: tty_name(),
         end: tokio::sync::Notify::new(),
     });
@@ -178,7 +181,8 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
     std::thread::spawn(move || pump_output(from_pty, &win, &sh, drained_tx, Emu::feed, tracker, fresh_fg));
     let to_window = shared.input.clone();
     // It may stay blocked on a read when run ends; the process exits under it.
-    std::thread::spawn(move || pump_keyboard(to_window));
+    let kb = shared.clone();
+    std::thread::spawn(move || pump_keyboard(to_window, &kb));
     std::thread::spawn(move || pump_input(to_pty, input_rx));
     let (exit_tx, mut exited) = oneshot::channel();
     std::thread::spawn(move || {
@@ -258,6 +262,7 @@ fn probe_fg(shared: &Shared, pgrp: Option<i32>, child_pid: u32) {
     let changed = shared.fg.lock().unwrap_or_else(|e| e.into_inner()).update(pgrp, child_pid);
     if changed {
         shared.fg_rev.send_modify(|v| *v += 1);
+        shared.touch();
     }
 }
 
@@ -351,6 +356,7 @@ fn pump_output<W: Write>(
 ) {
     let mut b = vec![0u8; 64 * 1024];
     let mut titles = Some(super::title::Titles::default());
+    let mut shell_scan = super::ps::Scanner::default();
     loop {
         let n = match pty.read(&mut b) {
             Ok(0) => break,
@@ -385,6 +391,24 @@ fn pump_output<W: Write>(
                 Err(_) => titles = None,
             }
         }
+        // 7502 reports and prompts keep the shell state. The bytes still go to the window below.
+        shell_scan.feed(&b[..n], |e| match e {
+            super::ps::Event::Shell(r) => {
+                shared.shell.lock().unwrap_or_else(|e| e.into_inner()).apply(r);
+                shared.touch();
+            }
+            super::ps::Event::Prompt => {
+                let mut st = shared.shell.lock().unwrap_or_else(|e| e.into_inner());
+                let was = st.running.clone();
+                st.prompt();
+                let changed = st.running != was;
+                drop(st);
+                if changed {
+                    shared.touch();
+                }
+            }
+            _ => {}
+        });
         // A window that is gone is no reason to stop: viewers still see the screen.
         {
             let mut w = window.lock().unwrap_or_else(|e| e.into_inner());
@@ -436,7 +460,7 @@ fn guarded<T>(shared: &Shared, fresh: Option<(u16, u16)>, f: impl FnOnce(&mut Em
 }
 
 /// The window's keyboard, into the same queue viewers type into.
-fn pump_keyboard(input: mpsc::UnboundedSender<Vec<u8>>) {
+fn pump_keyboard(input: mpsc::UnboundedSender<Vec<u8>>, shared: &Shared) {
     let mut stdin = std::io::stdin();
     let mut b = [0u8; 4096];
     loop {
@@ -446,6 +470,7 @@ fn pump_keyboard(input: mpsc::UnboundedSender<Vec<u8>>) {
                 if input.send(b[..n].to_vec()).is_err() {
                     return;
                 }
+                shared.note_input();
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
             Err(_) => return,
@@ -500,6 +525,7 @@ async fn client(s: UnixStream, shared: Arc<Shared>, token: Arc<str>) {
                 Some(n) => {
                     *shared.meta.name.lock().unwrap_or_else(|e| e.into_inner()) = n;
                     shared.meta.named.store(true, Ordering::Relaxed);
+                    shared.touch();
                     serde_json::json!({ "ok": true })
                 }
                 None => serde_json::json!({ "error": "invalid name" }),
@@ -595,6 +621,9 @@ mod tests {
             title: Mutex::new(None),
             fg: Mutex::default(),
             fg_rev: watch::channel(0).0,
+            shell: Mutex::default(),
+            input_at: AtomicU64::new(0),
+            dirty: watch::channel(0).0,
             tty: None,
             end: tokio::sync::Notify::new(),
         };
@@ -686,6 +715,33 @@ mod tests {
         pump_output(pty, &window, &sh, tx, Emu::feed, Some(Tracker::default()), |_: &Shared| {});
         let ps = sh.status().ps.unwrap();
         assert_eq!((ps.state.as_str(), ps.kind.as_deref()), ("blocked", Some("permission")));
+    }
+
+    #[test]
+    fn a_7502_report_updates_shared_shell_and_bumps_dirty() {
+        let (sh, _rx) = shared_with_input(30, 4);
+        let window = Mutex::new(Window::new(Vec::new()));
+        let (tx, _d) = oneshot::channel();
+        let before = *sh.dirty.borrow();
+        let pty = Chunks(VecDeque::from([&b"\x1b]7502;state;cwd=L3RtcA==\x07\x1b]7502;run;bHM=\x07"[..]]));
+        pump_output(pty, &window, &sh, tx, Emu::feed, None, |_: &Shared| {});
+        let st = sh.shell.lock().unwrap().clone();
+        assert!(st.hooked);
+        assert_eq!((st.cwd.as_deref(), st.running.as_deref()), (Some("/tmp"), Some("ls")));
+        assert!(*sh.dirty.borrow() > before);
+        // A prompt ends the run.
+        let (tx, _d) = oneshot::channel();
+        pump_output(Chunks(VecDeque::from([&b"\x1b]133;A\x07"[..]])), &window, &sh, tx, Emu::feed, None, |_: &Shared| {});
+        assert_eq!(sh.shell.lock().unwrap().running, None);
+    }
+
+    #[test]
+    fn input_moves_input_at() {
+        let (sh, _rx) = shared_with_input(30, 4);
+        assert_eq!(sh.status().input, 0);
+        sh.note_input();
+        assert!(sh.input_at.load(Ordering::Relaxed) > 0);
+        assert!(sh.status().input > 0);
     }
 
     #[tokio::test]

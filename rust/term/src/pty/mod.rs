@@ -5,6 +5,7 @@ pub mod holder;
 pub mod launch;
 pub mod local;
 pub mod ps;
+pub mod shell;
 pub mod sweep;
 pub mod title;
 pub mod view;
@@ -12,6 +13,7 @@ pub mod wintitle;
 
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, watch};
 
 /// What a `run` is called and what it runs. Only the name changes, by a rename.
@@ -50,6 +52,12 @@ pub struct Shared {
     pub fg: Mutex<fg::Fg>,
     /// Bumped whenever `fg` changed. The title composer (a later task) subscribes with `fg_rev.subscribe()`.
     pub fg_rev: watch::Sender<u64>,
+    /// What the shell hook reported; kept by the output pump.
+    pub shell: Mutex<shell::ShellState>,
+    /// The Unix second of the last input (keyboard or viewer); 0 for never.
+    pub input_at: AtomicU64,
+    /// Bumped whenever anything a snapshot holds changes: shell state, name, foreground program or directory.
+    pub dirty: watch::Sender<u64>,
     /// The holder's own window tty (`ttyname(0)`, read once at start); none when not a tty.
     pub tty: Option<String>,
     /// Notified by the `end` op; the run loop then ends like a closed window.
@@ -63,6 +71,17 @@ impl Meta {
 }
 
 impl Shared {
+    /// Notes that input just went to the program.
+    pub fn note_input(&self) {
+        let t = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        self.input_at.store(t, Ordering::Relaxed);
+    }
+
+    /// Tells snapshot writers something changed.
+    pub fn touch(&self) {
+        self.dirty.send_modify(|v| *v += 1);
+    }
+
     pub fn status(&self) -> local::Status {
         let fg = self.fg.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let s = self.emu.lock().unwrap_or_else(|e| e.into_inner()).screen();
@@ -83,6 +102,7 @@ impl Shared {
             cwd: fg.cwd.as_ref().map(|p| p.to_string_lossy().into_owned()),
             shell: fg.probed.then_some(fg.shell),
             tty: self.tty.clone(),
+            input: self.input_at.load(Ordering::Relaxed),
         }
     }
 }

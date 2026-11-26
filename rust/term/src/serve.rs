@@ -1003,6 +1003,7 @@ mod tests {
             cwd: None,
             shell: None,
             tty: None,
+            input: 0,
         }
     }
 
