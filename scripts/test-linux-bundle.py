@@ -154,6 +154,8 @@ with tempfile.TemporaryDirectory(prefix='rapp-bundle-') as td, EchoServer(('127.
                         host = status['id']
                         ask({'cmd': 'add_host', 'id': f'{host}@127.0.0.1:{status["port"]}', 'password': 'test-only'})
                         apps = ask({'cmd': 'apps', 'id': host})
+                        expected_os = 'omarchy' if Path('/usr/share/omarchy/shell').exists() else 'linux'
+                        assert apps.get('os') == expected_os, apps
                         assert apps['capabilities']['applications'] is False, apps
                         assert any(a['app'] == 'desktop:' and a['displays'] for a in apps['apps']), apps
                         opened = ask({'cmd': 'open', 'id': host, 'app': 'desktop:', 'embed': True})
@@ -190,6 +192,26 @@ with tempfile.TemporaryDirectory(prefix='rapp-bundle-') as td, EchoServer(('127.
                             hub.kill()
                             hub.wait(timeout=5)
                 cli('hosts')
+                upd_status = json.loads(cli('update', 'status', '--json'))
+                assert upd_status['ok'] is True and upd_status['state'] == 'off' and upd_status['current'] == version, upd_status
+                upd_apply = subprocess.run([bundle / 'rapp', 'update', '--json'],
+                    env=env, text=True, capture_output=True, timeout=15)
+                assert upd_apply.returncode == 7, upd_apply
+                upd_err = json.loads(upd_apply.stdout)
+                assert upd_err['ok'] is False and upd_err['error'] == 'not_launchd', upd_err
+                assert upd_err['page'] == 'https://github.com/wizlijun/rapp/releases', upd_err
+                lbl0 = ipc({'cmd': 'labels'})
+                assert lbl0 == {'ok': True, 'rev': 0, 'labels': {}}, lbl0
+                lbl_set = ipc({'cmd': 'set_label', 'app': 'term:pty:linux1', 'title': 'Linux 后端', 'note': '仅存本机加密表'})
+                assert lbl_set == {'ok': True, 'rev': 1}, lbl_set
+                assert (local / 'labels.json').stat().st_mode & 0o777 == 0o600
+                lbl1 = ipc({'cmd': 'labels'})
+                assert lbl1['rev'] == 1 and lbl1['labels']['term:pty:linux1']['title'] == 'Linux 后端', lbl1
+                lbl_rst = ipc({'cmd': 'reset_label', 'app': 'term:pty:linux1'})
+                assert lbl_rst == {'ok': True, 'rev': 2}, lbl_rst
+                assert ipc({'cmd': 'labels'})['labels'] == {}
+                svc_log = (root / 'logs' / 'service.log').read_text()
+                assert 'Linux 后端' not in svc_log and '仅存本机加密表' not in svc_log, svc_log
                 cli('share', str(port), '--note', 'bundle smoke')
                 item = row()
                 number = item['local']

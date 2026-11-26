@@ -25,6 +25,20 @@ use tokio::sync::Notify;
 
 /// How long the worker has to give its (first) answer.
 const ASK_WAIT: Duration = Duration::from_secs(30);
+/// One restored terminal's share of a `restore` wait. Equal to the hub's `OPEN_TERM_WAIT` (rapp-hub link.rs): the
+/// service must never give up before the hub does.
+const RESTORE_WAIT_PER_KEY: Duration = Duration::from_secs(45);
+/// Empty `keys` means "all restorable", a count the service does not know: waits as for this many (serve keeps at
+/// most 50 snapshots), so the wait stays bounded.
+const RESTORE_ALL_KEYS: u32 = 50;
+
+/// How long a `restore` of `keys` waits for serve: per key, never less than for one, bounded for "all".
+pub(crate) fn restore_wait(keys: &[String]) -> Duration {
+    if keys.is_empty() {
+        return RESTORE_WAIT_PER_KEY * RESTORE_ALL_KEYS;
+    }
+    RESTORE_WAIT_PER_KEY * u32::try_from(keys.len()).unwrap_or(RESTORE_ALL_KEYS).min(RESTORE_ALL_KEYS)
+}
 
 /// Held around every read-modify-write of `term.json`.
 static EDIT: Mutex<()> = Mutex::new(());
@@ -45,12 +59,47 @@ pub fn config(state: &State) -> Result<TermConfig, String> {
 }
 
 /// `term.json`, when terminal sessions are on.
-fn allowed(state: &State) -> Result<TermConfig, String> {
-    let c = config(state)?;
+pub(crate) fn allowed(state: &State) -> Result<TermConfig, String> {
+    allowed_quiet(state).map_err(|(text, why)| {
+        if let Some(why) = why {
+            state.log.msg(Lvl::Warn, why);
+        }
+        text.to_string()
+    })
+}
+
+/// Whether terminal sessions can be used now, without a log line: the load reply polls it (a broken `term.json`
+/// is logged by the terminal requests themselves).
+pub(crate) fn usable(state: &State) -> bool {
+    allowed_quiet(state).is_ok()
+}
+
+/// `allowed` with nothing logged: `Err((reply text, why it is invalid))`.
+fn allowed_quiet(state: &State) -> Result<TermConfig, (&'static str, Option<String>)> {
+    let c = rapp_term::config::load(&path(state)).map_err(|e| (INVALID, Some(e)))?;
     if !c.allow {
-        return Err(OFF.into());
+        return Err((OFF, None));
     }
     Ok(c)
+}
+
+/// A request from the local CLI (IPC only: `saved` carries cwd and cmd, which never go to a peer or the log).
+/// Like [`answer`] but an error keeps the other fields (`restore`'s `ids` opened so far).
+pub(crate) async fn local(state: &Arc<State>, req: &Value, wait: Duration) -> Value {
+    if let Err(e) = allowed(state) {
+        return err(&e);
+    }
+    match ask_for(state, req, wait).await {
+        Ok(mut v) => match v["error"].as_str().map(String::from) {
+            Some(e) => {
+                v["error"] = json!(e);
+                v["ok"] = json!(false);
+                v
+            }
+            None => ok(v),
+        },
+        Err(e) => err(&format!("{e:#}")),
+    }
 }
 
 /// One terminal-session request from B, logged as one `request` line.
@@ -71,6 +120,11 @@ pub async fn request<S: AsyncRead + AsyncWrite + Unpin + Send>(
                 carry_label(state, label_from.as_deref(), &r);
                 r
             }
+            Op::RestoreTerms { keys, app } => {
+                let wait = restore_wait(&keys);
+                answer(ask_for(state, &json!({"op": "restore", "keys": keys, "app": app}), wait).await)
+            }
+            Op::ForgetTerms { keys } => answer(ask(state, &json!({"op": "forget", "keys": keys})).await),
             Op::EndTerm { term } => answer(ask(state, &json!({"op": "end", "term": term})).await),
             Op::RenameTerm { term, name } => answer(ask(state, &json!({"op": "rename", "term": term, "name": name})).await),
             _ => err("unknown op"),
@@ -94,7 +148,15 @@ fn log_fields(op: &Op) -> Value {
     match op {
         Op::ListTerms => json!({"op": "list_terms"}),
         Op::WatchTerms => json!({"op": "watch_terms"}),
-        Op::OpenTerm { app, from, .. } => json!({"op": "open_term", "app": app, "from": from.is_some()}),
+        // `from` is a term id unless it is serve's "last": only its kind is logged.
+        Op::OpenTerm { app, from, .. } => match from.as_deref() {
+            None => json!({"op": "open_term", "app": app}),
+            Some("last") => json!({"op": "open_term", "app": app, "from": "last"}),
+            Some(_) => json!({"op": "open_term", "app": app, "from": "term"}),
+        },
+        // Only how many: a key names a saved terminal.
+        Op::RestoreTerms { keys, .. } => json!({"op": "restore_terms", "keys": keys.len()}),
+        Op::ForgetTerms { keys } => json!({"op": "forget_terms", "keys": keys.len()}),
         Op::EndTerm { .. } => json!({"op": "end_term"}),
         Op::RenameTerm { .. } => json!({"op": "rename_term"}),
         _ => json!({}),
@@ -107,11 +169,18 @@ async fn finish<S: AsyncWrite + Unpin>(s: &mut S, v: &Value) -> Result<()> {
     Ok(())
 }
 
-/// A worker line as a reply to B: one carrying `error` is that error, anything else is passed on with `ok` added.
+/// A worker line as a reply to B: one carrying `error` is that error (with the `ids` of a restore that stopped part
+/// way, so B can show the terminals that did open), anything else is passed on with `ok` added.
 fn answer(r: Result<Value>) -> Value {
     match r {
         Ok(v) => match v["error"].as_str() {
-            Some(e) => err(e),
+            Some(e) => {
+                let mut out = err(e);
+                if let Some(ids) = v.get("ids") {
+                    out["ids"] = ids.clone();
+                }
+                out
+            }
             None => ok(v),
         },
         Err(e) => err(&format!("{e:#}")),
@@ -135,13 +204,13 @@ async fn next(w: &mut WorkerConn) -> Result<Option<Value>> {
 }
 
 /// Connects with `req` and waits for the worker's first line.
-async fn first(port: u16, token: &str, req: &Value) -> Result<(WorkerConn, Value)> {
+async fn first(port: u16, token: &str, req: &Value, wait: Duration) -> Result<(WorkerConn, Value)> {
     let asked = async {
         let mut w = connect(port, token, req).await?;
         let v = next(&mut w).await?.ok_or_else(|| anyhow!("the terminal worker closed"))?;
         Ok((w, v))
     };
-    tokio::time::timeout(ASK_WAIT, asked).await.map_err(|_| anyhow!("the terminal worker did not answer"))?
+    tokio::time::timeout(wait, asked).await.map_err(|_| anyhow!("the terminal worker did not answer"))?
 }
 
 /// One session counted on the worker (`workers::start_session` succeeded), ended when this is dropped: however
@@ -162,9 +231,14 @@ async fn start(state: &Arc<State>) -> Result<(u16, String, Counted<'_>)> {
 }
 
 /// A one-line request (`list`, `new`) to the worker.
-async fn ask(state: &Arc<State>, req: &Value) -> Result<Value> {
+pub(crate) async fn ask(state: &Arc<State>, req: &Value) -> Result<Value> {
+    ask_for(state, req, ASK_WAIT).await
+}
+
+/// [`ask`] waiting up to `wait` for the answer.
+pub(crate) async fn ask_for(state: &Arc<State>, req: &Value, wait: Duration) -> Result<Value> {
     let (port, token, _counted) = start(state).await?;
-    first(port, &token, req).await.map(|(_, v)| v)
+    first(port, &token, req, wait).await.map(|(_, v)| v)
 }
 
 /// The outbox's own watch on the worker (spec §7.3): the worker's session count stays up, and the
@@ -181,7 +255,7 @@ pub(crate) struct LocalWatch<'a> {
 pub(crate) async fn watch_local(state: &Arc<State>) -> Result<LocalWatch<'_>> {
     allowed(state).map_err(|e| anyhow!(e))?;
     let (port, token, counted) = start(state).await?;
-    let (conn, first) = first(port, &token, &json!({"op": "watch"})).await?;
+    let (conn, first) = first(port, &token, &json!({"op": "watch"}), ASK_WAIT).await?;
     Ok(LocalWatch { conn, first: Some(first), _counted: counted })
 }
 
@@ -229,7 +303,7 @@ async fn follow<S: AsyncRead + AsyncWrite + Unpin + Send>(
     port: u16,
     token: &str,
 ) -> Result<()> {
-    let (mut w, line) = match first(port, token, &json!({"op": "watch"})).await {
+    let (mut w, line) = match first(port, token, &json!({"op": "watch"}), ASK_WAIT).await {
         Ok((w, v)) => (Some(w), answer(Ok(v))),
         Err(e) => (None, answer(Err(e))),
     };
@@ -454,9 +528,49 @@ mod tests {
     }
 
     #[test]
+    fn restore_wait_scales_with_keys_and_is_bounded() {
+        let k = |n: usize| vec!["k".to_string(); n];
+        assert_eq!(restore_wait(&k(1)), RESTORE_WAIT_PER_KEY);
+        assert_eq!(restore_wait(&k(3)), RESTORE_WAIT_PER_KEY * 3);
+        assert!(restore_wait(&k(3)) > ASK_WAIT);
+        let all = restore_wait(&[]);
+        assert_eq!(all, RESTORE_WAIT_PER_KEY * RESTORE_ALL_KEYS);
+        assert_eq!(restore_wait(&k(500)), all);
+    }
+
+    #[test]
     fn open_term_logs_only_the_app() {
         let op = Op::OpenTerm { shell: Some("zsh".into()), from: None, app: "iTerm".into(), label_from: None };
-        assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm","from":false}));
+        assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm"}));
+    }
+
+    #[test]
+    fn open_term_logs_from_kind() {
+        let op = Op::OpenTerm { shell: None, from: Some("last".into()), app: "iTerm".into(), label_from: None };
+        assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm","from":"last"}));
+        let op = Op::OpenTerm { shell: None, from: Some("term:pty:secret".into()), app: "iTerm".into(), label_from: None };
+        let f = log_fields(&op);
+        assert_eq!(f, json!({"op":"open_term","app":"iTerm","from":"term"}));
+        assert!(!f.to_string().contains("secret"));
+    }
+
+    #[test]
+    fn a_partial_restore_keeps_the_ids_that_opened() {
+        let v = answer(Ok(json!({"error": "no shell", "ids": ["term:pty:a"]})));
+        assert_eq!(v, json!({"ok": false, "error": "no shell", "ids": ["term:pty:a"]}));
+        assert_eq!(answer(Ok(json!({"error": "x"}))), json!({"ok": false, "error": "x"}));
+    }
+
+    #[test]
+    fn restore_terms_forwarded_and_logged_without_keys_values() {
+        let op = Op::RestoreTerms { keys: vec!["key-secret".into()], app: Some("Terminal".into()) };
+        let f = log_fields(&op);
+        assert_eq!(f, json!({"op":"restore_terms","keys":1}));
+        assert!(!f.to_string().contains("secret"));
+        let op = Op::ForgetTerms { keys: vec!["a-secret".into(), "b".into()] };
+        let f = log_fields(&op);
+        assert_eq!(f, json!({"op":"forget_terms","keys":2}));
+        assert!(!f.to_string().contains("secret"));
     }
 
     #[test]
@@ -465,14 +579,6 @@ mod tests {
         let f = log_fields(&op);
         assert_eq!(f, json!({"op":"end_term"}));
         assert!(!f.to_string().contains("secret"));
-    }
-
-    #[test]
-    fn open_term_log_from_is_bool() {
-        let op = Op::OpenTerm { shell: None, from: Some("term:pty:secret".into()), app: "iTerm".into(), label_from: None };
-        assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm","from":true}));
-        let op = Op::OpenTerm { shell: None, from: None, app: "iTerm".into(), label_from: None };
-        assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm","from":false}));
     }
 
     #[test]

@@ -4,6 +4,7 @@
 
 mod args;
 mod ipc;
+mod load;
 mod out;
 mod say;
 mod update;
@@ -51,7 +52,7 @@ async fn main() {
         Ok(c) => c,
         Err(line) => {
             // An agent asking for JSON gets its usage error as JSON too.
-            if argv.first().map(String::as_str) == Some("update") && argv.iter().any(|a| a == "--json") {
+            if matches!(argv.first().map(String::as_str), Some("update" | "load")) && argv.iter().any(|a| a == "--json") {
                 out::Out { json: true }.fail("usage", &line, None);
             }
             eprintln!("{line}\n{}", args::USAGE);
@@ -126,8 +127,49 @@ async fn main() {
             print!("{}", say::state(&r));
         }
         Cmd::Pipe { to, port } => pipe(to, port).await,
+        Cmd::Load { .. } | Cmd::LoadPick { .. } => load::run(cmd).await,
+        Cmd::TermRestore { list, forget, picks } => term_restore(list, forget, picks).await,
         Cmd::Update { what, yes, timeout, json } => update::run(what, yes, timeout, out::Out { json }).await,
     }
+}
+
+/// `rapp term restore`: always sends explicit keys, resolved from one `term_saved` call, so what is restored is
+/// what `--list` shows.
+async fn term_restore(list: bool, forget: bool, picks: Vec<String>) {
+    if forget {
+        let (r, ..) = call(json!({"cmd":"term_forget"})).await;
+        if r["ok"] != true {
+            fail(&format!("没有成功：{}", say::plain(error_of(&r))));
+        }
+        println!("已清掉 {} 个", r["forgot"].as_u64().unwrap_or(0));
+        return;
+    }
+    let (saved, ..) = call(json!({"cmd":"term_saved"})).await;
+    if saved["ok"] != true {
+        fail(&format!("没有成功：{}", say::plain(error_of(&saved))));
+    }
+    if list {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        print!("{}", say::saved_table(&saved, now));
+        return;
+    }
+    if saved["saved"].as_array().is_none_or(Vec::is_empty) {
+        println!("没有可以恢复的终端");
+        return;
+    }
+    let keys = match say::pick_keys(&saved, &picks) {
+        Ok(k) => k,
+        Err(line) => {
+            eprintln!("{line}");
+            std::process::exit(2);
+        }
+    };
+    let (r, ..) = call(json!({"cmd":"term_restore","keys":keys})).await;
+    let (line, failed) = say::restored(&r);
+    if failed {
+        fail(&line);
+    }
+    println!("{line}");
 }
 
 /// Stdin to the port and the port to stdout; either end finishing is passed on as a half-close.

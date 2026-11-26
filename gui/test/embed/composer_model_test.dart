@@ -475,6 +475,23 @@ void main() {
     ]);
   });
 
+  test('adoptFrom keeps the phrase and command flags of the rows it rebuilds', () {
+    m.submitText('/clear', command: true);
+    m.done(0, 'boom'); // a failed command
+    m.submitText('继续', phrase: true); // in flight
+    final olds = [...m.failed, m.inFlight!];
+    final fresh = ComposerModel();
+    addTearDown(fresh.dispose);
+    final made = fresh.adoptFrom(m);
+    expect(made[olds[0]]!.command, isTrue);
+    expect(made[olds[1]]!.phrase, isTrue);
+    expect(made[olds[1]]!.command, isFalse);
+    final seen = <Outgoing>[];
+    fresh.onSubmitted = seen.add;
+    fresh.retry(fresh.failed.first);
+    expect(seen.single.command, isTrue, reason: 'a retried command stays a command, so it is not recorded');
+  });
+
   test('adoptFrom without an editor takes the draft', () async {
     await m.detach(ed);
     m.draft = 'd';

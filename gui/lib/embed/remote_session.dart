@@ -158,7 +158,7 @@ class RemoteSession extends ChangeNotifier {
   /// 「直接回车且隐藏」: then the Return goes and the panel hides (the text stays, W6; the picture takes the keys back).
   void _allSent() {
     // A 常用语 always ends with Return and leaves the panel and the keyboard as they were (phrases spec §4).
-    if (composer.lastDone?.phrase == true) {
+    if (composer.lastDone?.phrase == true || composer.lastDone?.command == true) {
       onReturn?.call();
       return;
     }

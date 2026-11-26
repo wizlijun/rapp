@@ -11,6 +11,7 @@ mod forward;
 pub mod forward_log;
 mod ipc;
 mod labels;
+pub mod load;
 mod maps;
 mod numbers;
 mod outbox;
@@ -43,6 +44,7 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 
 pub use data::{DataOpts, SyncStatus};
+pub use load::LoadOpts;
 pub use rapp_update::{Runner, SystemRunner};
 
 pub const WORKER_IDLE: Duration = Duration::from_secs(60);
@@ -86,6 +88,8 @@ pub struct Opts {
     /// service). A test whose devices share one machine turns it off on a sharer, so that a
     /// visitor can take a number only when the sharer is not listening on it.
     pub own_ports: bool,
+    /// None: no load sampling (`LoadOpts::system()` in the real service).
+    pub load: Option<LoadOpts>,
 }
 
 /// Where the running app is and the updater's timings (online-update plan Task 4).
@@ -222,6 +226,7 @@ impl Service {
             pacer: pace::Pacer::new(opts.pacing),
             outbound: rapp_conn::dial::Outbound::new(client_ep, identity.clone(), name),
             activity: Default::default(),
+            load: opts.load.is_some().then(|| Arc::new(load::Load::new())),
         };
         let id = state.cfg.lock().unwrap().id.clone();
         let version = env!("CARGO_PKG_VERSION");
@@ -261,6 +266,9 @@ impl Service {
                 }
             }
             tasks.push(data::spawn(data, name, state.log.clone()));
+        }
+        if let Some(load) = opts.load {
+            tasks.push(tokio::spawn(load::task::run(state.clone(), load)));
         }
         Ok(Service { port, ipc_port, state, tasks, stopped: Default::default() })
     }

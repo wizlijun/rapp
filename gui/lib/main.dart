@@ -120,6 +120,7 @@ Future<void> main(List<String> args) async {
       profiles: AppProfileStore.load(data.sharedDir, builtin),
       stateRules: await StateRulesLibrary.load(data, builtinRules),
       builtinStateRules: builtinRules,
+      monitor: monitor,
       log: stderr.writeln);
   mainState = state;
   // Native window visibility: macOS occlusion, Linux mapping/minimization.

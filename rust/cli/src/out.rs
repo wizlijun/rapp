@@ -9,7 +9,7 @@ pub fn exit_code(error: &str) -> i32 {
     match error {
         "usage" => 2,
         "not_running" => 3,
-        "offline" => 4,
+        "offline" | "no_device" => 4,
         "timeout" => 5,
         "needs_confirm" => 6,
         "needs_admin" | "not_launchd" | "needs_reinstall" => 7,
@@ -79,6 +79,7 @@ mod tests {
             ("usage", 2),
             ("not_running", 3),
             ("offline", 4),
+            ("no_device", 4),
             ("timeout", 5),
             ("needs_confirm", 6),
             ("needs_admin", 7),

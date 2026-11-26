@@ -16,6 +16,8 @@ import 'package:rapp/paths.dart';
 import 'package:rapp/history/draft_store.dart';
 import 'package:rapp/history/input_recorder.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/load_model.dart';
+import 'package:rapp/service_client.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/lifecycle.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -111,7 +113,7 @@ void main() {
   test('addPhrase appends once and saves; a repeat or a blank is refused', () {
     Directory('${tmp.path}/local').createSync(recursive: true);
     File('${tmp.path}/local/service.json').writeAsStringSync('{"id":"dev1"}');
-    s.setPhrases(const [Phrase('继续')]);
+    s.setStripItems(const [Phrase('继续')]);
     expect(s.addPhrase('跑一下测试'), isTrue);
     expect(s.addPhrase('继续'), isFalse);
     expect(s.addPhrase('  '), isFalse);
@@ -178,6 +180,33 @@ void main() {
     expect(s.current!.lamp, Lamp.active);
     expect(s.hint, '已打开 Safari @ mini');
     expect(s.sessionCount, 1);
+  });
+
+  test('termRowOfSid / stripToolOf: a terminal in front of claude, back to its shell, and a plain app', () async {
+    final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: FakeSessionPort(), termPort: FakeTermSessionPort());
+    addTearDown(st.dispose);
+    t.onSend = (m) {
+      if (m['cmd'] == 'open') t.emit({...opened(m['app'] == 'term:pty:w' ? 1 : m['app'] == 'term:tmux:x' ? 3 : 2, '111', m['app'] as String), 'port': 5011, 'token': 'tk', 'req': m['req']});
+    };
+    await st.openOrSwitch('111', 'term:pty:w', 'w');
+    await st.openOrSwitch('111', 'com.apple.Safari', 'Safari');
+    await st.openOrSwitch('111', 'term:tmux:x', 'x');
+    await pump();
+    final tsid = st.recordFor('111/term:pty:w')!.sid!, asid = st.recordFor('111/com.apple.Safari')!.sid!;
+    TermRow row({required bool shell}) =>
+        TermRow('term:pty:w', 'w', 'zsh', null, 1, 1, 0, false, false, fg: 'claude', shell: shell);
+    final tmux = TermRow('term:tmux:x', 'x', 'zsh', null, 1, 1, 0, false, false, fg: 'claude', shell: false);
+    hub.termLists['111'] = TermList('111', terms: [row(shell: false), tmux]);
+    expect(st.termRowOfSid(tsid)?.id, 'term:pty:w');
+    expect(st.stripToolOf(RemoteSession(tsid, 'w'))?.id, 'claude-code');
+    hub.termLists['111'] = TermList('111', terms: [row(shell: true)]);
+    expect(st.stripToolOf(RemoteSession(tsid, 'w')), isNull);
+    expect(st.termRowOfSid(asid), isNull);
+    expect(st.stripToolOf(RemoteSession(asid, 'Safari')), isNull);
+    hub.termLists['111'] = TermList('111', terms: [row(shell: false), tmux]);
+    final xsid = st.recordFor('111/term:tmux:x')!.sid!;
+    expect(st.stripToolOf(RemoteSession(xsid, 'x')), isNull, reason: 'tmux gets no strip commands');
+    expect(st.termRowOfSid(99), isNull);
   });
 
   test('opening an open session focuses instead', () async {
@@ -5904,7 +5933,7 @@ void main() {
       await s.openOrSwitch('111', 'terms:', '终端');
       await pump();
       expect(t.sent.firstWhere((m) => m['cmd'] == 'open_term'),
-          {'cmd': 'open_term', 'id': '111', 'shell': '/bin/zsh', 'app': 'iTerm', 'req': anything});
+          {'cmd': 'open_term', 'id': '111', 'shell': '/bin/zsh', 'app': 'iTerm', 'from': 'last', 'req': anything});
     });
 
     test('opening terms: in text mode opens the latest text terminal', () async {
@@ -6117,6 +6146,176 @@ void main() {
       expect(s.needs.map((n) => n.target), ['term:pty:a', 'term:pty:b']);
     });
   });
+
+  group('resource needs', () {
+    const diskText = '磁盘约 40 分钟后写满（/，剩 6%，含 ~/git/rapp）';
+    Map<String, dynamic> loadEv(String id, List<(String, String, String)> warnings, {int headroom = 50, double cpu = 10}) => {
+          'event': 'load', 'id': id, 'at': 1764100000, 'headroom': headroom, 'tightest': 'disk', 'term': true,
+          'items': {'cpu': {'pct': cpu}},
+          'disks': [
+            {
+              'mount': '/', 'total': 100 * 1000000000, 'avail': 6 * 1000000000, 'level': 'warn',
+              'paths': [{'kind': 'term', 'path': '/Users/x/git/rapp', 'term': 'term:pty:a'}],
+            },
+          ],
+          'warnings': [for (final (item, level, text) in warnings) {'item': item, 'level': level, 'text': text}],
+          'history': [],
+        };
+    Future<void> emitLoad(String id, List<(String, String, String)> warnings, {int headroom = 50}) async {
+      t.emit(loadEv(id, warnings, headroom: headroom));
+      await pump();
+    }
+
+    test('resource_need_rows', () async {
+      await emitLoad('111', [('disk:/', 'warn', diskText)]);
+      final n = s.needs.single;
+      expect((n.kind, n.target, n.device, n.title), (NeedKind.resource, '111\ndisk:/', '111', 'disk:/'));
+      expect(n.text, 'mini $diskText');
+      // The row goes to the device's panel.
+      s.goToNeed(n);
+      expect((s.panel, s.deviceTab), (PanelTab.devices, '111'));
+    });
+
+    test('snooze_hides_until_danger', () async {
+      var now = DateTime(2026, 11, 26, 10);
+      final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), clock: () => now);
+      addTearDown(st.dispose);
+      await emitLoad('111', [('disk:/', 'warn', diskText)]);
+      expect(st.needs.where((n) => n.kind == NeedKind.resource), hasLength(1));
+      st.snoozeLoad('111', 'disk:/', LoadLevel.warn);
+      expect(st.needs.where((n) => n.kind == NeedKind.resource), isEmpty);
+      expect(st.prefs.loadSnooze.keys, ['111\ndisk:/']);
+      await emitLoad('111', [('disk:/', 'danger', '磁盘只剩 0.8 GB（/，剩 1%）')]);
+      expect(st.needs.single.text, 'mini 磁盘只剩 0.8 GB（/，剩 1%）');
+      await emitLoad('111', [('disk:/', 'warn', diskText)]);
+      expect(st.needs.where((n) => n.kind == NeedKind.resource), isEmpty);
+      // The device keeps sending (a load with no line for 20 s is not shown at all).
+      now = now.add(const Duration(minutes: 59));
+      await emitLoad('111', [('disk:/', 'warn', diskText)]);
+      expect(st.needs.where((n) => n.kind == NeedKind.resource), isEmpty);
+      now = now.add(const Duration(minutes: 1));
+      await emitLoad('111', [('disk:/', 'warn', diskText)]);
+      expect(st.needs.single.text, 'mini $diskText');
+    });
+
+    test('hint_on_rise_only', () async {
+      // The first load, already in warn, says nothing.
+      await emitLoad('111', [('cpu', 'warn', 'CPU 持续 90% 以上')]);
+      expect(s.hint, '');
+      await emitLoad('111', []);
+      expect(s.hint, '');
+      await emitLoad('111', [('cpu', 'warn', 'CPU 持续 90% 以上')]);
+      expect(s.hint, 'mini CPU 持续 90% 以上');
+      s.hint = '';
+      await emitLoad('111', [('cpu', 'warn', 'CPU 持续 90% 以上')]);
+      expect(s.hint, '');
+      await emitLoad('111', [('cpu', 'danger', '过热，系统正在降频')]);
+      expect(s.hint, 'mini 过热，系统正在降频');
+      s.hint = '';
+      // normal → danger rises too; a snoozed item does not hint at the level it was snoozed at.
+      await emitLoad('111', [('cpu', 'danger', '过热，系统正在降频'), ('mem', 'danger', '内存只剩 3%')]);
+      expect(s.hint, 'mini 内存只剩 3%');
+      s.hint = '';
+      s.snoozeLoad('111', 'gpu', LoadLevel.warn);
+      await emitLoad('111', [('gpu', 'warn', 'GPU 持续 90% 以上')]);
+      expect(s.hint, '');
+    });
+
+    test('offline_device_has_no_resource_rows', () async {
+      await emitLoad('111', [('disk:/', 'warn', diskText)]);
+      expect(s.needs.where((n) => n.kind == NeedKind.resource), hasLength(1));
+      t.emit({'event': 'presence', 'id': '111', 'online': true});
+      t.emit({'event': 'presence', 'id': '111', 'online': false});
+      await pump();
+      // The hub has not said `gone` yet: its last numbers are still there, but an offline device has no rows.
+      expect(hub.loads.containsKey('111'), isTrue);
+      expect(s.needs.where((n) => n.kind == NeedKind.resource), isEmpty);
+    });
+
+    test('load_error_hides_rows: a stream error takes the rows with it', () async {
+      await emitLoad('111', [('disk:/', 'warn', diskText)]);
+      expect(s.needs.where((n) => n.kind == NeedKind.resource), hasLength(1));
+      t.emit({'event': 'load', 'id': '111', 'error': 'connection lost'});
+      await pump();
+      expect(s.deviceLoads, isEmpty);
+      expect(s.needs.where((n) => n.kind == NeedKind.resource), isEmpty);
+    });
+
+    test('stale_load_is_absent: no line for more than 20 s, by the receipt clock', () async {
+      var now = DateTime(2026, 11, 26, 10);
+      final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), clock: () => now);
+      addTearDown(st.dispose);
+      // Two devices, so 到 X 上新建终端 has somewhere to go.
+      await emitLoad('222', [], headroom: 90);
+      await emitLoad('111', [('cpu', 'warn', 'CPU 持续 90% 以上')]);
+      expect(st.needs.where((n) => n.kind == NeedKind.resource), hasLength(1));
+      expect(st.newTermElsewhere('111'), '222');
+      now = now.add(const Duration(seconds: 20));
+      expect(st.deviceLoads.keys.toSet(), {'111', '222'}, reason: '20 s is not more than 20 s');
+      now = now.add(const Duration(seconds: 1));
+      // The snapshot's own `at` is the device's clock; it is not looked at.
+      expect(st.deviceLoads, isEmpty);
+      expect(st.needs.where((n) => n.kind == NeedKind.resource), isEmpty);
+      expect(st.newTermElsewhere('111'), isNull);
+      expect(st.columnLoad('111'), isNull);
+      // A new line brings it back.
+      await emitLoad('111', [('cpu', 'warn', 'CPU 持续 90% 以上')]);
+      expect(st.deviceLoads.keys, ['111']);
+      expect(st.needs.where((n) => n.kind == NeedKind.resource), hasLength(1));
+    });
+
+    test('stale_then_back_is_a_first_load: no rise hint', () async {
+      var now = DateTime(2026, 11, 26, 10);
+      final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), clock: () => now);
+      addTearDown(st.dispose);
+      await emitLoad('111', []);
+      now = now.add(const Duration(seconds: 30));
+      // Back in warn after the gap: it says nothing, as the first load after a device appears does.
+      await emitLoad('111', [('cpu', 'warn', 'CPU 持续 90% 以上')]);
+      expect(st.hint, '');
+      // A rise after that is news again.
+      await emitLoad('111', [('cpu', 'danger', '过热，系统正在降频')]);
+      expect(st.hint, 'mini 过热，系统正在降频');
+    });
+
+    test('local_load_goes_stale the same way', () async {
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      var now = DateTime(2026, 11, 26, 10);
+      final m = _PushMonitor();
+      addTearDown(m.dispose);
+      final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), monitor: m, clock: () => now);
+      addTearDown(st.dispose);
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      m.status = const ServiceStatus(id: 'me', name: 'MacBook');
+      final first = Map<String, dynamic>.from(loadEv('me', [('mem', 'warn', '内存只剩 8%')]))..remove('event');
+      m.load = DeviceLoad.fromJson(first);
+      m.push();
+      expect(st.needs.single.device, 'me');
+      now = now.add(const Duration(seconds: 21));
+      expect(st.needs, isEmpty);
+      expect(st.columnLoad(null), isNull);
+      m.load = m.load!.next({...first, 'point': {'at': 1764100005}});
+      m.push();
+      expect(st.needs.single.device, 'me');
+    });
+
+    test('the local device has rows on macOS, none on iOS', () async {
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final m = _PushMonitor();
+      addTearDown(m.dispose);
+      final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), monitor: m);
+      addTearDown(st.dispose);
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      m.status = const ServiceStatus(id: 'me', name: 'MacBook');
+      final first = Map<String, dynamic>.from(loadEv('me', [('mem', 'warn', '内存只剩 8%')]))..remove('event');
+      m.load = DeviceLoad.fromJson(first);
+      m.push();
+      final n = st.needs.single;
+      expect((n.kind, n.target, n.device, n.text), (NeedKind.resource, 'me\nmem', 'me', 'MacBook 内存只剩 8%'));
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      expect(st.needs, isEmpty);
+    });
+  });
 }
 
 /// A port whose `start` waits for the test to release it (null: ok, else the error thrown).
@@ -6159,4 +6358,10 @@ class _DelayedTakeEditor extends FakeEditor {
     await gate.future;
     return super.take();
   }
+}
+
+/// A service monitor the test fills by hand.
+class _PushMonitor extends ServiceMonitor {
+  _PushMonitor() : super(readToken: () async => null);
+  void push() => notifyListeners();
 }

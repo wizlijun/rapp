@@ -11,6 +11,7 @@ mod netmon;
 mod ports;
 mod presence;
 mod session;
+mod load;
 mod terms;
 mod upgrade;
 mod watch;
@@ -112,6 +113,8 @@ pub(crate) struct Hub {
     terms: terms::Watches,
     /// host id → its `watch_labels`.
     labels: terms::Watches,
+    /// host id → its `watch_load`.
+    load: load::Watches,
     /// The network monitor's level and last event (`netmon`).
     net: netmon::NetState,
     /// Offline hosts a session waits for (`watch`).
@@ -158,6 +161,7 @@ where
         presence_paused: AtomicBool::new(false),
         terms: Default::default(),
         labels: Default::default(),
+        load: Default::default(),
         net: Default::default(),
         watches: Default::default(),
         ports: Default::default(),
@@ -440,7 +444,8 @@ impl Hub {
                 self.net_changed();
                 return Ok(None);
             }
-            Some(c @ ("terms" | "open_term" | "rename_term" | "end_term")) => {
+            Some("load") => load::command(self, v).await?,
+            Some(c @ ("terms" | "open_term" | "rename_term" | "end_term" | "restore_terms" | "forget_terms")) => {
                 terms::command(self, c, v).await?
             }
             Some(c @ ("set_label" | "reset_label")) => labels::command(self, c, v).await?,

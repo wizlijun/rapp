@@ -107,6 +107,13 @@ async fn open_and_rename_go_through_the_hub() {
     assert_eq!(hub.call(rename).await, json!({"event":"term_renamed","id":a.id,"term":"term:pty:k","req":5}));
     let end = json!({"cmd":"end_term","id":a.id,"term":"term:pty:k","req":6});
     assert_eq!(hub.call(end).await, json!({"event":"term_ended","id":a.id,"term":"term:pty:k","req":6}));
+    let restore = json!({"cmd":"restore_terms","id":a.id,"keys":["k"],"app":"Terminal","req":7});
+    assert_eq!(
+        hub.call(restore).await,
+        json!({"event":"terms_restored","id":a.id,"terms":["term:pty:r1","term:pty:r2"],"req":7})
+    );
+    let forget = json!({"cmd":"forget_terms","id":a.id,"keys":["k"],"req":8});
+    assert_eq!(hub.call(forget).await, json!({"event":"terms_forgotten","id":a.id,"req":8}));
     let log = term_log(a.bins.path());
     assert!(log.contains(r#""shell":"zsh""#) && log.contains(r#""name":"n""#), "{log}");
     hub.finish().await;

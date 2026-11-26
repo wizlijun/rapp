@@ -22,6 +22,11 @@ import 'package:rapp/ui/prefs.dart';
 import '../fakes.dart';
 import '../ui/helpers.dart';
 
+const _oldTen = [
+  Phrase('继续'), Phrase('确认'), Phrase('听你的'), Phrase('按你推荐的来'), Phrase('进度'),
+  Phrase('全部做完，中途不用问我'), Phrase('先出方案，别改代码'), Phrase('跑一下测试'), Phrase('提交并推送'), Phrase('总结一下改了什么'),
+];
+
 void main() {
   late FakeTransport t;
   late HubClient hub;
@@ -41,7 +46,7 @@ void main() {
     hub = HubClient(t);
     port = FakeSessionPort();
     term = FakeTermSessionPort();
-    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, termPort: term);
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(phrases: _oldTen), port: port, termPort: term);
     term.seed(2);
     app = RemoteSession(1, 'Safari');
     tsess = RemoteSession(2, 'term');
@@ -639,9 +644,9 @@ void main() {
     });
 
     iosTest('no phrases: no strip', (tester) async {
-      s.setPhrases(const []);
+      s.setStripItems(const []);
       expect(phraseStripShown(s, tsess), isFalse);
-      s.setPhrases(defaultPhrases);
+      s.setStripItems(defaultPhrases);
       expect(phraseStripShown(s, tsess), isTrue);
     });
 
@@ -683,13 +688,13 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(ph('phrase-menu-first'));
       await tester.pumpAndSettle();
-      expect(s.prefs.phrases.first.text, '确认');
+      expect((s.prefs.phrases.first as Phrase).text, '确认');
       await tester.longPress(ph('phrase-0'));
       await tester.pumpAndSettle();
       await tester.tap(ph('phrase-menu-delete'));
       await tester.pumpAndSettle();
-      expect(s.prefs.phrases.first.text, '继续');
-      expect(s.prefs.phrases, hasLength(defaultPhrases.length - 1));
+      expect((s.prefs.phrases.first as Phrase).text, '继续');
+      expect(s.prefs.phrases, hasLength(_oldTen.length - 1));
       expect(term.calls.where((c) => c.$1 != 'composer'), isEmpty);
     });
 

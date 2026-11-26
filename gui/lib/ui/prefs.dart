@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../embed/app_profile.dart' show InputPoint;
 import '../embed/phrases.dart';
+import '../embed/strip_cmds.dart';
 import '../embed/tidy_mode.dart';
 import '../embed/voice_key_gate.dart';
 import 'tokens.dart';
@@ -32,7 +33,8 @@ class UiPrefs {
     this.quickAutoHide,
     this.termComposerAt,
     this.phraseStrip = true,
-    List<Phrase>? phrases,
+    List<StripItem>? phrases,
+    this.phraseCmdsSeeded = true,
     this.termFit = true,
     this.voiceAiTidy = true,
     this.voiceAiThink = false,
@@ -48,10 +50,12 @@ class UiPrefs {
     Map<String, String>? termOpen,
     Map<String, TidyMode>? voiceTidyMode,
     Map<String, String>? termApp,
-  })  : phrases = phrases ?? List.of(defaultPhrases),
+    Map<String, String>? loadSnooze,
+  })  : phrases = phrases ?? defaultStripItems,
         termOpen = termOpen ?? {},
         voiceTidyMode = voiceTidyMode ?? {},
-        termApp = termApp ?? {};
+        termApp = termApp ?? {},
+        loadSnooze = loadSnooze ?? {};
 
   RappTheme theme;
   bool startFullscreen;
@@ -84,7 +88,10 @@ class UiPrefs {
 
   /// 常用语 (`phrases`, iOS): in strip order. Missing or not a list means [defaultPhrases]; bad entries are
   /// dropped on load.
-  List<Phrase> phrases;
+  List<StripItem> phrases;
+
+  /// The six built-in commands were put in front of the saved list once (`phrase_cmds_seeded`).
+  bool phraseCmdsSeeded;
 
   /// 跟着我的窗口 (`term_fit`): the host's terminal window follows this console's size. Missing or bad means on.
   bool termFit;
@@ -137,6 +144,10 @@ class UiPrefs {
   /// dropped on load.
   final Map<String, String> termApp;
 
+  /// 1小时内不再提醒 (`load_snooze`, device-load §8): `<device>\n<item>` to `<untilMs> <level>`, this GUI's own and never
+  /// sent to the device. A value that is not a number and `warn` or `danger` is dropped on load.
+  final Map<String, String> loadSnooze;
+
   /// The stored app when [launchers] still has it, else the first launcher.
   String termAppFor(String device, List<String> launchers) {
     final a = termApp[device];
@@ -144,6 +155,13 @@ class UiPrefs {
   }
 
   /// Never throws: a missing or corrupt file gives the defaults.
+  /// A saved list from before the commands: the built-in ones go in front once (those it does not hold yet).
+  static List<StripItem> _seeded(List<StripItem> l, bool done) {
+    if (done) return l;
+    final have = {for (final c in l.whereType<StripCmd>()) c.id};
+    return [for (final id in builtinCmdOrder) if (!have.contains(id)) StripCmd(id), ...l];
+  }
+
   static UiPrefs load(String dir) {
     try {
       final j = jsonDecode(File('$dir/gui.json').readAsStringSync());
@@ -170,6 +188,7 @@ class UiPrefs {
       final qt = j['quick_hidden_term'];
       final qa = j['quick_hidden_app'];
       final qh = j['quick_auto_hide'];
+      final ls = j['load_snooze'];
       return UiPrefs(
         theme: RappTheme.values.firstWhere(
           (t) => t.name == name,
@@ -185,7 +204,7 @@ class UiPrefs {
         termComposerAt: InputPoint.fromJson(j['term_composer_at']),
         phraseStrip: j['phrase_strip'] != false,
         phrases: j['phrases'] is List
-            ? [for (final e in j['phrases'] as List) ?Phrase.fromJson(e)]
+            ? _seeded([for (final e in j['phrases'] as List) ?stripItemFromJson(e)], j['phrase_cmds_seeded'] == true)
             : null,
         termFit: tf is bool ? tf : true,
         voiceAiTidy: vt is bool ? vt : true,
@@ -217,6 +236,12 @@ class UiPrefs {
             for (final e in ta.entries)
               if (e.key is String && e.value is String) e.key as String: e.value as String,
         },
+        loadSnooze: {
+          if (ls is Map)
+            for (final e in ls.entries)
+              if (e.key is String && e.value is String && RegExp(r'^\d+ (warn|danger)$').hasMatch(e.value as String))
+                e.key as String: e.value as String,
+        },
       );
     } catch (_) {
       return UiPrefs();
@@ -239,6 +264,7 @@ class UiPrefs {
         if (termComposerAt != null) 'term_composer_at': termComposerAt!.toJson(),
         'phrase_strip': phraseStrip,
         'phrases': [for (final p in phrases) p.toJson()],
+        'phrase_cmds_seeded': phraseCmdsSeeded,
         'term_fit': termFit,
         'voice_ai_tidy': voiceAiTidy,
         'voice_ai_think': voiceAiThink,
@@ -254,6 +280,7 @@ class UiPrefs {
         'voice_tidy_mode': {for (final e in voiceTidyMode.entries) e.key: e.value.json},
         'term_open': termOpen,
         'term_app': termApp,
+        'load_snooze': loadSnooze,
       }),
     );
   }

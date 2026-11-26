@@ -18,6 +18,9 @@ import 'package:rapp/ui/sessions_tab.dart';
 
 import '../fakes.dart';
 import 'helpers.dart';
+import 'platform_helpers.dart';
+import 'package:rapp/ui/device_os.dart';
+import 'package:rapp/ui/os_mark.dart';
 
 /// A monitor that never connects: the test sets its status and labels, and records the label changes.
 class _Mon extends ServiceMonitor {
@@ -75,7 +78,7 @@ void main() {
   }
 
   /// m1 (mini) online with [apps] open; replies to label changes like a host would.
-  Future<void> boot(WidgetTester tester, {List<String> apps = const []}) async {
+  Future<void> boot(WidgetTester tester, {List<String> apps = const [], DeviceOs? localOs}) async {
     tt = tester;
     tester.view.physicalSize = const Size(1194, 834);
     tester.view.devicePixelRatio = 1;
@@ -102,7 +105,7 @@ void main() {
           t.emit({'event': 'label_reset', 'req': m['req'], 'id': m['id'], 'rev': 9});
       }
     };
-    s = MainState(hub: HubClient(t), data: DataDir(tmp.path), prefs: UiPrefs(), clock: () => epoch);
+    s = MainState(hub: HubClient(t), data: DataDir(tmp.path), prefs: UiPrefs(), clock: () => epoch, localOs: localOs);
     await tester.runAsync(() async {
       for (var i = 0; i < 8; i++) {
         await flush();
@@ -384,5 +387,82 @@ void main() {
       'b': {'title': '新', 'note': ''},
     });
     expect(s.labelFor('m1', 'b')?.title, '新');
+  });
+
+  testWidgets('Linux: Omarchy host stopped terminal restarts via ghostty with label_from and active terminal keeps fg on line 2', (
+    tester,
+  ) async {
+    await onPlatform(TargetPlatform.linux, () async {
+      await boot(tester, apps: ['term:pty:live'], localOs: DeviceOs.omarchy);
+      t.emit({
+        'event': 'hosts',
+        'hosts': [
+          {'id': 'm1', 'name': 'omarchy-box', 'os': 'omarchy'},
+        ],
+      });
+      final inner = t.onSend!;
+      t.onSend = (m) {
+        if (m['cmd'] == 'open_term') {
+          t.emit({'event': 'term_created', 'req': m['req'], 'id': m['id'], 'term': 'term:pty:restarted'});
+        } else if (m['cmd'] == 'terms') {
+          t.emit({
+            'event': 'terms',
+            'req': m['req'],
+            'id': m['id'],
+            'terms': [
+              {
+                'id': 'term:pty:live',
+                'name': 'zsh',
+                'title': '~/git/rapp',
+                'fg': 'claude',
+                'shell': false,
+                'command': 'zsh',
+                'activity': 1,
+                'dead': false,
+                'ps': {'state': 'blocked', 'kind': 'permission', 'msg': 'approve cargo test', 'seq': 1},
+              },
+            ],
+            'hosts': [
+              {
+                'host': null,
+                'launchers': ['ghostty', 'alacritty'],
+                'shells': [
+                  {'name': 'zsh', 'path': '/bin/zsh', 'default': true},
+                ],
+              },
+            ],
+          });
+        } else {
+          inner(m);
+        }
+      };
+      await tester.runAsync(() async {
+        await s.hub!.terms('m1');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await table(1, {
+        'term:pty:live': {'title': 'Linux 主仓', 'note': '对齐 0.15.44'},
+        'term:pty:gone': {'title': '巡检脚本', 'note': '常驻'},
+      });
+      await showOverview(tester);
+
+      expect(tester.widget<OsMark>(find.byKey(const Key('os-mark-local'))).os, DeviceOs.omarchy);
+      expect(tester.widget<OsMark>(find.byKey(const Key('os-mark-m1'))).os, DeviceOs.omarchy);
+      expect(inside('block-m1/term:pty:live', find.text('Linux 主仓')), findsOneWidget);
+      expect(inside('block-m1/term:pty:live', find.text('claude · 等确认 · approve cargo test')), findsOneWidget);
+      expect(inside('block-m1/term:pty:live', find.text('对齐 0.15.44')), findsOneWidget);
+
+      const goneKey = 'block-m1/term:pty:gone';
+      expect(inside(goneKey, find.text('巡检脚本')), findsOneWidget);
+      expect(inside(goneKey, find.text('CLI · 已停止')), findsOneWidget);
+      expect(inside(goneKey, find.text('启动')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key(goneKey)));
+      await settle(tester);
+      final open = t.sent.singleWhere((m) => m['cmd'] == 'open_term');
+      expect((open['app'], open['label_from']), ('ghostty', 'term:pty:gone'));
+    });
   });
 }

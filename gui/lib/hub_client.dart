@@ -5,6 +5,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'labels.dart';
+import 'load_model.dart';
 import 'log_view.dart';
 import 'term/term_id.dart';
 
@@ -61,6 +62,12 @@ class HubException implements Exception {
   final String message;
   @override
   String toString() => message;
+}
+
+/// A restore that stopped part way: [ids] opened before [message] stopped it.
+class RestoreStopped extends HubException {
+  RestoreStopped(super.message, this.ids);
+  final List<String> ids;
 }
 
 class HubHost {
@@ -188,14 +195,28 @@ TermPs? termPs(Object? v) {
 /// The place sessions are listed from: the device itself (`host` null). An old device may also list SSH hosts; those
 /// rows are dropped.
 class TermHost {
-  const TermHost(this.host, {this.launchers = const [], this.shells});
+  const TermHost(this.host, {this.launchers = const [], this.shells, this.saved = const []});
   final String? host;
+
+  /// The local host row only: text terminals saved from an earlier run that are not alive now, in the order the
+  /// device sent them. An old device sends none. No directory or command ever comes with them.
+  final List<TermSaved> saved;
 
   /// The local host row only: the terminal apps the device can open a text terminal in.
   final List<String> launchers;
 
   /// The shells the device can open, the default marked; null when the row has no `shells` (an old device).
   final List<TermShell>? shells;
+}
+
+/// A text terminal saved from an earlier run that can be restored; [saved] is Unix seconds, [boot] says it was saved
+/// before the device last started.
+class TermSaved {
+  const TermSaved(this.key, this.name, {this.prog, this.saved = 0, this.boot = false});
+  final String key, name;
+  final String? prog;
+  final int saved;
+  final bool boot;
 }
 
 /// A shell the device can open a text terminal with.
@@ -243,7 +264,12 @@ TermList _termList(Map<String, dynamic> m, String fallbackId) {
                       for (final x in (h['shells'] as List).whereType<Map>())
                         if (x['name'] is String && x['path'] is String) TermShell(x['name'], x['path'], x['default'] == true),
                     ]
-                  : null),
+                  : null,
+              saved: [
+                for (final x in (h['saved'] as List? ?? const []).whereType<Map>())
+                  if (x['key'] is String && x['name'] is String)
+                    TermSaved(x['key'], x['name'], prog: _str(x['prog']), saved: _int(x['saved']), boot: x['boot'] == true),
+              ]),
     ],
   );
 }
@@ -423,6 +449,16 @@ class HubClient extends ChangeNotifier {
     return termLists[id] ?? _termList(m, id);
   }
 
+  /// Each online device's load from its watch (device-load spec §10); a device that went offline, is too old or
+  /// is removed has none. Never a stale number: `gone`, `unsupported` and a stream `error` drop it (a watch that
+  /// just stops sending is [MainState.columnLoad]'s to leave out).
+  final loads = <String, DeviceLoad>{};
+
+  /// Device [id]'s load once, as the hub answers `load` (`ok` stripped); [top] asks for the process list too. The
+  /// device's refusal (`unknown op`, `no data`) is thrown.
+  Future<Map<String, dynamic>> loadNow(String id, {bool top = false}) =>
+      _request({'cmd': 'load', 'id': id, if (top) 'top': true}, 'load');
+
   /// Opens a text terminal window on device [id] running [shell] (the device's default when null, and an old device
   /// is sent none) in terminal app [app]; answers the new term id. [from]: the terminal it is opened beside (its
   /// directory and shell, its window); an old device ignores it. [labelFrom]: a terminal that is gone, whose label
@@ -476,6 +512,30 @@ class HubClient extends ChangeNotifier {
   /// Refreshes the device's list afterwards.
   Future<void> endTerm(String id, String term) async {
     await _request({'cmd': 'end_term', 'id': id, 'term': term}, 'term_ended');
+    try {
+      await terms(id);
+    } catch (_) {}
+  }
+
+  /// Reopens the saved text terminals [keys] of device [id] in terminal app [app]; answers the new term ids, in the
+  /// order opened. [keys] must be explicit (an empty list would make the hub wait for one terminal only). The device's
+  /// refusal is thrown with its words. Refreshes the device's list afterwards.
+  Future<List<String>> restoreTerms(String id, List<String> keys, {required String app}) async {
+    try {
+      final m = await _request({'cmd': 'restore_terms', 'id': id, 'keys': keys, 'app': app}, 'terms_restored');
+      final ids = [for (final x in (m['terms'] as List? ?? const [])) '$x'];
+      if (m['error'] case final String e) throw RestoreStopped(e, ids);
+      return ids;
+    } finally {
+      try {
+        await terms(id);
+      } catch (_) {}
+    }
+  }
+
+  /// Forgets the saved text terminals [keys] of device [id] for good. Refreshes the device's list afterwards.
+  Future<void> forgetTerms(String id, List<String> keys) async {
+    await _request({'cmd': 'forget_terms', 'id': id, 'keys': keys}, 'terms_forgotten');
     try {
       await terms(id);
     } catch (_) {}
@@ -620,8 +680,11 @@ class HubClient extends ChangeNotifier {
         // A new data dir: the hub dropped every link it had.
         hostPaths.clear();
         _paths.clear();
+        loads.clear();
       case 'terms':
         if (m['id'] != null) termLists['${m['id']}'] = _termList(m, '${m['id']}');
+      case 'load' when m['req'] is! int && m['id'] != null:
+        _onLoad('${m['id']}', m);
       case 'labels':
         _onLabels(m);
       case 'closed':
@@ -629,8 +692,8 @@ class HubClient extends ChangeNotifier {
         if (m['sid'] != null && m['reason'] != null) closeReasons[m['sid'] as Object] = '${m['reason']}';
     }
 
-    // A watch event has no `req`: it answers no one (`_take` would give it to another device's `terms`).
-    final p = (event == 'terms' || event == 'labels') && m['req'] is! int ? null : _take(m, event);
+    // A watch event has no `req`: it answers no one (`_take` would give it to another device's `terms`, `labels` or `load`).
+    final p = (event == 'terms' || event == 'labels' || event == 'load') && m['req'] is! int ? null : _take(m, event);
     if (p != null) {
       if (event == 'error') {
         p.completer.completeError(HubException('${m['error'] ?? 'unknown error'}'));
@@ -641,6 +704,18 @@ class HubClient extends ChangeNotifier {
       lastError = '${m['error'] ?? 'unknown error'}';
     }
     notifyListeners();
+  }
+
+  /// One line of device [id]'s load watch: the first (with `history`) starts it, the next ones move it on; `gone`,
+  /// `unsupported` and a stream `error` drop it. The hub retries an error after 30 s, up to 10 min apart: its first
+  /// line then starts the load again.
+  void _onLoad(String id, Map<String, dynamic> m) {
+    if (m['gone'] == true || m['unsupported'] == true || m['error'] != null) {
+      loads.remove(id);
+    } else {
+      final was = loads[id];
+      loads[id] = was == null || m.containsKey('history') ? DeviceLoad.fromJson(m) : was.next(m);
+    }
   }
 
   /// Finds the request this event answers: by `req`, else the oldest pending
@@ -665,6 +740,7 @@ class HubClient extends ChangeNotifier {
     _sessions.clear();
     hostPaths.clear();
     _paths.clear();
+    loads.clear();
     net = null;
     notifyListeners();
   }
