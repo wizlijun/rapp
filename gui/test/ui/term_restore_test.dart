@@ -266,6 +266,8 @@ void main() {
     // The list was refreshed and still holds both.
     expect(t.sent.where((m) => m['cmd'] == 'terms'), isNotEmpty);
     expect(s.savedTerms('111').map((x) => x.key), ['a', 'b']);
+    // Past the wait card's timers.
+    await tester.pump(const Duration(seconds: 9));
   });
 
   testWidgets('forget_all_sends_every_key', (tester) async {
