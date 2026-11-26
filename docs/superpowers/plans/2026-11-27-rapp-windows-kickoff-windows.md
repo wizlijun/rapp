@@ -2,7 +2,7 @@
 
 ## 背景
 
-rApp 是远程控制软件，macOS 版在用。Windows 版要对齐 macOS 的功能，设计和九份计划已经写完，代码只有 A、B 两段的草稿，而且**从来没有编译过**。Mac 上另有一个 agent 在验证这两段草稿里 Mac 能验的部分。
+rApp 是远程控制软件，macOS 版在用。Windows 版要对齐 macOS 的功能，设计和九份计划已经写完，代码只有 A、B 两段的草稿，而且**从来没有编译过**。草稿已经合进 `main`，但 `main` 的文件里只有 Mac 不编译的部分（三个没进 workspace 的新 crate、两个 PowerShell 脚本、文档）；对已有 crate 的改动留在分支上，见交接文档 §2.1。Mac 上另有一个 agent 在验证这两段草稿里 Mac 能验的部分。
 
 设计里凡是标了【未验证】的地方，都是对 Windows 的猜测。探针就是用一次性的小程序在真机上把这些猜测换成量出来的结果。C–H 六份计划是探针跑之前写的，探针结果和假设不一样时，计划要跟着改。所以探针的产出不是代码，是一页**结果**：试了什么、在哪台机器上、量到多少、过没过、管用的做法是什么。没见过探针代码的人要能照这一页把正式代码写出来。
 
@@ -11,7 +11,7 @@ rApp 是远程控制软件，macOS 版在用。Windows 版要对齐 macOS 的功
 仓库 clone 下来之后读：
 
 1. `CLAUDE.md`。最后一小节“Windows 集成 session”是这台机器上另一个 session 的事，见下面“谁推送”。
-2. `docs/superpowers/plans/2026-11-26-rapp-windows-handoff.md` 的 §4（边界）、§5（顺序）、§6（规矩）。
+2. `docs/superpowers/plans/2026-11-26-rapp-windows-handoff.md` 的 §2.1（草稿怎么进的 `main`）、§4（边界）、§5（顺序）、§6（规矩）。
 3. 规格 `docs/superpowers/specs/2026-11-26-rapp-windows-design.md` 的 §0.2、§5.3、§16（每个探针要回答什么、过线是多少、退路是什么）、§17.3（要哪些机器）。§16 要全文读完再动手。
 4. 计划 `docs/superpowers/plans/2026-11-26-rapp-windows-p-probes.md` 全文。
 5. 计划 `…-windows-a-foundation.md` 的任务 1 和任务 8。
@@ -25,13 +25,13 @@ rApp 是远程控制软件，macOS 版在用。Windows 版要对齐 macOS 的功
 - 要装的：Git for Windows；Visual Studio 2022 Build Tools，带“使用 C++ 的桌面开发”；Rust（rustup，stable，`x86_64-pc-windows-msvc`）；Flutter，开 `flutter config --enable-windows-desktop`，`flutter doctor` 的 Windows 部分要干净。
 - Rust 和 Flutter 的版本要和 Mac 一样。写这份提示词时 Mac 上是 `rustc 1.99.1` 和 `Flutter 3.44.1`，开工前请用户再确认一次。
 - **clone 之前**先设好：`git config --global core.autocrlf false` 和 `git config --global core.longpaths true`。Git for Windows 默认会把换行改成 CRLF，那样计划 B 里逐字节比对的样本就全不对了。
-- clone 之后核对：`git status` 是干净的；`git ls-files --eol` 里没有 `w/crlf`。
+- clone 之后核对：`git status` 是干净的；`git ls-files --eol` 里没有 `w/crlf`；仓库根有 `.gitattributes`（内容是 `* -text`）。
 - 仓库地址和放在哪个目录，问用户。
 - 缺什么软件先列出来给用户看，再装。
 
 **2. 建结果页，记下这台机器**（计划 P 任务 1）
 
-- 结果页是 `docs/superpowers/specs/2026-11-26-rapp-windows-probe-results.md`，现在还不存在，照计划 P 任务 1 的骨架建。在分支 `docs/windows-probe-results` 上改，合进这台机器的本机 `main`。
+- 结果页是 `docs/superpowers/specs/2026-11-26-rapp-windows-probe-results.md`，已经有一份骨架。先对一遍计划 P 任务 1，缺的补上。在分支 `docs/windows-probe-results` 上改，合进这台机器的本机 `main`。
 - 机器清单里写：Windows 版本和 build 号、CPU、显卡、checkout 的路径、四个工具的版本。
 - 把 checkout 的路径填进 `CLAUDE.md`“其他 session”第 2 条，替换掉“Windows 机器上的路径等机器装好后填在这里”这句。这处改动用户已经同意。
 
@@ -43,7 +43,7 @@ rApp 是远程控制软件，macOS 版在用。Windows 版要对齐 macOS 的功
 
 ## 第二段：A 段草稿的 Windows 那一半
 
-**现在还不能做。** 要等两件事：Mac 那边把 `feat/windows-foundation` 修到 Mac 门禁全绿；有人把这个分支推到 origin。这个分支现在只在 Mac 上。第一段做完后，告诉用户你在等它。
+**现在还不能做。** 要等两件事：Mac 那边把 `feat/windows-foundation` 修到 Mac 门禁全绿；有人把这个分支推到 origin。这个分支现在只在 Mac 上。第一段做完后，告诉用户你在等它。`main` 上虽然已经有 `scripts\check-windows.ps1`，但 A 段的接线不在 `main` 上，在 `main` 上跑它没有意义。
 
 拿到分支后：
 
@@ -51,7 +51,7 @@ rApp 是远程控制软件，macOS 版在用。Windows 版要对齐 macOS 的功
 2. 跑 `scripts\check-windows.ps1`（计划 A 任务 8），修到日志最后一行是 `EXIT=0`。这个脚本本身也是草稿，没跑过。
 3. 证明门禁既能绿也能红：故意弄坏一处，确认它报 `EXIT=1`，再改回来。
 4. 计划 A 每个任务的“实机检查”逐条做，结果写进 `tasks/todo.md`。
-5. 你改过的提交要回 Mac 再过一次 Mac 门禁（计划 A 第 24 行的办法：推分支，不推 `main`）。两边都绿了才能合并。
+5. 你改过的提交要回 Mac 再过一次 Mac 门禁（计划 A 第 24 行的办法：推分支，不推 `main`）。两边都绿了才能把接线合并进 `main`。
 6. A 段合并以后做 G2（计划 P 任务 12）。
 
 ## 规矩
@@ -87,7 +87,7 @@ rApp 是远程控制软件，macOS 版在用。Windows 版要对齐 macOS 的功
 - 退路写着“回来问用户”的（H1、S1、S2）和“回来告诉用户”的（G1 在云主机上不行、T1）。
 - 要登录云主机或别的机器，要冷启动、重启、断电，要有人坐在机器前操作。S2 要从冷启动、没人碰机器的状态做，结果里要写明确实是这样做的。
 - 要改规格 §19.1 第二张单子上的事，或者上面“不改”“边界”里的任何一条。
-- A 段合并进 `main` 之前。
+- A 段的接线合并进 `main` 之前。
 
 二级探针没过不用问：照 §16 写好的退路走，把规格 §15 里那个功能的那一行改成“有限制”。过线的数字是起点，量出来发现线定错了，就在规格里连同原因一起改，不要悄悄算过或算不过。
 
