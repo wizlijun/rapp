@@ -86,4 +86,12 @@ mod tests {
         let err = send_queued(&tx, 1, Duration::from_millis(30)).unwrap_err();
         assert!(err.to_string().contains("busy"));
     }
+    #[test]
+    fn a_dropped_receiver_errors_at_once() {
+        let (tx, rx) = mpsc::sync_channel::<u8>(1);
+        drop(rx);
+        let t = Instant::now();
+        assert!(send_queued(&tx, 1, Duration::from_secs(5)).is_err());
+        assert!(t.elapsed() < Duration::from_millis(100));
+    }
 }
