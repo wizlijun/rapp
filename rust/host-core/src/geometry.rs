@@ -186,8 +186,14 @@ pub fn clamp_size(requested: Size, origin: Point, screen: Rect) -> Size {
 ///
 /// Swift loops forever on `max == 0`; this port treats 0 as 1.
 pub fn chunk_utf16(s: &str, max: usize) -> Vec<Vec<u16>> {
-    let max = max.max(1);
     let units: Vec<u16> = s.encode_utf16().collect();
+    chunk_ranges(&units, max).into_iter().map(|r| units[r].to_vec()).collect()
+}
+
+/// The same split over units already in hand, as index ranges, so a caller holding a
+/// secret (the unlock password) can type slices of it without copying it into new buffers.
+pub fn chunk_ranges(units: &[u16], max: usize) -> Vec<std::ops::Range<usize>> {
+    let max = max.max(1);
     let mut chunks = Vec::new();
     let mut start = 0usize;
     while start < units.len() {
@@ -195,7 +201,7 @@ pub fn chunk_utf16(s: &str, max: usize) -> Vec<Vec<u16>> {
         if end < units.len() && end - start > 1 && (0xD800..=0xDBFF).contains(&units[end - 1]) {
             end -= 1;
         }
-        chunks.push(units[start..end].to_vec());
+        chunks.push(start..end);
         start = end;
     }
     chunks
