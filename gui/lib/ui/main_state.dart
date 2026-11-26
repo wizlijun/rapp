@@ -28,6 +28,7 @@ import '../permissions.dart';
 import '../embed/app_profile.dart';
 import '../embed/app_state.dart';
 import '../embed/state_rules.dart';
+import '../embed/strip_tools.dart';
 import '../embed/composer_model.dart';
 import '../embed/modifier_latch.dart';
 import '../term/term_id.dart';
@@ -1409,6 +1410,16 @@ class MainState extends ChangeNotifier {
     final fg = hub?.termLists[device]?.terms.where((r) => r.id == term).firstOrNull?.fg;
     return fg == null || fg.isEmpty ? null : fg;
   }
+
+  /// The terminals-list row of the text terminal behind [sid]; null for other apps or an unlisted terminal.
+  TermRow? termRowOfSid(Object sid) {
+    final r = _recordOfSid(sid);
+    if (r == null || !isTermApp(r.app)) return null;
+    return hub?.termLists[r.id]?.terms.where((t) => t.id == r.app).firstOrNull;
+  }
+
+  /// The AI tool in front of [s] when it is a text terminal, else null.
+  AgentTool? stripToolOf(RemoteSession s) => toolOf(termRowOfSid(s.sid));
 
   /// What a favourite or project member is called: `<program> · <name>` for a text terminal ([termTitle]), whose
   /// name is the list's current one, else the one stored with it.
