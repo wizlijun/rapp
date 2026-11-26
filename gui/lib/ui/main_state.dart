@@ -3928,8 +3928,6 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
-  /// 常用语 replaced (edited, reordered, deleted, 恢复默认); saved.
-
   /// The whole strip list (commands and phrases) replaced; saved.
   void setStripItems(List<StripItem> v) {
     prefs.phrases = List.of(v);

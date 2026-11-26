@@ -1279,3 +1279,4 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 10. 老用户升级：原来的常用语还在，6 个命令出现在最前面，只插一次
 - [ ] 11. App 会话（远程 iTerm2 里跑 claude）：不出现命令按钮
 - [ ] 12. macOS、Linux 的 PC 按键区上同样能用
+- [ ] 13. Claude Code 被 `kill -9` 后在同一终端开 vim / ssh：常用语条不显示命令
