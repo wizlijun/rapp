@@ -101,8 +101,14 @@ pub struct Session {
     /// The platform lock handle: the platform's before the target opens, the target's after.
     pub(crate) lock: Shared<dyn LockOps>,
     pub(crate) ops: Option<Ops>,
-    /// The capture source, until the capture thread takes it (Task 14).
+    /// The capture source, until the capture thread takes it.
     pub(crate) capture_source: Option<Box<dyn Capture>>,
+    /// The running capture thread's handle.
+    pub(crate) capture: Option<super::capture::CaptureHandle>,
+    /// The newest capture sequence number offered to `paced`.
+    pub(crate) newest_submitted_seq: u64,
+    /// B's focus bit from the last `setStream` (the focus pane, Task 15).
+    pub(crate) requested_focus: bool,
     pub(crate) text_reader: Option<Box<dyn TextReader>>,
     /// The app's name, for the ready title and the quit reason.
     pub(crate) app_name: String,
@@ -176,6 +182,9 @@ impl Session {
             lock,
             ops: None,
             capture_source: None,
+            capture: None,
+            newest_submitted_seq: 0,
+            requested_focus: false,
             text_reader: None,
             app_name: String::new(),
             display: Rect::new(0.0, 0.0, 0.0, 0.0),
@@ -264,7 +273,7 @@ impl Session {
                 let _ = ack.send(());
             }
             Event::Yield(by) => self.yielded(&by),
-            Event::Frame(frame) => self.frame_arrived(frame),
+            Event::FrameReady => self.frame_ready(),
             Event::CaptureStopped(reason) => self.fail(&format!("capture stopped: {reason}")),
             Event::Table(next, raw) => self.table_changed(next, raw),
             Event::Run(job) => {

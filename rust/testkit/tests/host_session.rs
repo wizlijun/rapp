@@ -43,6 +43,21 @@ fn expected_canvas(width: usize, height: usize, scroll: i64, mode: Mode) -> Vec<
     quantize(&bgra, width, height, width * 4, mode)
 }
 
+/// Takes messages until the decoded canvas equals `want` (10 s real time at most).
+fn wait_canvas(c: &mut Controller, want: &[u8]) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if c.canvas().2 == want {
+            return true;
+        }
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() || c.is_closed() {
+            return false;
+        }
+        let _ = c.next_within(left.min(Duration::from_millis(100)));
+    }
+}
+
 #[test]
 fn listening_then_ready() {
     let (_platform, host) = serve();
@@ -70,9 +85,9 @@ fn listening_then_ready() {
         }
         _ => unreachable!(),
     };
-    let (cw, ch, samples) = c.canvas();
-    assert_eq!((cw, ch), (width, height));
-    assert!(samples == expected_canvas(width, height, 0, Mode::Gray4).as_slice(), "decoded canvas differs from the pattern");
+    // The first frame can come in slices (each acknowledged): wait for the whole picture.
+    assert!(wait_canvas(&mut c, &expected_canvas(width, height, 0, Mode::Gray4)), "decoded canvas differs from the pattern");
+    assert_eq!((c.canvas().0, c.canvas().1), (width, height));
     let started = host.wait_event("session");
     assert_eq!(started["state"], "started");
     assert_eq!(started["mode"], "gray4");
@@ -327,4 +342,327 @@ fn list_apps_check_version_lock_json() {
     let (code, again) = one_line(&["lock", "--json"], platform);
     assert_eq!(code, 0);
     assert_eq!(again, json!({ "ok": true, "already": true }));
+}
+
+// MARK: - Task 14: the picture loop
+
+const MODES: [Mode; 5] = [Mode::Gray4, Mode::Color8, Mode::Color16, Mode::Duogray, Mode::Duocolor];
+
+fn is_frame(m: &Incoming) -> bool {
+    matches!(m, Incoming::Frame { .. })
+}
+
+fn frame_flags(m: &Incoming) -> u8 {
+    match m {
+        Incoming::Frame { flags, .. } => *flags,
+        _ => 0,
+    }
+}
+
+fn frame_region(m: &Incoming) -> client::Rect {
+    match m {
+        Incoming::Frame { region, .. } => *region,
+        other => panic!("not a frame: {}", rapp_testkit::host_harness::describe(other)),
+    }
+}
+
+/// A ready controller whose canvas shows the whole first picture; returns its pixel size.
+fn showing(host: &Host, mode: u8) -> (Controller, usize, usize) {
+    let mut c = ready(host, mode);
+    c.wait_for(is_frame);
+    let (w, h, _) = c.canvas();
+    assert!(wait_canvas(&mut c, &expected_canvas(w, h, 0, MODES[mode as usize])), "{:?}", c.seen);
+    (c, w, h)
+}
+
+/// Takes everything that arrives within `wait`.
+fn drain(c: &mut Controller, wait: Duration) -> Vec<Incoming> {
+    let deadline = Instant::now() + wait;
+    let mut got = Vec::new();
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return got;
+        }
+        if let Some(m) = c.next_within(left) {
+            got.push(m);
+        } else if c.is_closed() {
+            return got;
+        }
+    }
+}
+
+fn ended_event(host: &Host) -> Value {
+    host.wait_event_where(|e| e["event"] == "session" && e["state"] == "ended")
+}
+
+#[test]
+fn scroll_arrives_as_copy_tiles() {
+    let (platform, host) = serve();
+    let (mut c, w, h) = showing(&host, 0);
+    platform.scroll_by(16);
+    let m = c.wait_for(|m| is_frame(m) && frame_flags(m) & rapp_client_core::codec::COPIES != 0);
+    assert!(frame_flags(&m) & rapp_client_core::codec::COPIES != 0);
+    assert!(wait_canvas(&mut c, &expected_canvas(w, h, 16, Mode::Gray4)), "{:?}", c.seen);
+}
+
+#[test]
+fn window_added_and_removed() {
+    let (platform, host) = serve();
+    let (mut c, _, _) = showing(&host, 0);
+    let one = platform.windows();
+    let mut two = one.clone();
+    two.push(FakePlatform::window(2, rapp_host_core::Rect::new(100.0, 500.0, 400.0, 200.0)));
+    platform.set_windows(two);
+    c.wait_for(|m| matches!(m, Incoming::Windows(l) if l.len() == 2));
+    // The union of both, rounded out to 8 points: x 96..1040.
+    let f = c.wait_for(|m| is_frame(m) && frame_region(m).x <= 100.0 && frame_region(m).x + frame_region(m).w >= 1040.0);
+    let r = frame_region(&f);
+    assert!(r.y + r.h >= 700.0, "{r:?}");
+    platform.set_windows(one);
+    c.wait_for(|m| matches!(m, Incoming::Windows(l) if l.len() == 1));
+    // Nothing changed for 1 s: no table goes out again.
+    let quiet = c.quiet_for(host_time(1.0), |m| !matches!(m, Incoming::Windows(_)));
+    assert!(quiet.is_ok(), "{quiet:?}");
+}
+
+/// Pauses, scrolls for 2 s of host time, renames the window, and returns what arrived.
+fn paused_while_scrolling(platform: &FakePlatform, c: &mut Controller, mode: u8) -> Vec<Incoming> {
+    c.send(&client::stream(mode, 0, 1.0, false, false));
+    // Slices already on the way still arrive.
+    let _ = drain(c, host_time(0.3));
+    let frames = c.frames;
+    let mut renamed = platform.windows();
+    renamed[0].title = "Renamed".into();
+    platform.set_windows(renamed);
+    let start = Instant::now();
+    let mut got = Vec::new();
+    while start.elapsed() < host_time(2.0) {
+        platform.scroll_by(16);
+        got.extend(drain(c, host_time(0.1)));
+    }
+    got.extend(drain(c, host_time(0.3)));
+    assert_eq!(c.frames, frames, "frames while paused: {:?}", c.seen);
+    got
+}
+
+#[test]
+fn pause_and_resume() {
+    let (platform, host) = serve();
+    let (mut c, w, h) = showing(&host, 0);
+    let got = paused_while_scrolling(&platform, &mut c, 0);
+    let changed = got.iter().filter(|m| matches!(m, Incoming::Changed)).count();
+    // About once a second (the capture runs at 1 fps while paused).
+    assert!((1..=4).contains(&changed), "{changed} changed messages: {:?}", c.seen);
+    assert!(
+        got.iter().any(|m| matches!(m, Incoming::Windows(l) if l.first().is_some_and(|w| w.title.contains("Renamed")))),
+        "windows not delivered while paused: {:?}",
+        c.seen
+    );
+    c.send(&client::stream(0, 15, 1.0, false, false));
+    let first = c.wait_for(is_frame);
+    // A diff against the last frame sent before the pause (Server.swift:1203), not a full frame.
+    assert_eq!(frame_flags(&first) & rapp_client_core::codec::FULL, 0, "{:?}", c.seen);
+    assert!(wait_canvas(&mut c, &expected_canvas(w, h, platform.scroll(), Mode::Gray4)), "{:?}", c.seen);
+}
+
+#[test]
+fn pause_mode_change_resumes_full() {
+    let (platform, host) = serve();
+    let (mut c, w, h) = showing(&host, 0);
+    let _ = paused_while_scrolling(&platform, &mut c, 0);
+    // A mode switch while paused: still nothing sent.
+    c.send(&client::stream(1, 0, 1.0, false, false));
+    let _ = drain(&mut c, host_time(0.5));
+    c.send(&client::stream(1, 15, 1.0, false, false));
+    let first = c.wait_for(is_frame);
+    assert_ne!(frame_flags(&first) & rapp_client_core::codec::FULL, 0, "{:?}", c.seen);
+    assert!(matches!(first, Incoming::Frame { mode: 1, .. }));
+    assert!(wait_canvas(&mut c, &expected_canvas(w, h, platform.scroll(), Mode::Color8)), "{:?}", c.seen);
+}
+
+#[test]
+fn unacknowledged_controller_gets_bounded_frames() {
+    let (platform, host) = serve();
+    let mut c = Controller::connect(host.port());
+    c.auto_ack = false;
+    c.hello(TOKEN, FAKE_APP, "B", 0, 15);
+    c.wait_for(|m| matches!(m, Incoming::Ready(..)));
+    let start = Instant::now();
+    while start.elapsed() < host_time(5.0) {
+        platform.scroll_by(8);
+        let _ = drain(&mut c, host_time(0.05));
+    }
+    // Without a single ack there is no RTT, so the cap is 1 frame in flight (SendPacer.cap).
+    assert_eq!(c.frames, 1, "{:?}", c.seen);
+    // The worker keeps reporting at most that one frame per second.
+    let stats: Vec<Value> = host.events().into_iter().filter(|e| e["event"] == "stats").collect();
+    assert!(stats.len() >= 3, "{stats:?}");
+    assert!(stats.iter().all(|s| s["fps"].as_i64().is_some_and(|f| f <= 1)), "{stats:?}");
+    // The paced sender holds one offer at most: acking now lets the newest picture through.
+    c.auto_ack = true;
+    c.send(&client::frame_ack(0));
+    let (w, h, _) = c.canvas();
+    assert!(wait_canvas(&mut c, &expected_canvas(w, h, platform.scroll(), Mode::Gray4)), "{:?}", c.seen);
+}
+
+#[test]
+fn set_view_narrows_the_picture() {
+    let (_platform, host) = serve();
+    let mut c = ready(&host, 0);
+    let id = match c.wait_for(|m| matches!(m, Incoming::Windows(l) if !l.is_empty())) {
+        Incoming::Windows(l) => l[0].id,
+        _ => unreachable!(),
+    };
+    c.wait_for(is_frame);
+    c.send(&client::set_view(id, client::Rect { x: 0.0, y: 0.0, w: 400.0, h: 300.0 }));
+    let f = c.wait_for(|m| is_frame(m) && frame_region(m).w <= 408.0);
+    let r = frame_region(&f);
+    // Window content coordinates: below the title row, inside the window, rounded out to 8 points.
+    assert!(r.x >= 232.0 && r.w <= 408.0 && r.h <= 312.0, "{r:?}");
+    // Window 0 clears the view: the whole window again.
+    c.send(&client::set_view(0, client::Rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }));
+    c.wait_for(|m| is_frame(m) && frame_region(m).w >= 800.0);
+}
+
+#[test]
+fn set_stream_changes_mode() {
+    let (platform, host) = serve();
+    let (mut c, w, h) = showing(&host, 0);
+    for (i, mode) in MODES.iter().enumerate().skip(1).chain(MODES.iter().enumerate().take(1)) {
+        c.send(&client::stream(i as u8, 15, 1.0, false, false));
+        let first = c.wait_for(|m| matches!(m, Incoming::Frame { mode: got, .. } if *got as usize == i));
+        assert_ne!(frame_flags(&first) & rapp_client_core::codec::FULL, 0, "mode {i}: {:?}", c.seen);
+        // Two-tone modes settle to the exact picture 300 ms after the last change.
+        assert!(wait_canvas(&mut c, &expected_canvas(w, h, platform.scroll(), *mode)), "mode {i}: {:?}", c.seen);
+    }
+}
+
+#[test]
+fn density_is_capped_by_the_display_scale() {
+    // The fake display has 2 pixels per point; B asks for 3.
+    let (_platform, host) = serve();
+    let mut c = Controller::connect(host.port());
+    c.hello_at(TOKEN, FAKE_APP, 0, 15, 3.0);
+    c.wait_for(|m| matches!(m, Incoming::Ready(..)));
+    let f = c.wait_for(is_frame);
+    let r = frame_region(&f);
+    assert_eq!((c.canvas().0, c.canvas().1), ((r.w * 2.0) as usize, (r.h * 2.0) as usize), "{:?}", c.seen);
+    // On a 1x display the same request captures one pixel per point.
+    let platform = FakePlatform::new();
+    platform.set_scale(1.0);
+    let host = Host::start(platform, FAKE_APP, TOKEN);
+    let mut c = Controller::connect(host.port());
+    c.hello_at(TOKEN, FAKE_APP, 0, 15, 3.0);
+    let f = c.wait_for(is_frame);
+    let r = frame_region(&f);
+    assert_eq!((c.canvas().0, c.canvas().1), (r.w as usize, r.h as usize), "{:?}", c.seen);
+}
+
+#[test]
+fn stats_event_every_second() {
+    let (_platform, host) = serve();
+    let (_c, _, _) = showing(&host, 0);
+    let _first = host.wait_event("stats");
+    let start = Instant::now();
+    // The event cursor is past the first one: this is the next.
+    let _second = host.wait_event("stats");
+    assert!(start.elapsed() < host_time(3.0) + Duration::from_secs(1));
+    // Swift's `stats` line: these keys and no others (absent optionals left out).
+    let allowed = ["event", "kbps", "fps", "width", "height", "weak", "fulls", "rttMs", "baseRttMs", "latencyMs", "encMs"];
+    for e in host.events().iter().filter(|e| e["event"] == "stats") {
+        let o = e.as_object().expect("object");
+        for k in o.keys() {
+            assert!(allowed.contains(&k.as_str()), "unexpected key {k}: {e}");
+        }
+        for k in ["kbps", "fps", "width", "height", "weak", "fulls"] {
+            assert!(o.contains_key(k), "missing {k}: {e}");
+        }
+    }
+}
+
+#[test]
+fn capture_error_ends_the_session() {
+    let (platform, host) = serve();
+    let (mut c, _, _) = showing(&host, 0);
+    platform.fail_capture(Some("device lost"));
+    c.wait_for(|m| is_error(m, "capture stopped: device lost"));
+    assert!(c.closes_within(Duration::from_secs(5)));
+    assert_eq!(ended_event(&host)["reason"], "capture stopped: device lost");
+    platform.fail_capture(None);
+    let _next = showing(&host, 0);
+}
+
+#[test]
+fn capture_silence_does_not_spin() {
+    let (platform, host) = serve();
+    let (_c, _, _) = showing(&host, 0);
+    let before = platform.frame_calls();
+    std::thread::sleep(host_time(2.0));
+    let calls = platform.frame_calls() - before;
+    // 15 fps for 2 s, with room for timing: never a busy loop.
+    assert!(calls <= 2 * 15 * 2, "{calls} frame calls in 2 s");
+    assert!(calls >= 2, "the capture stopped polling: {calls}");
+}
+
+#[test]
+fn target_exit_ends_the_session() {
+    let (platform, host) = serve();
+    let (mut c, _, _) = showing(&host, 0);
+    let start = Instant::now();
+    platform.kill_target();
+    c.wait_for(|m| is_error(m, &format!("{FAKE_APP_NAME} quit")));
+    // The 1 s tick notices; generous real-time slack for a loaded machine.
+    assert!(start.elapsed() < host_time(1.5) + Duration::from_millis(500), "{:?}", start.elapsed());
+    assert!(c.closes_within(Duration::from_secs(5)));
+}
+
+#[test]
+fn all_windows_closed_keeps_the_session() {
+    let (platform, host) = serve();
+    let (mut c, _, _) = showing(&host, 0);
+    let one = platform.windows();
+    let before = frame_region(&{
+        platform.touch();
+        c.wait_for(is_frame)
+    });
+    platform.set_windows(vec![]);
+    c.wait_for(|m| matches!(m, Incoming::Windows(l) if l.is_empty()));
+    // An empty table keeps the region (Server.swift:939-963).
+    platform.touch();
+    let after = frame_region(&c.wait_for(is_frame));
+    assert_eq!((before.x, before.y, before.w, before.h), (after.x, after.y, after.w, after.h));
+    platform.set_windows(one);
+    c.wait_for(|m| matches!(m, Incoming::Windows(l) if l.len() == 1));
+    assert!(!c.is_closed());
+}
+
+#[test]
+fn empty_region_sends_no_frame() {
+    let (platform, host) = serve();
+    let (mut c, _, _) = showing(&host, 0);
+    platform.set_frame_size(Some((0, 0)));
+    let quiet = c.quiet_for(host_time(1.5), |m| !is_frame(m));
+    assert!(quiet.is_ok(), "{quiet:?}");
+    assert!(!c.is_closed());
+    platform.set_frame_size(None);
+    c.wait_for(is_frame);
+}
+
+#[test]
+fn disconnect_mid_frame_cleans_up() {
+    let (platform, host) = serve();
+    let mut c = ready(&host, 3);
+    // The first frame of a two-tone picture is several slices; close during them.
+    c.wait_for(is_frame);
+    c.close();
+    let ended = ended_event(&host);
+    assert!(ended["reason"].is_string(), "{ended}");
+    assert!(!platform.awake(), "stay_awake still on");
+    // The capture thread stops polling (at most one call was in flight).
+    std::thread::sleep(host_time(0.5));
+    let calls = platform.frame_calls();
+    std::thread::sleep(host_time(1.0));
+    assert!(platform.frame_calls() <= calls + 1, "the capture thread is still polling");
+    let _next = ready(&host, 0);
 }

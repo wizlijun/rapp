@@ -4,21 +4,12 @@
 //! What stays until then: the session answers hello, ping and the window table, and drops
 //! the commands below without acting on them.
 
-use crate::platform::Frame;
-use crate::protocol::{Mode, Password, PasteSource, WindowInfo};
+use crate::protocol::{Password, PasteSource, WindowInfo};
 use crate::tile::EncodeReport;
 
 use super::session::Session;
 
 impl Session {
-    // Task 14: capture, encode, send.
-    pub(crate) fn start_capture_thread(&mut self) {}
-    pub(crate) fn capture_params_changed(&mut self) {}
-    pub(crate) fn stop_capture(&mut self) {}
-    pub(crate) fn frame_arrived(&mut self, _frame: Frame) {}
-    pub(crate) fn set_stream(&mut self, _mode: Mode, _fps: i64, _density: f32) {}
-    pub(crate) fn set_stream_request(&mut self, _mode: Mode, _fps: u8, _density: f32, _pinned: bool, _focus: bool) {}
-
     // Task 15: input, covers, focus pane, state rules.
     pub(crate) fn input_ready(&mut self) {}
     pub(crate) fn input(&mut self, _m: crate::protocol::Message) {}

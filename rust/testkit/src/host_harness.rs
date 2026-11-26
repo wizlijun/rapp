@@ -260,6 +260,12 @@ pub struct Controller {
     pub end: Option<String>,
     /// Everything received so far, described.
     pub seen: Vec<String>,
+    /// Answer each frame with `frameAck` as it is taken (on by default, as a real controller does).
+    pub auto_ack: bool,
+    /// Frame messages taken so far.
+    pub frames: usize,
+    /// The flags and size of the last frame taken.
+    pub last_frame: Option<(u8, usize, usize)>,
 }
 
 impl Controller {
@@ -290,6 +296,9 @@ impl Controller {
             closed: false,
             end: None,
             seen: Vec::new(),
+            auto_ack: true,
+            frames: 0,
+            last_frame: None,
         }
     }
 
@@ -318,6 +327,20 @@ impl Controller {
         self.send(&address.hello(1.0));
     }
 
+    /// A hello asking for `density` capture pixels per point.
+    pub fn hello_at(&mut self, token: &str, app: &str, mode: u8, fps: u8, density: f32) {
+        let address = Address {
+            host: "127.0.0.1".to_string(),
+            port: 0,
+            app: app.to_string(),
+            token: token.to_string(),
+            mode,
+            fps,
+        };
+        self.seen.push(format!("(hello at density {density})"));
+        self.send(&address.hello(density));
+    }
+
     pub fn send(&mut self, bytes: &[u8]) {
         if let Err(e) = self.stream.write_all(bytes) {
             self.seen.push(format!("(send failed: {e})"));
@@ -330,6 +353,12 @@ impl Controller {
                 Ok(true) => self.samples = self.decoder.samples_le(),
                 Ok(false) => {}
                 Err(e) => self.seen.push(format!("(decode error: {e:#})")),
+            }
+            self.frames += 1;
+            self.last_frame = Some((*flags, *width, *height));
+            if self.auto_ack {
+                let ack = rapp_client_core::protocol::frame_ack(0);
+                self.send(&ack);
             }
         }
         self.seen.push(describe(&m));

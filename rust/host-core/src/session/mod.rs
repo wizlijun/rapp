@@ -7,6 +7,7 @@
 //! calls that may be slow (window polls, capture, queries, paste, unlock). They never touch
 //! session state: they post an `Event` back.
 
+pub mod capture;
 pub mod intake;
 pub mod server;
 pub mod session;
@@ -15,7 +16,7 @@ pub mod tracker;
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use crate::platform::{Frame, RawWindow};
+use crate::platform::RawWindow;
 use crate::protocol::{CodecError, Message, WindowInfo};
 
 /// A platform handle several threads share. Each call takes the lock for that call only.
@@ -49,8 +50,8 @@ pub enum Event {
     Stop { ack: std::sync::mpsc::Sender<()> },
     /// stdin `yield`.
     Yield(String),
-    /// A captured picture.
-    Frame(Frame),
+    /// The capture thread left a picture in its slot (`capture::CaptureHandle::take`).
+    FrameReady,
     /// The capture thread gave up.
     CaptureStopped(String),
     /// A new window table from the poll thread, with the raw list it came from.

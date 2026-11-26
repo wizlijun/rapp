@@ -54,6 +54,10 @@ struct State {
     frontmost: bool,
     open_error: Option<OpenError>,
     capture_error: Option<String>,
+    /// `Capture::frame` calls so far (whether or not they returned a picture).
+    frame_calls: usize,
+    /// Forces the pixel size of the next pictures (a broken platform's empty frame).
+    frame_size: Option<(usize, usize)>,
 
     locked: bool,
     password: Vec<u16>,
@@ -204,6 +208,8 @@ impl FakePlatform {
             frontmost: true,
             open_error: None,
             capture_error: None,
+            frame_calls: 0,
+            frame_size: None,
             locked: false,
             password: Vec::new(),
             typed: 0,
@@ -428,6 +434,23 @@ impl FakePlatform {
     }
 
     /// Every platform call so far, in order.
+    /// How many times the capture was polled.
+    pub fn frame_calls(&self) -> usize {
+        self.st().frame_calls
+    }
+
+    /// Pictures come out `size` pixels big whatever the region (`None`: the region's size).
+    pub fn set_frame_size(&self, size: Option<(usize, usize)>) {
+        let mut s = self.st();
+        s.frame_size = size;
+        FakePlatform::changed(&mut s);
+    }
+
+    /// The display's pixels per point (what capture density is capped at).
+    pub fn set_scale(&self, scale: f32) {
+        self.st().scale = scale;
+    }
+
     pub fn log(&self) -> Vec<String> {
         self.st().log.clone()
     }
@@ -622,9 +645,10 @@ struct FakeCapture {
 
 impl Capture for FakeCapture {
     fn frame(&mut self, region: CanvasRect, density: f32, wait: Duration) -> Result<Option<Frame>, String> {
-        let (generation, scroll, error) = {
-            let s = lock_state(&self.state);
-            (s.generation, s.scroll, s.capture_error.clone())
+        let (generation, scroll, error, forced) = {
+            let mut s = lock_state(&self.state);
+            s.frame_calls += 1;
+            (s.generation, s.scroll, s.capture_error.clone(), s.frame_size)
         };
         if let Some(reason) = error {
             return Err(reason);
@@ -634,8 +658,10 @@ impl Capture for FakeCapture {
             return Ok(None);
         }
         self.served = Some((generation, region, density));
-        let width = ((region.w * density).round() as usize).max(1);
-        let height = ((region.h * density).round() as usize).max(1);
+        let (width, height) = forced.unwrap_or((
+            ((region.w * density).round() as usize).max(1),
+            ((region.h * density).round() as usize).max(1),
+        ));
         Ok(Some(Frame {
             bgra: FakePlatform::pattern(width, height, scroll),
             width,
