@@ -9,6 +9,7 @@ import '../service_client.dart';
 import 'controls.dart';
 import 'inbound.dart';
 import 'lamp.dart';
+import 'os_mark.dart';
 import 'main_state.dart';
 import 'open_apps_menu.dart';
 import 'overview_model.dart';
@@ -304,6 +305,8 @@ class _Column extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             Row(children: [
+              OsMark(col.os, key: Key('os-mark-${id ?? 'local'}')),
+              const SizedBox(width: 6),
               StatusLamp(col.lamp),
               const SizedBox(width: 6),
               Flexible(

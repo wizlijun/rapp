@@ -9,7 +9,9 @@ import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/term/term_session_port.dart';
 import 'package:rapp/embed/traffic_label.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/ui/device_os.dart';
 import 'package:rapp/ui/lamp.dart';
+import 'package:rapp/ui/os_mark.dart';
 import 'package:rapp/ui/workspace_store.dart';
 import 'package:rapp/ui/main_window.dart';
 import 'package:rapp/ui/fullscreen.dart';
@@ -59,7 +61,7 @@ void main() {
 
   /// Builds the state, opens [apps] (`id/app`) in order and shows the overview.
   Future<void> boot(WidgetTester tester,
-      {List<String> apps = const [], bool embed = true, TermSessionPort? termPort, String? stateRules}) async {
+      {List<String> apps = const [], bool embed = true, TermSessionPort? termPort, String? stateRules, DeviceOs? localOs}) async {
     tester.view.physicalSize = const Size(1194, 834);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -90,6 +92,7 @@ void main() {
       termPort: termPort,
       clock: () => epoch,
       builtinStateRules: stateRules,
+      localOs: localOs,
     );
     await tester.runAsync(() async {
       for (var i = 0; i < 8; i++) {
@@ -471,6 +474,22 @@ void main() {
     final title = tester.widget<Text>(inside('column-m2', find.text('air')));
     expect(title.style!.color, tokens(tester).muted);
     expect(inside('column-m2', find.text('离线')), findsOneWidget);
+  });
+
+  testWidgets('each column shows its system mark left of the lamp, offline too', (tester) async {
+    hosts = [
+      {'id': 'm1', 'name': 'A', 'os': 'windows'},
+    ];
+    offline = {'m1'};
+    await boot(tester, localOs: DeviceOs.macos);
+    await show(tester);
+    OsMark mark(String k) => tester.widget<OsMark>(find.byKey(Key(k)));
+    expect(mark('os-mark-local').os, DeviceOs.macos);
+    expect(mark('os-mark-m1').os, DeviceOs.windows);
+    final lamp = find.descendant(of: find.byKey(const Key('column-m1')), matching: find.byType(StatusLamp));
+    expect(tester.getTopLeft(find.byKey(const Key('os-mark-m1'))).dx, lessThan(tester.getTopLeft(lamp.first).dx));
+    expect(find.descendant(of: find.byKey(const Key('column-m1')), matching: find.byKey(const Key('os-mark-m1'))),
+        findsOneWidget);
   });
 
   testWidgets('each column shows its version at the bottom in muted text; none when unknown', (tester) async {
