@@ -44,7 +44,7 @@
 说明文件：分支上的 `docs/superpowers/plans/notes/2026-11-26-windows-a-draft-notes.md`（六节：写了什么、没写什么、和计划不同的地方、计划的错、编译风险、先验什么）。
 
 - **写了的**：两个空壳 crate 进 workspace；`rapp-net` 的 Windows 部分（`rust/net/src/win.rs`，新增的 `unsafe` 只在这一个文件）；`rapp-service` 的单实例和 `--supervised`；`rapp-term` 的 unix 部分包起来；`rapp-cli` 在 Windows 上的入口；测试在 Windows 上的写法（七处权限断言、testkit 复制四个假程序）；`.gitattributes`；`rust/.cargo/config.toml`；`scripts/stage-windows.ps1`、`scripts/check-windows.ps1`；规格 §19.2 列的旧文档句子；`tasks/todo.md` 末尾两个新标题。
-- **没做的**：`CLAUDE.md` 没动（四条文字在说明文件第 2 节，要先给用户看）；所有要 Windows 机器的步骤；Flutter 的 Windows 构建；§17.2 的完成标记；合并。
+- **没做的**：`CLAUDE.md` 草稿没动（四条已由用户 2026-11-27 同意，直接加在 main 上了，见第 5 节第 1 步）；所有要 Windows 机器的步骤；Flutter 的 Windows 构建；§17.2 的完成标记；合并。
 - **计划里错的，已经改回计划 A**：中继只改 `audit.rs` 不够（见 4.2，用户已同意再改 `admin.rs`，草稿里已经写了：提交 `132111ad`、`ddbdc52b`；Windows 上因此关掉“换钥”一组八个测试，首发前手工验一次，在计划 H 任务 5）；`rapp-state` 和余力的 `disks.rs` 是计划之后才进 main 的 unix 代码；testkit 的假程序是四个不是三个；`rapp-term` 的“改名检查”要改成比内容；`rust/.cargo/config.toml` 只在当前目录是 `rust\` 时生效。
 - **最先会撞上的**：
   1. `Cargo.lock` 没重新生成。第一次跑 cargo 会改它，这是加依赖的正常结果，和功能一起提交（只是不许动里面的版本号行，那归发版 session）。
@@ -158,7 +158,7 @@ B 段分三批写，前两批在两个分支上并行，互相没看过对方的
 
 **0. 先读**：规格 §0.2（用户定的十一件事）、§5.3、§19.1；这一份；要做的那一段的计划；那个分支上的说明文件。
 
-**1. `CLAUDE.md` 的四条先加上**（规格 §14.5 第 1–4 条）。**第一行 Windows 代码合并进 main 之前必须做**，否则 Mac 发版 session 会为每一次只动 Windows 的合并发一个 macOS 版。文字要用户点头，给用户看一次再提交。计划 A 任务 1。
+**1. `CLAUDE.md` 的四条：已做**（规格 §14.5 第 1–4 条；用户 2026-11-27 同意文字，已在 main 上）。剩一处要填：“其他 session”第 2 条里 Windows 机器上 checkout 的路径，机器装好后填（计划 A 任务 1 步骤 5）。计划 A 任务 1 的步骤 1 不用再做，步骤 3 只剩 `.gitattributes`。
 
 **2. 探针**（计划 P），在 Windows 实机上。一级探针先跑（G1、G2、H1、H3、H5、S1、S2、S4、T1、T5、C1）：它们的结果能推翻结构。每个结果写进探针结果文件；和计划假设不一样的，照那份计划开头的表改计划，再动代码。表里写了“回来问用户”的（S1、S2、H1 的退路、I1 的退路）必须问。
 
