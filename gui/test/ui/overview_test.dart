@@ -364,6 +364,23 @@ void main() {
     expect(t.sent.where((m) => m['cmd'] == 'open').map((m) => m['app']), ['desktop:']);
   });
 
+  testWidgets('a permission prompt while the host desktop is on the stage stays on that screen', (tester) async {
+    await boot(tester);
+    await tester.runAsync(() async {
+      await s.openOrSwitch('m1', 'desktop:', '桌面');
+      for (var j = 0; j < 6; j++) {
+        await flush();
+      }
+    });
+    expect(s.currentKey, 'm1/desktop:');
+    s.toggleOverview();
+    await newTermAsked(tester);
+    expect(s.hint, endsWith('不在这块屏上就换一块屏看看'));
+    expect(t.sent.where((m) => m['cmd'] == 'open'), hasLength(1));
+    expect(s.currentKey, 'm1/desktop:');
+    expect(s.overview, isFalse);
+  });
+
   testWidgets('a permission prompt on a host without a desktop is only said', (tester) async {
     capsOf['m1'] = {'graphical': false};
     await boot(tester);
