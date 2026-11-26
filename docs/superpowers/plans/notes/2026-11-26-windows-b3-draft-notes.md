@@ -100,6 +100,10 @@
 - FocusReader 的 roles 和其他属于平台的部分（FocusReader 105-216、InputInjector 220-233、InputSourceWatcher 17-68、SecureFocusWatcher 66-110、WindowCapture 126-164）：这些是阶段 D 的 host-windows，在 PORTING.md 里标了 “phase D”。
 - VisionText OCR、MenuBarReader，以及 Server 488-505、1249-1265：Windows 上没有，PORTING 里标了 not on Windows。
 - Timeout.swift：没有移植。Rust 用 clock 和 recv_timeout。
+- **任务 20 步骤 4、5（第四批写了）**：
+  - `tasks/todo.md` 末尾新增「Windows B 段（主机核心）」：D 段的 5 项实机检查，加一行给发版 session。
+  - 「B 段交接」按计划 :743 应该追加到探针结果页，可这一页（`docs/superpowers/specs/2026-11-26-rapp-windows-probe-results.md`）还不存在。所以先写在 `rust/host-core/PORTING.md` 第 5 部分，探针结果页建好后搬过去，PORTING 里留一个链接就行。
+  - 第 5 部分在第 4 部分后面，`tests/porting.rs` 只解析第 1、3 部分，加这一部分不影响检查。
 
 ## 3. 名字和签名与计划 B 不同的地方（全部）
 

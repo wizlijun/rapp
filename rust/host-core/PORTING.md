@@ -269,3 +269,64 @@ Each entry: what differs from Swift, why, and the weaker check that stands in.
 - **Typing after the session ended.** Swift's typing loop asks only the screen's lock state;
   host-core's also stops once the session is gone (plan B Review Focus 2). Check:
   `host_session::disconnect_while_typing_frees_the_lock`.
+
+## 5. B 段交接 (what phase D must know)
+
+Plan B Task 20 step 5 puts this on the probe-results page, which does not exist yet
+(`docs/superpowers/specs/2026-11-26-rapp-windows-probe-results.md`); it lives here until
+then. The draft is uncompiled and untested; see
+`docs/superpowers/plans/notes/2026-11-26-windows-b3-draft-notes.md`.
+
+**The interface.** [`src/platform.rs`](src/platform.rs) is the final one. Read it there; it
+is not copied here.
+
+**What `FakePlatform` does that a real platform must also do** (`rust/testkit/src/fake_platform.rs`;
+the session tests depend on each):
+
+- `open`: starts an app that is not running; an unknown app id is `OpenError::NotFound(id)`,
+  an unknown display `NotFound("desktop:<id>")`. The four "no picture" reasons (`NoDisplay`,
+  `SessionDisconnected`, `NotInteractive`, `OtherUser`) also show in `permissions().error`,
+  with `screen_recording` false; other failures do not.
+- `Capture::frame`: waits at most `wait` and answers `Ok(None)` when nothing changed;
+  otherwise a frame of `round(region × density)` pixels (at least 1 x 1) with
+  `bytes_per_row` ≥ `width * 4`. `Err` only when it cannot recover: the session ends on it.
+- `TargetOps::activate` returns false, and nothing comes to the front, while A is locked or
+  another app keeps the front; `frontmost` tells the truth. The paste path waits on it (10
+  tries, 50 ms apart) and answers "screen locked" or "target not frontmost"; a copy is not
+  announced while the target is not frontmost.
+- `WindowOps::list` is front to back, `foreground` only on the frontmost window, and `raise`
+  reorders it. `screen` leaves out minimized windows and includes other apps' windows with
+  their pid (the cover and hit tests use them). Rects and points are global points.
+  `opened_app` reports each newly opened app once.
+- Scroll: a wheel turn moves the content on the next frames (the fake shifts its pattern by
+  `-dy × scale` pixels); the scroll detector must be able to see it.
+- `InputOps::text` gets UTF-16 units in the chunks host-core cuts (at most 20) and must type
+  them as given. `blocked_by` answers `Some("elevated")` over a higher-privilege window.
+- `InputSourceOps::select` / `select_english` return false when there is no such source;
+  `current` is one of `list`.
+- `ClipboardOps::change_count` goes up on every write and restore and on anyone else's copy;
+  `write` and `restore` return the new count; `snapshot` then `restore` gives back the same
+  contents; `read` marks a password manager's copy `concealed`.
+- `ControlOps::keyboard_changed` is true once per change, not while it stays changed;
+  `focus_chain` keeps to its deadline; `close_cover` only closes a regular app's window.
+- `LockOps`: `locked` is the real lock screen; `lock()` answers `None` once the call is made
+  and A locks within 2 s; units typed while A is not locked do nothing; Return after the right
+  password unlocks; `can_unlock` false makes the session answer `ScreenLocked(true)`.
+  `stay_awake(on/off)` is per handle: the session keeps its own handle for it (its target's
+  lock handle is replaced when the target opens), so `off` on one handle must not drop
+  another handle's hold.
+- `locked_app_windows` answers `None` when the app is not running or its windows cannot be
+  listed while A is locked.
+- Nothing logs typed text, passwords or clipboard contents, only their length.
+
+**The deflate backend.** `libz-sys` 1.x with `default-features = false, features = ["static"]`
+(`Cargo.toml`): stock zlib built from its bundled C sources. On Windows that needs a C
+compiler, the MSVC build tools' `cl.exe` (the "Desktop development with C++" workload). If
+probe C1 picks zlib-rs instead, `libz-rs-sys` needs no C compiler. Only `src/deflate.rs`
+names the crate. Probe C1 has not run, so whether the output is byte-identical to the Swift
+host's (Apple's system zlib) is not proven; plan B Task 3 has the fallback if it is not.
+
+**Not byte-exact.** Every entry of part 4: text recognition (`VisionText.swift`), the display
+an app on a locked A is shown on (`WindowCapture.swift:273-287`), staying awake
+(`PowerHold.swift`, no "could not keep A awake" line), and typing that also stops when the
+session ends.

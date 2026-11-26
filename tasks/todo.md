@@ -1471,3 +1471,14 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），将 Linux / Omarchy `x86_64` 产物构建并挂载至已发布的 [v0.15.55](https://github.com/wizlijun/rapp/releases/tag/v0.15.55) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
 - [x] 对齐 macOS `0.15.52`–`0.15.55`（含 Linux `0.15.54` `fix/linux-terminal-paste`）：放大版非阻塞 `WaitCard` 舞台等候卡片（`Ctrl+Shift+T` 排队计数与远端 Mac 授权自动切桌面）、`rapp-host-linux` 终端窗口 `Ctrl+Shift+V` 中文粘贴与 Wayland 选区往返同步、以及 `rapp-state` 第 3 步（`PUT /v1/desk/<fp>` 会话面板「别处开着」一键接力、`StateOut` 应用状态规则代报与「需要你」`推断` 标记、`Op::SetService` 节点间控制及设备页 `StateServiceRow` 开关）；补充 `scripts/test-linux-bundle.py`、`gui/test/term/term_main_test.dart`、`gui/test/ui/state_service_row_test.dart` 与 `gui/test/ui/wait_card_test.dart` Linux 侧回归校验。
 - [x] `v0.15.55`（源码 `1038f30b`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01555-parity.md`。
+
+## Windows B 段（主机核心）（计划 `docs/superpowers/plans/2026-11-26-rapp-windows-b-host-core.md`，分支 `feat/windows-host-core`，2026-11-27）
+
+`rust/host-core` 加上 testkit 里的 `FakePlatform`、`fake-host-core` 都是草稿，还没编译，也没跑过测试。验证顺序见 `docs/superpowers/plans/notes/2026-11-26-windows-b3-draft-notes.md` §6。下面几项假平台演不出来，要等 D 段有了真的 Windows 平台再到实机上看。交接内容见 `rust/host-core/PORTING.md` 第 5 部分「B 段交接」。
+
+- [ ] 1 真的 Windows 截屏在五种模式（gray4、color8、color16、duogray、duocolor）下画面都对：颜色和灰阶不错位，块边界上没有错行
+- [ ] 2 滚动复用：在一个真会滚的程序里（浏览器、长文档）滚轮滚动，画面跟着平滑走，没有撕裂的行。日志里看得出滚动复用确实生效了，不是每帧整张重发
+- [ ] 3 在一个真的程序里打字（中英文都打，每段超过 20 个字），字都到了，没丢也没重复
+- [ ] 4 从 Mac 粘贴文件到 Windows：文件落在 NTFS 的下载目录里。名字是保留名（如 `CON.txt`、`aux`）时改名为 `_CON.txt` 这类，同名再来时编号为 `_CON (2).txt`；SHA-256 和原文件一致
+- [ ] 5 锁屏后经系统服务解锁：B 端输入密码，A 真的解开；密码错时 A 保持锁着，B 端还显示「已锁」；日志里没有密码
+- [ ] 发版 session：`host-core` 属于共用代码（不带 `cfg(windows)`），合进 main 以后随下一次 macOS 发版一起发出去，macOS 版的行为不变（macOS 的被控端还是 Swift 的 `rapp-host`）。它进了 `cargo test --workspace` 和 clippy 门禁；夹具测试要先用 Swift 生成夹具（`RAPP_WRITE_FIXTURES=1 swift test --filter 'Fixtures/'`），合并前不先生成会让门禁失败
