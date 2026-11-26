@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- **Precondition:** probe C1 has a recorded verdict (plan P, Task 2). Tasks 1–2 and 4 do not depend on it and may start before; Task 3 and everything that compresses may not.
+- **Precondition:** probe C1 has a recorded verdict (plan P, Task 2). Tasks 1–2 and 4 do not depend on it and may start before; Task 3 and everything that compresses may not. (The code draft of 2026-11-26 was written before C1 ran and assumes stock zlib through `libz-sys`; C1 confirms or overturns that — see the draft notes.)
 - **`Sources/` is never modified** (spec U10). Generators are new files under `Tests/RappCoreTests/HostCoreFixtures/`. If a Swift symbol is not visible to tests, the generator works around it (see Task 2); it does not change the symbol's access level.
 - **`rust/host-linux/` is never modified** (spec U9). Its `gate.rs`, `pause.rs`, `pacing.rs`, `wire.rs` may be copied as a starting point; the copy is then made to pass the Swift fixtures. Where the two disagree, Swift wins.
 - `host-core` contains no `cfg(windows)`, no `cfg(target_os …)`, no `cfg(unix)`, no `windows`/`windows-sys`/`libc` dependency, no `tokio`. From the outside world it uses only `std` networking, files, threads and time. Task 1 adds a test that enforces this.
@@ -77,9 +77,9 @@ rust/testkit/
 - **Who writes:** a Swift test class in `Tests/RappCoreTests/HostCoreFixtures/`, calling only code in `Sources/RappCore/`. **Who reads:** a Rust test in `rust/host-core/tests/`. A fixture, its generator, the Rust code it checks and the Rust test land in the same commit.
 - **Write or compare:** every generator ends in `HostFixture.check(name, bytes)`. With `RAPP_WRITE_FIXTURES=1` it writes `rust/host-core/tests/fixtures/<name>`; without, it rebuilds the bytes in memory and fails if they differ from the file. So a change in `Sources/RappCore/` turns `swift test` red until fixtures are regenerated, and regenerated fixtures turn `cargo test` red until `host-core` follows. Generators must be deterministic: own seeded generator (as `ScrollScenes` does), no system random, no clock, no dictionary iteration order.
 - **Two formats.** *Binary* (`.bin`): a sequence of records `u8 tag, u32 LE length, payload`; the meaning of each tag is documented in the generator's header comment and repeated in the Rust test's header. *Cases* (`.json`): a JSON array of `{"name": …, "in": …, "out": …}`, written with sorted keys and pretty-printed so diffs are readable. Traces (pacing, tracker, state engine) are cases whose `in` is a list of calls with their `now` and whose `out` is the list of results.
-- **Comparison is typed and exact.** The Rust test deserialises `in` and `out` into Rust types (`serde`), calls the Rust function, and compares with `==`. It never compares JSON text and never compares `serde_json::Value` for computed results. No float tolerance. Swift `Float` fields are `f32` in Rust, `CGFloat`/`Double`/`TimeInterval` are `f64`; a generator writes a `Float` as `Double(value)` so the round trip is exact. Fixtures never contain NaN or infinity.
+- **Comparison is typed and exact.** The Rust test deserialises `in` and `out` into Rust types (`serde`), calls the Rust function, and compares with `==`. It never compares JSON text and never compares `serde_json::Value` for computed results. No float tolerance. Swift `Float` fields are `f32` in Rust, `CGFloat`/`Double`/`TimeInterval` are `f64`; a generator writes a `Float` as `Double(value)` so the round trip is exact. JSON fixtures never contain NaN or infinity; the binary reject fixtures may carry NaN bit patterns, as bytes.
 - **Coverage floor:** a generator contains at least every scenario of the existing Swift unit tests for that module (`Tests/RappCoreTests/<Module>Tests.swift`), re-expressed as input → Swift-computed output, plus the extras listed in the task. Reuse the existing helpers (`ScrollScenes`, `RuleCanvas`, `RuleFixtures`).
-- **If byte identity turns out impossible for one output**, stop and write down why in `PORTING.md` under “Not byte-exact”, then use the fallback the spec allows (§14.2): Swift's decoder decodes `host-core`'s output to identical pixels. Only the deflate layer and what depends on compressed sizes may need this, and only if C1 says so (Task 3).
+- **If byte identity turns out impossible for one output**, stop and write down why in `PORTING.md` under “Not byte-exact” (`rust/host-core/PORTING.md`; Task 18 completes the file, the first task that needs it creates it with that one heading), then use the fallback the spec allows (§14.2): Swift's decoder decodes `host-core`'s output to identical pixels. Only the deflate layer and what depends on compressed sizes may need this, and only if C1 says so (Task 3).
 
 ## Porting traps (apply to every task)
 
@@ -98,6 +98,8 @@ Task 1 → 2 → 3 → 4 → 5 → 6 (encode and send, in dependency order). Tas
 ---
 
 ### Task 1: Crate, clock, fixture harness, boundary test
+
+**`lib.rs` declares a module only in the task that creates its file.** Each task adds its own `pub mod` line, so the crate compiles after every task and each task's “Run” step can really run. (The 2026-11-26 code draft declared all modules in Task 1; whoever verifies it first makes the crate compile by bringing the two draft branches together — see the handoff, §3.2.)
 
 **Files:**
 - Create: `rust/host-core/Cargo.toml`, `rust/host-core/src/lib.rs`, `rust/host-core/src/clock.rs`
@@ -204,7 +206,7 @@ Run: `cargo test --manifest-path rust/Cargo.toml -p rapp-host-core --test protoc
 
 **Files:**
 - Create: `rust/host-core/src/deflate.rs`, `rust/host-core/tests/deflate.rs`, `Tests/RappCoreTests/HostCoreFixtures/DeflateFixtures.swift`
-- Modify: `rust/host-core/Cargo.toml`, `rust/Cargo.lock`
+- Modify: `rust/host-core/Cargo.toml`; `rust/Cargo.lock` changes by itself on the first cargo run (`libz-sys` is already in the lock file through other crates; never edit the lock by hand, never touch its version lines)
 - Fixture: `deflate.bin`
 
 Swift side for reference (`Sources/RappCore/Deflate.swift`): system zlib, `deflateInit_` at level 6 (so window bits 15, memory level 8, default strategy, zlib wrapper), `deflate(…, Z_SYNC_FLUSH)` per call, one stream per connection, `compress(_:ifAtMost:)` compresses on a `deflateCopy` of the stream and keeps the copy only if the output fits, `reset()` on a full frame.
@@ -229,7 +231,7 @@ impl DeflateStream {
 
 Run: `cargo test --manifest-path rust/Cargo.toml -p rapp-host-core --test deflate` — Expected: FAIL to compile.
 
-- [ ] **Step 2: Implement `deflate.rs`** per the decision above. Output buffer grows in a loop until `avail_out` is non-zero after `Z_SYNC_FLUSH`.
+- [ ] **Step 2: Implement `deflate.rs`** per the decision above. As Swift does (`Deflate.swift:10`, `:60`–`:70`): a fixed 64 KiB output buffer drained in a loop until `avail_out` is non-zero after `Z_SYNC_FLUSH`.
 
 - [ ] **Step 3: Run** the test — Expected: PASS. Run `cargo tree -p rapp-client-core -e features | /usr/bin/grep flate2` before and after — Expected: identical. Build for iOS as the gate does (`cargo build --release -p rapp-hub-ffi --target aarch64-apple-ios-sim`) — Expected: unaffected (it does not depend on `host-core`).
 
@@ -270,8 +272,9 @@ pub struct FrameEncoder { … }
 impl FrameEncoder {
     pub fn new(mode: Mode) -> Self;
     pub fn reset(&mut self);
-    pub fn encode(&mut self, samples: &[u8], raw: Option<&[u8]>, width: usize, height: usize, region: CanvasRect) -> FramePayload;
-    pub fn encode_slices(&mut self, samples: &[u8], raw: Option<&[u8]>, width: usize, height: usize, region: CanvasRect, limit: usize, first_limit: usize) -> Vec<FramePayload>;
+    // As Swift: `encode` is `encode_slices(..).first` (None when nothing is to be sent); `region` None = the whole canvas.
+    pub fn encode(&mut self, samples: &[u8], raw: Option<&[u8]>, width: usize, height: usize, region: Option<CanvasRect>) -> Option<FramePayload>;
+    pub fn encode_slices(&mut self, samples: &[u8], raw: Option<&[u8]>, width: usize, height: usize, region: Option<CanvasRect>, limit: usize, first_limit: Option<usize>) -> Vec<FramePayload>;
     pub fn encode_settle(&mut self, limit: usize) -> Vec<FramePayload>;
     pub fn last_report(&self) -> Option<&EncodeReport>;
 }
@@ -279,9 +282,9 @@ impl FrameEncoder {
 
 Exact parameter lists follow `TileCodec.swift:190`, `:216`, `:317`; if Swift has a parameter this block lacks, add it under its Swift name.
 
-- [ ] **Step 1: Generator.** Same record layout as `CrossFixtureTests.swift` (tag 1 slice, tag 2 canvas after the frame, tag 3 frame count), plus tag 4 = the tile stream before deflate for that slice (from a mirror `InflateStream`, as `CrossFixtureTests` already does) and tag 5 = the `EncodeReport`. Scenes per mode: `ScrollScenes.frames(seed: 7, count: 15, kinds: …, size: (160, 120))` with every `SceneKind`; a first frame, an identical second frame (expect an empty delta), a full-size change; a region size change (forces full); 1×1 and 65×65 canvases. Each scene twice: through `encode`, and through `encodeSlices` with `limit: 32768, firstLimit: 8192` (the values `PacedSender` uses) and with `limit: 600, firstLimit: 300` (forces many slices). `tile-settle.bin`: lossy `duogray`/`duocolor` frames with `raw` given, then `encodeSettle(limit: 32768)` until it returns nothing.
+- [ ] **Step 1: Generator.** Same record layout as `CrossFixtureTests.swift` (tag 1 slice, tag 2 canvas after the frame, tag 3 frame count), plus tag 0 = the input of each encoder call (samples, raw, width, height, region, limits — without it Rust cannot replay the calls), tag 4 = the tile stream before deflate for that slice (from a mirror `InflateStream`, as `CrossFixtureTests` already does) and tag 5 = the `EncodeReport`. Scenes per mode: `ScrollScenes.frames(seed: 7, count: 15, kinds: …, size: (160, 120))` with every `SceneKind`; a first frame, an identical second frame (expect an empty delta), a full-size change; a region size change (does **not** force a full frame by itself — only a density change of more than 1 % does, `TileCodec.swift:329`; a size change only sets `full` in the report) and a density change of 2 % (forces full); 1×1 and 65×65 canvases. Each scene twice: through `encode`, and through `encodeSlices` with `limit: 32768, firstLimit: 8192` (the values `PacedSender` uses) and with `limit: 600, firstLimit: 300` (forces many slices). `tile-settle.bin`: lossy `duogray`/`duocolor` frames with `raw` given, then `encodeSettle(limit: 32768)` until it returns nothing.
 
-- [ ] **Step 2: Failing Rust tests** in `tests/tile.rs`: `frames_match_swift` (payload header fields, then tag 4 bytes equal `host-core`'s pre-deflate stream — expose it to tests through a `#[doc(hidden)] pub fn last_tile_stream(&self) -> &[u8]` — then tag 1 bytes equal the compressed payload); `reports_match_swift`; `settle_matches_swift`; `decoder_agrees` (feed every payload to `rapp_client_core::codec::Decoder` and compare the canvas with tag 2 — this is the controller's real decoder). If Task 3 recorded “not byte-exact”, the compressed comparison and the slice-count comparison are replaced by `decoder_agrees` alone for sliced scenes, and that is written in `PORTING.md`.
+- [ ] **Step 2: Failing Rust tests** in `tests/tile.rs`: `frames_match_swift` (payload header fields, then tag 4 bytes equal `host-core`'s pre-deflate stream — expose it to tests through `#[doc(hidden)] pub fn last_tile_streams(&self) -> &[Vec<u8>]`, one per slice, since one call can produce several slices — then tag 1 bytes equal the compressed payload); `reports_match_swift`; `settle_matches_swift`; `decoder_agrees` (feed every payload to `rapp_client_core::codec::Decoder` and compare the canvas with tag 2 — this is the controller's real decoder). If Task 3 recorded “not byte-exact”, the compressed comparison and the slice-count comparison are replaced by `decoder_agrees` alone for sliced scenes, and that is written in `PORTING.md`.
 
 Run: `cargo test … -p rapp-host-core --test tile` — Expected: FAIL to compile.
 
@@ -299,29 +302,30 @@ Run: `cargo test … -p rapp-host-core --test tile` — Expected: FAIL to compil
 
 ```rust
 pub struct SendPacer { pub fps: i64, … }            // sent, acked, base_rtt, queueing, cap, reset, in_flight
-pub struct WeakTier { pub steps: Vec<i64>, pub pinned: bool, … }   // observe, probe, set_steps, weak(), level()
+pub struct WeakTier { pub steps: Vec<i64>, … }   // observe, probe, set_steps, set_pinned (resets the level to 0, as Swift's didSet, WeakTier.swift:12), pinned(), weak(), level()
 pub struct StreamSpec { pub mode: Mode, pub fps: i64, pub density: f32 }
 pub fn save_ladder_stream(level: i64, ceiling: StreamSpec) -> StreamSpec;
 pub fn save_ladder_steps(ceiling: StreamSpec) -> Vec<i64>;
 pub struct Stats { pub rtt_ms: Option<i64>, pub base_rtt_ms: Option<i64>, pub latency_ms: Option<i64>, pub in_flight: i64, pub cap: i64, pub weak: bool, pub level: i64, pub full_frames: i64, pub encode_ms_max: Option<i64> }
-pub enum SenderOutput { Frame(FramePayload), LevelChanged(i64), Encoded(EncodeReport) }
+pub enum SenderOutput { Frame { region: CanvasRect, payload: FramePayload }, LevelChanged(i64), Encoded(EncodeReport) }   // region: Swift's transmit(region, payload), PacedSender.swift:46
 pub struct PacedSender { … }
 impl PacedSender {
     pub fn new(mode: Mode, fps: i64) -> Self;
-    pub fn offer(&mut self, samples: Vec<u8>, raw: Option<Vec<u8>>, width: usize, height: usize, region: CanvasRect, now: f64) -> Vec<SenderOutput>;
+    pub fn offer(&mut self, samples: Vec<u8>, raw: Option<Vec<u8>>, width: usize, height: usize, region: CanvasRect, captured: f64, now: f64) -> Vec<SenderOutput>;   // captured: PacedSender.swift:83
     pub fn ack(&mut self, processing_ms: u16, now: f64) -> Vec<SenderOutput>;
     pub fn settle_if_idle(&mut self, now: f64) -> Vec<SenderOutput>;
     pub fn tick(&mut self, now: f64) -> Vec<SenderOutput>;
     pub fn set_mode(&mut self, mode: Mode); pub fn set_fps(&mut self, fps: i64);
-    pub fn set_paused(&mut self, on: bool); pub fn set_pinned(&mut self, pinned: bool); pub fn set_steps(&mut self, steps: Vec<i64>);
-    pub fn take_stats(&mut self) -> Stats;
+    pub fn set_paused(&mut self, on: bool, now: f64) -> Vec<SenderOutput>;   // a resume pumps (PacedSender.swift:135)
+    pub fn set_pinned(&mut self, pinned: bool) -> Vec<SenderOutput>; pub fn set_steps(&mut self, steps: Vec<i64>) -> Vec<SenderOutput>;   // both can report a level change (:142–:151)
+    pub fn take_stats(&mut self, now: f64) -> Stats;   // reads the clock (:163)
 }
 pub struct PauseOutbox { … }   // pass, due, changed, set_paused — WINDOWS_EVERY = 5.0, CHANGED_EVERY = 1.0
 ```
 
-Swift's `PacedSender` takes `now` and `transmit` closures and has `onLevelChange`/`onEncoded` callbacks; the Rust one takes `now` as an argument and returns what Swift would have called back, in call order. That is the one structural change in this task.
+Swift's `PacedSender` takes `now` and `transmit` closures and has `onLevelChange`/`onEncoded` callbacks; the Rust one takes `now` as an argument and returns what Swift would have called back, in call order. That is the one structural change in this task. It is also why `offer`, `set_paused`, `set_pinned`, `set_steps` and `take_stats` carry `now` and/or return outputs where the Swift methods return nothing: whatever Swift does through `now()` or a callback shows in the Rust signature.
 
-- [ ] **Step 1: Generators.** Each fixture is a list of traces. A trace = constructor arguments plus a list of calls (`{"call": "offer", "now": 1.25, "scene": 3}` …) and, per call, what came out (frames as hex of the encoded `frame` message, level changes, stats). `PacedSender` traces: steady 30 fps with prompt acks; no acks at all for 5 s (expect the in-flight cap to hold and only the latest offered frame to be kept); acks delayed 400 ms (expect the weak tier to engage, then recover); `setPaused(true)`, offers, `setPaused(false)` (expect no frame while paused, a full frame after); `setMode` mid-stream; idle 0.3 s then `settleIfIdle` on a duo mode; `setPinned(true)` under delay. Plus every scenario of `SendPacerTests`, `WeakTierTests`, `SaveLadderTests`, `PacedSenderTests`, `PauseOutboxTests`.
+- [ ] **Step 1: Generators.** Each fixture is a list of traces. A trace = constructor arguments plus a list of calls (`{"call": "offer", "now": 1.25, "scene": 3}` …) and, per call, what came out (frames as hex of the encoded `frame` message, level changes, stats). `PacedSender` traces: steady 30 fps with prompt acks; no acks at all for 5 s (expect the in-flight cap to hold and only the latest offered frame to be kept); acks delayed 400 ms (expect the weak tier to engage, then recover); `setPaused(true)`, offers, `setPaused(false)` (expect no frame while paused, then a **diff** against what the controller last got — `PacedSenderTests.swift:601`; only a mode change while paused gives a full frame, `:655`–`:668`); `setMode` mid-stream; idle 0.3 s then `settleIfIdle` on a duo mode; `setPinned(true)` under delay. Plus every scenario of `SendPacerTests`, `WeakTierTests`, `SaveLadderTests`, `PacedSenderTests`, `PauseOutboxTests`.
 - [ ] **Step 2: Failing Rust test** `tests/pacing.rs`, one test per fixture replaying the trace, plus `unacknowledged_stream_keeps_one_frame` (Review Focus 5): offer 1000 distinct frames with no ack and assert the sender holds at most one pending frame's samples (check through a `#[doc(hidden)] pub fn pending_bytes(&self) -> usize`).
 - [ ] **Step 3: Port** `SendPacer.swift`, `WeakTier.swift`, `SaveLadder.swift`, `PacedSender.swift`, `PauseOutbox.swift`. `rust/host-linux/src/pacing.rs` and `pause.rs` are a usable starting point.
 - [ ] **Step 4: Run** `cargo test … --test pacing` — Expected: PASS. **Step 5: Commit** `feat(host-core): pacing, weak tier, save ladder, pause outbox`.
