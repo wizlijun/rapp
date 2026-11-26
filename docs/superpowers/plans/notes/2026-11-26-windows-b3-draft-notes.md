@@ -16,7 +16,19 @@
 | 90f30db9 | 任务 17：锁屏状态和解锁 |
 | 5249fde3 | 任务 18：`PORTING.md` 对照表和摘要，带检查测试 |
 | 46c89cb9 | 任务 19：`fake-host-core` 程序和服务契约测试 |
-| （本文件） | 笔记 |
+| 6175425d | 笔记 |
+| 3ecfffbb | 第四批开工前 `git merge main`，没有冲突 |
+| 7649a3e0 | 第四批 1：锁屏时开始的会话按程序所在的显示器报画布 |
+| a8624d30 | 第四批 2：menuPick 走闸门，按 Swift 丢弃，只写日志 |
+| bbea8c91 | 第四批 3：保持唤醒按 Swift 用 StayAwake，开和关落在同一个句柄上 |
+| e2c41102 | 第四批 4：目标不在最前时，粘贴报 target not frontmost，复制不宣布 |
+| ed9f0c86 | 第四批 5：fps 只收协议的档位，和 Swift 一样不取整 |
+| c4effbea | 第四批 6：crate 根重新导出 `run` 和 `WorkerIo` |
+| a3489af0 | 第四批 7：unlock 线程的 locked 闭包；其余几处编译疑点看过不用改 |
+| 40ef3bd2 | 第四批 8：任务 20 步骤 4、5（待办、PORTING 第 5 部分） |
+| （本次） | 笔记改到第四批之后的实际情况 |
+
+第四批同样**没编译、没运行**，所有改动只靠读代码保证一致。
 
 ### 第 2 步（a81f1f81）改了什么
 
@@ -71,7 +83,7 @@
 - **任务 17（写完）**
   - `session/unlock.rs`：密码在独立线程上输入，持有跨 worker 的 `unlock.lock`。
   - 会话结束后不再输入。
-  - 锁屏开始的会话先宣布主屏画布，再每秒轮询一次。
+  - 锁屏开始的会话先宣布程序所在显示器的画布（平台列不出窗口时用主屏），再每秒轮询一次。按程序选屏是第四批补的。
   - lock 命令。
   - 临时的 `stage.rs` 已删除。
   - 会话测试 8 个，其中有 `password_never_leaves`。
@@ -105,6 +117,12 @@
   - 「B 段交接」按计划 :743 应该追加到探针结果页，可这一页（`docs/superpowers/specs/2026-11-26-rapp-windows-probe-results.md`）还不存在。所以先写在 `rust/host-core/PORTING.md` 第 5 部分，探针结果页建好后搬过去，PORTING 里留一个链接就行。
   - 第 5 部分在第 4 部分后面，`tests/porting.rs` 只解析第 1、3 部分，加这一部分不影响检查。
 
+第四批之后还剩的：
+- 焦点区的控件角色、locale：不在第四批的范围内，见 §3 任务 15。
+- “could not move a window” 和 “could not keep A awake” 两行日志：要改 trait 的返回值（`WindowOps::move_to`、`LockOps::stay_awake`），留给用户决定。
+- 交接文档 `2026-11-26-rapp-windows-handoff.md` :104–110 列的草稿缺口里，第 1、3、4、6 条已经由第四批补上。这份文件归 docs/windows-design，我没有改它，免得和那边冲突。
+- 任务 19 步骤 4（真 Mac 控制端）和所有运行步骤。
+
 ## 3. 名字和签名与计划 B 不同的地方（全部）
 
 任务 13
@@ -129,7 +147,7 @@
 
 任务 15
 - 新增 `session/input.rs` 和 `session/hints.rs`。
-- 窗口操作返回 ()，所以没有 “could not move a window” 日志（Swift 在 Server.swift:484-486 有）。
+- 窗口操作返回 ()，所以没有 “could not move a window” 日志（Swift 在 Server.swift:484-486 有）。计划 :586 的 `WindowOps::move_to` 也返回 ()，草稿和计划一致；要补这行日志就得改 trait，让 `move_to` 返回 bool。这算接口边界的改动，第四批没做，留给用户决定。
 - covered 的名字来自 `screen()`，bundle 来自 `ControlOps::cover_at`。
 - 遮挡关闭的日志不带 `: detail`。
 - FocusReader 的 roles 拿不到：start 记 “-”，picked 记 `depth<n>`，depth 用链的长度。
@@ -158,7 +176,7 @@
 - 假平台新增 `set_lock_error`，`FakeLock::lock` 可以失败。
 - `can_unlock` 为 false 的分支来自计划和 spec，Swift 没有这个分支。
 - lock 命令在 run.rs 里本来就有。
-- 锁屏开始时宣布主屏画布（见 §4）。
+- 锁屏开始时的画布（第四批）：`Platform` 加了 `locked_app_windows(app) -> Option<Vec<Rect>>`，会话用已有的 `lock::locked_start_display` 选屏，选不到就用主屏，日志按 Swift 写 `(canvas: the app's display|main display)`。假平台新增 `set_locked_app_windows`；测试 `locked_start_announces_the_app_display`、`locked_start_without_app_windows_announces_the_main_display`。
 
 任务 18
 - 新增 3 个测试：`desktop_session_shows_the_main_display`、`input_source_is_reported_and_selected`、`window_commands_reach_the_platform`。
@@ -175,10 +193,7 @@
 
 ## 4. 计划错误（计划行号，然后是证据）
 
-- **计划 :698（任务 17）**：“app session started while locked announces the canvas of `locked_start_display`” 和 Swift 不一致。
-  - Swift 的 `waitForUnlock` 用 `lockedAppDisplay`，后者通过 NSRunningApplication 和 CGWindowList 找到 app 所在的屏，找不到才用主屏（Server.swift:676-697，WindowCapture.swift:273-287）。
-  - 平台接口给不出锁屏时 app 的窗口，所以 Rust 总是用主屏（session.rs `wait_for_unlock`）。
-  - PORTING 第 4 部分记了这条。
+- ~~计划 :698（任务 17）~~：撤回。原来记的是“计划和 Swift 不一致”，其实计划写的就是 Swift 的做法：先找程序窗口所在的屏，列不出来再用主屏（Server.swift:676-697，WindowCapture.swift:273-287）。不一致的是草稿，草稿当时总用主屏。第四批（7649a3e0）补上了平台入口，现在和计划、Swift 都一致，所以这一条不算计划错误。
 - **计划 :700（任务 17，`unlock_with_a_wrong_password`）**：“`screenLocked(true)` arrives after the 8 s wait” 是错的。
   - Swift 的 `sendLocked` 只在状态变化时才发（Server.swift:863-871 的 `guard locked != sentLocked`；输完密码后在 :909 调用）。
   - 密码错时一直是锁定，所以不会再发 `screenLocked(true)`。
@@ -196,9 +211,11 @@
 
 ## 5. 编译和行为风险（最可能的在前）
 
-1. **借用和类型推断。**
-   - `session/unlock.rs` 的闭包：`is_locked` 被移进 `locked`，同时又有 `&mut || hold(&lock)…` 的共享借用；`with_unlock_lock` 的 body 是否要求 FnOnce/FnMut。
-   - `run.rs` 的 `read_commands` 对 stdin BufRead 的借用方式。
+1. **借用和类型推断（第四批逐处看过）。**
+   - `session/unlock.rs`：`locked` 闭包改在 `with_unlock_lock` 的 body 里现做，和 wake、sleep、type、return 几个闭包一样，只共享借用 `lock`、`alive`、`clock`，可以同时存在（a3489af0）。原来的写法其实也能编，因为只借用的闭包是 Copy。
+   - `with_unlock_lock` 收 `impl FnOnce() -> T`，两个 match 分支各调用一次，互不重叠，不用改。调用方：unlock.rs:62、rules_lock.rs:195/203/219/225/235/246、host_session.rs:1831。
+   - `run.rs` 的 `read_commands`：`Box<dyn BufRead + Send>` 通过 `impl BufRead for Box<B>` 直接调用 `read_line`。`text` 借用 `line`，下一轮 `clear()` 时借用已经结束，不用改。
+   - 没看出问题，但还是可能出错的：`stay_awake` 的两个闭包要求 `Send + 'static`，它们捕获 `Shared<dyn LockOps>` 和 `Arc<Output>`，按类型看都是 Send。
 2. **Cargo.lock 会变。** testkit 新增了对 rapp-host-core、rapp-client-core 的依赖，还有新 bin。我按规则没碰 Cargo.lock，第一次构建会更新它。
 3. **ScaledClock（×20）下的计时断言偏紧**：错密码的 8–10 秒窗口、`disconnect_while_typing_frees_the_lock`、暂停 2 秒、20 单元/5 ms 间隔、0.15 秒/2 秒的粘贴恢复。机器负载高时可能偶发失败。
 4. **host_service.rs 对服务行为的假设。**
@@ -219,6 +236,11 @@
 10. **porting.rs 的分段**：`part()` 取到下一个 `## ` 为止，所以第 1 到 3 部分内部不能再有 `## ` 标题。另外，任何 Swift 文件一改，摘要测试就会失败，这是故意的。
 11. **桌面测试的标题**：期望的 “Fake PC · 屏幕 1” 依赖 `desktop_title` 和 `ordered_displays`。
 12. **`bins()`/`bins_with_host` 只能在 unix 上用**（`std::os::unix::fs::symlink`）。testkit 的服务测试本来只在 Mac/Linux 上跑。
+13. **第四批新加的 trait 方法 `Platform::locked_app_windows`**：现在只有 FakePlatform 实现了它。D 段的 Windows 平台必须实现：锁屏时列不出窗口就回 `None`。
+14. **假平台的锁句柄现在带编号**（`FakeLock(state, id)`），`awake` 是按句柄记的 `Vec<u64>`。`stay_awake_spans_the_session` 要求整个会话里正好一次 `stay_awake on` 和一次 `stay_awake off`。如果别处（比如 lock 命令或者测试 harness）也在同一个假平台上调 `stay_awake`，这个计数就会对不上。
+15. **第四批新测试的计时**：`menu_pick_is_ignored` 要求主机时间 2 秒内什么都不回；`paste_when_the_target_stays_behind_fails_with_the_fixed_text` 要求至少过了主机时间 0.5 秒才回错误（10 次 × 50 ms）。在 ScaledClock ×20 下，这两个时长实际是 100 ms 和 25 ms，机器负载高时可能偶发失败。
+16. **menuPick 进了闸门列表**：没有输入权限时也被拦，被拦的效果和 Swift 一样（Server.swift:415）。单元测试 `reaction()` 仍把它算作 Ignored。
+17. **`pub use run::{run, WorkerIo}`**：`run` 既是模块名又是函数名。两者在不同命名空间，按规则不冲突；如果 clippy 报 `module_name_repetitions` 之类的告警，改名或加 allow 即可。
 
 ## 6. 验证的人先做什么
 
