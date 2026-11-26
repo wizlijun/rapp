@@ -153,9 +153,9 @@ impl Store {
     }
 
     pub fn expire(&mut self, now: u64) {
-        let q_min = now.saturating_sub(self.keep_days * 86400);
+        let q_min = now.saturating_sub(self.keep_days.saturating_mul(86400));
         self.queue.retain(|q| q.at >= q_min);
-        let d_min = now.saturating_sub(DEVICE_DAYS * 86400);
+        let d_min = now.saturating_sub(DEVICE_DAYS.saturating_mul(86400));
         self.devices.retain(|_, d| d.last >= d_min);
     }
 
@@ -355,6 +355,14 @@ mod tests {
         }
         s.set_limits(7, 1);
         assert_eq!(ns(&s.queue(None, 50).unwrap()), [8]);
+    }
+
+    #[test]
+    fn a_huge_keep_days_keeps_everything() {
+        let mut s = Store::new(u64::MAX, 1000);
+        s.apply(ev(1, 1000), 1000);
+        s.expire(u64::MAX);
+        assert_eq!(s.state()["queued"], 1);
     }
 
     #[test]

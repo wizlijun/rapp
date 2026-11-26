@@ -31,6 +31,8 @@ const MAX_BODY: usize = 256 * 1024;
 const MAX_EVENTS: usize = 50;
 const SAVE_AFTER: Duration = Duration::from_secs(1);
 const EXPIRE_EVERY: Duration = Duration::from_secs(600);
+/// After a failed accept, the next one is tried this much later.
+const ACCEPT_PAUSE: Duration = Duration::from_millis(100);
 
 type Shared = Arc<Mutex<Store>>;
 
@@ -214,10 +216,20 @@ async fn accept_loop(store: Shared, dirty: Dirty, log: Log, listener: TcpListene
     // Dropped with the loop: every open connection is then aborted.
     let mut conns = tokio::task::JoinSet::new();
     loop {
-        let (stream, _) = tokio::select! {
-            accepted = listener.accept() => accepted?,
+        let accepted = tokio::select! {
+            accepted = listener.accept() => accepted,
             // Reap the finished ones so the set does not grow.
             Some(_) = conns.join_next(), if !conns.is_empty() => continue,
+        };
+        // A failed accept (out of file descriptors, a connection reset before it was taken) is
+        // for now only: the service keeps listening. Only an abort or a drop ends it.
+        let stream = match accepted {
+            Ok((stream, _)) => stream,
+            Err(e) => {
+                log.emit("accept_failed", json!({"kind": format!("{:?}", e.kind())}));
+                tokio::time::sleep(ACCEPT_PAUSE).await;
+                continue;
+            }
         };
         let (store, dirty, log) = (store.clone(), dirty.clone(), log.clone());
         conns.spawn(async move {
