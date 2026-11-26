@@ -350,9 +350,12 @@ class FakeStateSync extends StateSync {
 class FakeStateOut extends StateOut {
   final List<(String, String?, String, AppReport?)> reports = [];
   final List<List<Map<String, Object?>>> desksSet = [];
+  final List<(String?, String?)> mes = [];
   int attaches = 0;
   int detaches = 0;
 
+  @override
+  void setMe(String? fp, String? device) => mes.add((fp, device));
   @override
   void report({required String fp, String? id, required String session, required AppReport? now}) =>
       reports.add((fp, id, session, now));
