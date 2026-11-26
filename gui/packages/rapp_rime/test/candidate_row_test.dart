@@ -24,6 +24,8 @@ class FakeLink extends ChangeNotifier implements RimeLink {
   @override
   Future<void> clear() async {}
   @override
+  Future<void> setAscii(bool on) async {}
+  @override
   void toggleBuiltin() => toggles++;
 }
 

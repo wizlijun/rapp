@@ -106,6 +106,11 @@ class FakeRimeLink extends ChangeNotifier implements RimeLink {
   }
 
   @override
+  Future<void> setAscii(bool on) async {
+    calls.add('ascii:$on');
+  }
+
+  @override
   void toggleBuiltin() {
     calls.add('toggleBuiltin');
     if (builtin) clear();

@@ -25,7 +25,11 @@ final class SecureInputPlugin {
     channel.setMethodCallHandler { call, result in plugin.handle(call, result: result) }
     plugin.channel = channel
     shared = plugin
+    LocalImePlugin.register(with: registrar)
   }
+
+  /// True while secure input is engaged (a password field has focus): the local IME channel then does nothing.
+  static var isEngaged: Bool { shared?.engaged ?? false }
 
   private init(window: NSWindow) {
     self.window = window
@@ -91,6 +95,86 @@ final class SecureInputPlugin {
   }
 
   private func sourceID(_ source: TISInputSource) -> String? {
+    guard let raw = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else { return nil }
+    return Unmanaged<CFString>.fromOpaque(raw).takeUnretainedValue() as String
+  }
+}
+
+/// Switches the local input source for the writing panel: Chinese when it gets the caret, the ASCII
+/// layout when the user returns to the streamed picture. Ignored while secure input is engaged.
+final class LocalImePlugin {
+  static func register(with registrar: FlutterPluginRegistrar) {
+    let plugin = LocalImePlugin()
+    let channel = FlutterMethodChannel(name: "rapp/local-ime", binaryMessenger: registrar.messenger)
+    channel.setMethodCallHandler { call, result in plugin.handle(call, result: result) }
+  }
+
+  private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    if SecureInputPlugin.isEngaged {
+      result(nil)
+      return
+    }
+    switch call.method {
+    case "toChinese":
+      let preferred = (call.arguments as? [String: Any])?["preferred"] as? String
+      result(toChinese(preferred: preferred))
+    case "toEnglish":
+      if let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(), !isASCII(current),
+         let ascii = TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?.takeRetainedValue() {
+        TISSelectInputSource(ascii)
+      }
+      result(nil)
+    case "current":
+      guard let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(), let id = id(current) else {
+        result(nil)
+        return
+      }
+      result(["id": id, "ascii": isASCII(current)])
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  private func toChinese(preferred: String?) -> String? {
+    var target: TISInputSource?
+    if let preferred, !preferred.isEmpty {
+      let filter = [kTISPropertyInputSourceID as String: preferred] as CFDictionary
+      let list = TISCreateInputSourceList(filter, false)?.takeRetainedValue() as? [TISInputSource]
+      target = list?.first(where: usable)
+    }
+    if target == nil {
+      let list = TISCreateInputSourceList(nil, false)?.takeRetainedValue() as? [TISInputSource]
+      target = list?.first { usable($0) && !isASCII($0) && languages($0).contains { $0.hasPrefix("zh") } }
+    }
+    guard let target, let targetID = id(target) else { return nil }
+    if let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(), id(current) == targetID {
+      return targetID
+    }
+    return TISSelectInputSource(target) == noErr ? targetID : nil
+  }
+
+  /// Enabled and selectable.
+  private func usable(_ source: TISInputSource) -> Bool {
+    bool(source, kTISPropertyInputSourceIsEnabled) && bool(source, kTISPropertyInputSourceIsSelectCapable)
+  }
+
+  private func bool(_ source: TISInputSource, _ key: CFString) -> Bool {
+    guard let raw = TISGetInputSourceProperty(source, key) else { return false }
+    return CFBooleanGetValue(Unmanaged<CFBoolean>.fromOpaque(raw).takeUnretainedValue())
+  }
+
+  private func isASCII(_ source: TISInputSource) -> Bool {
+    guard let raw = TISGetInputSourceProperty(source, kTISPropertyInputSourceType) else { return false }
+    let type = Unmanaged<CFString>.fromOpaque(raw).takeUnretainedValue()
+    return CFEqual(type, kTISTypeKeyboardLayout)
+  }
+
+  private func languages(_ source: TISInputSource) -> [String] {
+    guard let raw = TISGetInputSourceProperty(source, kTISPropertyInputSourceLanguages) else { return [] }
+    return (Unmanaged<CFArray>.fromOpaque(raw).takeUnretainedValue() as? [String]) ?? []
+  }
+
+  private func id(_ source: TISInputSource) -> String? {
     guard let raw = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else { return nil }
     return Unmanaged<CFString>.fromOpaque(raw).takeUnretainedValue() as String
   }

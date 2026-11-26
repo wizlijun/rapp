@@ -375,11 +375,15 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       // the held keys now reach Flutter's text input, and B's IME, in the order they were typed.
       let events = hold.take(sid: sid, now: ProcessInfo.processInfo.systemUptime)
       #if os(macOS)
-      replaying = true
-      for e in events { NSApp.sendEvent(e) }
-      replaying = false
+      // On the next runloop turn: the panel's text field must have taken the caret first.
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        self.replaying = true
+        for e in events { NSApp.sendEvent(e) }
+        self.replaying = false
+      }
       #else
-      replay(events)
+      DispatchQueue.main.async { [weak self] in self?.replay(events) }
       #endif
       result(nil)
     #if os(macOS)
