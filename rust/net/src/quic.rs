@@ -56,6 +56,36 @@ where
     tokio::io::copy_bidirectional_with_sizes(&mut a, b, 64 * 1024, 64 * 1024).await.map(|_| ())
 }
 
+/// How often a watched splice looks whether bytes moved (`splice_watched`).
+pub const TRAFFIC_TICK: Duration = Duration::from_secs(5);
+
+/// `splice_metered`, calling `on_traffic` once at the start and then at every `every` tick at
+/// which the meter moved: for "something used this connection lately" without a call per byte.
+pub async fn splice_watched<A, B>(a: &mut A, b: &mut B, meter: &Meter, every: Duration, mut on_traffic: impl FnMut()) -> std::io::Result<()>
+where
+    A: AsyncRead + AsyncWrite + Unpin + ?Sized,
+    B: AsyncRead + AsyncWrite + Unpin + ?Sized,
+{
+    on_traffic();
+    let work = splice_metered(a, b, meter);
+    tokio::pin!(work);
+    let mut tick = tokio::time::interval(every);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut last = meter.get();
+    loop {
+        tokio::select! {
+            r = &mut work => return r,
+            _ = tick.tick() => {
+                let now = meter.get();
+                if now != last {
+                    last = now;
+                    on_traffic();
+                }
+            }
+        }
+    }
+}
+
 /// `a` with its reads counted as a→b and its writes as b→a.
 struct Counted<'a, S: ?Sized> {
     inner: &'a mut S,
@@ -369,6 +399,31 @@ mod tests {
     use super::*;
     use crate::line::{read_json, write_json};
     use serde_json::json;
+
+    #[tokio::test]
+    async fn splice_watched_reports_traffic() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (mut a, mut a_far) = tokio::io::duplex(1024);
+        let (mut b, mut b_far) = tokio::io::duplex(1024);
+        let calls = Arc::new(AtomicU64::new(0));
+        let c = calls.clone();
+        let every = Duration::from_millis(20);
+        let task = tokio::spawn(async move {
+            splice_watched(&mut a, &mut b, &Meter::default(), every, || {
+                c.fetch_add(1, Ordering::SeqCst);
+            })
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "once at the start, nothing for quiet ticks");
+        a_far.write_all(&[1; 10]).await.unwrap();
+        let mut got = [0u8; 10];
+        b_far.read_exact(&mut got).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "the tick after bytes moved");
+        drop((a_far, b_far));
+        task.await.unwrap().unwrap();
+    }
 
     #[tokio::test]
     async fn splice_metered_counts_both_ways() {

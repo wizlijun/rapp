@@ -224,6 +224,9 @@ class ServiceConnection {
       request({'cmd': 'set_update', 'auto_update': ?autoUpdate, 'check_updates': ?checkUpdates});
   Future<Map<String, Object?>> setAutoLock(bool on) => request({'cmd': 'set_auto_lock', 'on': on});
 
+  /// How many remote windows other than text terminals this GUI has open (cli-update §5.1).
+  Future<Map<String, Object?>> guiWindows(int n) => request({'cmd': 'gui_windows', 'count': n});
+
   /// Clears rApp's own screen recording and accessibility records; the reply says which took.
   Future<Map<String, Object?>> permissionsReset() => request({'cmd': 'permissions_reset'});
 
@@ -288,6 +291,15 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi {
   Timer? _timer;
   var _disposed = false;
   var _connecting = false;
+  int? _guiWindows;
+
+  /// Tells the service how many windows would be lost; it counts per connection, so this is sent
+  /// again on every reconnect.
+  void setGuiWindows(int n) {
+    if (_guiWindows == n) return;
+    _guiWindows = n;
+    _cmd?.guiWindows(n).catchError((_) => <String, Object?>{});
+  }
 
   void start() => _connect();
 
@@ -308,6 +320,9 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi {
       cmd.done.then((_) => _lost());
       sub.done.then((_) => _lost());
       status = await cmd.status();
+      final w = _guiWindows;
+      // An older service does not know the command: that is no reason to stay disconnected.
+      if (w != null) await cmd.guiWindows(w).catchError((_) => <String, Object?>{});
       error = null;
       if (_disposed) return _closeAll();
       notifyListeners();

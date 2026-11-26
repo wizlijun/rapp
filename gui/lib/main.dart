@@ -11,6 +11,7 @@ import 'embed/session_port.dart';
 import 'embed/state_rules.dart';
 import 'embed/linux_session_port.dart';
 import 'hub_client.dart';
+import 'update.dart';
 import 'pages/local_section.dart';
 import 'data_dir.dart';
 import 'data_relocate.dart';
@@ -62,6 +63,10 @@ Future<void> main(List<String> args) async {
       }
     }
     windowManager.addListener(_QuitOnClose(closeCm));
+    // An install waits for every rApp window to close, this one included.
+    monitor.addListener(() {
+      if (monitor.status?.update?.quitGui == true) closeCm();
+    });
     runApp(_App(textSize: textSize, home: CmPage(monitor: monitor, onQuit: closeCm)));
     return;
   }
@@ -131,6 +136,16 @@ Future<void> main(List<String> args) async {
   windowManager.addListener(shell);
   trayManager.addListener(shell);
   await shell.setupTray();
+  // The service installs once the GUI is gone (cli-update §5.2): it asks, the GUI quits without asking.
+  void quitIfAsked() {
+    if (monitor.status?.update?.quitGui == true) shell._quitNow();
+  }
+  monitor.addListener(quitIfAsked);
+  // The first status may have come in while the window was being set up.
+  quitIfAsked();
+  void reportWindows() => monitor.setGuiWindows(remoteWindows(hub?.sessions ?? const []));
+  hub?.addListener(reportWindows);
+  reportWindows();
 
   runApp(_App(
     textSize: textSize,
@@ -370,7 +385,12 @@ class _Shell with WindowListener, TrayListener {
     return yes == true;
   }
 
+  var _quitting = false;
+
+  /// Once: the service's `quit_gui` and the GUI's own upgrade can both ask for it.
   Future<void> _quitNow() async {
+    if (_quitting) return;
+    _quitting = true;
     port?.dispose();
     state.termPort?.dispose();
     await hub?.shutdown(); // hub closes its clients on stdin EOF

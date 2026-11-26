@@ -1208,3 +1208,19 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] 补充 `TargetPlatform.linux` 回归用例（覆盖总览终端块 `claude · ~/git/rapp · 2` 前台标题、`CLI · …` 副标题与「新建」单并发防重开提示）；Flutter 3.50.0 全量 3266 项通过（3 跳过），`analyze` 无 error/warning；Rust 全套 clippy `-D warnings` 与测试通过。
 - [x] [Linux v0.15.38](https://github.com/wizlijun/rapp/releases/tag/v0.15.38) 已发布（源码 `8ac509fe`，`--latest=false`）；两包 41 文件逐字节一致、14 个 ELF 依赖完整、`BUILD-INFO.json` 与隔离网络命名空间服务/CLI/端口共享测试通过；三个远端附件大小与 SHA256 与本地一致，macOS Latest 保留 `v0.15.37`。
 - [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01538-parity.md`。
+
+## rapp update / 自动升级（规格：`docs/superpowers/specs/2026-11-26-rapp-cli-update-design.md`，分支 `feat/cli-update`）
+- [x] 服务：记最后一次远程活动和 GUI 的远程窗口数；所有安装都先请 GUI 退出（`quit_gui`），装好再打开；自动升级只在 10 分钟没人操作时装
+- [x] CLI：`rapp update`、`update check`、`update status`、`update rollback`，`--json`、`--yes`、`--timeout`，退出码按 §5.4
+- [x] GUI：看到 `quit_gui` 就退出（主窗口和 `--cm` 窗口），报告远程窗口数，文案「10 分钟没人操作时会自动装好」
+- 第一次升级到带这个功能的版本，还要手工点一次「立即升级」；之后才会自动装
+- 实机检查（要等一个比它更新的版本发布出来才能做，§5.8）：
+  - [ ] 1. 开着几个文本终端，里面跑着 claude，执行 `rapp update`：升级完成，终端里的程序照样跑，窗口照样能用
+  - [ ] 2. GUI 开着时执行 `rapp update`：GUI 退出，装好后重新打开，没有弹 ⌘Q 确认
+  - [ ] 3. MacBook-M4-Pro 连着在看终端，但两边都 10 分钟不碰：自动装上，M4-Pro 那边断开几秒后自己重连
+  - [ ] 4. 本机一直在打字：不自动装（`rapp update status` 不显示原因；日志里 `update_auto_wait` 写着「最近本机有人操作」）
+  - [ ] 5. M4-Pro 一直往终端里输入：不自动装
+  - [ ] 5a. 本机开着一个看别的设备桌面的远程窗口：不自动装；只开着文本终端标签页：照样自动装，重开后标签页恢复
+  - [ ] 6. `rapp update --json`、`rapp update check --json`、`rapp update status --json` 的输出能被 `jq` 解析，退出码符合 §5.4
+  - [ ] 7. `rapp update --timeout 1`：退出码 5
+  - [ ] 8. 开着「rApp 连接管理」小窗（`--cm`）时执行 `rapp update`：小窗也关掉，升级不会因为它卡住

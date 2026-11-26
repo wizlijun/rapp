@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/hub_client.dart';
 import 'package:rapp/update.dart';
 
 UpdateInfo info(String state,
@@ -25,6 +26,21 @@ UpdateInfo info(String state,
     );
 
 void main() {
+  test('quit_gui is read, false when missing', () {
+    expect(UpdateInfo.fromJson({'current': '0.4.1', 'state': 'installing', 'quit_gui': true})!.quitGui, isTrue);
+    expect(UpdateInfo.fromJson({'current': '0.4.1', 'state': 'installing'})!.quitGui, isFalse);
+  });
+
+  test('text terminals are not counted as remote windows', () {
+    const s = [
+      HubSession(1, '123', 'term:a1', 'lan'),
+      HubSession(2, '123', 'com.apple.Safari', 'relay'),
+      HubSession(3, '456', 'desktop', 'lan'),
+    ];
+    expect(remoteWindows(s), 2);
+    expect(remoteWindows(const []), 0);
+  });
+
   test('fromJson tolerates missing fields', () {
     final u = UpdateInfo.fromJson({'current': '0.4.1', 'state': 'idle'})!;
     expect(u.current, '0.4.1');
@@ -71,7 +87,7 @@ void main() {
       (info('up_to_date', latest: '0.4.1'), '当前 0.4.1 · 已是最新', [c]),
       (info('checking'), '当前 0.4.1 · 正在检查', []),
       (info('downloading', progress: 45), '正在下载 0.5.0（45%）', []),
-      (info('ready'), '0.5.0 已下载，没人在用时会自动装好', [a, d]),
+      (info('ready'), '0.5.0 已下载，10 分钟没人操作时会自动装好', [a, d]),
       (info('ready', autoUpdate: false), '0.5.0 已下载', [a, d]),
       (info('ready', needsConfirm: true), '这一版换了签名，装上以后要重新授权屏幕录制和辅助功能', [any, d]),
       (info('ready', needsAdmin: true), '这次需要管理员密码', [o, d]),
