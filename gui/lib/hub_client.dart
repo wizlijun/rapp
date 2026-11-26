@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'load_model.dart';
 import 'log_view.dart';
 import 'term/term_id.dart';
 
@@ -422,6 +423,15 @@ class HubClient extends ChangeNotifier {
     return termLists[id] ?? _termList(m, id);
   }
 
+  /// Each online device's load from its watch (device-load spec §10); a device that went offline, is too old or
+  /// is removed has none. Never a stale number: `gone` and `unsupported` drop it.
+  final loads = <String, DeviceLoad>{};
+
+  /// Device [id]'s load once, as the hub answers `load` (`ok` stripped); [top] asks for the process list too. The
+  /// device's refusal (`unknown op`, `no data`) is thrown.
+  Future<Map<String, dynamic>> loadNow(String id, {bool top = false}) =>
+      _request({'cmd': 'load', 'id': id, if (top) 'top': true}, 'load');
+
   /// Opens a text terminal window on device [id] running [shell] (the device's default when null, and an old device
   /// is sent none) in terminal app [app]; answers the new term id. [from]: the terminal it is opened beside (its
   /// directory and shell, its window); an old device ignores it.
@@ -578,15 +588,18 @@ class HubClient extends ChangeNotifier {
         // A new data dir: the hub dropped every link it had.
         hostPaths.clear();
         _paths.clear();
+        loads.clear();
       case 'terms':
         if (m['id'] != null) termLists['${m['id']}'] = _termList(m, '${m['id']}');
+      case 'load' when m['req'] is! int && m['id'] != null:
+        _onLoad('${m['id']}', m);
       case 'closed':
         _sessions.remove(m['sid']);
         if (m['sid'] != null && m['reason'] != null) closeReasons[m['sid'] as Object] = '${m['reason']}';
     }
 
-    // A watch event has no `req`: it answers no one (`_take` would give it to another device's `terms`).
-    final p = event == 'terms' && m['req'] is! int ? null : _take(m, event);
+    // A watch event has no `req`: it answers no one (`_take` would give it to another device's `terms` or `load`).
+    final p = (event == 'terms' || event == 'load') && m['req'] is! int ? null : _take(m, event);
     if (p != null) {
       if (event == 'error') {
         p.completer.completeError(HubException('${m['error'] ?? 'unknown error'}'));
@@ -597,6 +610,19 @@ class HubClient extends ChangeNotifier {
       lastError = '${m['error'] ?? 'unknown error'}';
     }
     notifyListeners();
+  }
+
+  /// One line of device [id]'s load watch: the first (with `history`) starts it, the next ones move it on; `gone` and
+  /// `unsupported` drop it. A stream `error` keeps the last numbers: the hub retries, and says `gone` if it stops.
+  void _onLoad(String id, Map<String, dynamic> m) {
+    if (m['gone'] == true || m['unsupported'] == true) {
+      loads.remove(id);
+    } else if (m['error'] != null) {
+      return;
+    } else {
+      final was = loads[id];
+      loads[id] = was == null || m.containsKey('history') ? DeviceLoad.fromJson(m) : was.next(m);
+    }
   }
 
   /// Finds the request this event answers: by `req`, else the oldest pending
@@ -621,6 +647,7 @@ class HubClient extends ChangeNotifier {
     _sessions.clear();
     hostPaths.clear();
     _paths.clear();
+    loads.clear();
     net = null;
     notifyListeners();
   }

@@ -2,12 +2,14 @@
 // It takes the stage's place; the top bar and overlays stay as they are.
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
 import '../embed/traffic_label.dart';
 import '../service_client.dart';
 import 'inbound.dart';
 import 'lamp.dart';
+import 'load_row.dart';
 import 'os_mark.dart';
 import 'main_state.dart';
 import 'open_apps_menu.dart';
@@ -289,6 +291,15 @@ class _Column extends StatelessWidget {
     final id = col.id;
     final small = Theme.of(context).textTheme.bodySmall;
     final favorites = id == null ? const <AppRef>[] : [for (final f in state.idleFavorites) if (f.device == id) f];
+    // 余力 (device-load §7): a remote device's from the hub's watch while it is online; this machine's from its
+    // service, which iOS does not have.
+    final hub = state.hub, local = monitor;
+    final load = id != null
+        ? (col.offline ? null : hub?.loads[id])
+        : (defaultTargetPlatform == TargetPlatform.iOS ? null : local?.load);
+    final LoadNow? loadNow = id != null
+        ? (hub == null ? null : ({bool top = false}) => hub.loadNow(id, top: top))
+        : local?.loadNow;
     return SizedBox(
       key: Key('column-${id ?? 'local'}'),
       width: _colWidth,
@@ -317,6 +328,7 @@ class _Column extends StatelessWidget {
                 ),
               ),
             ]),
+            LoadRow(id: id ?? 'local', load: load, loadNow: loadNow),
           ]),
         ),
         // The sessions, then this device's favourites that are not open (one tap opens one). The page scrolls,

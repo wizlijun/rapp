@@ -1,0 +1,258 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/hub_client.dart';
+import 'package:rapp/load_model.dart';
+import 'package:rapp/paths.dart';
+import 'package:rapp/service_client.dart';
+import 'package:rapp/ui/load_row.dart';
+import 'package:rapp/ui/main_state.dart';
+import 'package:rapp/ui/overview.dart';
+import 'package:rapp/ui/prefs.dart';
+import 'package:rapp/ui/tokens.dart';
+
+import '../fakes.dart';
+import 'helpers.dart';
+import 'platform_helpers.dart';
+
+const gb = 1000000000;
+
+Map<String, dynamic> snapshot({List<Map<String, dynamic>> warnings = const []}) => {
+      'at': 1764100000, 'headroom': 30, 'tightest': 'disk', 'term': true,
+      'items': {
+        'cpu': {'pct': 42.0, 'cores': 8, 'load1': 3.5},
+        'mem': {'total': 16 * gb, 'avail': 8 * gb, 'swap_used': gb, 'pressure': 'normal'},
+        'heat': {'level': 'normal'},
+      },
+      'disks': [
+        {
+          'mount': '/', 'total': 100 * gb, 'avail': 6 * gb, 'level': 'warn',
+          'paths': [
+            {'kind': 'home', 'path': '/Users/x'},
+            {'kind': 'term', 'path': '/Users/x/git/rapp', 'term': 't1'},
+          ],
+        },
+        {'mount': '/Volumes/nas', 'unreadable': true, 'paths': [{'kind': 'data', 'path': '/Volumes/nas/d'}]},
+      ],
+      'warnings': warnings,
+      'history': [
+        for (var i = 0; i < 20; i++) {'at': 1764100000 - 5 * (19 - i), 'cpu': 30.0 + i, 'mem': 0.5, 'heat': 0, 'disk': 0.06},
+      ],
+    };
+
+DeviceLoad load({String? level}) => DeviceLoad.fromJson(snapshot(warnings: [
+      if (level != null) {'item': 'disk:/', 'level': level, 'text': '磁盘只剩 6.0 GB（/，剩 6%）'},
+    ]));
+
+/// A local service that answers `status` and `subscribe`, and logs every command.
+class _Service {
+  late ServerSocket server;
+  final received = <String>[];
+  final _all = <Socket>[];
+
+  Future<void> start() async {
+    server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((s) {
+      _all.add(s);
+      var authed = false;
+      s.cast<List<int>>().transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
+        final m = jsonDecode(line) as Map<String, dynamic>;
+        if (!authed) {
+          authed = true;
+          return;
+        }
+        received.add('${m['cmd']}');
+        s.write(m['cmd'] == 'status' ? '{"ok":true,"id":"1","name":"me"}\n' : '{"ok":true}\n');
+      }, onError: (_) {});
+    });
+  }
+
+  Future<void> stop() async {
+    for (final s in _all) {
+      s.destroy();
+    }
+    await server.close();
+  }
+}
+
+void main() {
+  group('LoadRow', () {
+    Color colourOf(WidgetTester tester, String text) => tester.widget<Text>(find.text(text)).style!.color!;
+
+    testWidgets('load_row_three_colours', (tester) async {
+      for (final (level, pick) in [
+        (null, (RappTokens t) => t.muted),
+        ('warn', (RappTokens t) => t.warn),
+        ('danger', (RappTokens t) => t.danger),
+      ]) {
+        await tester.pumpWidget(wrap(LoadRow(id: 'm1', load: load(level: level))));
+        final t = RappTokens.of(tester.element(find.byType(LoadRow)));
+        expect(find.text('余力'), findsOneWidget);
+        expect(find.byKey(const Key('load-bar-m1')), findsOneWidget);
+        expect(colourOf(tester, '磁盘 剩 6%'), pick(t), reason: '$level');
+      }
+    });
+
+    testWidgets('the warning colours differ from muted and from each other in every theme', (tester) async {
+      for (final th in RappTheme.values) {
+        final t = tokensFor(th);
+        expect({t.muted, t.warn, t.danger}.length, 3, reason: '$th');
+      }
+    });
+
+    testWidgets('no load: nothing', (tester) async {
+      await tester.pumpWidget(wrap(const LoadRow(id: 'm1', load: null)));
+      expect(find.text('余力'), findsNothing);
+      expect(find.byKey(const Key('load-bar-m1')), findsNothing);
+    });
+
+    testWidgets('load_detail_opens', (tester) async {
+      var asked = <bool>[];
+      await tester.pumpWidget(wrap(LoadRow(
+        id: 'm1',
+        load: load(level: 'warn'),
+        loadNow: ({bool top = false}) async {
+          asked.add(top);
+          return <String, dynamic>{'at': 1};
+        },
+      )));
+      await tester.tap(find.byKey(const Key('load-row-m1')));
+      await tester.pumpAndSettle();
+      expect(find.byType(LoadDetail), findsOneWidget);
+      expect(find.textContaining('/Volumes/nas'), findsOneWidget);
+      expect(find.textContaining('读不到'), findsOneWidget); // the hung disk
+      expect(find.text('/'), findsOneWidget);
+      expect(find.textContaining('~/git/rapp'), findsOneWidget);
+      expect(find.byType(Sparkline), findsWidgets);
+      expect(find.text('看占用最多的进程'), findsOneWidget);
+      // Under the row.
+      expect(tester.getTopLeft(find.byType(LoadDetail)).dy,
+          greaterThanOrEqualTo(tester.getBottomLeft(find.byKey(const Key('load-row-m1'))).dy));
+
+      // A short window: the detail scrolls.
+      await tester.ensureVisible(find.text('看占用最多的进程'));
+      await tester.pump();
+      await tester.tap(find.text('看占用最多的进程'));
+      await tester.pumpAndSettle();
+      expect(asked, [true]);
+      expect(find.textContaining('读不到'), findsNWidgets(2)); // the disk, and now the processes
+    });
+  });
+
+  group('the overview column', () {
+    late FakeTransport t;
+    late MainState s;
+    late Directory tmp;
+    var offline = <String>{};
+
+    Future<void> flush() => Future<void>.delayed(Duration.zero);
+
+    setUp(() {
+      tmp = Directory.systemTemp.createTempSync('load_row_test');
+      offline = {};
+    });
+
+    tearDown(() {
+      s.dispose();
+      tmp.deleteSync(recursive: true);
+    });
+
+    Future<void> boot(WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1194, 834);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      t = FakeTransport();
+      t.onSend = (m) {
+        if (m['cmd'] == 'hosts') {
+          t.emit({'event': 'hosts', 'req': m['req'], 'hosts': [{'id': 'm1', 'name': 'mini'}]});
+        } else if (m['cmd'] == 'apps') {
+          t.emit(offline.contains(m['id'])
+              ? {'event': 'error', 'req': m['req'], 'error': 'connect timed out'}
+              : {'event': 'apps', 'req': m['req'], 'id': m['id'], 'path': 'lan', 'apps': []});
+        }
+      };
+      s = MainState(hub: HubClient(t), data: DataDir(tmp.path), prefs: UiPrefs(), clock: () => DateTime(2026, 11, 26, 12));
+      await tester.runAsync(() async {
+        for (var i = 0; i < 8; i++) {
+          await flush();
+        }
+      });
+    }
+
+    Future<void> show(WidgetTester tester, {ServiceMonitor? monitor}) async {
+      s.toggleOverview();
+      await tester.pumpWidget(wrap(SizedBox(width: 1194, height: 700, child: Overview(state: s, monitor: monitor))));
+      await tester.pump();
+    }
+
+    Future<void> emit(WidgetTester tester, Map<String, dynamic> m) async {
+      t.emit(m);
+      await tester.pump();
+      await tester.pump();
+    }
+
+    testWidgets('load_row_hidden_when_gone', (tester) async {
+      await boot(tester);
+      await show(tester);
+      expect(find.byKey(const Key('load-bar-m1')), findsNothing); // no data yet
+      await emit(tester, {'event': 'load', 'id': 'm1', ...snapshot()});
+      expect(find.byKey(const Key('load-bar-m1')), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('column-m1')), matching: find.byKey(const Key('load-bar-m1'))),
+          findsOneWidget);
+      await emit(tester, {'event': 'load', 'id': 'm1', 'gone': true});
+      expect(find.byKey(const Key('load-bar-m1')), findsNothing);
+    });
+
+    testWidgets('load_row_hidden_offline', (tester) async {
+      offline = {'m1'};
+      await boot(tester);
+      await show(tester);
+      await emit(tester, {'event': 'load', 'id': 'm1', ...snapshot()});
+      expect(tester.widget<Text>(find.descendant(of: find.byKey(const Key('column-m1')), matching: find.text('离线'))),
+          isNotNull);
+      expect(find.byKey(const Key('load-bar-m1')), findsNothing);
+    });
+
+    testWidgets('the local column shows the local service\'s load', (tester) async {
+      await boot(tester);
+      final monitor = ServiceMonitor(readToken: () async => null);
+      addTearDown(monitor.dispose);
+      monitor.load = load();
+      await show(tester, monitor: monitor);
+      expect(find.descendant(of: find.byKey(const Key('column-local')), matching: find.byKey(const Key('load-bar-local'))),
+          findsOneWidget);
+    });
+
+    testWidgets('ios_local_column_has_no_load_row', (tester) async {
+      await onPlatform(TargetPlatform.iOS, () async {
+        await boot(tester);
+        final svc = _Service();
+        late ServiceMonitor monitor;
+        await tester.runAsync(() async {
+          await svc.start();
+          monitor = ServiceMonitor(readToken: () async => 'tok', port: svc.server.port);
+          monitor.start();
+          final end = DateTime.now().add(const Duration(seconds: 5));
+          while (monitor.status == null && DateTime.now().isBefore(end)) {
+            await Future<void>.delayed(const Duration(milliseconds: 10));
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        });
+        expect(monitor.status, isNotNull);
+        expect(svc.received, isNot(contains('watch_load')));
+        // Even a load from somewhere would not be shown on iOS's own column.
+        monitor.load = load();
+        await show(tester, monitor: monitor);
+        expect(find.byKey(const Key('column-local')), findsOneWidget);
+        expect(find.byKey(const Key('load-bar-local')), findsNothing);
+        await tester.runAsync(() async {
+          monitor.dispose();
+          await svc.stop();
+        });
+      });
+    });
+  });
+}
