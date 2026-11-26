@@ -66,8 +66,10 @@ pub async fn request<S: AsyncRead + AsyncWrite + Unpin + Send>(
         Ok(_) => match op {
             Op::WatchTerms => return watch(state, s, peer, what).await,
             Op::ListTerms => answer(ask(state, &json!({"op": "list"})).await),
-            Op::OpenTerm { shell, from, app } => {
-                answer(ask(state, &json!({"op": "open", "shell": shell, "from": from, "app": app})).await)
+            Op::OpenTerm { shell, from, app, label_from } => {
+                let r = answer(ask(state, &json!({"op": "open", "shell": shell, "from": from, "app": app})).await);
+                carry_label(state, label_from.as_deref(), &r);
+                r
             }
             Op::EndTerm { term } => answer(ask(state, &json!({"op": "end", "term": term})).await),
             Op::RenameTerm { term, name } => answer(ask(state, &json!({"op": "rename", "term": term, "name": name})).await),
@@ -76,6 +78,15 @@ pub async fn request<S: AsyncRead + AsyncWrite + Unpin + Send>(
     };
     log_request(state, peer, what, &r);
     finish(s, &r).await
+}
+
+/// A terminal opened in place of `from` (one that is gone) takes over its label, in one step; nothing to do when the
+/// open failed or there is no `from`.
+fn carry_label(state: &State, from: Option<&str>, opened: &Value) {
+    let (Some(from), Some(to)) = (from, opened["id"].as_str().filter(|_| opened["ok"] == true)) else { return };
+    if rapp_term::id::is_term(from) && state.labels.rename(from, to).is_ok() {
+        state.notify();
+    }
 }
 
 /// The `request` line's fields: never a name, a term id or anything from `term.json`.
@@ -410,7 +421,7 @@ mod tests {
 
     #[test]
     fn open_term_logs_only_the_app() {
-        let op = Op::OpenTerm { shell: Some("zsh".into()), from: None, app: "iTerm".into() };
+        let op = Op::OpenTerm { shell: Some("zsh".into()), from: None, app: "iTerm".into(), label_from: None };
         assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm","from":false}));
     }
 
@@ -424,9 +435,9 @@ mod tests {
 
     #[test]
     fn open_term_log_from_is_bool() {
-        let op = Op::OpenTerm { shell: None, from: Some("term:pty:secret".into()), app: "iTerm".into() };
+        let op = Op::OpenTerm { shell: None, from: Some("term:pty:secret".into()), app: "iTerm".into(), label_from: None };
         assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm","from":true}));
-        let op = Op::OpenTerm { shell: None, from: None, app: "iTerm".into() };
+        let op = Op::OpenTerm { shell: None, from: None, app: "iTerm".into(), label_from: None };
         assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm","from":false}));
     }
 

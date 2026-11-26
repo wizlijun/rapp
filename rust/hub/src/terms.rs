@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn open_term_is_answered_with_term_created() {
-        let op = Op::OpenTerm { shell: None, from: None, app: "Terminal".into() };
+        let op = Op::OpenTerm { shell: None, from: None, app: "Terminal".into(), label_from: None };
         let e = event(&op, "d1", &json!({"id": "term:pty:c"}));
         assert_eq!(e, json!({"event":"term_created","id":"d1","term":"term:pty:c"}));
     }

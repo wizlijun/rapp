@@ -224,6 +224,9 @@ pub async fn serve_value(state: &Arc<State>, mut s: Pipe, v: Value, peer: Peer) 
             | Op::RenameTerm { .. }
             | Op::EndTerm { .. }),
         ) => crate::term::request(state, &mut s, &peer, op).await,
+        Ok(op @ (Op::WatchLabels | Op::SetLabel { .. } | Op::ResetLabel { .. })) => {
+            crate::labels::request(state, &mut s, &peer, op).await
+        }
         Ok(Op::Open { app, .. }) if rapp_term::id::is_term(&app) => crate::term::open(state, &mut s, &app, peer).await,
         Ok(Op::Open { app, side }) => open(state, s, &app, side, peer).await,
         Ok(Op::ListShares) => crate::forward::serve_list(state, s, peer).await,
