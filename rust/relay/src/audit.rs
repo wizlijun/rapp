@@ -8,6 +8,7 @@ use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+#[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
@@ -69,11 +70,11 @@ fn day_files(dir: &Path) -> Vec<(String, PathBuf, u64)> {
 impl Audit {
     pub fn open(data: &Path, cfg: &AuditCfg, mirror: Log) -> Result<Audit> {
         let dir = data.join("audit");
-        fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(&dir)
-            .with_context(|| format!("create {}", dir.display()))?;
+        let mut builder = fs::DirBuilder::new();
+        builder.recursive(true);
+        #[cfg(unix)]
+        builder.mode(0o700);
+        builder.create(&dir).with_context(|| format!("create {}", dir.display()))?;
         let inner = Inner { buf: Vec::new(), probes: BTreeMap::new(), healthy: true, hour: hour_of(SystemTime::now()) };
         let a = Audit(Arc::new(Shared { dir, cfg: cfg.clone(), mirror, inner: Mutex::new(inner) }));
         a.prune(SystemTime::now());
@@ -117,10 +118,11 @@ impl Audit {
         let mut res = Ok(());
         for (day, text) in by_day {
             let path = self.0.dir.join(format!("{day}.jsonl"));
-            let r = OpenOptions::new()
-                .append(true)
-                .create(true)
-                .mode(0o600)
+            let mut options = OpenOptions::new();
+            options.append(true).create(true);
+            #[cfg(unix)]
+            options.mode(0o600);
+            let r = options
                 .open(&path)
                 .and_then(|mut f| f.write_all(text.as_bytes()).and_then(|_| f.flush()));
             if let Err(e) = r {
