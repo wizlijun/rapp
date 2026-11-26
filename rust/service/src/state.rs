@@ -118,6 +118,8 @@ pub struct State {
     pub outbound: rapp_conn::dial::Outbound,
     /// The last remote use and the GUI's remote windows (what the auto-update waits out).
     pub activity: crate::activity::Activity,
+    /// The device-load history; None: sampling is off (see `Opts::load`).
+    pub load: Option<Arc<crate::load::Load>>,
 }
 
 impl State {

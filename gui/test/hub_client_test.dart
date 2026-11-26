@@ -753,5 +753,73 @@ void main() {
       expect((await f).off, isTrue);
     });
 
+    group('load', () {
+      Map<String, dynamic> snap(int at, {Map<String, dynamic>? extra}) => {
+            'event': 'load', 'id': 'A', 'at': at, 'headroom': 70, 'tightest': 'cpu', 'term': true,
+            'items': {'cpu': {'pct': 30.0, 'cores': 8}}, 'disks': [], 'warnings': [], ...?extra,
+          };
+
+      test('load events fill loads; the first line brings history, later ones a point', () async {
+        t.emit(snap(10, extra: {'history': [{'at': 5, 'cpu': 20.0}, {'at': 10, 'cpu': 30.0}]}));
+        await Future<void>.delayed(Duration.zero);
+        expect(hub.loads['A']!.history.length, 2);
+        t.emit(snap(15, extra: {'headroom': 65, 'point': {'at': 15, 'cpu': 35.0}}));
+        await Future<void>.delayed(Duration.zero);
+        expect((hub.loads['A']!.at, hub.loads['A']!.headroom, hub.loads['A']!.history.length), (15, 65, 3));
+      });
+
+      test('load_error_drops_numbers: a stream error, gone and unsupported each remove the device', () async {
+        t.emit(snap(10, extra: {'history': []}));
+        t.emit({...snap(10, extra: {'history': []}), 'id': 'B'});
+        t.emit({...snap(10, extra: {'history': []}), 'id': 'C'});
+        await Future<void>.delayed(Duration.zero);
+        var told = 0;
+        hub.addListener(() => told++);
+        // The hub retries after 30 s and up to 10 min: the last numbers would be stale all that time.
+        t.emit({'event': 'load', 'id': 'A', 'error': 'connection lost'});
+        await Future<void>.delayed(Duration.zero);
+        expect(hub.loads.containsKey('A'), isFalse);
+        expect(told, 1);
+        t.emit({'event': 'load', 'id': 'B', 'gone': true});
+        t.emit({'event': 'load', 'id': 'C', 'unsupported': true});
+        await Future<void>.delayed(Duration.zero);
+        expect(hub.loads, isEmpty);
+        // The retry's first line brings it back.
+        t.emit(snap(40, extra: {'history': []}));
+        await Future<void>.delayed(Duration.zero);
+        expect(hub.loads['A']!.at, 40);
+      });
+
+      test('home_set clears loads', () async {
+        t.emit(snap(10, extra: {'history': []}));
+        t.emit({'event': 'home_set'});
+        await Future<void>.delayed(Duration.zero);
+        expect(hub.loads, isEmpty);
+      });
+
+      test('a load line without req answers no one; loadNow gets its own reply', () async {
+        final f = hub.loadNow('A', top: true);
+        final cmd = t.sent.last;
+        expect(cmd, {'cmd': 'load', 'id': 'A', 'top': true, 'req': anything});
+        var done = false;
+        f.then((_) => done = true);
+        t.emit(snap(10, extra: {'history': []}));
+        await Future<void>.delayed(Duration.zero);
+        expect(done, isFalse);
+        t.emit({...snap(11), 'req': cmd['req']});
+        final r = await f;
+        expect(r['at'], 11);
+        // The one-shot reply is not the stream: the watch's numbers stay as they were.
+        expect(hub.loads['A']!.at, 10);
+      });
+
+      test('loadNow fails on an error reply', () async {
+        final f = hub.loadNow('A');
+        expect(t.sent.last, {'cmd': 'load', 'id': 'A', 'req': anything});
+        t.emit({'event': 'error', 'req': t.sent.last['req'], 'error': 'unknown op'});
+        await expectLater(f, throwsA(isA<HubException>()));
+      });
+    });
+
   });
 }

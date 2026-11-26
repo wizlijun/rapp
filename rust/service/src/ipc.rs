@@ -56,7 +56,9 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
     let (_closed, closed) = tokio::sync::watch::channel(());
     // Set by a `pipe` that opened: from then on the connection carries that port's bytes.
     let mut piped: Option<Pipe> = None;
-    while piped.is_none() {
+    // Set by `watch_load`: from then on the connection carries the load stream.
+    let mut watching = false;
+    while piped.is_none() && !watching {
         tokio::select! {
             line = lines.next_line() => {
                 let Some(line) = line? else { return Ok(()) };
@@ -102,6 +104,13 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
                     "share" => crate::share_cmds::share(state, &cmd).await,
                     "unshare" => crate::share_cmds::unshare(state, &cmd).await,
                     "hosts" => hosts(state).await,
+                    "load" => crate::load::serve::reply(state, cmd["history"] == true, cmd["top"] == true),
+                    "load_all" => load_all(state, &cmd).await,
+                    // `serve::follow` writes the first line itself.
+                    "watch_load" => {
+                        watching = true;
+                        continue;
+                    }
                     "term_saved" => crate::term::local(state, &json!({"op": "saved"}), Duration::from_secs(30)).await,
                     "term_restore" => {
                         let keys: Vec<String> = cmd["keys"]
@@ -128,6 +137,10 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
                 write_json(&mut w, &json!({"event":"changed"})).await?;
             }
         }
+    }
+    if watching {
+        let mut near = tokio::io::join(lines.into_inner(), w);
+        return crate::load::serve::follow(state, &mut near).await;
     }
     let Some(mut far) = piped else { return Ok(()) };
     // The reader's buffer may already hold bytes the client sent right behind the command line,
@@ -176,7 +189,7 @@ const HISTORY_DEFAULT: u64 = 50;
 const HISTORY_MAX: u64 = 500;
 
 /// 访问记录 (spec §6): sessions, terminal inputs, failed auths, refused requests and blocked input; never side
-/// connections, nor the hub's background `watch_terms` / `watch_labels` (polled like `ping`, not a user action).
+/// connections, nor the hub's background `watch_terms`, `watch_labels`, `load` or `watch_load` (polled like `ping`, not a user action).
 /// Who sent an `update_apply`/`update_rollback`: `rapp update` says `"by": "cli"`.
 fn by(cmd: &Value) -> update::By {
     if cmd["by"] == "cli" {
@@ -189,7 +202,7 @@ fn by(cmd: &Value) -> update::By {
 fn in_history(v: &Value) -> bool {
     let shown = match v["ev"].as_str() {
         Some("session_start" | "session_end" | "term_inputs" | "auth_fail" | "rejected" | "input_blocked" | "unlock" | "auto_lock" | "auto_lock_failed") => true,
-        Some("request") => v["result"] != "ok" && v["op"] != "watch_terms" && v["op"] != "watch_labels",
+        Some("request") => v["result"] != "ok" && !matches!(v["op"].as_str(), Some("watch_terms" | "watch_labels" | "load" | "watch_load")),
         _ => false,
     };
     shown && v["side"] != true
@@ -256,6 +269,64 @@ async fn hosts(state: &Arc<State>) -> Value {
         }
     }
     ok(json!({"hosts": hosts}))
+}
+
+/// `load_all`: this device first, then each one in `hosts.json`, all asked at the same time. `devices` keeps
+/// only those whose id or name is one of them, in any case. A row has `load` (the reply without `ok`) or `error`.
+async fn load_all(state: &Arc<State>, cmd: &Value) -> Value {
+    let wanted: Option<Vec<String>> = cmd["devices"]
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_lowercase).collect());
+    let keep = |id: &str, name: &str| {
+        wanted.as_ref().is_none_or(|w| w.iter().any(|x| *x == id.to_lowercase() || *x == name.to_lowercase()))
+    };
+    let top = cmd["top"] == true;
+    let row = |id: &str, name: &str, got: Result<Value, String>| {
+        let mut v = json!({"id": id, "name": name});
+        match got {
+            Ok(mut load) => {
+                if let Some(o) = load.as_object_mut() {
+                    o.remove("ok");
+                }
+                v["load"] = load;
+            }
+            Err(e) => v["error"] = json!(e),
+        }
+        v
+    };
+    let mut devices = Vec::new();
+    let (id, name) = {
+        let cfg = state.cfg.lock().unwrap();
+        (cfg.id.clone().unwrap_or_default(), cfg.name.clone())
+    };
+    if keep(&id, &name) {
+        let r = crate::load::serve::reply(state, false, top);
+        let got = if r["ok"] == true { Ok(r) } else { Err(r["error"].as_str().unwrap_or("bad reply").to_string()) };
+        let mut v = row(&id, &name, got);
+        v["local"] = json!(true);
+        devices.push(v);
+    }
+    let asks: Vec<_> = crate::pipe::known_hosts(&state.home)
+        .into_iter()
+        .filter(|h| keep(&h.id, &h.name))
+        .map(|h| {
+            let state = state.clone();
+            tokio::spawn(async move {
+                let got = match tokio::time::timeout(HOSTS_WAIT, crate::pipe::load_of(&state, &h.id, top)).await {
+                    Ok(Ok(load)) => Ok(load),
+                    Ok(Err(e)) => Err(e.as_str().to_string()),
+                    Err(_) => Err(crate::pipe::PipeErr::Offline.as_str().to_string()),
+                };
+                (h, got)
+            })
+        })
+        .collect();
+    for ask in asks {
+        if let Ok((h, got)) = ask.await {
+            devices.push(row(&h.id, &h.name, got));
+        }
+    }
+    ok(json!({"devices": devices}))
 }
 
 /// The shares the device `id` (known here as `name`) offers this one, each with the local port

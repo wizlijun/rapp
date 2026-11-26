@@ -8,6 +8,7 @@ import '../embed/traffic_label.dart';
 import '../service_client.dart';
 import 'inbound.dart';
 import 'lamp.dart';
+import 'load_row.dart';
 import 'os_mark.dart';
 import 'main_state.dart';
 import 'open_apps_menu.dart';
@@ -291,6 +292,9 @@ class _Column extends StatelessWidget {
     final id = col.id;
     final small = Theme.of(context).textTheme.bodySmall;
     final favorites = id == null ? const <AppRef>[] : [for (final f in state.idleFavorites) if (f.device == id) f];
+    // 余力 (device-load §7), read where 需要你 reads it.
+    final load = state.columnLoad(id, local: monitor, offline: col.offline);
+    final loadNow = columnLoadNow(state.hub, monitor, id);
     return SizedBox(
       key: Key('column-${id ?? 'local'}'),
       width: _colWidth,
@@ -319,6 +323,7 @@ class _Column extends StatelessWidget {
                 ),
               ),
             ]),
+            LoadRow(id: id ?? 'local', load: load, loadNow: loadNow),
           ]),
         ),
         // The sessions, then this device's favourites that are not open (one tap opens one). The page scrolls,

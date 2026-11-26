@@ -89,6 +89,7 @@ pub async fn start_service_opts(home: &Path, bins: &Path, idle: Duration, map_po
         pacing: true,
         map_ports,
         own_ports,
+        load: Some(fake_load()),
     })
     .await
     .unwrap()
@@ -118,6 +119,7 @@ pub async fn start_service_with(
         pacing: true,
         map_ports: TEST_PORTS,
         own_ports: true,
+        load: Some(fake_load()),
     })
     .await
     .unwrap()
@@ -623,6 +625,7 @@ pub async fn service_on_relay_with(
         pacing: true,
         map_ports: TEST_PORTS,
         own_ports: true,
+        load: Some(fake_load()),
     };
     tune(&mut opts);
     let svc = Service::start(opts).await.unwrap();
@@ -782,4 +785,27 @@ pub async fn relayed_request(
         .unwrap()
         .unwrap();
     pipe
+}
+
+/// A steady machine for the service's load sampler: cpu 10%, memory 50% of 16 GB, heat normal, every 200 ms.
+pub fn fake_load() -> rapp_service::LoadOpts {
+    use rapp_service::load::{Cpu, Heat, HeatLevel, Mem, Sample, Sampler};
+    struct Steady;
+    impl Sampler for Steady {
+        fn sample(&mut self) -> Sample {
+            let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            Sample {
+                at,
+                cpu: Some(Cpu { pct: 10.0, cores: 8, load1: None }),
+                mem: Some(Mem { total: 16_000_000_000, avail: 8_000_000_000, swap_used: None, pressure: None }),
+                heat: Some(Heat { level: HeatLevel::Normal, celsius: None }),
+                ..Default::default()
+            }
+        }
+    }
+    rapp_service::LoadOpts {
+        every: Duration::from_millis(200),
+        sampler: Arc::new(|| Box::new(Steady)),
+        disk_wait: Duration::from_secs(2),
+    }
 }

@@ -41,6 +41,16 @@ pub async fn shares_of(state: &State, name: &str) -> Result<Value, PipeErr> {
     Ok(reply["shares"].clone())
 }
 
+/// The load of the device `name` means: its `load` reply (`top` passed on). A device that does not know the
+/// request is `Old`; any other refusal (`no data`, …) is `Refused`.
+pub async fn load_of(state: &State, name: &str, top: bool) -> Result<Value, PipeErr> {
+    let (_, reply, _, _) = ask(state, name, &Op::Load { history: false, top }).await?;
+    if reply["ok"] != true {
+        return Err(reply_err(&reply));
+    }
+    Ok(reply)
+}
+
 /// Sends a share-table request (`Shares`, `Share`, `Unshare`) to the device `name` means: its
 /// reply and its fingerprint. A device that does not know the request is `Old`.
 pub async fn set(state: &State, name: &str, op: &Op) -> Result<(Value, Fp), PipeErr> {

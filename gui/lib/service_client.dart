@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import 'labels.dart';
+import 'load_model.dart';
 import 'shares.dart';
 import 'update.dart';
 
@@ -168,6 +169,9 @@ class ServiceConnection {
   final _done = Completer<void>();
   var _closed = false;
 
+  /// Set by [watch]: every reply line from then on goes here.
+  StreamController<Map<String, dynamic>>? _stream;
+
   Stream<Map<String, dynamic>> get events => _events.stream;
 
   /// Completes when the service closes the connection.
@@ -192,6 +196,19 @@ class ServiceConnection {
     _waiting.add(c);
     _s.write('${jsonEncode(cmd)}\n');
     return c.future;
+  }
+
+  /// Sends [cmd] and hands every reply line from then on to the stream, which ends with the connection: a stream
+  /// command (`watch_load`) takes the connection for itself.
+  Stream<Map<String, dynamic>> watch(Map<String, dynamic> cmd) {
+    final c = StreamController<Map<String, dynamic>>();
+    _stream = c;
+    if (_closed) {
+      c.close();
+    } else {
+      _s.write('${jsonEncode(cmd)}\n');
+    }
+    return c.stream;
   }
 
   Future<ServiceStatus> status() async => ServiceStatus.fromJson(await request({'cmd': 'status'}));
@@ -250,6 +267,11 @@ class ServiceConnection {
       _events.add(m);
       return;
     }
+    final stream = _stream;
+    if (stream != null) {
+      stream.add(m);
+      return;
+    }
     if (_waiting.isEmpty) return;
     final c = _waiting.removeAt(0);
     if (m['ok'] == true) {
@@ -267,6 +289,7 @@ class ServiceConnection {
     }
     _waiting.clear();
     _events.close();
+    _stream?.close();
     _done.complete();
     _s.destroy();
   }
@@ -295,10 +318,17 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi {
   /// This device's session labels; null until read, or when the service predates them ([labelsUnsupported]).
   LabelTable? labels;
   var labelsUnsupported = false;
+  /// This machine's load from the service's `watch_load` (device-load spec §7, the 本机 column); null before the
+  /// first line, while disconnected, from an old service, and always on iOS (no service there).
+  DeviceLoad? load;
 
   ServiceConnection? _cmd;
   ServiceConnection? _sub;
   ServiceConnection? _remote;
+  ServiceConnection? _load;
+
+  /// Counts [_closeAll]s, so a load watch opened for an earlier connection does not take over.
+  var _gen = 0;
   Timer? _timer;
   var _disposed = false;
   var _connecting = false;
@@ -337,6 +367,7 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi {
       if (w != null) await cmd.guiWindows(w).catchError((_) => <String, Object?>{});
       error = null;
       if (_disposed) return _closeAll();
+      unawaited(_watchLoad(token));
       notifyListeners();
     } catch (e) {
       _closeAll();
@@ -350,6 +381,44 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi {
       _connecting = false;
     }
   }
+
+  /// The load stream, on a connection of its own (each line can wait 5 s for a sample). It is opened again only
+  /// with the others: an old service answers `unknown cmd` once, and is not asked again until it restarts.
+  Future<void> _watchLoad(String token) async {
+    if (defaultTargetPlatform == TargetPlatform.iOS) return;
+    final gen = _gen;
+    final ServiceConnection c;
+    try {
+      c = await ServiceConnection.connect(token: token, port: port);
+    } catch (_) {
+      return;
+    }
+    if (_disposed || gen != _gen) {
+      c.close();
+      return;
+    }
+    _load = c;
+    c.watch({'cmd': 'watch_load'}).listen((m) {
+      if (!identical(_load, c)) return;
+      if (m['ok'] != true) {
+        c.close();
+        return;
+      }
+      final was = load;
+      load = was == null || m.containsKey('history') ? DeviceLoad.fromJson(m) : was.next(m);
+      notifyListeners();
+    });
+    c.done.then((_) {
+      if (!identical(_load, c)) return;
+      _load = null;
+      if (load == null) return;
+      load = null;
+      if (!_disposed) notifyListeners();
+    });
+  }
+
+  /// This machine's load once; [top] asks for the process list too.
+  Future<Map<String, dynamic>> loadNow({bool top = false}) => _remoteRequest({'cmd': 'load', if (top) 'top': true});
 
   Future<void> refresh() async {
     final c = _cmd;
@@ -400,13 +469,17 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi {
   }
 
   void _closeAll() {
-    final c = _cmd, s = _sub, r = _remote;
+    final c = _cmd, s = _sub, r = _remote, l = _load;
+    _gen++;
     _cmd = null;
     _sub = null;
     _remote = null;
+    _load = null;
+    load = null;
     c?.close();
     s?.close();
     r?.close();
+    l?.close();
   }
 
   ServiceConnection _need() => _cmd ?? (throw ServiceException('service not running'));

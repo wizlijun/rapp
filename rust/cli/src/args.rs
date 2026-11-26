@@ -12,7 +12,9 @@ rapp term restore --forget
 rapp update [--yes] [--timeout 秒] [--json]      立即升级到最新版
 rapp update check [--timeout 秒] [--json]       只检查（并下载），不装
 rapp update status [--json]                     看升级状态
-rapp update rollback [--timeout 秒] [--json]    回到上一版";
+rapp update rollback [--timeout 秒] [--json]    回到上一版
+rapp load [设备…] [--top] [--json]   各设备的余力、各项数值、警告；不写设备名就列出全部，含本机
+rapp load pick [--json]              推荐一台设备，并说明原因";
 
 #[derive(Debug, PartialEq)]
 pub enum Cmd {
@@ -24,6 +26,8 @@ pub enum Cmd {
     /// `rapp term restore`: no picks = all; `list` and `forget` stand alone.
     TermRestore { list: bool, forget: bool, picks: Vec<String> },
     Update { what: Upd, yes: bool, timeout: Option<u64>, json: bool },
+    Load { devices: Vec<String>, top: bool, json: bool },
+    LoadPick { json: bool },
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -67,8 +71,24 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
             Some((c, _)) => Err(format!("不认识的命令：term {c}")),
         },
         "update" => update(rest),
+        "load" => load(rest),
         other => Err(format!("不认识的命令：{other}")),
     }
+}
+
+fn load(args: &[String]) -> Result<Cmd, String> {
+    let pick = args.first().map(String::as_str) == Some("pick");
+    let (mut devices, mut top, mut json) = (Vec::new(), false, false);
+    for a in &args[usize::from(pick)..] {
+        match a.as_str() {
+            "--json" => json = true,
+            "--top" if !pick => top = true,
+            flag if flag.starts_with("--") => return Err(format!("不认识的选项：{flag}")),
+            word if !pick => devices.push(word.to_string()),
+            extra => return Err(format!("多写了：{extra}")),
+        }
+    }
+    Ok(if pick { Cmd::LoadPick { json } } else { Cmd::Load { devices, top, json } })
 }
 
 fn term_restore(args: &[String]) -> Result<Cmd, String> {
@@ -171,6 +191,20 @@ mod tests {
 
     fn p(s: &str) -> Result<Cmd, String> {
         parse(&s.split_whitespace().map(String::from).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn load_commands() {
+        assert_eq!(p("load"), Ok(Cmd::Load { devices: vec![], top: false, json: false }));
+        assert_eq!(
+            p("load mini gpu1 --top --json"),
+            Ok(Cmd::Load { devices: vec!["mini".into(), "gpu1".into()], top: true, json: true })
+        );
+        assert_eq!(p("load pick --json"), Ok(Cmd::LoadPick { json: true }));
+        assert_eq!(p("load pick"), Ok(Cmd::LoadPick { json: false }));
+        assert_eq!(p("load pick mini"), Err("多写了：mini".into()));
+        assert_eq!(p("load --bad"), Err("不认识的选项：--bad".into()));
+        assert_eq!(p("load pick --top"), Err("不认识的选项：--top".into()));
     }
 
     #[test]

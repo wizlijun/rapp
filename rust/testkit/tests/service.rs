@@ -790,6 +790,7 @@ async fn service_with_a_data_dir_commits_its_device_json() {
         pacing: true,
         map_ports: TEST_PORTS,
         own_ports: true,
+        load: Some(common::fake_load()),
     })
     .await
     .unwrap();

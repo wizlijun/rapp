@@ -28,7 +28,7 @@ pub(crate) struct Watches(Mutex<HashMap<String, Watch>>);
 /// A host offline or removed has no entry (`stop_watch`, `stop_gone`). `Off` and `Failed` hold back the next watch
 /// until it is due (`due`), so a device is not sent a request it refuses every round; a GUI `terms` starts one at
 /// once (`restart`).
-enum Watch {
+pub(crate) enum Watch {
     /// A watch is open, or being opened.
     Running(JoinHandle<()>),
     /// Terminal sessions are off on the device: asked again after `OFF_RECHECK`.
@@ -59,7 +59,7 @@ pub(crate) fn after_end(error: &str) -> Next {
 
 /// The state a watch leaves when it ends at `now`; `delay` is the last failure's wait, `None` if there was none
 /// since a list.
-fn ended(next: Next, delay: Option<Duration>, now: Instant) -> Watch {
+pub(crate) fn ended(next: Next, delay: Option<Duration>, now: Instant) -> Watch {
     match next {
         Next::Off => Watch::Off { since: now },
         Next::Retry => {
@@ -71,7 +71,7 @@ fn ended(next: Next, delay: Option<Duration>, now: Instant) -> Watch {
 }
 
 /// Whether a presence round at `now` starts a watch: `Some` with the last failure's wait to carry, or `None`.
-fn due(w: Option<&Watch>, now: Instant) -> Option<Option<Duration>> {
+pub(crate) fn due(w: Option<&Watch>, now: Instant) -> Option<Option<Duration>> {
     match w {
         None => Some(None),
         Some(Watch::Running(task)) => task.is_finished().then_some(None),

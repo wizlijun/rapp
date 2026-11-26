@@ -59,10 +59,26 @@ pub fn config(state: &State) -> Result<TermConfig, String> {
 }
 
 /// `term.json`, when terminal sessions are on.
-fn allowed(state: &State) -> Result<TermConfig, String> {
-    let c = config(state)?;
+pub(crate) fn allowed(state: &State) -> Result<TermConfig, String> {
+    allowed_quiet(state).map_err(|(text, why)| {
+        if let Some(why) = why {
+            state.log.msg(Lvl::Warn, why);
+        }
+        text.to_string()
+    })
+}
+
+/// Whether terminal sessions can be used now, without a log line: the load reply polls it (a broken `term.json`
+/// is logged by the terminal requests themselves).
+pub(crate) fn usable(state: &State) -> bool {
+    allowed_quiet(state).is_ok()
+}
+
+/// `allowed` with nothing logged: `Err((reply text, why it is invalid))`.
+fn allowed_quiet(state: &State) -> Result<TermConfig, (&'static str, Option<String>)> {
+    let c = rapp_term::config::load(&path(state)).map_err(|e| (INVALID, Some(e)))?;
     if !c.allow {
-        return Err(OFF.into());
+        return Err((OFF, None));
     }
     Ok(c)
 }
