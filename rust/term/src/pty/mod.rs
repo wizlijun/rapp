@@ -1,3 +1,4 @@
+pub mod consent;
 pub mod fg;
 pub mod fit;
 pub mod grid;

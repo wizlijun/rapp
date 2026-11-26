@@ -1587,6 +1587,7 @@ class MainState extends ChangeNotifier {
     } catch (err) {
       if (_disposed) return;
       hint = newTermWords(err);
+      _showConsentPrompt(e.id, err);
       notifyListeners();
     }
   }
@@ -3216,6 +3217,8 @@ class MainState extends ChangeNotifier {
         await hub?.terms(device);
       } catch (_) {}
       if (e is RestoreStopped && !_disposed) stage(e.ids);
+      // After the ones that came up: the desktop with the prompt is what comes forward.
+      if (!_disposed) _showConsentPrompt(device, e);
     }
     if (!_disposed) notifyListeners();
   }
@@ -3304,11 +3307,25 @@ class MainState extends ChangeNotifier {
         } catch (e) {
           if (_disposed) return;
           hint = newTermWords(e);
+          _showConsentPrompt(id, e);
           notifyListeners();
         } finally {
           _newingText.remove(id);
         }
     }
+  }
+
+  /// The host refused a new terminal because macOS is asking there whether rApp may control Terminal.
+  @visibleForTesting
+  static bool isConsentAsk(String message) => message.contains('whether rApp may control Terminal');
+
+  /// After a terminal open on [id] failed with [e]: when macOS is asking on that device, its desktop comes up so the
+  /// prompt can be answered there — not for this machine (the prompt is on this screen) nor a device without one.
+  void _showConsentPrompt(String id, Object e) {
+    if (e is! HubException || !isConsentAsk(e.message)) return;
+    if (id == localLoadId || !_hasGraphicalApps(id)) return;
+    hint = '$hint；已切到它的桌面';
+    unawaited(_open(id, 'desktop:', _desktopName(id), quiet: true));
   }
 
   /// Devices a 新建 from the 终端 entry is still opening a text terminal on.
@@ -3318,6 +3335,9 @@ class MainState extends ChangeNotifier {
   @visibleForTesting
   static String newTermWords(Object e) => switch (e) {
         StateError(:final message) => message,
+        // macOS on the host would have stopped the Terminal tab script to ask: the prompt is up there now.
+        HubException(:final message) when isConsentAsk(message) =>
+          '被控 Mac 上弹出了授权框「“rApp”想要控制“终端”」：请在那台 Mac 上点「允许」（可能连着两个），点完再新建',
         // The host's Terminal tab script was cut off and no window came: most likely macOS asking for permission.
         HubException(:final message) when message.contains('allow rApp to control Terminal') =>
           '被控 Mac 上的「终端」没有回应：请在那台 Mac 上看看是否弹出了「允许 rApp 控制“终端”」，点「好」后再新建',

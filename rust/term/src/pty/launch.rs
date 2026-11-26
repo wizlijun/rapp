@@ -14,6 +14,9 @@ pub const START_TIMEOUT: &str = "terminal launcher did not respond within 5 s";
 /// The Terminal tab script was cut off and no window came: macOS is most likely still asking, on that Mac,
 /// whether rApp may control Terminal or System Events.
 pub const NO_ANSWER: &str = "Terminal did not answer: on that Mac, allow rApp to control Terminal and System Events";
+/// macOS would stop the Terminal tab script to ask whether rApp may control Terminal or System Events: the prompt
+/// is up on that Mac, and the terminal was not opened.
+pub const ASKING: &str = "macOS is asking on that Mac whether rApp may control Terminal: answer it there, then open again";
 
 /// How [`open`] went when it did not fail.
 #[derive(Debug, PartialEq)]
@@ -303,6 +306,8 @@ pub fn open(app: &str, file: &Path, launch_with: Option<&Path>, source_tty: Opti
     // A new terminal goes in a tab beside the ones rapp already opened; the first one gets a window.
     // Unsure leaves the holder's own start-up wait to tell whether it started.
     if cfg!(target_os = "macos") && launch_with.is_none() && app == "Terminal" {
+        // Asked first: the script would only hang on the prompt.
+        if super::consent::asking() { bail!(ASKING); }
         match terminal_tab(file, source_tty) {
             TabOutcome::Opened => return Ok(Launched::Yes),
             TabOutcome::Unsure => return Ok(Launched::CutOff),
