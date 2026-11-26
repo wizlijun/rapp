@@ -16,7 +16,7 @@
 - Flutter 在 `~/development/flutter/bin/flutter`，不在 PATH；测试后 `git checkout gui/pubspec.lock`（如有改动）。
 - 用户可见文字全中文。键面只写意图，读屏念「命令：<键面>」。
 - 内置 6 条命令、顺序、键面：`new` 新对话 · `model` 换模型 · `compact` 压缩 · `resume` 恢复 · `usage` 用量 · `search` 搜历史。
-- 默认列表 = 这 6 条命令 + 原来 10 条常用语（命令在前）。
+- 默认列表 = 这 6 条命令 + 精简后的 7 条常用语（命令在前）。`defaultPhrases` 改成且只含这 7 条，按此顺序：`继续`、`按你推荐的来`、`进度`、`全部做完，中途不用问我`、`先出方案，别改代码`、`跑一下测试`、`提交并推送`（去掉 `确认`、`听你的`、`总结一下改了什么`；用户 2026-11-26 定）。已存的 `phrases` 不改写。
 - 前台是 shell（`TermRow.shell == true`）、认不出工具、tmux、App 会话：命令**隐藏**；认出工具但它没有这个意图：**灰掉**，点了提示 `<工具名> 没有这个命令` 2 秒（`phraseHintTime`）。
 - 命令完全不进输入历史；不经 AI 整理；不动 ⌃⌥⌘ 粘滞；1 秒内不连发（`phraseRepeatWindow`）；断网 / 正在断开时不发。
 - `gui.json`：命令项 `{"kind":"cmd", ...}`；没有 `kind` 的照旧当常用语；新键 `phrase_cmds_seeded`（bool）。
