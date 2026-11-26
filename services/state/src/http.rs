@@ -60,9 +60,12 @@ struct Ctx {
 }
 
 impl Ctx {
-    /// Sends what the store gathered to every watcher. Call it with the store unlocked.
-    fn publish(&self, changes: Vec<Value>) {
-        for c in changes {
+    /// Sends what the store gathered to every watcher. It takes the locked store on purpose:
+    /// published under the lock, changes reach watchers in the order the store made them (a
+    /// `session` row or the `need` list is whole and unordered, so a late older one would
+    /// overwrite a newer one). `send` never waits, so this holds the lock only briefly.
+    fn publish(&self, st: &mut Store) {
+        for c in st.take_changes() {
             // No watcher is fine: the change is in the store anyway.
             let _ = self.changes.send(c.to_string());
         }
@@ -152,7 +155,7 @@ async fn post_events(cx: &Ctx, req: Request<Incoming>) -> Response<Body> {
     }
     let from: String = events.first().map(|e| e.sender.chars().take(8).collect()).unwrap_or_default();
     let (mut accepted, mut dup) = (0, 0);
-    let changes = {
+    {
         let mut st = lock(&cx.store);
         let t = now();
         for ev in events {
@@ -163,9 +166,8 @@ async fn post_events(cx: &Ctx, req: Request<Incoming>) -> Response<Body> {
                 dup += 1;
             }
         }
-        st.take_changes()
-    };
-    cx.publish(changes);
+        cx.publish(&mut st);
+    }
     if accepted > 0 {
         mark(&cx.dirty);
     }
@@ -214,12 +216,12 @@ async fn put_seen(cx: &Ctx, req: Request<Incoming>) -> Response<Body> {
         (None, Some(fp), Some(session)) => (Look::Session { fp, session }, "session"),
         _ => return bad(),
     };
-    let (result, changes) = {
+    let result = {
         let mut st = lock(&cx.store);
         let r = st.mark_seen(look, handled, now());
-        (r, st.take_changes())
+        cx.publish(&mut st);
+        r
     };
-    cx.publish(changes);
     match result {
         Ok(()) => {
             mark(&cx.dirty);
@@ -262,6 +264,7 @@ async fn watcher(mut changes: broadcast::Receiver<String>, out: mpsc::Sender<Byt
     let mut lagged = false;
     if out.send(Bytes::from_static(HELLO)).await.is_ok() {
         let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + PING_EVERY, PING_EVERY);
+        ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             let frame = tokio::select! {
                 c = changes.recv() => match c {
@@ -328,12 +331,11 @@ pub async fn serve_with_log(cfg: Config, listener: TcpListener, log: Log) -> any
         let mut tick = tokio::time::interval(EXPIRE_EVERY);
         loop {
             tick.tick().await;
-            let changes = {
+            {
                 let mut st = lock(&sweeper.store);
                 st.expire(now());
-                st.take_changes()
-            };
-            sweeper.publish(changes);
+                sweeper.publish(&mut st);
+            }
             mark(&sweeper.dirty);
         }
     }));

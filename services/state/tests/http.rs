@@ -309,7 +309,10 @@ async fn a_closed_watch_is_let_go() {
     assert_eq!(watching("watch_open"), [1, 2, 3]);
     drop(ws);
     tokio::time::sleep(Duration::from_millis(200)).await;
-    assert_eq!(watching("watch_closed").last(), Some(&0));
+    // The three closes may log in any order; together they count down to none left.
+    let mut closed = watching("watch_closed");
+    closed.sort();
+    assert_eq!(closed, [0, 1, 2]);
     let closed = lines.lock().unwrap().iter().filter(|v| v["event"] == "watch_closed").cloned().collect::<Vec<_>>();
     assert!(closed.iter().all(|v| v["lagged"] == false), "{closed:?}");
 }
