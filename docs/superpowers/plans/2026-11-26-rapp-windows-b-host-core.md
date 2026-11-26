@@ -32,7 +32,7 @@ Inputs and conditions the spec implies but does not spell out, most likely first
 2. **The controller vanishes mid-session** (socket closed during a frame, during a file transfer, while the unlock password is being typed). Expected: held keys and buttons are released, stay-awake ends, the `.rapp-part` file stays for resume, the unlock lock file is freed, and the next `hello` is served. → Tasks 13, 16, 17.
 3. **The picture source goes away**: capture returns an error, returns nothing for a long time, the region becomes empty, the app exits, every window closes. Expected: a capture error ends the session with `capture stopped: …`, a gone app with `<name> quit`, closing every window ends nothing; never a hang or a busy loop. → Task 14.
 4. **Hostile or awkward file names from the controller**: `..\x`, `a/b`, `CON`, `nul.txt`, `x.` , `x `, 300 characters, an empty name, two files with the same name. Expected: the file lands inside the transfer directory under a legal, unique name; nothing is written outside it. → Task 10.
-5. **A controller that stops acknowledging frames or asks for 0 fps.** Expected: memory stays bounded (only the latest frame is kept, the in-flight cap holds), no frame is sent while paused, and frames resume with a full frame. → Tasks 6, 14.
+5. **A controller that stops acknowledging frames or asks for 0 fps.** Expected: memory stays bounded (only the latest frame is kept, the in-flight cap holds), no frame is sent while paused, and frames resume with a diff against the last frame the controller got (`Server.swift:1203`; a full frame only when the mode changed while paused). → Tasks 6, 14.
 
 ---
 
@@ -336,7 +336,7 @@ Swift's `PacedSender` takes `now` and `transmit` closures and has `onLevelChange
 
 **Files:** Create `rust/host-core/src/{geometry,wintable,desktop,hit_test,hints}.rs`, `rust/host-core/tests/rules_windows.rs`, `Tests/RappCoreTests/HostCoreFixtures/WindowRuleFixtures.swift`. Fixtures: `geometry.json`, `wintable.json`, `view.json`, `desktop.json`, `hit-test.json`, `hints.json`.
 
-**Interfaces — Produces** (ported only because `Sources/rapp-host/` calls them):
+**Interfaces — Produces** (ported only because `Sources/rapp-host/` calls them). Also ported, though the block below does not list them, because the host calls them too: `view_region` (`Windows.swift:142`), `clamp_size` (`Geometry.swift:29`), and — in Task 9's `cli.rs` — `shareable_apps`, `apps_text`, `ListedWindow` (`WorkerCLI.swift:300`–`:339`):
 
 ```rust
 pub struct Point { pub x: f64, pub y: f64 }  pub struct Size { pub width: f64, pub height: f64 }  pub struct Rect { pub x: f64, pub y: f64, pub width: f64, pub height: f64 }
@@ -431,7 +431,7 @@ pub fn resolve_hello_app(requested: &str, bound: Option<&str>) -> Result<String,
 pub fn check_hello(token: &str, bundle_id: &str, expected: &str, bound: Option<&str>) -> Result<String, CodecError>;   // constant-time token compare
 pub fn taken_over_error(by: Option<&str>) -> String;  pub fn takeover_notice(reason: &str) -> Option<String>;  pub fn input_blocked_notice(by: &str) -> String;
 pub enum TransferDirection { AToB, BToA }         // "a_to_b" / "b_to_a"
-pub enum WorkerEvent { Listening { … }, SessionStarted { … }, SessionEnded { … }, Rejected { … }, Stats { … }, Ready { … }, Windows { … }, Transfer { … }, Input { … }, InputBlocked { … }, Unlock, Exit { … } }
+pub enum WorkerEvent { Listening { … }, SessionStarted { … }, SessionEnded { … }, Rejected { … }, Stats { … }, Ready { … }, Windows { … }, Transfer { … }, Input, InputBlocked { … }, Unlock, Exit { … } }
 impl WorkerEvent { pub fn json_line(&self) -> String; }          // keys sorted, as Swift's jsonLine
 pub enum WorkerCommand { Kick, Quit, Peer { port: u16, name: String }, Yield { by: String }, Focus }
 pub fn parse_worker_command(line: &str) -> Option<WorkerCommand>;
@@ -439,11 +439,11 @@ pub struct SharedApp { pub app: String, pub name: String }
 pub fn apps_json(desktop: &[DesktopDisplay], apps: &[SharedApp], permissions: &Permissions) -> String;
 // platform.rs — created here with these two types only; Task 13 adds the traits
 pub enum OpenError { NoDisplay, SessionDisconnected, NotInteractive, OtherUser, NotFound(String), Other(String) }
-impl OpenError { pub fn reason(&self) -> String; }   // "no display" | "session disconnected" | "not interactive" | "other user" | Swift's text for a missing app | the text given
+impl OpenError { pub fn reason(&self) -> String; }   // "no display" | "session disconnected" | "not interactive" | "other user" | `<id> not found` for a missing app (spec §6.4; Swift's own sentence names a bundle id and is not reused) | the text given
 pub struct Permissions { pub screen_recording: bool, pub accessibility: bool, pub platform: String, pub applications: bool, pub error: Option<OpenError> }
 pub fn version_json(platform: &str) -> String;                   // {"version", "protocol", "platform"}
 pub fn check_json(permissions: &Permissions) -> String;
-pub fn lock_json(outcome: &LockOutcome) -> String;               // {"ok":true} / {"ok":true,"already":true} / {"ok":false,"error":…}
+pub fn lock_json(outcome: &LockOutcome) -> String;               // `LockOutcome` is defined in this task (in `lock.rs`, type only); Task 11 adds `lock_screen` beside it // {"ok":true} / {"ok":true,"already":true} / {"ok":false,"error":…}
 ```
 
 Differences from Swift, all from spec §6.1: `secure-helper --pipe <name>` exists (host-core only parses it; running it is `host-windows`' job, phase F); `check --prompt` is accepted and ignored; `version` reports the workspace version (`env!("CARGO_PKG_VERSION")`), not Swift's fixed `0.3.0`, and the platform string given by the caller; `list-apps` and `check` carry `"platform"`, `"applications"` and, when the session cannot show a screen, `"error"` with one of `no display`, `session disconnected`, `not interactive`, `other user`. These Windows-only shapes have no Swift fixture; `tests/cli.rs` pins them with literal expected JSON written from spec §6.1.
@@ -486,7 +486,7 @@ pub fn unique_name(name: &str, exists: &dyn Fn(&str) -> bool) -> String;
 
 `portable_file_name` rules (spec §6.7): take the last path component after splitting on `/` and `\`; replace each of `< > : " / \ | ? *` and every character below U+0020 with `_`; strip trailing dots and spaces; if the stem (before the first dot), compared case-insensitively, is `CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`, prefix `_`; cut to 200 UTF-16 units keeping the extension and never splitting a surrogate pair; if the result is empty, `.` or `..`, use `file`. It is applied on every operating system, so the fake platform exercises it on the Mac. Where Swift's host already sanitises a name (`Transfers.swift`, `PutSink`), apply Swift's rule first, then this one.
 
-- [ ] **Step 1: Generators** — every host-side scenario of `ClipboardTests` and `TransferTests`. `transfer-chunks.bin`: a 700 KiB seeded file fetched through `FetchSource` from offset 0 and from offset 300 000 (records = chunks), and the same bytes written through `PutSink` in 256 KiB chunks, with the on-disk states (`<name>.rapp-part` size after each chunk, final name). Plus: text of exactly 1 MiB and 1 MiB + 1 byte ending inside a 4-byte character; 100 and 101 files; a put whose `total` is smaller than the existing part file (resume from 0); a put of 0 bytes.
+- [ ] **Step 1: Generators** — every host-side scenario of `ClipboardTests` and `TransferTests`. `transfer-chunks.bin`: a 700 KiB seeded file fetched through `FetchSource` from offset 0 and from offset 300 000 (records = chunks), and the same bytes written through `PutSink` in 256 KiB chunks, with the on-disk states (`<name>.rapp-part` size after each chunk, final name). Plus: text of exactly 1 MiB and 1 MiB + 1 byte ending inside a 4-byte character; 100 and 101 files (the limit lives in `rapp-host`'s `ClipboardWatcher`, not in `RappCore`, so no fixture can call it: the Rust test checks the constant here and Task 16's session test checks the behaviour; the same holds for the 64 MiB image limit); a put whose `total` is smaller than the existing part file (starts again from 0 — Swift's `PutSink` never continues an existing part file by itself; `resumeOffset` is a pure function the session calls); a put of 0 bytes.
 - [ ] **Step 2: Failing Rust tests.** `tests/rules_clip.rs` and `tests/transfers.rs` replay the fixtures in a `tempfile` directory. `tests/filename.rs` (Review Focus 4), literal table: `"..\\x"` → `x`; `"a/b"` → `b`; `"CON"` → `_CON`; `"nul.txt"` → `_nul.txt`; `"x."` → `x`; `"x "` → `x`; `""` → `file`; `".."` → `file`; `"a<b>.txt"` → `a_b_.txt`; a 300-character name with `.png` → 200 units ending `.png`; and `put_never_leaves_the_transfer_dir`: for each of those names, a `TransferStore::put` followed by a full write leaves exactly one new file, and its canonical path starts with the canonical transfer directory. `second_file_with_same_name_gets_a_suffix`.
 - [ ] **Step 3: Port** the host-used parts of `Clipboard.swift` and `Transfers.swift` with `std::fs`; write `filename.rs`. **Step 4: Run** — Expected: PASS. **Step 5: Commit** `feat(host-core): clipboard rules, transfer store, portable file names`.
 
@@ -504,7 +504,7 @@ pub fn lock_screen(is_locked: &mut dyn FnMut() -> bool, call: &mut dyn FnMut() -
 pub fn wait_until_unlocked(is_locked: &mut dyn FnMut() -> bool, sleep: &mut dyn FnMut(f64), timeout: f64, step: f64);                                                     // callers pass 8.0, 0.1
 pub fn locked_start_display(windows: &[Rect], displays: &[Rect]) -> Option<Rect>;
 pub fn type_unlock_password(password: &[u16], is_locked: &mut dyn FnMut() -> bool, wake: &mut dyn FnMut(), wait: &mut dyn FnMut(f64), type_chunk: &mut dyn FnMut(&[u16]), press_return: &mut dyn FnMut());
-pub fn with_unlock_lock<T>(file: &Path, body: impl FnOnce() -> T) -> T;      // one typist at a time across workers
+pub fn with_unlock_lock<T>(file: &Path, log: &mut dyn FnMut(&str), body: impl FnOnce() -> T) -> T;      // one typist at a time across workers; `log` receives `unlock lock unavailable` (the core has no logger of its own)
 pub struct StayAwake { … }                                                    // begin(), end(): nested begins hold once
 ```
 
@@ -525,7 +525,7 @@ pub struct StayAwake { … }                                                    
 ```rust
 pub struct RuleRect { pub x: i64, pub y: i64, pub w: i64, pub h: i64 }
 pub struct RuleImage { pub width: usize, pub height: usize, pub pixels: Vec<u8> }
-impl RuleImage { pub fn sample(bgra: &[u8], width: usize, height: usize, bytes_per_row: usize, …) -> RuleImage; pub fn rgb(&self, x: i64, y: i64) -> (u8, u8, u8); }   // RuleImage.swift:27
+impl RuleImage { pub fn sample(bgra: &[u8], width: usize, height: usize, bytes_per_row: usize, …) -> Option<RuleImage>; pub fn rgb(&self, x: i64, y: i64) -> (u8, u8, u8); }   // RuleImage.swift:27
 pub trait TextReader: Send { fn lines(&mut self, image: &RuleImage, rect: RuleRect) -> Vec<String>; fn ready(&self) -> bool { true } }
 pub const TEXT_EVERY: f64 = 2.0;  pub const HEALTH_ROUNDS: i64 = 5;  pub const REPORT_COUNT_KEYS: usize = 32;  pub const RULE_BYTES_LIMIT: usize = 65536;
 pub struct RuleEnv { pub app_version: Option<String>, pub os: String, pub locale: String, pub caps: BTreeSet<String>, pub reread_version: … }   // StateEngine.swift:6
@@ -537,7 +537,7 @@ impl StateEngine {
 }
 ```
 
-- [ ] **Step 1: Generators.** Reuse `RuleFixtures.swift` and `RuleCanvas.swift`. Every scenario of `RulePackTests`, `RuleRegionTests`, `RuleDetectTests`, `StateTableTests`, `StateEngineTests`. Images go in `rule-image.bin` (tag 1 = `u16 width, u16 height`, BGRA; tag 2 = sampled `RuleImage` pixels) and cases refer to them by index. Engine traces run with `os: "macos"` **and** the same packs with `os: "windows"` (spec §6.9: `RuleEnv.os` is `"windows"`), with and without a `TextReader` (a scripted one), and with `caps` lacking `text`. Plus: a pack of exactly 65536 and 65537 bytes; malformed JSON; a pack whose `os` condition excludes the platform; `compareVersions` on `1.10` vs `1.9`, `1.0` vs `1`, a non-numeric part; an `AppStateReport` that exceeds 4096 bytes (expect Swift's clipping, `StateEngine.swift:50-62`).
+- [ ] **Step 1: Generators.** Reuse `RuleFixtures.swift` and `RuleCanvas.swift`. Every scenario of `RulePackTests`, `RuleRegionTests`, `RuleDetectTests`, `StateTableTests`, `StateEngineTests`. Frames larger than 256×256 (the 800×600 and 1600×1000 scenes are tens of MB as pixels) are stored as the drawing recipe plus a SHA-256 of the pixels: the Rust test redraws the frame with a port of `RuleCanvas.swift` kept under `tests/`, checks the hash first, then runs the case. Small images go in `rule-image.bin` (tag 1 = `u16 width, u16 height`, BGRA; tag 2 = sampled `RuleImage` pixels) and cases refer to them by index. Engine traces run with `os: "macos"` **and** the same packs with `os: "windows"` (spec §6.9: `RuleEnv.os` is `"windows"`), with and without a `TextReader` (a scripted one), and with `caps` lacking `text`. Plus: a pack of exactly 65536 and 65537 bytes; malformed JSON; a pack whose `os` condition excludes the platform; `compareVersions` on `1.10` vs `1.9`, `1.0` vs `1`, a non-numeric part; an `AppStateReport` that exceeds 4096 bytes (expect Swift's clipping, `StateEngine.swift:50-62`).
 - [ ] **Step 2: Failing Rust test** `tests/state_rules.rs`, one test per fixture; `AppStateReport::json()` compared as a parsed object, and its byte length compared exactly (the limit is on bytes).
 - [ ] **Step 3: Port** `Sources/RappCore/StateRules/` (seven files, 1521 lines) file for file. The pack's JSON is read with `serde_json` into the same permissive `RuleValue` tree Swift builds; do not replace it with derive-based strict parsing — unknown keys and wrong types must fail or pass exactly where Swift's do.
 - [ ] **Step 4: Run** — Expected: PASS. **Step 5: Commit** `feat(host-core): state-rule engine, checked against Swift`.
@@ -657,7 +657,7 @@ Behaviour to port, with its Swift source: capture start and region [`Server.swif
 - [ ] **Step 1: Failing tests** (append to `host_session.rs`):
   - `scroll_arrives_as_copy_tiles`: `scroll_by(16)`; the next frame has `FrameFlags::COPIES` and the decoded canvas equals the new pattern.
   - `window_added_and_removed`: `set_windows` with a second window → a `windows` message listing both and a frame covering the larger region; remove it → back to one. No `windows` message when nothing changed for 1 s.
-  - `pause_and_resume`: `setStream` fps 0 → no `frame` for 2 s of host time while the pattern scrolls, `changed` messages about once a second, `windows` still delivered; fps 15 → the first frame is full and the canvas is current.
+  - `pause_and_resume`: `setStream` fps 0 → no `frame` for 2 s of host time while the pattern scrolls, `changed` messages about once a second, `windows` still delivered; fps 15 → the first frame is a diff against the last frame sent before the pause (not a full frame; `Server.swift:1203`, `PacedSenderTests.swift:586`) and the decoded canvas is current. A second test `pause_mode_change_resumes_full`: `setMode` while paused → the first frame after resume is full (`PacedSenderTests.swift:655`).
   - `unacknowledged_controller_gets_bounded_frames` (Review Focus 5): never send `frameAck` while the pattern scrolls every tick for 5 s; the number of frames received stays at the in-flight cap and the worker's `stats` event shows `in_flight` at the cap, not growing.
   - `set_view_narrows_the_picture`, `set_stream_changes_mode` (all five modes decode correctly), `density_is_capped_by_the_display_scale`.
   - `stats_event_every_second`: field names exactly those of `cli-events.json`'s `stats` case.
