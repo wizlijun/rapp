@@ -229,7 +229,7 @@
 | `rust/speech-linux` | 改（目录名不动） | 加 Windows 的录音；识别部分共用 | —— |
 | `rust/client-core` | 基本不动 | `rapp-session` 在 Windows 上编过即可 | —— |
 | `rust/wire`、`conn`、`ports` | 预计不用改 | —— | —— |
-| `rust/relay`、`host-linux`、`client-gtk`、`hub-ffi` | 不碰（例外：`relay/src/audit.rs` 三处 `#[cfg(unix)]`，§14.3） | Windows 的门禁里排除（§14.3） | —— |
+| `rust/relay`、`host-linux`、`client-gtk`、`hub-ffi` | 不碰（例外：`relay/src/audit.rs` 三处 `#[cfg(unix)]`、`relay/src/admin.rs` 的 unix 部分加 `#[cfg(unix)]`，§14.3） | Windows 的门禁里排除（§14.3） | —— |
 
 `speech-linux` 不改名【我定的】：改目录名会动到另一台机器维护的 Linux 打包脚本，收益只是名字好看。
 
@@ -898,7 +898,7 @@ unix 上的规矩是“目录 0700、文件 0600”。Rust 里真正设权限的
 
 **Windows 的门禁**（Windows 机器上的集成 session、首发后的发版 session 用，功能 session 在 Windows 机器上开发时也用）：
 
-1. `cargo test --workspace --no-fail-fast`，排除 `rapp-relay`、`rapp-host-linux`、`rapp-client-gtk`、`rapp-hub-ffi`（这四个的测试 Windows 上不跑）。排除管不到依赖：`rapp-conn`、`rapp-testkit` 的测试要在进程里起一个中继，所以 `rapp-relay` 的**库**在 Windows 上还是会被编译。为此 `rust/relay/src/audit.rs` 里三处 unix 专用的写法加 `#[cfg(unix)]`（只为编过，Linux 上的代码不变，中继仍然不为 Windows 构建、不在 Windows 上发）——用户 2026-11-26 同意。
+1. `cargo test --workspace --no-fail-fast`，排除 `rapp-relay`、`rapp-host-linux`、`rapp-client-gtk`、`rapp-hub-ffi`（这四个的测试 Windows 上不跑）。排除管不到依赖：`rapp-conn`、`rapp-testkit` 的测试要在进程里起一个中继，所以 `rapp-relay` 的**库**在 Windows 上还是会被编译。为此 `rust/relay/src/audit.rs` 里三处 unix 专用的写法加 `#[cfg(unix)]`（只为编过，Linux 上的代码不变，中继仍然不为 Windows 构建、不在 Windows 上发）——用户 2026-11-26 同意。后来写代码草稿时发现这还不够：管理接口 `rust/relay/src/admin.rs` 整个建在 Unix 套接字上。用户同日再同意改这一个文件：unix 的代码原样放到 `#[cfg(unix)]` 后面，别的系统上给一个同名的替身（不开管理接口，`call`、`issue_key` 报错）；换钥只能通过管理接口触发，所以“换钥”那一组八个测试在 Windows 上关掉（同一段逻辑在 Mac 和 Linux 上照常测），Windows 上首发前手工验一次；别的经过中继的测试（连接、网络监测、端口转发）在 Windows 上照跑。中继的其他文件仍然不动。
 2. `cargo clippy` 同样的范围，`-D warnings`。
 3. `flutter analyze`、`flutter test`。
 4. 构建和包的自检（§12.6）。
