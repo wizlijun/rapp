@@ -40,6 +40,7 @@ pub(crate) async fn drive(
     every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut sampler: Option<Box<dyn Sampler>> = None;
     let mut panicked = false;
+    let disks = super::disks::DiskReader::default();
     loop {
         every.tick().await;
         let mut s = sampler.take().unwrap_or_else(|| (opts.sampler)());
@@ -63,7 +64,7 @@ pub(crate) async fn drive(
                 continue;
             }
         };
-        sample.disks = super::disks::read(covered().await, opts.disk_wait).await;
+        sample.disks = disks.read(covered().await, opts.disk_wait).await;
         load.hist.lock().unwrap().push(sample);
         load.tick.send_modify(|n| *n += 1);
     }
