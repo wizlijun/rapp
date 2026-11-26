@@ -736,9 +736,10 @@ fn handle(l: &mut Live, desktop: &mut Desktop, input: Input) -> Result<()> {
                     .as_ref()
                     .context("clipboard is unavailable on this desktop")?
                     .set(&copy)?;
+                let mods = desktop.paste_modifiers();
                 desktop.release();
-                desktop.key(9, 1 << 20, true)?;
-                desktop.key(9, 1 << 20, false)?;
+                desktop.key(9, mods, true)?;
+                desktop.key(9, mods, false)?;
                 desktop.release();
                 Ok(())
             })();
