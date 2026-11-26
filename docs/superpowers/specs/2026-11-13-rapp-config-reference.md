@@ -54,6 +54,7 @@
 | `$ROOT/local/term.json` | A | GUI 经 IPC 改开关，可手改 | 无 | §2.10 |
 | `$ROOT/local/shares.json` | A（分享方） | `rapp share` / `rapp unshare`（经 IPC），可手改 | 无 | §2.11 |
 | `$ROOT/local/services.json` | A | `rapp state on\|off`（经 IPC），可手改 | 无 | §2.12 |
+| `$ROOT/local/state.json` | B（GUI） | GUI 设置里的「状态服务」，可手改 | 无（手填的地址可能是内网地址） | §2.15 |
 | `$ROOT/local/state-sinks.json` | A | 程序自管（rapp-service 写） | 无 | §2.13 |
 | `$ROOT/local/state/state.json` | A（开了状态服务的设备） | 程序自管（rapp-state 写） | 有（命令和路径） | §2.14 |
 | `$ROOT/devices/<id>/device.json` | A / B | 程序自管（rapp-service 写，没有机密） | 无 | §2.6 |
@@ -251,6 +252,14 @@ agent 规则：程序自管，不要改。
 谁读写：`rapp-state`（`services/state/src/disk.rs`）。路径来自 `rapp-service` 传的 `--data <local>/state`（`companion.rs` 的 `args`；`store` 为 `"memory"` 时不传，也就没有这个文件）。目录 0700，文件 0600，先写 `state.json.tmp` 再改名盖过去。内容是 `Store` 的序列化：各设备的会话快照、事件队列、去重用的收件记录、`keep_days`、`keep_events`。里面有各设备上程序的状态、命令和路径，算有机密。读不懂的文件改名成 `state.json.bad`，从空开始。规格：《rapp-state 设计》§7、§17 第 1 条。
 
 agent 规则：程序自管，不要改；要清空就停服务后删这个目录。
+
+### 2.15 `$ROOT/local/state.json`（GUI 怎么找状态服务）
+
+谁读写：GUI（`gui/lib/state/state_config.dart`，`StateConfig`）。设置里的「状态服务」块改它，用 `writePrivate` 写，文件 0600。三种写法：`{"mode":"auto"}`（自动找：本机有就用本机的，分享表里有 `kind: "state"` 的项就用那个）、`{"mode":"off"}`（不连）、`{"mode":"manual","url":"http://主机:端口"}`（手填，必须以 `http://` 或 `https://` 开头）。缺文件、读不懂、`mode` 不认识都当作 `auto`；`manual` 没有合法的 `url` 时按「没找到」处理。和 §2.14（服务自己的数据）不是一回事。规格：《rapp-state 设计》、`docs/superpowers/plans` 里 P2 计划。
+
+生效：GUI 里改马上重连；手改要重启 GUI。
+
+agent 规则：可以改，但要先关 GUI（GUI 退出时不回写这个文件，但开着时设置页会覆盖）。
 
 ## 3. 程序自管的状态（不要改）
 
