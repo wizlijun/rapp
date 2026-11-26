@@ -52,6 +52,10 @@ pub struct RunOpts {
     pub command: Vec<String>,
     /// Answer the OSC 7501 probe and track the program's status (`programStatus` in term.json).
     pub program_status: bool,
+    /// Start zsh, bash and fish through the shell hook (`shellHook` in term.json).
+    pub shell_hook: bool,
+    /// The environment a restored terminal activates; only with the shell hook.
+    pub restore: Option<super::shell::Restore>,
 }
 
 /// Standard input is not a terminal.
@@ -65,6 +69,19 @@ impl std::fmt::Display for NoTerminal {
 }
 
 impl std::error::Error for NoTerminal {}
+
+/// How to start the command through the shell hook; none when it is not a hooked shell or the hook files cannot be
+/// written (the shell then starts as it is).
+fn hook_launch(opts: &RunOpts) -> Option<super::shell::Launch> {
+    let zdotdir = std::env::var_os("ZDOTDIR");
+    // A ZDOTDIR that is not UTF-8 could not be put back as it was: no hook rather than the wrong startup files.
+    let zdotdir = match &zdotdir {
+        Some(z) => Some(z.to_str()?),
+        None => None,
+    };
+    let dir = super::shell::install(&opts.dir).ok()?;
+    super::shell::launch(&opts.command, &dir, zdotdir, opts.restore.as_ref())
+}
 
 /// Run the program until it exits or the window goes; its exit code.
 pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
@@ -126,11 +143,23 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
     let pair = native_pty_system()
         .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(|_| anyhow!("cannot open a pty"))?;
+    let hook = if opts.shell_hook { hook_launch(&opts) } else { None };
     let mut cmd = match opts.command.split_first() {
         None => CommandBuilder::new_default_prog(),
         Some((program, args)) => {
             let mut c = CommandBuilder::new(program);
-            c.args(args);
+            match &hook {
+                Some(l) => {
+                    c.args(&l.args);
+                    for (k, v) in &l.set {
+                        c.env(k, v);
+                    }
+                    for k in &l.unset {
+                        c.env_remove(k);
+                    }
+                }
+                None => c.args(args),
+            }
             c
         }
     };
@@ -356,7 +385,7 @@ fn pump_output<W: Write>(
 ) {
     let mut b = vec![0u8; 64 * 1024];
     let mut titles = Some(super::title::Titles::default());
-    let mut shell_scan = super::ps::Scanner::default();
+    let mut shell_scan = Some(super::ps::Scanner::default());
     loop {
         let n = match pty.read(&mut b) {
             Ok(0) => break,
@@ -391,24 +420,32 @@ fn pump_output<W: Write>(
                 Err(_) => titles = None,
             }
         }
-        // 7502 reports and prompts keep the shell state. The bytes still go to the window below.
-        shell_scan.feed(&b[..n], |e| match e {
-            super::ps::Event::Shell(r) => {
-                shared.shell.lock().unwrap_or_else(|e| e.into_inner()).apply(r);
-                shared.touch();
+        // 7502 reports and prompts keep the shell state. The bytes still go to the window below. A panic there only
+        // ends the shell state.
+        if let Some(sc) = shell_scan.as_mut() {
+            let fed = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                sc.feed(&b[..n], |e| match e {
+                    super::ps::Event::Shell(r) => {
+                        shared.shell.lock().unwrap_or_else(|e| e.into_inner()).apply(r);
+                        shared.touch();
+                    }
+                    super::ps::Event::Prompt => {
+                        let mut st = shared.shell.lock().unwrap_or_else(|e| e.into_inner());
+                        let was = st.running.clone();
+                        st.prompt();
+                        let changed = st.running != was;
+                        drop(st);
+                        if changed {
+                            shared.touch();
+                        }
+                    }
+                    _ => {}
+                })
+            }));
+            if fed.is_err() {
+                shell_scan = None;
             }
-            super::ps::Event::Prompt => {
-                let mut st = shared.shell.lock().unwrap_or_else(|e| e.into_inner());
-                let was = st.running.clone();
-                st.prompt();
-                let changed = st.running != was;
-                drop(st);
-                if changed {
-                    shared.touch();
-                }
-            }
-            _ => {}
-        });
+        }
         // A window that is gone is no reason to stop: viewers still see the screen.
         {
             let mut w = window.lock().unwrap_or_else(|e| e.into_inner());

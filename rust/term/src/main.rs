@@ -135,15 +135,17 @@ async fn run(a: &Args) -> Res<i32> {
         return Err(usage("--cwd is not a directory"));
     }
     let dir = a.dir.as_ref().map_or_else(local::default_dir, PathBuf::from);
-    // Read once, at start: a broken file means on (serve already refuses requests then, so it is seen).
-    let program_status = config::load(&config::beside(&dir)).map(|c| c.program_status).unwrap_or(true);
+    // Read once, at start: a broken file means the defaults, all on (serve already refuses requests then, so it is seen).
+    let cfg = config::load(&config::beside(&dir)).unwrap_or_default();
     let opts = RunOpts {
         name: a.name.clone(),
         cwd: a.cwd.as_ref().map(PathBuf::from),
         dir,
         ticket: a.ticket.clone(),
         command: a.command.clone().unwrap_or_default(),
-        program_status,
+        program_status: cfg.program_status,
+        shell_hook: cfg.shell_hook,
+        restore: None,
     };
     holder::run(opts).await.map_err(|e| match e.downcast_ref::<NoTerminal>() {
         Some(n) => Fail::Terminal(n.to_string()),
