@@ -11,7 +11,9 @@ mod instance;
 
 #[tokio::main]
 async fn main() {
-    let args = match rapp_service::supervise::parse_args(&std::env::args().skip(1).collect::<Vec<_>>(), cfg!(windows)) {
+    // `args_os` + lossy: a non-UTF-8 argument is a usage error (exit 2), as before, not a panic.
+    let argv: Vec<String> = std::env::args_os().skip(1).map(|a| a.to_string_lossy().into_owned()).collect();
+    let args = match rapp_service::supervise::parse_args(&argv, cfg!(windows)) {
         Ok(args) => args,
         Err(usage) => {
             eprintln!("{usage}");
