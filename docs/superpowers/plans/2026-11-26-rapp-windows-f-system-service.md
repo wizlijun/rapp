@@ -25,7 +25,7 @@
 2. **Helper pixels travel in a shared section**, everything else on the pipe; the helper writes the next frame only after the previous one was acknowledged.
 3. **Lock after reattach is done by the requester**, verified by `rapp-svc`: if the session is not locked 2 s after reattaching, `rapp-svc` disconnects it again and answers an error. `rapp-svc` starts no extra program for it.
 4. **“Another user is at the console”** reaches the prelogin instance as a start argument (`--occupied`): `rapp-svc` restarts the instance when that changes.
-5. **The Ctrl+Alt+Del menu is not greyed in advance** (the protocol carries no such state): when the SAS cannot be sent, the host answers `inputBlocked` with `by = "sas"` and the controller shows one fixed sentence. This is the only place this plan departs from the spec's wording (§7.5 says “置灰”); tell the user in the phase report.
+5. **The Ctrl+Alt+Del menu is not greyed in advance** (the protocol carries no such state): when the SAS cannot be sent, the host answers `inputBlocked` with `by = "sas"` and the controller shows one fixed sentence. The user agreed to this on 2026-11-26 and spec §7.5 now says the same.
 6. `rapp-host` learns the mode by asking the system pipe for `status`, not from an argument or the environment.
 
 ## Global Constraints
