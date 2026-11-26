@@ -954,3 +954,13 @@ async fn dismissed_in_cache_never_installs() {
     assert_eq!(marker_of(&e.bundle), "current");
     assert_eq!(e.update().await["state"], "idle");
 }
+
+/// cli-update §5.1: the GUI reports its remote windows on its own connection.
+#[tokio::test]
+async fn gui_windows_is_acknowledged() {
+    let mut e = Env::new(Knobs::default());
+    e.start().await;
+    let mut gui = Ipc::open(e.svc(), &e.home).await;
+    assert_eq!(gui.call(json!({"cmd":"gui_windows","count":2})).await, json!({"ok": true}));
+    assert_eq!(gui.call(json!({"cmd":"gui_windows"})).await["ok"], false);
+}

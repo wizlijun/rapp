@@ -18,6 +18,18 @@ use tokio::net::{TcpListener, TcpStream};
 /// and the ones the relay knows cost one `DIRECT_WAIT` each list, and the relayed request follows.
 pub(crate) const HOSTS_WAIT: Duration = Duration::from_secs(6);
 
+/// Numbers the IPC connections, so that each GUI's `gui_windows` count is its own.
+static CONN_IDS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// Forgets a connection's `gui_windows` count when it ends, however it ends.
+struct Windows<'a>(&'a State, u64);
+
+impl Drop for Windows<'_> {
+    fn drop(&mut self) {
+        self.0.activity.drop_conn(self.1);
+    }
+}
+
 pub async fn serve(state: Arc<State>, listener: TcpListener, token: String) {
     while let Ok((tcp, _)) = listener.accept().await {
         let (state, token) = (state.clone(), token.clone());
@@ -38,6 +50,7 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
         return write_json(&mut w, &err("bad token")).await;
     }
     let mut feed: Option<tokio::sync::watch::Receiver<u64>> = None;
+    let windows = Windows(state, CONN_IDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
     // Dropped when this function returns: every `update_apply`/`update_rollback` on this
     // connection gets its own receiver and sees the connection close (K21).
     let (_closed, closed) = tokio::sync::watch::channel(());
@@ -72,6 +85,14 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
                         update::apply(state, cmd["confirm_signature_change"] == true, closed.clone()).await
                     }
                     "update_rollback" => update::rollback(state, closed.clone()).await,
+                    // The GUI's remote windows other than text terminals: they keep the auto-update out.
+                    "gui_windows" => match cmd["count"].as_u64() {
+                        Some(n) => {
+                            state.activity.set_windows(windows.1, n as usize);
+                            ok(json!({}))
+                        }
+                        None => err("count"),
+                    },
                     "shares" => crate::share_cmds::shares(state, &cmd).await,
                     "share" => crate::share_cmds::share(state, &cmd).await,
                     "unshare" => crate::share_cmds::unshare(state, &cmd).await,
@@ -98,7 +119,9 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
     // so the stream is read through it, never through the socket underneath.
     let mut near = tokio::io::join(lines.into_inner(), w);
     // However the stream ends (closed, reset), that is the port's business, not an IPC failure.
-    let _ = rapp_net::quic::splice(&mut near, &mut far).await;
+    let meter = rapp_net::quic::Meter::default();
+    let tick = rapp_net::quic::TRAFFIC_TICK;
+    let _ = rapp_net::quic::splice_watched(&mut near, &mut far, &meter, tick, || state.activity.touch()).await;
     Ok(())
 }
 

@@ -396,6 +396,8 @@ async fn viewing_a_pty_session_goes_through_serve() {
     c.send(json!({"t": "type", "pane": "%0", "text": "secret-word-2\r"})).await;
     win.wait_output("secret-word-2");
     drop(c);
+    // The input told the service someone uses this device (cli-update §5.1), then the view ended.
+    assert_eq!(w.event().await, json!({"event": "activity"}));
     let ended = w.event().await;
     assert_eq!(ended, json!({"event": "ended", "sid": 5, "term": id, "inputs": 1}));
     let (rest, err, _) = w.stop().await;

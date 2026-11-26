@@ -22,6 +22,10 @@ impl rapp_ports::Carrier for State {
     async fn open(&self, id: &str, port: u16) -> Result<rapp_conn::Pipe, String> {
         crate::pipe::open(self, id, port).await.map(|(pipe, _)| pipe).map_err(|e| e.as_str().to_string())
     }
+
+    fn traffic(&self) {
+        self.activity.touch();
+    }
 }
 
 /// `rapp_ports::ensure_all` for the shares `(port, wanted)` of the device `id`, in the running

@@ -1,5 +1,6 @@
 //! rapp-service (spec §3): A side. Authenticates B, runs `rapp-host` workers, serves local IPC.
 
+mod activity;
 pub mod autolock;
 mod channel;
 mod cm;
@@ -197,6 +198,7 @@ impl Service {
             channels: opts.channels,
             pacer: pace::Pacer::new(opts.pacing),
             outbound: rapp_conn::dial::Outbound::new(client_ep, identity.clone(), name),
+            activity: Default::default(),
         };
         let id = state.cfg.lock().unwrap().id.clone();
         let version = env!("CARGO_PKG_VERSION");

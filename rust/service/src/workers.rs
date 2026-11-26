@@ -316,7 +316,12 @@ async fn spawn(state: &Arc<State>, app: &str, gen: u64) -> Result<(u16, String, 
             match v["event"].as_str() {
                 Some("exit") => said = Some(v),
                 Some(ev @ ("transfer" | "rejected" | "unlock")) => transcribe(&state, &app, ev, &v),
-                Some("input") => tell_others(&state, &app),
+                Some("input") => {
+                    state.activity.touch();
+                    tell_others(&state, &app);
+                }
+                // Remote use that tells no one else (a text terminal's keys).
+                Some("activity") => state.activity.touch(),
                 Some("input_blocked") => log_blocked(&state, &app, &v, &mut blocked_logged),
                 Some("ended") if app == TERM => crate::term::ended(&state, &v),
                 Some("session") if v["state"] == "ended" => {
