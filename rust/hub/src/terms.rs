@@ -111,12 +111,45 @@ fn event(op: &Op, id: &str, r: &Value) -> Value {
     }
 }
 
+impl Watches {
+    /// Starts `id`'s watch with `spawn` (given the last failure's wait) if one is due (`due`).
+    pub(crate) fn ensure(&self, id: &str, spawn: impl FnOnce(Option<Duration>) -> JoinHandle<()>) {
+        let mut watches = self.0.lock().unwrap();
+        if let Some(delay) = due(watches.get(id), Instant::now()) {
+            watches.insert(id.to_string(), Watch::Running(spawn(delay)));
+        }
+    }
+
+    /// Forgets `id`'s watch, whatever its state: the next round that finds the host online asks again at once.
+    pub(crate) fn stop(&self, id: &str) {
+        if let Some(Watch::Running(task)) = self.0.lock().unwrap().remove(id) {
+            task.abort();
+        }
+    }
+
+    /// Stops the watches of hosts no longer in `hosts`.
+    pub(crate) fn retain(&self, hosts: &[Host]) {
+        self.0.lock().unwrap().retain(|id, w| {
+            let kept = hosts.iter().any(|h| h.id == *id);
+            if let (false, Watch::Running(task)) = (kept, w) {
+                task.abort();
+            }
+            kept
+        });
+    }
+
+    /// Records how `id`'s watch ended (`after_end`, `ended`); `delay` is the last failure's wait, `None` once the
+    /// watch brought something.
+    pub(crate) fn ended(&self, id: &str, next: Next, delay: Option<Duration>) {
+        if let Some(w) = self.0.lock().unwrap().get_mut(id) {
+            *w = ended(next, delay, Instant::now());
+        }
+    }
+}
+
 /// Starts `host`'s watch if one is due (`due`).
 pub(crate) fn ensure_watch(hub: &Arc<Hub>, host: &Host) {
-    let mut watches = hub.terms.0.lock().unwrap();
-    if let Some(delay) = due(watches.get(&host.id), Instant::now()) {
-        start(&mut watches, hub, host, delay);
-    }
+    hub.terms.ensure(&host.id, |delay| tokio::spawn(watch(hub.clone(), host.clone(), delay)));
 }
 
 /// The GUI asked for `host`'s list: a watch left `Off` or `Failed` starts again now, not when due.
@@ -127,30 +160,18 @@ fn restart(hub: &Arc<Hub>, host: &Host) {
         Some(Watch::Failed { delay, .. }) => Some(*delay),
         _ => return,
     };
-    start(&mut watches, hub, host, delay);
-}
-
-fn start(watches: &mut HashMap<String, Watch>, hub: &Arc<Hub>, host: &Host, delay: Option<Duration>) {
     let task = tokio::spawn(watch(hub.clone(), host.clone(), delay));
     watches.insert(host.id.clone(), Watch::Running(task));
 }
 
 /// Forgets `id`'s watch, whatever its state: the next round that finds the host online asks again at once.
 pub(crate) fn stop_watch(hub: &Hub, id: &str) {
-    if let Some(Watch::Running(task)) = hub.terms.0.lock().unwrap().remove(id) {
-        task.abort();
-    }
+    hub.terms.stop(id);
 }
 
 /// Stops the watches of hosts no longer in `hosts`.
 pub(crate) fn stop_gone(hub: &Hub, hosts: &[Host]) {
-    hub.terms.0.lock().unwrap().retain(|id, w| {
-        let kept = hosts.iter().any(|h| h.id == *id);
-        if let (false, Watch::Running(task)) = (kept, w) {
-            task.abort();
-        }
-        kept
-    });
+    hub.terms.retain(hosts);
 }
 
 /// One watch: each list it brings is a `terms` event; how it ended decides what follows (`after_end`, `ended`).
@@ -170,9 +191,7 @@ async fn watch(hub: Arc<Hub>, host: Host, delay: Option<Duration>) {
         Next::Retry => Some(json!({"event":"terms","id":id,"error":error})),
         Next::Unsupported => None,
     };
-    if let Some(w) = hub.terms.0.lock().unwrap().get_mut(id) {
-        *w = ended(next, delay.filter(|_| !listed), Instant::now());
-    }
+    hub.terms.ended(id, next, delay.filter(|_| !listed));
     if let Some(event) = event {
         hub.emit(event, &None).await;
     }
