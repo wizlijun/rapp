@@ -1224,3 +1224,6 @@ macOS、Linux、Duo、iPad 各一遍。
   - [ ] 6. `rapp update --json`、`rapp update check --json`、`rapp update status --json` 的输出能被 `jq` 解析，退出码符合 §5.4
   - [ ] 7. `rapp update --timeout 1`：退出码 5
   - [ ] 8. 开着「rApp 连接管理」小窗（`--cm`）时执行 `rapp update`：小窗也关掉，升级不会因为它卡住
+- 审查留下的两条小问题（没修）：
+  - [ ] ps 的 `comm` 分不出 `--cm` 小窗和主窗口：上次服务留下的孤儿 `--cm` 会被当成「主窗口开着」，升级后多开一次主窗口（要改读 `args=`）
+  - [ ] 安装中途 panic 会让 `quit_gui` 一直是 true，GUI 一打开就退，直到服务重启（可用 drop guard 清掉）
