@@ -48,6 +48,9 @@ const SNAPSHOT_QUIET: Duration = Duration::from_secs(2);
 const SNAPSHOT_MAX_WAIT: Duration = Duration::from_secs(10);
 /// How long a restored terminal waits for its shell's first prompt before it pre-types the command anyway.
 const PREFILL_WAIT: Duration = Duration::from_secs(2);
+/// How long after the program exited by itself a signal to `run` still counts as the reason (a shutdown that
+/// stopped the program first, which caught its SIGTERM and exited cleanly).
+const LATE_SIGNAL_WAIT: Duration = Duration::from_millis(150);
 /// The shells a snapshot names as its shell when one is the command.
 const SHELLS: [&str; 8] = ["zsh", "bash", "fish", "sh", "dash", "ksh", "tcsh", "csh"];
 
@@ -280,7 +283,7 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
             _ = int.recv() => break End::Signal(libc::SIGINT),
             _ = quit.recv() => break End::Signal(libc::SIGQUIT),
             _ = shared.end.notified() => break End::Ended,
-            status = &mut exited => break End::Exited(exit_code(status)),
+            status = &mut exited => break exit_end(status),
             _ = winch.recv() => resize(pair.master.as_ref(), &shared),
             _ = fg_tick.tick() => probe_fg(&shared, pair.master.process_group_leader(), child_pid.unwrap_or(0)),
             _ = tick.tick() => {
@@ -290,15 +293,14 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
             }
         }
     };
-    // Stopped before the program is: what it looks like while it goes is not what to restore.
+    // Stopped before the program is: what it looks like while it goes is not what to restore. Abort and then remove
+    // cannot race a write only because the runtime is current_thread and the task writes synchronously: no write is
+    // in flight while this code runs.
     snapshots.abort();
-    let code = match end {
-        End::Exited(code) => code,
-        End::Ended | End::Signal(_) => {
-            let sig = match end {
-                End::Signal(s) => s,
-                _ => libc::SIGHUP,
-            };
+    let code = match (&end, end.stop_signal()) {
+        (End::Exited { code, .. }, _) => *code,
+        (_, stop) => {
+            let sig = stop.unwrap_or(libc::SIGHUP);
             let _ = killer.kill();
             if tokio::time::timeout(KILL_WAIT, &mut exited).await.is_err() {
                 if let Some(p) = child_pid {
@@ -309,6 +311,16 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
             128 + sig
         }
     };
+    // A clean exit during a shutdown may be the program's answer to a signal that is about to reach run as well.
+    let late = async {
+        tokio::select! {
+            _ = hup.recv() => libc::SIGHUP,
+            _ = term.recv() => libc::SIGTERM,
+            _ = int.recv() => libc::SIGINT,
+            _ = quit.recv() => libc::SIGQUIT,
+        }
+    };
+    let end = settle(end, late).await;
     finish_snapshot(&end, &opts.dir, &shared.meta.key);
     // The last screen is in before anyone is told it was the last; each viewer sends it before saying so.
     let _ = tokio::time::timeout(DRAIN_WAIT, drained).await;
@@ -354,22 +366,52 @@ fn probe_fg(shared: &Shared, pgrp: Option<i32>, child_pid: u32) {
 }
 
 /// Why the main loop stopped.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum End {
-    /// The program exited, with this code.
-    Exited(i32),
+    /// The program exited, with this code; `signaled` when a signal killed it (or its status is unknown).
+    Exited { code: i32, signaled: bool },
     /// The `end` op (结束终端, ⌘W): the program is stopped like on SIGHUP.
     Ended,
     /// run got this signal.
     Signal(i32),
 }
 
-/// The snapshot after a run ended: gone when the user ended the terminal (the program exited, or `end`), kept for a
-/// signal from outside (a closed window, a logout or shutdown, an upgrade), so the terminal can be restored.
+impl End {
+    /// The signal the program is stopped with when run ends it; none when it exited by itself.
+    fn stop_signal(&self) -> Option<i32> {
+        match self {
+            End::Exited { .. } => None,
+            End::Ended => Some(libc::SIGHUP),
+            End::Signal(s) => Some(*s),
+        }
+    }
+}
+
+/// The ending for the program's exit status.
+fn exit_end(status: Result<std::io::Result<ExitStatus>, oneshot::error::RecvError>) -> End {
+    let signaled = !matches!(&status, Ok(Ok(s)) if s.signal().is_none());
+    End::Exited { code: exit_code(status), signaled }
+}
+
+/// A clean exit becomes `Signal` when `late` (a signal to run) comes within `LATE_SIGNAL_WAIT`; any other ending
+/// stays as it is, at once.
+async fn settle(end: End, late: impl std::future::Future<Output = i32>) -> End {
+    match end {
+        End::Exited { signaled: false, .. } => match tokio::time::timeout(LATE_SIGNAL_WAIT, late).await {
+            Ok(sig) => End::Signal(sig),
+            Err(_) => end,
+        },
+        end => end,
+    }
+}
+
+/// The snapshot after a run ended: gone when the user ended the terminal (the program exited by itself, or `end`),
+/// kept for a signal from outside (a closed window, a logout or shutdown, an upgrade, a program killed by a signal),
+/// so the terminal can be restored.
 fn finish_snapshot(end: &End, dir: &Path, key: &str) {
     match end {
-        End::Exited(_) | End::Ended => saved::remove(dir, key),
-        End::Signal(_) => {}
+        End::Exited { signaled: false, .. } | End::Ended => saved::remove(dir, key),
+        End::Exited { signaled: true, .. } | End::Signal(_) => {}
     }
 }
 
@@ -430,9 +472,10 @@ fn snapshot_with(
         (Some(p.clone()), saved::clean_cmd(p).1)
     } else if let Some(r) = &st.running {
         saved::clean_cmd(r)
-    } else if !st.hooked && fg.probed && !fg.shell {
-        // No hook: what the program in front was started with. Only with no hook: a hooked shell keeps out what it
-        // does not report (a command kept out of history).
+    } else if (!st.hooked || st.norun) && fg.probed && !fg.shell {
+        // No hook, or a hook that cannot report runs (bash with a DEBUG trap of the user's): what the program in front
+        // was started with. Not when the hook reports runs: it keeps out what it does not report (a command kept out
+        // of history).
         match fg.pgrp.and_then(&launch_info) {
             Some((argv, env)) => {
                 let get = |k: &str| env.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
@@ -794,13 +837,56 @@ mod tests {
     #[test]
     fn ended_and_exited_remove_the_snapshot_signals_keep_it() {
         let key = "0123456789abcdef";
-        let cases = [(End::Exited(0), false), (End::Ended, false), (End::Signal(libc::SIGHUP), true), (End::Signal(libc::SIGTERM), true)];
+        let cases = [
+            (End::Exited { code: 0, signaled: false }, false),
+            (End::Exited { code: 3, signaled: false }, false),
+            (End::Exited { code: 1, signaled: true }, true),
+            (End::Ended, false),
+            (End::Signal(libc::SIGHUP), true),
+            (End::Signal(libc::SIGTERM), true),
+        ];
         for (end, kept) in cases {
             let d = tempfile::tempdir().unwrap();
             saved::write(d.path(), &Snapshot { v: 1, key: key.into(), ..Default::default() }).unwrap();
             finish_snapshot(&end, d.path(), key);
             assert_eq!(saved::path(d.path(), key).exists(), kept, "{end:?}");
         }
+    }
+
+    #[test]
+    fn a_signal_death_is_told_from_an_exit() {
+        let st = |s: ExitStatus| exit_end(Ok(Ok(s)));
+        assert_eq!(st(ExitStatus::with_exit_code(0)), End::Exited { code: 0, signaled: false });
+        assert_eq!(st(ExitStatus::with_exit_code(2)), End::Exited { code: 2, signaled: false });
+        assert_eq!(st(ExitStatus::with_signal("Killed: 9")), End::Exited { code: 1, signaled: true });
+        assert_eq!(exit_end(Ok(Err(std::io::Error::other("x")))), End::Exited { code: 1, signaled: true });
+        assert_eq!((End::Ended.stop_signal(), End::Signal(15).stop_signal()), (Some(libc::SIGHUP), Some(15)));
+        assert_eq!(End::Exited { code: 0, signaled: false }.stop_signal(), None);
+    }
+
+    #[tokio::test]
+    async fn a_signal_right_after_a_clean_exit_keeps_the_snapshot() {
+        let clean = || End::Exited { code: 0, signaled: false };
+        let soon = async {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            libc::SIGTERM
+        };
+        assert_eq!(settle(clean(), soon).await, End::Signal(libc::SIGTERM));
+        // No signal: a clean exit, after the wait.
+        let t = Instant::now();
+        assert_eq!(settle(clean(), std::future::pending()).await, clean());
+        assert!(t.elapsed() >= LATE_SIGNAL_WAIT);
+        // Too late: still a clean exit.
+        let late = async {
+            tokio::time::sleep(LATE_SIGNAL_WAIT * 3).await;
+            libc::SIGTERM
+        };
+        assert_eq!(settle(clean(), late).await, clean());
+        // Anything else is not waited on.
+        let t = Instant::now();
+        assert_eq!(settle(End::Exited { code: 1, signaled: true }, std::future::pending()).await, End::Exited { code: 1, signaled: true });
+        assert_eq!(settle(End::Ended, std::future::pending()).await, End::Ended);
+        assert!(t.elapsed() < LATE_SIGNAL_WAIT);
     }
 
     fn fg_of(prog: &str, cwd: &str, shell: bool, pgrp: i32) -> super::super::fg::Fg {
@@ -819,6 +905,7 @@ mod tests {
             venv: venv.map(Into::into),
             conda: Some("/c/ml".into()),
             conda_name: Some("ml".into()),
+            norun: false,
         }
     }
 
@@ -888,6 +975,38 @@ mod tests {
         assert_eq!((s.cmd, s.prog.as_deref()), (None, Some("tool")));
         let s = snapshot_with(&sh, "/bin/zsh", 10, 20, |_| None);
         assert_eq!((s.cmd, s.prog, s.venv, s.cwd.as_deref()), (None, None, None, Some("/w/app")));
+    }
+
+    #[test]
+    fn snapshot_of_fallback_only_when_the_hook_cannot_report_runs() {
+        let sh = shared(30, 4);
+        *sh.fg.lock().unwrap() = fg_of("sleep", "/fg/dir", false, 42);
+        // A hook that reports runs reported none: the line was kept out of history, and stays out.
+        sh.shell.lock().unwrap().apply(state("/hook/dir", None));
+        let s = snapshot_with(&sh, "/bin/bash", 10, 20, no_info);
+        assert_eq!((s.cmd, s.prog), (None, None));
+        // A bash hook that stepped back for an existing DEBUG trap: what the program in front was started with.
+        let norun = super::super::shell::Report::State {
+            cwd: Some("/hook/dir".into()),
+            venv: None,
+            conda: None,
+            conda_name: None,
+            norun: true,
+        };
+        sh.shell.lock().unwrap().apply(norun);
+        let info = |pid: i32| -> Info {
+            assert_eq!(pid, 42);
+            Some((vec!["sleep".into(), "30".into()], vec![]))
+        };
+        let s = snapshot_with(&sh, "/bin/bash", 10, 20, info);
+        assert_eq!((s.cmd.as_deref(), s.prog.as_deref(), s.cwd.as_deref()), (Some("sleep 30"), Some("sleep"), Some("/hook/dir")));
+        // Still filtered.
+        let s = snapshot_with(&sh, "/bin/bash", 10, 20, |_| Some((vec!["tool".into(), "--password".into(), "x".into()], vec![])));
+        assert_eq!((s.cmd, s.prog.as_deref()), (None, Some("tool")));
+        // The shell itself in front: nothing to read.
+        *sh.fg.lock().unwrap() = fg_of("bash", "/fg/dir", true, 5);
+        let s = snapshot_with(&sh, "/bin/bash", 10, 20, no_info);
+        assert_eq!((s.cmd, s.prog), (None, None));
     }
 
     #[test]

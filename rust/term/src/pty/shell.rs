@@ -8,7 +8,7 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 
 /// The version of the hook files; bump it whenever one of them changes, so installed copies are written again.
-pub const HOOK_V: u32 = 2;
+pub const HOOK_V: u32 = 3;
 const ZSHENV: &str = include_str!("hook/zshenv");
 const RAPP_ZSH: &str = include_str!("hook/rapp.zsh");
 const RAPP_BASH: &str = include_str!("hook/rapp.bash");
@@ -116,7 +116,8 @@ pub fn launch(command: &[String], hook_dir: &Path, env_zdotdir: Option<&str>, re
 /// One decoded OSC 7502 report.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Report {
-    State { cwd: Option<String>, venv: Option<String>, conda: Option<String>, conda_name: Option<String> },
+    /// `norun`: the hook reports no runs (bash stepped back for a DEBUG trap already set).
+    State { cwd: Option<String>, venv: Option<String>, conda: Option<String>, conda_name: Option<String>, norun: bool },
     Run(String),
 }
 
@@ -133,7 +134,7 @@ pub fn parse_report(body: &[u8]) -> Option<Report> {
     match kind {
         b"run" => b64(rest).map(Report::Run),
         b"state" => {
-            let (mut cwd, mut venv, mut conda, mut conda_name) = (None, None, None, None);
+            let (mut cwd, mut venv, mut conda, mut conda_name, mut norun) = (None, None, None, None, false);
             for field in rest.split(|&c| c == b';').filter(|f| !f.is_empty()) {
                 let i = field.iter().position(|&c| c == b'=')?;
                 let (k, v) = (&field[..i], &field[i + 1..]);
@@ -143,10 +144,11 @@ pub fn parse_report(body: &[u8]) -> Option<Report> {
                     b"venv" => venv = value,
                     b"conda" => conda = value,
                     b"conda_name" => conda_name = value,
+                    b"norun" => norun = value.as_deref() == Some("1"),
                     _ => {}
                 }
             }
-            Some(Report::State { cwd, venv, conda, conda_name })
+            Some(Report::State { cwd, venv, conda, conda_name, norun })
         }
         _ => None,
     }
@@ -165,6 +167,8 @@ pub struct ShellState {
     pub running: Option<String>,
     /// The restored command still waiting for the user.
     pub pending: Option<String>,
+    /// The hook said it reports no runs; once said, it holds for the shell.
+    pub norun: bool,
 }
 
 impl ShellState {
@@ -175,7 +179,8 @@ impl ShellState {
                 self.running = Some(c);
                 self.pending = None;
             }
-            Report::State { cwd, venv, conda, conda_name } => {
+            Report::State { cwd, venv, conda, conda_name, norun } => {
+                self.norun |= norun;
                 self.cwd = cwd;
                 self.venv = venv;
                 self.conda = conda;
@@ -201,8 +206,24 @@ mod tests {
     fn state_report_parses_fields() {
         assert_eq!(
             parse_report(b"state;cwd=L1VzZXJzL2I=;venv="),
-            Some(Report::State { cwd: Some("/Users/b".into()), venv: None, conda: None, conda_name: None })
+            Some(Report::State { cwd: Some("/Users/b".into()), venv: None, conda: None, conda_name: None, norun: false })
         );
+    }
+
+    #[test]
+    fn state_report_says_when_runs_are_not_reported() {
+        // "1" in base64; a key this side does not know is passed over.
+        let r = parse_report(b"state;cwd=L1VzZXJzL2I=;norun=MQ==;later=eA==").unwrap();
+        assert_eq!(r, Report::State { cwd: Some("/Users/b".into()), venv: None, conda: None, conda_name: None, norun: true });
+        let mut s = ShellState::default();
+        s.apply(r);
+        assert!(s.hooked && s.norun);
+        // It stays said: a later report without it does not take it back.
+        s.apply(parse_report(b"state;cwd=L3Q=").unwrap());
+        assert!(s.norun);
+        let mut s = ShellState::default();
+        s.apply(parse_report(b"state;cwd=L3Q=;norun=").unwrap());
+        assert!(s.hooked && !s.norun);
     }
 
     #[test]
@@ -222,7 +243,7 @@ mod tests {
         let mut s = ShellState { running: Some("x".into()), ..Default::default() };
         s.prompt();
         assert_eq!(s.running.as_deref(), Some("x"));
-        s.apply(Report::State { cwd: None, venv: None, conda: None, conda_name: None });
+        s.apply(Report::State { cwd: None, venv: None, conda: None, conda_name: None, norun: false });
         assert!(s.hooked);
         s.prompt();
         assert_eq!(s.running, None);

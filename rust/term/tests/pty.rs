@@ -569,3 +569,56 @@ async fn restore_of_a_live_key_takes_a_new_one() {
     let kb = key_of(d.path(), "b").await;
     assert_ne!(ka, kb);
 }
+
+#[tokio::test]
+async fn a_child_killed_by_a_signal_keeps_the_snapshot() {
+    let d = short_dir();
+    let mut w = Window::start(d.path(), &["--name", "t", "--", "/bin/cat"]);
+    let key = key_of(d.path(), "t").await;
+    wait_snapshot(d.path(), &key, WAIT, |_| true);
+    // The holder's child (cat), killed from outside: an out-of-memory kill, a shutdown that reached it first.
+    let out = Command::new("/usr/bin/pgrep").args(["-P", &w.pid().to_string()]).output().unwrap();
+    let child: i32 = String::from_utf8_lossy(&out.stdout).trim().parse().expect("one child");
+    unsafe { libc::kill(child, libc::SIGKILL) };
+    assert_eq!(w.wait_exit(), 1);
+    assert!(saved::path(d.path(), &key).exists());
+}
+
+/// A term dir and a home whose `.bash_profile` is `profile`; none when /bin/bash is not here.
+fn bash_window(profile: &str) -> Option<(tempfile::TempDir, std::path::PathBuf, tempfile::TempDir, Window)> {
+    if !Path::new("/bin/bash").is_file() {
+        eprintln!("note: /bin/bash is not installed here; the test is skipped");
+        return None;
+    }
+    let d = short_dir();
+    let term = d.path().join("t");
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(home.path().join(".bash_profile"), profile).unwrap();
+    let env = [("HOME", home.path().display().to_string()), ("PATH", "/usr/bin:/bin:/usr/sbin:/sbin".into()), ("TERM", "xterm-256color".into())];
+    let w = Window::start_env(&term, &["--name", "t", "--", "/bin/bash", "-l"], &env, &SEALED);
+    Some((d, term, home, w))
+}
+
+#[tokio::test]
+async fn bash_with_a_debug_trap_saves_the_program_in_front() {
+    // bash-preexec, starship: a DEBUG trap already set, so the hook reports no runs and says so.
+    let Some((_d, term, _home, mut w)) = bash_window("PS1='$ '\ntrap ':' DEBUG\n") else { return };
+    let key = key_of(&term, "t").await;
+    w.wait_output("norun=");
+    w.wait_output("\x1b]133;A");
+    w.type_in(b"sleep 30\r");
+    let s = wait_snapshot(&term, &key, WAIT, |s| s.cmd.is_some());
+    assert_eq!((s.cmd.as_deref(), s.prog.as_deref(), s.shell.as_str()), (Some("sleep 30"), Some("sleep"), "/bin/bash"));
+}
+
+#[tokio::test]
+async fn bash_hooked_never_saves_a_line_kept_out_of_history() {
+    let Some((_d, term, _home, mut w)) = bash_window("PS1='$ '\nHISTCONTROL=ignorespace\n") else { return };
+    let key = key_of(&term, "t").await;
+    w.wait_output("\x1b]133;A");
+    w.type_in(b" sleep 30\r");
+    // Past the quiet time a change would be written after; the program in front is not read for a hooked bash.
+    std::thread::sleep(Duration::from_secs(4));
+    let s = saved::read(&term, &key).expect("a snapshot");
+    assert_eq!((s.cmd, s.prog), (None, None));
+}

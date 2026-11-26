@@ -2,7 +2,8 @@
 # reads this instead of ~/.bashrc; this reads the user's files the way bash would have (the login files when
 # RAPP_BASH_LOGIN=1, else ~/.bashrc). At each prompt it reports the directory and the virtual environments
 # (OSC 7502 state, only when they changed) and marks the prompt (OSC 133;A); before each command line it reports
-# the line (OSC 7502 run), unless a DEBUG trap is already set (then it reports no commands).
+# the line (OSC 7502 run), unless a DEBUG trap is already set (then it reports no commands, and says so in each
+# state report: norun).
 # Written by rapp-term; changes here are overwritten.
 if [ "${RAPP_BASH_LOGIN-}" = 1 ]; then
   unset RAPP_BASH_LOGIN
@@ -27,6 +28,7 @@ _rapp_state() {
     if [ -n "${VIRTUAL_ENV-}" ]; then s="$s;venv=$(_rapp_b64 "$VIRTUAL_ENV")"; fi
     if [ -n "${CONDA_PREFIX-}" ]; then s="$s;conda=$(_rapp_b64 "$CONDA_PREFIX")"; fi
     if [ -n "${CONDA_DEFAULT_ENV-}" ]; then s="$s;conda_name=$(_rapp_b64 "$CONDA_DEFAULT_ENV")"; fi
+    if [ -n "${_rapp_norun-}" ]; then s="$s;norun=$(_rapp_b64 1)"; fi
     printf '\033]7502;%s\007' "$s"
   fi
 }
@@ -111,4 +113,6 @@ fi
 # "$_" as the last word keeps $_ for the user's command.
 if [ -z "$(trap -p DEBUG)" ]; then
   trap '_rapp_debug "$_"' DEBUG
+else
+  _rapp_norun=1
 fi

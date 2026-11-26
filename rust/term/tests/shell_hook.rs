@@ -349,6 +349,21 @@ fn bash_existing_debug_trap_left_alone() {
         sh.run("cd /tmp");
         let ev = sh.wait("state for /tmp", |ev| states(ev).iter().any(|(c, _)| is_tmp(c)));
         assert!(runs(&ev).is_empty(), "{bash}: {ev:?}");
+        // Each state report says no runs come, so the holder looks at the program in front instead.
+        let norun: Vec<bool> = ev.iter().filter_map(|e| match e { Ev::R(Report::State { norun, .. }) => Some(*norun), _ => None }).collect();
+        assert!(!norun.is_empty() && norun.iter().all(|n| *n), "{bash}: {ev:?}");
+    }
+}
+
+#[test]
+fn bash_hooked_says_nothing_of_norun() {
+    for bash in bash_shells() {
+        let (h, root) = (home(&[(".bash_profile", "PS1='$ '\n")]), tempfile::tempdir().unwrap());
+        let mut sh = Sh::start(&[&bash, "-l"], root.path(), h.path(), None, None);
+        sh.run("cd /tmp");
+        let ev = sh.wait("state for /tmp", |ev| states(ev).iter().any(|(c, _)| is_tmp(c)));
+        assert!(!ev.iter().any(|e| matches!(e, Ev::R(Report::State { norun: true, .. }))), "{bash}: {ev:?}");
+        assert!(!sh.output().contains("norun="), "{bash}");
     }
 }
 
