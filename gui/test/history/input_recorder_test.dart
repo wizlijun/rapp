@@ -913,6 +913,22 @@ void main() {
       expect(got, isEmpty);
     });
 
+    test('a strip command is not recorded and not remembered', () async {
+      final got = <String>[];
+      final rec = recorder()..onSent = (key, text, at) => got.add(text);
+      final a = session(1, 'com.a');
+      rec.attach(a, () => meta('h1', 'com.a'), restore: true);
+      a.composer.submitText('/clear', command: true);
+      a.composer.done(1, null);
+      a.composer.submitText('继续', phrase: true); // a later write proves the first one is not just late
+      a.composer.done(1, null);
+      await until(() => lines().isNotEmpty);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(lines().map((l) => l['source']), ['phrase']);
+      expect(lines().any((l) => '$l'.contains('/clear')), isFalse);
+      expect(got, isEmpty);
+    });
+
     test('a typed send stays typed', () async {
       final r = await sendOne((a) => unawaited(send(a, '打的字')));
       expect(r['source'], 'typed');

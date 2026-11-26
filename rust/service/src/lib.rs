@@ -9,6 +9,7 @@ mod data;
 mod forward;
 pub mod forward_log;
 mod ipc;
+mod labels;
 pub mod load;
 mod maps;
 mod numbers;
@@ -161,6 +162,10 @@ impl Service {
         if let Some(why) = unreadable {
             log.event(Lvl::Warn, "shares_unreadable", json!({"err": why}));
         }
+        let (labels, unreadable) = labels::Labels::load(&opts.home);
+        if let Some(why) = unreadable {
+            log.event(Lvl::Warn, "labels_unreadable", json!({"err": why}));
+        }
         let (maps, unreadable) = maps::Maps::load(&opts.home, opts.map_ports.0, opts.map_ports.1);
         if let Some(why) = unreadable {
             log.event(Lvl::Warn, "maps_unreadable", json!({"err": why}));
@@ -200,6 +205,7 @@ impl Service {
             relay_settings: tokio::sync::watch::channel(0).0,
             forward_log: forward_log::ForwardLog::new(log.clone()),
             shares,
+            labels,
             maps,
             numbers: numbers::Numbers::new(),
             own: own::Own::new(opts.own_ports),

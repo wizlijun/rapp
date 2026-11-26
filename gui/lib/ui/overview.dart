@@ -16,6 +16,7 @@ import 'overview_model.dart';
 import 'prefs.dart' show FirstLayer;
 import 'projects.dart' show orderedProjects;
 import 'session_block.dart';
+import 'term_restore_dialog.dart' show showTermRestore;
 import 'workspace_store.dart';
 import 'tokens.dart';
 
@@ -47,7 +48,8 @@ class Overview extends StatelessWidget {
         final cols = deviceColumns(
           hosts: hosts,
           probes: state.probes,
-          entries: entries,
+          // The labelled sessions that are not open stand at the end of their device's column (not counted).
+          entries: state.listed,
           name: state.deviceName,
           localVersion: state.hub?.version,
           localOs: state.localOs,
@@ -339,6 +341,14 @@ class _Column extends StatelessWidget {
               hosts: state.hub?.hosts ?? const [],
               now: state.now,
               onKick: monitor!.kick,
+              labels: monitor!.labels == null
+                  ? null
+                  : LocalLabels(
+                      table: monitor!.labels!,
+                      set: (app, title, note) => monitor!.setLabel(app, title: title, note: note),
+                      reset: monitor!.resetLabel,
+                      say: state.say,
+                    ),
             ),
           if (favorites.isNotEmpty) ...[
             Padding(
@@ -350,8 +360,10 @@ class _Column extends StatelessWidget {
               FavoriteBlock(
                 favorite: f,
                 label: state.labelOf(f),
-                verb: state.favoriteCreates(f) ? '新建' : '打开',
-                onTap: state.hubUsable && !col.offline ? () => state.openFavorite(f) : null,
+                verb: state.favoriteVerb(f),
+                onTap: state.hubUsable && !col.offline
+                    ? () => state.favoriteVerb(f) == '恢复' ? showTermRestore(context, state, f.device) : state.openFavorite(f)
+                    : null,
               ),
             ],
           ],

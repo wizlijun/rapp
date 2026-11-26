@@ -1,4 +1,5 @@
-//! `term.json`: whether terminal sessions are allowed, and whether program status (`programStatus`) is read.
+//! `term.json`: whether terminal sessions are allowed, whether program status (`programStatus`) is read, and whether
+//! shells start through the shell hook (`shellHook`).
 //! The `tmux` and `targets` of older versions are ignored.
 
 use serde::{Deserialize, Serialize};
@@ -16,11 +17,14 @@ pub struct TermConfig {
     /// Answer the OSC 7501 probe and track program status.
     #[serde(rename = "programStatus")]
     pub program_status: bool,
+    /// Start zsh, bash and fish through the shell hook, which reports the directory, venv and command.
+    #[serde(rename = "shellHook")]
+    pub shell_hook: bool,
 }
 
 impl Default for TermConfig {
     fn default() -> TermConfig {
-        TermConfig { allow: true, program_status: true }
+        TermConfig { allow: true, program_status: true, shell_hook: true }
     }
 }
 
@@ -56,6 +60,17 @@ mod tests {
     }
 
     #[test]
+    fn config_shell_hook_defaults_on() {
+        assert!(TermConfig::default().shell_hook);
+        let (_d, p) = write(r#"{"allow":true}"#);
+        assert!(load(&p).unwrap().shell_hook);
+        let (_d, p) = write(r#"{"shellHook":false}"#);
+        let c = load(&p).unwrap();
+        assert!(!c.shell_hook && c.allow && c.program_status);
+        assert!(serde_json::to_string(&c).unwrap().contains(r#""shellHook":false"#));
+    }
+
+    #[test]
     fn beside_is_next_to_the_term_dir() {
         assert_eq!(beside(Path::new("/r/local/term")), PathBuf::from("/r/local/term.json"));
     }
@@ -71,7 +86,7 @@ mod tests {
     fn a_missing_file_is_the_default_and_the_default_allows() {
         let d = tempfile::tempdir().unwrap();
         let c = load(&d.path().join("term.json")).unwrap();
-        assert_eq!(c, TermConfig { allow: true, program_status: true });
+        assert_eq!(c, TermConfig { allow: true, program_status: true, shell_hook: true });
     }
 
     #[test]

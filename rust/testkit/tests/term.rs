@@ -93,6 +93,8 @@ async fn with_terminals_off_nothing_starts() {
         json!({"op":"watch_terms"}),
         json!({"op":"open_term","app":"Terminal"}),
         json!({"op":"rename_term","term":"term:pty:work","name":"n"}),
+        json!({"op":"restore_terms","keys":["k"]}),
+        json!({"op":"forget_terms","keys":["k"]}),
     ] {
         assert_eq!(req(&conn, op.clone()).await, json!({"ok":false,"error":OFF}), "{op}");
     }
@@ -214,6 +216,33 @@ async fn end_term_reaches_the_worker() {
     assert_eq!(r, json!({"ok":true,"id":"term:pty:opened"}));
     let sent = term_requests(a.bins.path(), "open");
     assert_eq!(sent[0]["from"], json!("term:pty:k"));
+}
+
+#[tokio::test]
+async fn restore_and_forget_terms_reach_the_worker() {
+    let a = service().await;
+    let (_ep, conn) = b(&a).await;
+    let r = req(&conn, json!({"op":"restore_terms","keys":["k-secret"],"app":"Terminal"})).await;
+    assert_eq!(r, json!({"ok":true,"ids":["term:pty:r1","term:pty:r2"]}));
+    assert_eq!(term_requests(a.bins.path(), "restore"), [json!({"op":"restore","keys":["k-secret"],"app":"Terminal"})]);
+    let r = req(&conn, json!({"op":"forget_terms","keys":["k-secret","j-secret"]})).await;
+    assert_eq!(r, json!({"ok":true,"forgot":2}));
+    assert_eq!(term_requests(a.bins.path(), "forget"), [json!({"op":"forget","keys":["k-secret","j-secret"]})]);
+    let logged = wait_log(a.home.path(), "request", |v| v["op"] == "restore_terms" && v["result"] == "ok").await;
+    assert_eq!(logged["keys"], 1, "{logged}");
+    wait_log(a.home.path(), "request", |v| v["op"] == "forget_terms" && v["keys"] == 2).await;
+    assert!(!service_log_text(a.home.path()).contains("-secret"));
+}
+
+/// `saved` is serve's local request (it returns cmd and cwd): no peer reaches it.
+#[tokio::test]
+async fn a_peer_cannot_ask_for_saved() {
+    let a = service().await;
+    let (_ep, conn) = b(&a).await;
+    let r = req(&conn, json!({"op":"saved"})).await;
+    assert_eq!(r["ok"], false, "{r}");
+    assert!(r["error"].as_str().unwrap().contains("unknown op"), "{r}");
+    assert!(!term_log(a.bins.path()).unwrap_or_default().contains("saved"));
 }
 
 /// Opens `term` and passes the worker token through: the stream is then the worker's view (`hello` first).
@@ -399,4 +428,49 @@ async fn ipc_set_term_ignores_a_tmux_path() {
     let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
     assert_eq!(ipc.call(json!({"cmd":"set_term","tmux":"/opt/homebrew/bin/tmux"})).await, json!({"ok":true}));
     assert_eq!(ipc.call(json!({"cmd":"term"})).await, json!({"ok":true,"allow":true}));
+}
+
+/// The local CLI's three IPC commands: keys pass through exactly, forget sends none (= all), and a worker error
+/// keeps the `ids` opened so far.
+#[tokio::test]
+async fn ipc_term_saved_restore_forget() {
+    let a = service().await;
+    let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"term_saved"})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(r["saved"][0]["cwd"], "/tmp/p", "{r}");
+    assert!(term_log(a.bins.path()).unwrap().lines().any(|l| l == "saved"));
+    let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"term_restore","keys":["k1","k2"]})).await;
+    assert_eq!(r, json!({"ok":true,"ids":["term:pty:r1","term:pty:r2"]}));
+    // Non-string keys are dropped, a missing array is "all" (empty).
+    ipc_once(&a.svc, a.home.path(), json!({"cmd":"term_restore","keys":["k3", 5]})).await;
+    ipc_once(&a.svc, a.home.path(), json!({"cmd":"term_restore"})).await;
+    assert_eq!(
+        term_requests(a.bins.path(), "restore"),
+        [json!({"op":"restore","keys":["k1","k2"]}), json!({"op":"restore","keys":["k3"]}), json!({"op":"restore","keys":[]})]
+    );
+    let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"term_forget","keys":["ignored"]})).await;
+    assert_eq!(r, json!({"ok":true,"forgot":0}));
+    assert_eq!(term_requests(a.bins.path(), "forget"), [json!({"op":"forget","keys":[]})]);
+    // cwd and keys never reach the service log.
+    assert!(!service_log_text(a.home.path()).contains("/tmp/p"));
+}
+
+#[tokio::test]
+async fn ipc_term_restore_error_keeps_ids() {
+    let a = service().await;
+    std::fs::write(a.home.path().join("term.json"), json!({"allow":true,"fake_restore_error":"boom"}).to_string()).unwrap();
+    let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"term_restore","keys":["k1","k2"]})).await;
+    assert_eq!(r["ok"], false, "{r}");
+    assert_eq!(r["error"], "boom", "{r}");
+    assert_eq!(r["ids"], json!(["term:pty:r1"]), "{r}");
+}
+
+#[tokio::test]
+async fn ipc_term_commands_with_terminals_off() {
+    let a = service().await;
+    std::fs::write(a.home.path().join("term.json"), r#"{"allow":false}"#).unwrap();
+    for cmd in [json!({"cmd":"term_saved"}), json!({"cmd":"term_restore","keys":["k"]}), json!({"cmd":"term_forget"})] {
+        assert_eq!(ipc_once(&a.svc, a.home.path(), cmd.clone()).await, json!({"ok":false,"error":OFF}), "{cmd}");
+    }
+    assert!(term_log(a.bins.path()).is_none_or(|l| !l.contains("restore") && !l.contains("forget")));
 }

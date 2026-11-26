@@ -30,6 +30,7 @@ import '../permissions.dart';
 import '../embed/app_profile.dart';
 import '../embed/app_state.dart';
 import '../embed/state_rules.dart';
+import '../embed/strip_tools.dart';
 import '../embed/composer_model.dart';
 import '../embed/modifier_latch.dart';
 import '../term/term_id.dart';
@@ -51,6 +52,7 @@ import '../llm_api.dart';
 import 'projects.dart';
 import 'resources_state.dart';
 import '../embed/tidy_mode.dart';
+import '../labels.dart';
 import 'session_model.dart';
 import 'terms_entry.dart';
 import 'tokens.dart';
@@ -632,6 +634,12 @@ class MainState extends ChangeNotifier {
     _queue(HintRecord(v, _now()));
   }
 
+  /// Puts [words] on the hint line now.
+  void say(String words) {
+    hint = words;
+    notifyListeners();
+  }
+
   void _queue(HintRecord r) {
     hintHistory.insert(0, r);
     if (hintHistory.length > hintHistoryMax) hintHistory.removeLast();
@@ -900,6 +908,7 @@ class MainState extends ChangeNotifier {
       markingInput = null;
       _followCurrentKey();
     }
+    _noteLastTerm();
     if (embeds) _entries = _mapEntries();
     // The session list has nothing to show once the last session is gone.
     if (corner == Corner.sessions && _entries.isEmpty) corner = null;
@@ -1423,7 +1432,113 @@ class MainState extends ChangeNotifier {
   }
 
   // ---- sessions ----
-  List<SessionGroup> get groups => groupSessions(_entries, grouping, projects: projects, first: currentProject);
+  /// What every session list shows: the open sessions, then the labelled ones that are not open ([standbyEntries]),
+  /// each at the end of its group.
+  List<SessionGroup> get groups => standLast(groupSessions(listed, grouping, projects: projects, first: currentProject));
+
+  /// The open sessions, then [standbyEntries]: what the overview's columns and the top bar's list show.
+  List<SessionEntry> get listed => [..._entries, ...standbyEntries];
+
+  /// The groups [step] walks: open sessions only.
+  List<SessionGroup> get _openGroups => groupSessions(_entries, grouping, projects: projects, first: currentProject);
+
+  // ---- labels (spec 2026-11-26-rapp-session-labels-design.md) ----
+
+  /// The label of [app] on [device], as its table last came; null for none, or before the table has come.
+  SessionLabel? labelFor(String device, String app) => hub?.labels[device]?.labels[app];
+
+  /// The card menu's 改标题和备注… / 还原 show for [device]: its table has come (so it knows labels).
+  bool labelsReady(String device) => hub?.labels.containsKey(device) == true;
+
+  /// What [app] on [device] is called wherever it is listed: its label's title, else [fallback] (spec §7.6).
+  String titleOf(String device, String app, String fallback) {
+    final t = labelFor(device, app)?.title;
+    return t == null || t.isEmpty ? fallback : t;
+  }
+
+  /// Labels [app] on [device]; both empty clears it. The device's refusal is thrown with its words.
+  Future<void> setLabel(String device, String app, {required String title, required String note}) async {
+    final h = hub;
+    if (h == null || !hubUsable) throw StateError('rapp-hub 没有在运行');
+    await h.setLabel(device, app, title: title, note: note);
+  }
+
+  Future<void> resetLabel(String device, String app) async {
+    final h = hub;
+    if (h == null || !hubUsable) throw StateError('rapp-hub 没有在运行');
+    await h.resetLabel(device, app);
+  }
+
+  /// A card for every labelled session that is not open in this window, on each device that is on line and whose
+  /// table has come (spec §7.3): 「打开」 for one that runs (an app, or a terminal still listed), 「已停止」 for a
+  /// terminal that is gone. A terminal waits for its device's list, which says which it is.
+  List<SessionEntry> get standbyEntries {
+    final h = hub;
+    if (h == null) return const [];
+    final open = {for (final e in _entries) e.key};
+    final out = <SessionEntry>[];
+    final seen = <String>{};
+    for (final host in h.hosts) {
+      final id = host.id;
+      final table = h.labels[id];
+      if (table == null || !seen.add(id) || deviceOffline(id)) continue;
+      for (final MapEntry(key: app, value: label) in table.labels.entries) {
+        if (open.contains('$id/$app')) continue;
+        if (app == termsEntry || isDesktopScreen(app)) continue;
+        var standby = Standby.open;
+        var name = appName(id, app);
+        if (isTermApp(app)) {
+          final list = h.termLists[id];
+          if (list == null) continue;
+          final row = list.terms.where((r) => r.id == app).firstOrNull;
+          if (row == null || row.dead) {
+            standby = Standby.stopped;
+            if (row == null && name == app) name = parseTermId(app)?.name ?? app;
+          } else {
+            name = termDisplayName(row.shown, row.host);
+          }
+        }
+        out.add(SessionEntry(
+          sid: null,
+          id: id,
+          app: app,
+          appName: name,
+          device: deviceName(id),
+          path: '',
+          lamp: Lamp.notOpened,
+          ps: standby == Standby.open ? _termPs(id, app) : null,
+          fg: standby == Standby.open ? termFg(id, app) : null,
+          label: label,
+          standby: standby,
+        ));
+      }
+    }
+    return out;
+  }
+
+  /// A tap on a card in [standby]: 「打开」 opens the session; 「启动」 opens a new terminal on its device that takes the
+  /// gone one's label (in the device's home: where it was is not kept yet), then goes to it.
+  Future<void> openStandby(SessionEntry e) async {
+    if (e.standby != Standby.stopped) return openOrSwitch(e.id, e.app, e.appName);
+    if (!hubUsable) return;
+    try {
+      final launchers = hub?.termLists[e.id]?.hosts.where((h) => h.host == null).firstOrNull?.launchers ?? const <String>[];
+      if (launchers.isEmpty) throw StateError('这台设备没有可用的终端窗口');
+      final term = await hub!.openTerm(e.id, app: prefs.termAppFor(e.id, launchers), labelFrom: e.app);
+      try {
+        await hub?.terms(e.id);
+      } catch (_) {}
+      hint = '原来的目录没有记下，已在家目录新开';
+      notifyListeners();
+      final row = hub?.termLists[e.id]?.terms.where((r) => r.id == term).firstOrNull;
+      // Quiet: 已打开 … would cover why it starts in the home directory (a failed open still says so).
+      unawaited(_open(e.id, term, row == null ? e.appName : termDisplayName(row.shown, row.host), quiet: true));
+    } catch (err) {
+      if (_disposed) return;
+      hint = newTermWords(err);
+      notifyListeners();
+    }
+  }
 
   int get sessionCount => _entries.length;
 
@@ -1473,7 +1588,7 @@ class MainState extends ChangeNotifier {
   }
 
   void step(int delta) {
-    final k = stepKey(groups, currentKey, delta, within: _stepWithin);
+    final k = stepKey(_openGroups, currentKey, delta, within: _stepWithin);
     if (k == null) return;
     currentKey = k;
     notifyListeners();
@@ -1505,10 +1620,20 @@ class MainState extends ChangeNotifier {
     return fg == null || fg.isEmpty ? null : fg;
   }
 
+  /// The terminals-list row of the pty text terminal behind [sid] (tmux gets none); null for other apps or an unlisted terminal.
+  TermRow? termRowOfSid(Object sid) {
+    final r = _recordOfSid(sid);
+    if (r == null || !isPtyTerm(r.app)) return null;
+    return hub?.termLists[r.id]?.terms.where((t) => t.id == r.app).firstOrNull;
+  }
+
+  /// The AI tool in front of [s] when it is a text terminal, else null.
+  AgentTool? stripToolOf(RemoteSession s) => toolOf(termRowOfSid(s.sid));
+
   /// What a favourite or project member is called: `<program> · <name>` for a text terminal ([termTitle]), whose
   /// name is the list's current one, else the one stored with it.
-  String labelOf(AppRef a) =>
-      isTermApp(a.bundle) ? termTitle(termName(a.device, a.bundle) ?? a.name, fg: termFg(a.device, a.bundle)) : a.name;
+  String labelOf(AppRef a) => titleOf(a.device, a.bundle,
+      isTermApp(a.bundle) ? termTitle(termName(a.device, a.bundle) ?? a.name, fg: termFg(a.device, a.bundle)) : a.name);
 
   /// A text terminal's program status from its live row on [device]; null when the app is no terminal, the row is
   /// gone or dead, or the device dropped (its last list is stale).
@@ -1542,6 +1667,7 @@ class MainState extends ChangeNotifier {
       ps: r.phase == Phase.disconnected ? null : (_termPs(r.id, r.app) ?? inferredPs),
       inferred: inferredPs != null && !isTermApp(r.app),
       fg: termFg(r.id, r.app),
+      label: labelFor(r.id, r.app),
     );
   }
 
@@ -1563,6 +1689,7 @@ class MainState extends ChangeNotifier {
           lamp: _termBlocked(s.id, s.app) ? Lamp.waiting : Lamp.active,
           ps: _termPs(s.id, s.app),
           fg: termFg(s.id, s.app),
+          label: labelFor(s.id, s.app),
         );
         if (seen.add(e.key)) out.add(e);
       }
@@ -1604,7 +1731,8 @@ class MainState extends ChangeNotifier {
     }
     // Sessions run by rapp-client (no port) are not moved: their next reconnect takes the new link.
     final old = _entries;
-    final oldGroups = groups;
+    // Only open sessions: a standby card is never the one to move to.
+    final oldGroups = _openGroups;
     _entries = _mapEntries();
     final newKeys = {for (final e in _entries) e.key};
 
@@ -2371,7 +2499,8 @@ class MainState extends ChangeNotifier {
     _rerouteEnd(r, false);
     _batchEnded.remove(r.key);
     _stopRetry(r);
-    final oldGroups = groups;
+    // Only open sessions: a standby card is never the one to move to.
+    final oldGroups = _openGroups;
     final old = r.lastSid;
     if (old != null) portOf(old)?.close(old); // reconnected but not swapped yet: the old session is still open
     // Before a swap the old session is the one on show, the one written in. A waiting tidy's
@@ -2987,10 +3116,69 @@ class MainState extends ChangeNotifier {
       _termsNewTargetOf(id) is NewText &&
       _unopenedTerms(id).isNotEmpty;
 
-  /// A 常用 tile for the 终端 entry creates a new terminal (the tile says 「新建」); before that, its first
-  /// tap after launch reopens the terminals still running (「打开」).
-  bool favoriteCreates(AppRef f) =>
-      f.bundle == termsEntry && !_restoresTerms(f.device) && _termsNewTargetOf(f.device) is NewText;
+  /// The saved text terminals of [id] (from its local host row); empty on an old device.
+  List<TermSaved> savedTerms(String id) =>
+      hub?.termLists[id]?.hosts.where((h) => h.host == null).firstOrNull?.saved ?? const [];
+
+  /// What a 常用 tile says: the 终端 entry says 「打开」 on its first tap after launch while text terminals are still
+  /// running; else 「恢复」 when the device has no live text terminal but some saved one from before it started; else
+  /// 「新建」 when it creates a new terminal; every other tile says 「打开」.
+  String favoriteVerb(AppRef f) {
+    if (f.bundle != termsEntry || _restoresTerms(f.device)) return '打开';
+    final live = (hub?.termLists[f.device]?.terms ?? const <TermRow>[]).any((r) => !r.dead && parseTermId(r.id)?.backend == 'pty');
+    if (!live && savedTerms(f.device).any((x) => x.boot)) return '恢复';
+    return _termsNewTargetOf(f.device) is NewText ? '新建' : '打开';
+  }
+
+  /// The terminal app a new or restored text terminal of [id] opens in; throws when the device has none.
+  String _launcherOf(String id) {
+    final launchers = hub?.termLists[id]?.hosts.where((h) => h.host == null).firstOrNull?.launchers ?? const <String>[];
+    if (launchers.isEmpty) throw StateError('这台设备没有可用的终端窗口');
+    return prefs.termAppFor(id, launchers);
+  }
+
+  /// 恢复所选: reopens the saved terminals [keys] of [id] (always explicit keys), the first one current. One hint with
+  /// the count; a failure is the hint and the list refreshes, so what was not restored stays listed.
+  Future<void> restoreSaved(String device, List<String> keys) async {
+    if (!hubUsable || keys.isEmpty) return;
+    // The terminals that came up are opened, the first one selected; also when the restore stopped part way.
+    void stage(List<String> ids) {
+      for (final (i, id) in ids.indexed) {
+        final row = hub?.termLists[device]?.terms.where((r) => r.id == id).firstOrNull;
+        unawaited(_open(device, id, row == null ? '已结束' : termDisplayName(row.shown, row.host), select: i == 0, quiet: true));
+      }
+    }
+
+    try {
+      final ids = await hub!.restoreTerms(device, keys, app: _launcherOf(device));
+      if (_disposed) return;
+      stage(ids);
+      hint = '已恢复 ${ids.length} 个终端';
+    } catch (e) {
+      if (_disposed) return;
+      hint = newTermWords(e);
+      try {
+        await hub?.terms(device);
+      } catch (_) {}
+      if (e is RestoreStopped && !_disposed) stage(e.ids);
+    }
+    if (!_disposed) notifyListeners();
+  }
+
+  /// 全部清掉: forgets the saved terminals [keys] of [device].
+  Future<void> forgetSaved(String device, List<String> keys) async {
+    if (!hubUsable || keys.isEmpty) return;
+    try {
+      await hub!.forgetTerms(device, keys);
+    } catch (e) {
+      if (_disposed) return;
+      hint = newTermWords(e);
+      notifyListeners();
+    }
+  }
+
+  /// 新建 from the restore list: the same new terminal the 常用 · 终端 tile makes.
+  Future<void> newTermFromRestore(String device) => _openTerms(device, target: _termsNewTargetOf(device));
 
   /// Taps a 常用 tile: the 终端 entry first reopens the running text terminals, then makes a new terminal
   /// each tap when it can; anything else opens or switches.
@@ -3057,7 +3245,7 @@ class MainState extends ChangeNotifier {
           return;
         }
         try {
-          await openText(id, shell: shell);
+          await openText(id, shell: shell, from: newTermSource(id));
         } catch (e) {
           if (_disposed) return;
           hint = newTermWords(e);
@@ -3087,9 +3275,7 @@ class MainState extends ChangeNotifier {
   /// refusal is thrown with the hub's words. [from]: the terminal it opens beside (its directory, shell and window).
   Future<void> openText(String id, {String? shell, String? from}) async {
     if (!hubUsable) return;
-    final launchers = hub?.termLists[id]?.hosts.where((h) => h.host == null).firstOrNull?.launchers ?? const <String>[];
-    if (launchers.isEmpty) throw StateError('这台设备没有可用的终端窗口');
-    final app = prefs.termAppFor(id, launchers);
+    final app = _launcherOf(id);
     final term = await hub!.openTerm(id, shell: shell, app: app, from: from);
     try {
       await hub?.terms(id);
@@ -3097,6 +3283,29 @@ class MainState extends ChangeNotifier {
     final row = hub?.termLists[id]?.terms.where((r) => r.id == term).firstOrNull;
     final shown = row == null ? '已结束' : termDisplayName(row.shown, row.host);
     unawaited(openOrSwitch(id, term, shown));
+  }
+
+  /// The last text terminal each device showed on the stage this run (device id to term id).
+  final Map<String, String> _lastTerm = {};
+
+  /// Every change of the current session ends in [notifyListeners], which calls this: a text terminal on the stage
+  /// becomes its device's last one.
+  void _noteLastTerm() {
+    final r = current;
+    if (r != null && isTermApp(r.app)) _lastTerm[r.id] = r.app;
+  }
+
+  bool _termListed(String device, String term) =>
+      hub?.termLists[device]?.terms.any((t) => t.id == term) ?? false;
+
+  /// Where a 新建 on [device] starts: the terminal on the stage when it is one of the device's listed text
+  /// terminals, else the last one this run showed there (still listed), else 'last' (serve's own pick).
+  String newTermSource(String device) {
+    final r = current;
+    if (r != null && r.id == device && isTermApp(r.app) && _termListed(device, r.app)) return r.app;
+    final last = _lastTerm[device];
+    if (last != null && _termListed(device, last)) return last;
+    return 'last';
   }
 
   Future<void> _newTerms = Future<void>.value();
@@ -3260,6 +3469,7 @@ class MainState extends ChangeNotifier {
       path: '',
       lamp: Lamp.connecting,
       fg: termFg(id, app),
+      label: labelFor(id, app),
     );
     _entries = _mapEntries();
     final before = currentKey;
@@ -4009,16 +4219,16 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
-  /// 常用语 replaced (edited, reordered, deleted, 恢复默认); saved.
-  void setPhrases(List<Phrase> v) {
+  /// The whole strip list (commands and phrases) replaced; saved.
+  void setStripItems(List<StripItem> v) {
     prefs.phrases = List.of(v);
     _save();
   }
 
   /// 加到常用语: [text] at the end unless a phrase already has it. False when it was there (or blank).
   bool addPhrase(String text) {
-    if (text.trim().isEmpty || prefs.phrases.any((p) => p.text == text)) return false;
-    setPhrases([...prefs.phrases, Phrase(text)]);
+    if (text.trim().isEmpty || prefs.phrases.whereType<Phrase>().any((p) => p.text == text)) return false;
+    setStripItems([...prefs.phrases, Phrase(text)]);
     return true;
   }
 
@@ -4336,7 +4546,8 @@ class MainState extends ChangeNotifier {
 
   /// Favourites with no session (pending or open), in favourite order.
   List<AppRef> get idleFavorites {
-    final open = {for (final e in _entries) e.key};
+    // A labelled one that is not open already has its card (standing at the end of its group): not twice.
+    final open = {for (final e in _entries) e.key, for (final e in standbyEntries) e.key};
     return [
       for (final f in workspace.favorites)
         if (!open.contains(f.key)) f,

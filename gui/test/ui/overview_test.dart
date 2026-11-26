@@ -245,6 +245,22 @@ void main() {
     expect(t.sent.where((m) => m['cmd'] == 'open_term').length, 2);
   });
 
+  testWidgets('常用 · 终端 says 恢复 when only terminals saved before boot are left, and opens the list', (tester) async {
+    await boot(tester);
+    s.prefs.termOpen['m1'] = 'text';
+    s.hub!.termLists['m1'] = TermList('m1', hosts: [
+      TermHost(null, launchers: const ['Terminal'], saved: const [TermSaved('a', 'rapp', prog: 'claude', saved: 1, boot: true)]),
+    ]);
+    s.toggleFavorite('m1', termsEntry, termsEntryName);
+    await show(tester);
+    const key = Key('ov-favorite-m1/terms:');
+    expect(find.descendant(of: find.byKey(key), matching: find.text('恢复')), findsOneWidget);
+    await tester.tap(find.byKey(key));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('恢复上次的终端'), findsOneWidget);
+    expect(t.sent.where((m) => m['cmd'] == 'open_term'), isEmpty);
+  });
+
   testWidgets('常用 · 终端 新建 tapped again while the host is still opening sends nothing and says 请稍候', (tester) async {
     await boot(tester);
     s.prefs.termOpen['m1'] = 'text';

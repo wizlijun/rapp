@@ -113,7 +113,7 @@ void main() {
   test('addPhrase appends once and saves; a repeat or a blank is refused', () {
     Directory('${tmp.path}/local').createSync(recursive: true);
     File('${tmp.path}/local/service.json').writeAsStringSync('{"id":"dev1"}');
-    s.setPhrases(const [Phrase('继续')]);
+    s.setStripItems(const [Phrase('继续')]);
     expect(s.addPhrase('跑一下测试'), isTrue);
     expect(s.addPhrase('继续'), isFalse);
     expect(s.addPhrase('  '), isFalse);
@@ -180,6 +180,33 @@ void main() {
     expect(s.current!.lamp, Lamp.active);
     expect(s.hint, '已打开 Safari @ mini');
     expect(s.sessionCount, 1);
+  });
+
+  test('termRowOfSid / stripToolOf: a terminal in front of claude, back to its shell, and a plain app', () async {
+    final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: FakeSessionPort(), termPort: FakeTermSessionPort());
+    addTearDown(st.dispose);
+    t.onSend = (m) {
+      if (m['cmd'] == 'open') t.emit({...opened(m['app'] == 'term:pty:w' ? 1 : m['app'] == 'term:tmux:x' ? 3 : 2, '111', m['app'] as String), 'port': 5011, 'token': 'tk', 'req': m['req']});
+    };
+    await st.openOrSwitch('111', 'term:pty:w', 'w');
+    await st.openOrSwitch('111', 'com.apple.Safari', 'Safari');
+    await st.openOrSwitch('111', 'term:tmux:x', 'x');
+    await pump();
+    final tsid = st.recordFor('111/term:pty:w')!.sid!, asid = st.recordFor('111/com.apple.Safari')!.sid!;
+    TermRow row({required bool shell}) =>
+        TermRow('term:pty:w', 'w', 'zsh', null, 1, 1, 0, false, false, fg: 'claude', shell: shell);
+    final tmux = TermRow('term:tmux:x', 'x', 'zsh', null, 1, 1, 0, false, false, fg: 'claude', shell: false);
+    hub.termLists['111'] = TermList('111', terms: [row(shell: false), tmux]);
+    expect(st.termRowOfSid(tsid)?.id, 'term:pty:w');
+    expect(st.stripToolOf(RemoteSession(tsid, 'w'))?.id, 'claude-code');
+    hub.termLists['111'] = TermList('111', terms: [row(shell: true)]);
+    expect(st.stripToolOf(RemoteSession(tsid, 'w')), isNull);
+    expect(st.termRowOfSid(asid), isNull);
+    expect(st.stripToolOf(RemoteSession(asid, 'Safari')), isNull);
+    hub.termLists['111'] = TermList('111', terms: [row(shell: false), tmux]);
+    final xsid = st.recordFor('111/term:tmux:x')!.sid!;
+    expect(st.stripToolOf(RemoteSession(xsid, 'x')), isNull, reason: 'tmux gets no strip commands');
+    expect(st.termRowOfSid(99), isNull);
   });
 
   test('opening an open session focuses instead', () async {
@@ -5906,7 +5933,7 @@ void main() {
       await s.openOrSwitch('111', 'terms:', '终端');
       await pump();
       expect(t.sent.firstWhere((m) => m['cmd'] == 'open_term'),
-          {'cmd': 'open_term', 'id': '111', 'shell': '/bin/zsh', 'app': 'iTerm', 'req': anything});
+          {'cmd': 'open_term', 'id': '111', 'shell': '/bin/zsh', 'app': 'iTerm', 'from': 'last', 'req': anything});
     });
 
     test('opening terms: in text mode opens the latest text terminal', () async {

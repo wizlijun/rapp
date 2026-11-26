@@ -52,7 +52,7 @@ class VoiceOrigin {
 /// One send: what was taken out of the editor, in the editor's order: text runs ([String], never empty)
 /// and blocks ([BlockChip]). Each part is one piece.
 class Outgoing {
-  Outgoing(List<Object> parts, {this.draftless = false, this.voice, this.phrase = false})
+  Outgoing(List<Object> parts, {this.draftless = false, this.voice, this.phrase = false, this.command = false})
       : parts = List.unmodifiable(parts) {
     assert(parts.every((p) => p is BlockChip || (p is String && p.isNotEmpty)));
   }
@@ -66,6 +66,9 @@ class Outgoing {
 
   /// A 常用语 tap: Return follows whatever the app's 发送后 says, and ↑ does not bring it back.
   final bool phrase;
+
+  /// A 常用语条 command (`/clear`): sent like a [phrase], and never recorded or remembered for ↑.
+  final bool command;
 
   /// The blocks among [parts], in order.
   List<BlockChip> get blocks => [for (final p in parts) if (p is BlockChip) p];
@@ -776,13 +779,13 @@ class ComposerModel extends ChangeNotifier {
 
   /// Sends [text] alone, as its own round: the draft, the editor and the held blocks stay as they
   /// are. Nothing happens while [busy] or when [text] is blank.
-  /// [voice] marks it as voice input (and AI) in its record; [phrase] as a 常用语.
-  Submit submitText(String text, {VoiceOrigin? voice, bool phrase = false}) {
+  /// [voice] marks it as voice input (and AI) in its record; [phrase] as a 常用语, [command] as a strip command.
+  Submit submitText(String text, {VoiceOrigin? voice, bool phrase = false, bool command = false}) {
     final t = text.trim();
     if (t.isEmpty || busy) return SubmitNothing();
     final now = _clock();
     _lastSend = now;
-    final o = Outgoing([t], draftless: true, voice: voice, phrase: phrase)..at = now;
+    final o = Outgoing([t], draftless: true, voice: voice, phrase: phrase, command: command)..at = now;
     onSubmitted?.call(o);
     _inFlight = o;
     sending = true;
@@ -896,7 +899,7 @@ class ComposerModel extends ChangeNotifier {
     final made = <Outgoing, Outgoing>{
       for (final o in [...old._failed, ?old._inFlight])
         if (o.parts.skip(o.sent).whereType<String>().join() case final t when t.isNotEmpty)
-          o: Outgoing([t], voice: o.voice)..failure = o.failure ?? '没有发出去',
+          o: Outgoing([t], voice: o.voice, phrase: o.phrase, command: o.command)..failure = o.failure ?? '没有发出去',
     };
     _failed.insertAll(0, made.values);
     // The AI mark (or the heard words) goes with the draft it belongs to, not onto a draft of this composer's own.

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../embed/app_profile.dart' show InputPoint;
 import '../embed/phrases.dart';
+import '../embed/strip_cmds.dart';
 import '../embed/tidy_mode.dart';
 import '../embed/voice_key_gate.dart';
 import 'tokens.dart';
@@ -32,7 +33,8 @@ class UiPrefs {
     this.quickAutoHide,
     this.termComposerAt,
     this.phraseStrip = true,
-    List<Phrase>? phrases,
+    List<StripItem>? phrases,
+    this.phraseCmdsSeeded = true,
     this.termFit = true,
     this.voiceAiTidy = true,
     this.voiceAiThink = false,
@@ -49,7 +51,7 @@ class UiPrefs {
     Map<String, TidyMode>? voiceTidyMode,
     Map<String, String>? termApp,
     Map<String, String>? loadSnooze,
-  })  : phrases = phrases ?? List.of(defaultPhrases),
+  })  : phrases = phrases ?? defaultStripItems,
         termOpen = termOpen ?? {},
         voiceTidyMode = voiceTidyMode ?? {},
         termApp = termApp ?? {},
@@ -86,7 +88,10 @@ class UiPrefs {
 
   /// 常用语 (`phrases`, iOS): in strip order. Missing or not a list means [defaultPhrases]; bad entries are
   /// dropped on load.
-  List<Phrase> phrases;
+  List<StripItem> phrases;
+
+  /// The six built-in commands were put in front of the saved list once (`phrase_cmds_seeded`).
+  bool phraseCmdsSeeded;
 
   /// 跟着我的窗口 (`term_fit`): the host's terminal window follows this console's size. Missing or bad means on.
   bool termFit;
@@ -150,6 +155,13 @@ class UiPrefs {
   }
 
   /// Never throws: a missing or corrupt file gives the defaults.
+  /// A saved list from before the commands: the built-in ones go in front once (those it does not hold yet).
+  static List<StripItem> _seeded(List<StripItem> l, bool done) {
+    if (done) return l;
+    final have = {for (final c in l.whereType<StripCmd>()) c.id};
+    return [for (final id in builtinCmdOrder) if (!have.contains(id)) StripCmd(id), ...l];
+  }
+
   static UiPrefs load(String dir) {
     try {
       final j = jsonDecode(File('$dir/gui.json').readAsStringSync());
@@ -192,7 +204,7 @@ class UiPrefs {
         termComposerAt: InputPoint.fromJson(j['term_composer_at']),
         phraseStrip: j['phrase_strip'] != false,
         phrases: j['phrases'] is List
-            ? [for (final e in j['phrases'] as List) ?Phrase.fromJson(e)]
+            ? _seeded([for (final e in j['phrases'] as List) ?stripItemFromJson(e)], j['phrase_cmds_seeded'] == true)
             : null,
         termFit: tf is bool ? tf : true,
         voiceAiTidy: vt is bool ? vt : true,
@@ -252,6 +264,7 @@ class UiPrefs {
         if (termComposerAt != null) 'term_composer_at': termComposerAt!.toJson(),
         'phrase_strip': phraseStrip,
         'phrases': [for (final p in phrases) p.toJson()],
+        'phrase_cmds_seeded': phraseCmdsSeeded,
         'term_fit': termFit,
         'voice_ai_tidy': voiceAiTidy,
         'voice_ai_think': voiceAiThink,

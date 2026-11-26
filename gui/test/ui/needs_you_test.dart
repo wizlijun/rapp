@@ -120,8 +120,8 @@ void main() {
     await tester.runAsync(flush);
     await tester.pump();
     final ot = t.sent.where((m) => m['cmd'] == 'open_term').single;
-    expect(ot, {'cmd': 'open_term', 'id': 'm2', 'app': 'Terminal', 'req': anything});
-    expect(ot.containsKey('from'), isFalse);
+    // Same path as 新建, so it starts where 新建 would there (term-restore: serve's `last` pick on m2).
+    expect(ot, {'cmd': 'open_term', 'id': 'm2', 'app': 'Terminal', 'from': 'last', 'req': anything});
     // Its failure is the hint, as 新建's is.
     expect(s.hint, 'test: open_term');
     await staleLoads(tester);

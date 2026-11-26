@@ -81,8 +81,8 @@ pub(crate) fn due(w: Option<&Watch>, now: Instant) -> Option<Option<Duration>> {
     }
 }
 
-/// The terminal commands; `cmd` is one of `terms`, `open_term`, `rename_term`, whose
-/// fields (other than `cmd`, `id`, `req`) are the device request's.
+/// The terminal commands; `cmd` is one of `terms`, `open_term`, `rename_term`, `end_term`, `restore_terms`,
+/// `forget_terms`, whose fields (other than `cmd`, `id`, `req`) are the device request's.
 pub(crate) async fn command(hub: &Arc<Hub>, cmd: &str, v: &Value) -> Result<Value> {
     let id = v.get("id").and_then(Value::as_str).context("missing id")?;
     let host = hub.host(id)?;
@@ -98,8 +98,18 @@ pub(crate) async fn command(hub: &Arc<Hub>, cmd: &str, v: &Value) -> Result<Valu
     let mut op = v.clone();
     op["op"] = json!(cmd);
     let op: Op = serde_json::from_value(op).with_context(|| format!("bad {cmd}"))?;
-    let (_, r, _) = hub.request(&host, &op).await?;
-    Ok(event(&op, id, &r))
+    match hub.request(&host, &op).await {
+        Ok((_, r, _)) => Ok(event(&op, id, &r)),
+        Err(e) => stopped(&op, id, &e).ok_or(e),
+    }
+}
+
+/// A restore that stopped part way: the terminals it opened, with why it stopped, so the GUI can show them.
+fn stopped(op: &Op, id: &str, e: &anyhow::Error) -> Option<Value> {
+    let Op::RestoreTerms { .. } = op else { return None };
+    let r = e.downcast_ref::<crate::link::Refused>()?;
+    let ids = r.reply["ids"].as_array().filter(|a| !a.is_empty())?;
+    Some(json!({"event":"terms_restored","id":id,"terms":ids,"error":r.error}))
 }
 
 /// The event that tells the GUI how its terminal command `op` went on device `id`, `r` being the reply.
@@ -107,16 +117,51 @@ fn event(op: &Op, id: &str, r: &Value) -> Value {
     match op {
         Op::RenameTerm { term, .. } => json!({"event":"term_renamed","id":id,"term":term}),
         Op::EndTerm { term } => json!({"event":"term_ended","id":id,"term":term}),
+        Op::RestoreTerms { .. } => json!({"event":"terms_restored","id":id,"terms":r["ids"]}),
+        Op::ForgetTerms { .. } => json!({"event":"terms_forgotten","id":id}),
         _ => json!({"event":"term_created","id":id,"term":r["id"]}),
+    }
+}
+
+impl Watches {
+    /// Starts `id`'s watch with `spawn` (given the last failure's wait) if one is due (`due`).
+    pub(crate) fn ensure(&self, id: &str, spawn: impl FnOnce(Option<Duration>) -> JoinHandle<()>) {
+        let mut watches = self.0.lock().unwrap();
+        if let Some(delay) = due(watches.get(id), Instant::now()) {
+            watches.insert(id.to_string(), Watch::Running(spawn(delay)));
+        }
+    }
+
+    /// Forgets `id`'s watch, whatever its state: the next round that finds the host online asks again at once.
+    pub(crate) fn stop(&self, id: &str) {
+        if let Some(Watch::Running(task)) = self.0.lock().unwrap().remove(id) {
+            task.abort();
+        }
+    }
+
+    /// Stops the watches of hosts no longer in `hosts`.
+    pub(crate) fn retain(&self, hosts: &[Host]) {
+        self.0.lock().unwrap().retain(|id, w| {
+            let kept = hosts.iter().any(|h| h.id == *id);
+            if let (false, Watch::Running(task)) = (kept, w) {
+                task.abort();
+            }
+            kept
+        });
+    }
+
+    /// Records how `id`'s watch ended (`after_end`, `ended`); `delay` is the last failure's wait, `None` once the
+    /// watch brought something.
+    pub(crate) fn ended(&self, id: &str, next: Next, delay: Option<Duration>) {
+        if let Some(w) = self.0.lock().unwrap().get_mut(id) {
+            *w = ended(next, delay, Instant::now());
+        }
     }
 }
 
 /// Starts `host`'s watch if one is due (`due`).
 pub(crate) fn ensure_watch(hub: &Arc<Hub>, host: &Host) {
-    let mut watches = hub.terms.0.lock().unwrap();
-    if let Some(delay) = due(watches.get(&host.id), Instant::now()) {
-        start(&mut watches, hub, host, delay);
-    }
+    hub.terms.ensure(&host.id, |delay| tokio::spawn(watch(hub.clone(), host.clone(), delay)));
 }
 
 /// The GUI asked for `host`'s list: a watch left `Off` or `Failed` starts again now, not when due.
@@ -127,30 +172,18 @@ fn restart(hub: &Arc<Hub>, host: &Host) {
         Some(Watch::Failed { delay, .. }) => Some(*delay),
         _ => return,
     };
-    start(&mut watches, hub, host, delay);
-}
-
-fn start(watches: &mut HashMap<String, Watch>, hub: &Arc<Hub>, host: &Host, delay: Option<Duration>) {
     let task = tokio::spawn(watch(hub.clone(), host.clone(), delay));
     watches.insert(host.id.clone(), Watch::Running(task));
 }
 
 /// Forgets `id`'s watch, whatever its state: the next round that finds the host online asks again at once.
 pub(crate) fn stop_watch(hub: &Hub, id: &str) {
-    if let Some(Watch::Running(task)) = hub.terms.0.lock().unwrap().remove(id) {
-        task.abort();
-    }
+    hub.terms.stop(id);
 }
 
 /// Stops the watches of hosts no longer in `hosts`.
 pub(crate) fn stop_gone(hub: &Hub, hosts: &[Host]) {
-    hub.terms.0.lock().unwrap().retain(|id, w| {
-        let kept = hosts.iter().any(|h| h.id == *id);
-        if let (false, Watch::Running(task)) = (kept, w) {
-            task.abort();
-        }
-        kept
-    });
+    hub.terms.retain(hosts);
 }
 
 /// One watch: each list it brings is a `terms` event; how it ended decides what follows (`after_end`, `ended`).
@@ -170,9 +203,7 @@ async fn watch(hub: Arc<Hub>, host: Host, delay: Option<Duration>) {
         Next::Retry => Some(json!({"event":"terms","id":id,"error":error})),
         Next::Unsupported => None,
     };
-    if let Some(w) = hub.terms.0.lock().unwrap().get_mut(id) {
-        *w = ended(next, delay.filter(|_| !listed), Instant::now());
-    }
+    hub.terms.ended(id, next, delay.filter(|_| !listed));
     if let Some(event) = event {
         hub.emit(event, &None).await;
     }
@@ -190,16 +221,16 @@ async fn follow(hub: &Hub, host: &Host, listed: &mut bool) -> Result<std::conver
 
 #[cfg(test)]
 mod tests {
-    use super::{after_end, due, ended, event, Next, Watch, OFF_RECHECK};
+    use super::{after_end, due, ended, event, stopped, Next, Watch, OFF_RECHECK};
     use rapp_net::msg::Op;
-    use serde_json::json;
+    use serde_json::{json, Value};
     use std::time::{Duration, Instant};
 
     const S: Duration = Duration::from_secs(1);
 
     #[test]
     fn open_term_is_answered_with_term_created() {
-        let op = Op::OpenTerm { shell: None, from: None, app: "Terminal".into() };
+        let op = Op::OpenTerm { shell: None, from: None, app: "Terminal".into(), label_from: None };
         let e = event(&op, "d1", &json!({"id": "term:pty:c"}));
         assert_eq!(e, json!({"event":"term_created","id":"d1","term":"term:pty:c"}));
     }
@@ -216,6 +247,33 @@ mod tests {
         let op = Op::EndTerm { term: "term:pty:k".into() };
         let e = event(&op, "d1", &json!({"ok": true}));
         assert_eq!(e, json!({"event":"term_ended","id":"d1","term":"term:pty:k"}));
+    }
+
+    #[test]
+    fn restore_and_forget_terms_are_answered_with_their_events() {
+        let op = Op::RestoreTerms { keys: vec![], app: None };
+        let e = event(&op, "d1", &json!({"ok": true, "ids": ["term:pty:a", "term:pty:b"]}));
+        assert_eq!(e, json!({"event":"terms_restored","id":"d1","terms":["term:pty:a","term:pty:b"]}));
+        let op = Op::ForgetTerms { keys: vec!["k".into()] };
+        assert_eq!(event(&op, "d1", &json!({"ok": true, "forgot": 1})), json!({"event":"terms_forgotten","id":"d1"}));
+    }
+
+    #[test]
+    fn a_restore_stopped_part_way_still_names_what_opened() {
+        let op = Op::RestoreTerms { keys: vec![], app: None };
+        let refused = |r: Value| crate::link::accepted(r).unwrap_err();
+        let e = refused(json!({"ok": false, "error": "no shell", "ids": ["term:pty:a"]}));
+        assert_eq!(e.to_string(), "no shell");
+        assert_eq!(
+            stopped(&op, "d1", &e),
+            Some(json!({"event":"terms_restored","id":"d1","terms":["term:pty:a"],"error":"no shell"}))
+        );
+        // Nothing opened, another command, or no reply at all: the error as it was.
+        assert_eq!(stopped(&op, "d1", &refused(json!({"ok": false, "error": "no shell", "ids": []}))), None);
+        assert_eq!(stopped(&op, "d1", &refused(json!({"ok": false, "error": "no shell"}))), None);
+        let forget = Op::ForgetTerms { keys: vec![] };
+        assert_eq!(stopped(&forget, "d1", &e), None);
+        assert_eq!(stopped(&op, "d1", &anyhow::anyhow!("timed out")), None);
     }
 
     #[test]

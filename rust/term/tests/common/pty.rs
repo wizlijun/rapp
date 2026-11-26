@@ -49,6 +49,11 @@ fn dup(master: &dyn MasterPty) -> File {
 
 impl Window {
     pub fn start(dir: &Path, args: &[&str]) -> Window {
+        Window::start_env(dir, args, &[], &[])
+    }
+
+    /// `start` with `env` added to the inherited environment and `remove` taken out of it.
+    pub fn start_env(dir: &Path, args: &[&str], env: &[(&str, String)], remove: &[&str]) -> Window {
         // One at a time: on macOS openpty is not safe to call from two threads at once (ptsname's buffer is shared).
         static OPEN: Mutex<()> = Mutex::new(());
         let pair = {
@@ -60,6 +65,12 @@ impl Window {
         cmd.arg("--dir");
         cmd.arg(dir);
         cmd.args(args);
+        for k in remove {
+            cmd.env_remove(k);
+        }
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
         let child = pair.slave.spawn_command(cmd).unwrap();
         drop(pair.slave);
         let mut reader = dup(pair.master.as_ref());

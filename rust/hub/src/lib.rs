@@ -5,6 +5,7 @@
 
 mod access;
 mod hosts;
+mod labels;
 mod link;
 mod netmon;
 mod ports;
@@ -110,6 +111,9 @@ pub(crate) struct Hub {
     presence_paused: AtomicBool,
     /// One terminal-session watch per online host.
     terms: terms::Watches,
+    /// host id → its `watch_labels`.
+    labels: terms::Watches,
+    /// host id → its `watch_load`.
     load: load::Watches,
     /// The network monitor's level and last event (`netmon`).
     net: netmon::NetState,
@@ -156,6 +160,7 @@ where
         dual_stack: opts.dual_stack,
         presence_paused: AtomicBool::new(false),
         terms: Default::default(),
+        labels: Default::default(),
         load: Default::default(),
         net: Default::default(),
         watches: Default::default(),
@@ -440,9 +445,10 @@ impl Hub {
                 return Ok(None);
             }
             Some("load") => load::command(self, v).await?,
-            Some(c @ ("terms" | "open_term" | "rename_term" | "end_term")) => {
+            Some(c @ ("terms" | "open_term" | "rename_term" | "end_term" | "restore_terms" | "forget_terms")) => {
                 terms::command(self, c, v).await?
             }
+            Some(c @ ("set_label" | "reset_label")) => labels::command(self, c, v).await?,
             _ => bail!("unknown cmd"),
         }))
     }

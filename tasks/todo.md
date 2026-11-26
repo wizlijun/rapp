@@ -1202,6 +1202,44 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01536-parity.md`。
 - [ ] 实机验收：Linux 连接 macOS 0.15.35 验证协议 v16 状态规则推断显示；Linux 本地验证 `Ctrl+Shift+T`/`Ctrl+Shift+W`、宿主终端 `<目录> · <程序>` 标题与总览本机列「正在被接入」。
 
+## 文本终端恢复（规格：docs/superpowers/specs/2026-11-26-rapp-term-restore-design.md，计划：docs/superpowers/plans/2026-11-26-rapp-term-restore.md）
+
+已完成（任务 1–9）：
+
+- [x] 1 shell 钩子（zsh/bash/fish）与 OSC 7502 上报
+- [x] 2 快照存盘、命令过滤、清理
+- [x] 3 快照的删除规则
+- [x] 4 serve `restore` / `forget`、`term_saved`
+- [x] 5 `rapp-term run --restore`（沿用旧 key、环境激活、命令预填）
+- [x] 6 `rapp term restore` 命令行
+- [x] 7 「新建」沿用上一个终端的目录（`from: "last"`）
+- [x] 8 GUI 恢复列表与入口
+- [x] 9 testkit 端到端测试
+
+实机检查（规格 §7）：
+
+- [ ] 1 开 3 个终端：一个在 venv 里跑 claude，一个在 conda 环境里空着，一个在别的目录跑 `npm run dev`。重启电脑，在 rApp 里恢复：目录、环境（提示符前的 `(venv)`、`(ml)`）、填好的命令都对，没有一个自己跑起来。
+- [ ] 2 同上，改在被控 Mac 上敲 `rapp term restore`。
+- [ ] 3 敲 `exit` 结束的、在 rApp 里点「结束终端」的，不在恢复列表里。
+- [ ] 4 点 Terminal 的红色关闭按钮关掉的，在恢复列表里，勾掉就不恢复。
+- [ ] 5 在终端 A（`~/git/x`）里点总览「新建」：新终端在 `~/git/x`；在设备页点「新建 · bash」：bash，在 `~/git/x`。
+- [ ] 6 重启 rApp 后什么都不看，直接点「新建」：在最近有输入的那个终端的目录。
+- [ ] 7 自己的 `~/.zshrc` 里的提示符（oh-my-zsh、starship 之类）、补全、别名在 rApp 开的终端里和直接开 Terminal 一样。
+- [ ] 8 在 rApp 开的终端里再敲 `zsh`、`tmux`：读的是用户自己的配置。
+- [ ] 9 `KEY=xxx claude` 跑着时重启，恢复后填的是 `claude --continue`，`saved/` 里搜不到 `xxx`；`claude --api-key sk-abc…` 跑着时重启，恢复后只填 `claude`，`saved/` 里搜不到 `sk-`。
+- [ ] 10 恢复后不按回车再重启一次，命令还能填回来。
+- [ ] 11 只关窗口（不重启）后，总览按钮仍说「新建」；设备页有「上次没关的 1 个终端」。
+- [ ] 12 macOS 自己的「重新登录时重新打开窗口」：重启后 Terminal 会不会把 rapp 的旧标签页重开成普通 shell，和恢复出来的混在一起（规格 §8）。⌘Q 的情形见第 13 项。
+- [ ] 13 Terminal.app ⌘Q 实验（会关掉本机所有 Terminal 窗口，先确认没有别的会话在用）：开一个 rapp 文字终端，⌘Q 退出 Terminal 再打开。看标签页回不回来，回来的是同目录的普通 shell 还是重跑 `.command`；再看 rApp 恢复同一个终端后会不会出现两份。结果写进规格 §8。已知 `NSQuitAlwaysKeepsWindows` 没设（系统默认，退出时关闭窗口）。
+
+跟进：
+
+- [ ] `rust/term/src/pty/resume.rs` 改写表的三处问题（终审第 3 条，只影响预填，不会执行）：`claude -p hi` 被改成 `claude -p --continue`（一次性打印，不是交互会话）；表里没有的带值选项（如 `--system-prompt`、`--output-format`）会把 `--continue` 吞成自己的值，或把自己的值当提示词丢掉；子命令也被改写（`claude doctor` → `claude --continue`，`codex exec x` → `codex resume --last`）。做法：claude 的 `-p/--print` 和已知子命令原样不动。
+- [ ] 恢复时快照恰好读不出来（极少见）：终端窗口里写了原因，但 rApp / `rapp term restore` 只说「10 秒内没打开」。做法：holder 读不出来时先把原因交回 serve，再退出。
+- [ ] 快照存命令时，双引号里的 `\"` 没跳过：`TOKEN="abc\" def" claude` 会存成 `def" claude`，漏出值的一部分。做法：`strip_assignments` 在双引号里也认 `\`。
+- [ ] 规格的密钥规则表补上 `docker/podman login -p`（代码已拦）。
+- [ ] `rust/term/tests/shell_hook.rs`：`strip_osc` 插进了 `home()` 和它的注释之间，把注释挪回 `home()` 上。
+
 ## Linux 0.15.38 新建终端防重开与前台程序标题对齐与发布（2026-11-26）
 
 - [x] 对齐 macOS 0.15.37：`rapp-term serve` 跳过请求方已断开的排队 `open`、`rapp-hub` 禁止重发 `open_term`/`end_term` 并将 `open_term` 超时放宽至 45 秒、GUI 单设备「新建」串行互斥（提示「正在新建终端，请稍候」），以及文字终端标题显示前台程序 `<程序> · <标题>` 且 `CLI` 移至副标题。
@@ -1232,6 +1270,61 @@ macOS、Linux、Duo、iPad 各一遍。
 
 - [x] service 的 `list_apps` 回报 `os`（macos / windows / linux / omarchy）；hub 记进 hosts.json 并转给 GUI；总览每个设备列在状态灯左边画单色系统图标（9 种，含「未知」），悬停显示系统名。分支 `feat/device-os-marks`。
 - [ ] 实机检查：① Mac 本机列显示苹果；② 已升级的另一台 Mac / Omarchy / Linux 列显示对的图标；③ 未升级的设备显示「未知」，升级后变对；④ 设备离线后图标还在；⑤ iPad、iPhone 本机列是平板 / 手机外形加苹果；⑥ 三套主题下都看得清；⑦ 悬停显示系统名。
+
+## 会话标注（2026-11-26，规格 `docs/superpowers/specs/2026-11-26-rapp-session-labels-design.md`，计划 `docs/superpowers/plans/2026-11-26-rapp-session-labels.md`，分支 `feat/session-labels`）
+
+- [x] 第一期：被控端服务存 `labels.json`（标题 ≤64 字、备注 ≤200 字），新 Op `WatchLabels` / `SetLabel` / `ResetLabel`、`OpenTerm.label_from`；本机 IPC `labels` / `set_label` / `reset_label`；hub 每台在线设备一个标注 watch，推 `labels` 事件，旧设备推 `unsupported`
+- [x] GUI：总览、顶栏会话列表、侧栏会话页、「打开应用」菜单都显示标注标题和备注；卡片右键 / 长按「改标题和备注…」「还原」；有标注但没打开的会话排在所属分组末尾（「没有打开 · 打开」或「已停止 · 启动」，后者在家目录新开并搬走标注）；本机列「正在被接入」卡片并进同一张卡片，下面列出「有标注的会话」
+- 第二期（等 `feat/term-restore` 合入后做，规则见规格 §7.2）：
+  - [ ] 钉住：标注表里的 `term:pty:<key>` 交给 serve，holder 在 shell 退出 /「结束终端」时不删钉住的快照，改记 `ended`
+  - [ ] `HostRow.saved` 加 `pinned`、`ended`；`ended` 的不进「恢复上次的终端」，钉住的不参加 30 天 / 50 个清理，`ForgetTerms` 跳过
+  - [ ] 「启动」有快照时用 `RestoreTerms{keys:[key]}` 恢复原目录；还原标注时解除钉住，已 `ended` 的快照删掉
+- 小项（审查时看到，不急）：
+  - [ ] 状态队列那几行（`_trackPrograms`、`termDisplayName`）和「已结束 …」提示还用默认名，没用标注标题
+  - [ ] 设备关了终端会话时，有标注的终端仍显示「已停止 · 启动」，点了会失败；应隐藏或说明
+- 实机检查：
+  - [ ] 1. A 上给一个终端改标题和备注，B、iPad 上同一张卡马上变；B 改回来，A 也变
+  - [ ] 2. 退出重开 GUI、重启被控端服务：标注还在
+  - [ ] 3. 「还原」后标题回到默认名，提示「已还原，标题回到 …」；没打开的那张卡消失
+  - [ ] 4. 有标注的终端里 `exit`：每台客户端都出「已停止 · 启动」，点「启动」在家目录新开，标注跟过去，提示「原来的目录没有记下，已在家目录新开」
+  - [ ] 5. 有标注的图形 App 没打开：卡片在设备列末尾写「没有打开 · 打开」，点了打开；不计入顶部计数
+  - [ ] 6. 被控端本机列：被接入的卡片显示标注，右键能改；没人接入的有标注会话列在「有标注的会话」下，能改能还原
+  - [ ] 7. 连一台没升级的设备：卡片没有标注菜单，其他照常
+  - [ ] 8. 设备离线：没打开的标注卡收起；已打开的卡菜单变灰，写「设备离线，连上后再改」
+  - [ ] 9. 标题 65 个字、标题里有换行：对话框里红字说明，不关闭；备注里的换行变成空格
+  - [ ] 10. 按 App 分组时，改了标题的会话仍在原来那个 App 组里
+  - [ ] 11. `service.log` 里只记 `set_label` 这件事，不出现标题、备注和 app
+
+## Linux 0.15.42 统一会话卡片、rapp update 命令与设备系统图标对齐与发布（2026-11-26）
+
+- [x] 对齐 macOS 0.15.39–0.15.41：顶栏、侧栏「会话」页与总览统一 `SessionBlock` / `FavoriteBlock` 卡片；补齐 Linux 启动脚本 `rapp update` 分发与 `rapp-cli` 在 Linux 下的当前版本回报及发布页链接映射（`not_launchd`，退出码 `7`）；核对实机 `/usr/share/omarchy/shell` 识别 `omarchy` 系统图标。
+- [x] 补充 `TargetPlatform.linux` 侧栏统一卡片/常用终端回归用例（`gui/test/ui/side_panel_test.dart`）及打包启动器/集成断言（`scripts/test-linux-launcher.py`、`scripts/test-linux-bundle.py`）；Flutter 3.50.0 全量 3282 项通过（4 跳过），Rust 全套 clippy `-D warnings` 与测试通过。
+- [x] [Linux v0.15.42](https://github.com/wizlijun/rapp/releases/tag/v0.15.42) 已发布（源码 `018e8d3b`，`--latest=false`）；两包 41 文件逐字节一致、14 个 ELF 依赖完整、`BUILD-INFO.json` 与隔离网络命名空间测试通过；三个远端附件大小与 SHA256 与本地一致，保留 macOS Latest。
+- [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01542-parity.md`。
+
+## Linux 0.15.44 会话标注与官方设备系统标志对齐与发布（2026-11-26）
+
+- [x] 对齐 macOS 0.15.43：被控端持久化会话标注（`local/labels.json` `0600`、`watch_labels`/`set_label`/`reset_label` 与 `open_term` `label_from` 原子搬迁）、全卡片统一 `SessionCard` 标题/备注/右键菜单、分组末尾待机与已停止终端一键「启动」恢复，以及总览设备系统标志改用官方图形（含 `omarchy.org` MIT 图形）。
+- [x] 补充 `TargetPlatform.linux` 会话标注/Omarchy 标志/`ghostty` 重启回归用例（`gui/test/ui/session_labels_test.dart`）及打包服务本机 `labels` IPC 与日志脱敏校验（`scripts/test-linux-bundle.py`）；Flutter 3.50.0 全量测试与 Rust 全套 clippy `-D warnings` / 测试全部通过。
+- [x] [Linux v0.15.44](https://github.com/wizlijun/rapp/releases/tag/v0.15.44) 已发布（源码 `2e2e7513`，`--latest=false`）；两包 41 文件逐字节一致、14 个 ELF 依赖完整、`BUILD-INFO.json` 与隔离网络命名空间测试通过；三个远端附件大小与 SHA256 与本地一致，保留 macOS Latest。
+- [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01544-parity.md`。
+
+## 常用语条命令（feat/strip-commands，2026-11-26）实机检查（规格 `docs/superpowers/specs/2026-11-26-rapp-strip-commands-design.md` §13）
+
+- 默认常用语改成 7 条短的（继续 · 按你推荐来 · 进度 · 全做完别问我 · 先写方案别改代码 · 跑下测试 · 提交并推送）；只有新用户和点「恢复默认」的人会看到，老用户的列表不动
+- [ ] 1. 文字终端里开 Claude Code：条上前面是 6 个命令按钮；点「新对话」，Claude Code 真的清空并开始新对话
+- [ ] 2. 同一个终端退出到 zsh：命令按钮消失，条上只剩常用语，画面高度不变
+- [ ] 3. 开 Codex：「新对话」发的是 `/new`；Codex 没有的意图按钮是灰的，点了提示原因
+- [ ] 4. 「换模型」：弹出模型列表，用 ↑ ↓ ⏎ 能选中
+- [ ] 5. 「搜历史」：Claude Code 和 Codex 里进入 ⌃R 搜索
+- [ ] 6. 1 秒内连点两次命令，只发一次；断网冻结时命令按钮也是灰的
+- [ ] 7. 命令不进输入历史：↑ 翻不到 `/clear`，历史列表里也没有
+- [ ] 8. 管理页：拖动让命令和常用语交叉排序，条上的顺序跟着变；新建一个命令「审查」（Codex `/review`），在 Codex 里能用
+- [ ] 9. 改内置命令在某个工具上的写法后能生效；「恢复这一项」和「恢复默认」都能用
+- [ ] 10. 老用户升级：原来的常用语还在，6 个命令出现在最前面，只插一次
+- [ ] 11. App 会话（远程 iTerm2 里跑 claude）：不出现命令按钮
+- [ ] 12. macOS、Linux 的 PC 按键区上同样能用
+- [ ] 13. Claude Code 被 `kill -9` 后在同一终端开 vim / ssh：常用语条不显示命令
 
 ## 设备负载（规格 `docs/superpowers/specs/2026-11-26-rapp-device-load-design.md`，计划 `docs/superpowers/plans/2026-11-26-rapp-device-load.md`，分支 `feat/device-load`）
 

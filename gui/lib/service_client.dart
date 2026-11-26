@@ -5,6 +5,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import 'labels.dart';
 import 'load_model.dart';
 import 'shares.dart';
 import 'update.dart';
@@ -219,6 +220,12 @@ class ServiceConnection {
   /// The key text; the only place the service returns it.
   Future<String> showKey() async => '${(await request({'cmd': 'show_key'}))['key'] ?? ''}';
   Future<void> kick(Object sid) => request({'cmd': 'kick', 'sid': sid});
+
+  /// This device's session labels.
+  Future<LabelTable> labels() async => LabelTable.fromJson(await request({'cmd': 'labels'}));
+  Future<void> setLabel(String app, {required String title, required String note}) =>
+      request({'cmd': 'set_label', 'app': app, 'title': title, 'note': note});
+  Future<void> resetLabel(String app) => request({'cmd': 'reset_label', 'app': app});
   Future<void> subscribe() => request({'cmd': 'subscribe'});
 
   /// 访问记录, newest first (observability spec §6).
@@ -308,6 +315,9 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi {
   String? error;
   bool get running => status != null;
 
+  /// This device's session labels; null until read, or when the service predates them ([labelsUnsupported]).
+  LabelTable? labels;
+  var labelsUnsupported = false;
   /// This machine's load from the service's `watch_load` (device-load spec §7, the 本机 column); null before the
   /// first line, while disconnected, from an old service, and always on iOS (no service there).
   DeviceLoad? load;
@@ -351,6 +361,7 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi {
       cmd.done.then((_) => _lost());
       sub.done.then((_) => _lost());
       status = await cmd.status();
+      await _readLabels(cmd);
       final w = _guiWindows;
       // An older service does not know the command: that is no reason to stay disconnected.
       if (w != null) await cmd.guiWindows(w).catchError((_) => <String, Object?>{});
@@ -414,16 +425,39 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi {
     if (c == null) return;
     try {
       status = await c.status();
+      await _readLabels(c);
       if (!_disposed) notifyListeners();
     } catch (_) {
       // _lost handles a dead connection.
     }
   }
 
+  Future<void> _readLabels(ServiceConnection c) async {
+    if (labelsUnsupported) return;
+    try {
+      labels = await c.labels();
+    } on ServiceException catch (e) {
+      // An older service: no labels on this device.
+      if ('$e'.contains('unknown')) labelsUnsupported = true;
+    }
+  }
+
+  Future<void> setLabel(String app, {required String title, required String note}) async {
+    await _need().setLabel(app, title: title, note: note);
+    await refresh();
+  }
+
+  Future<void> resetLabel(String app) async {
+    await _need().resetLabel(app);
+    await refresh();
+  }
+
   void _lost() {
     if (_disposed || (_cmd == null && _sub == null)) return;
     _closeAll();
     status = null;
+    // The next service may be a newer one (an upgrade restarts it): ask it about labels afresh.
+    labelsUnsupported = false;
     error = 'service not running';
     notifyListeners();
     _schedule();
