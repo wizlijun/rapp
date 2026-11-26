@@ -63,7 +63,7 @@ data: {"what":"seen","fp":"<fp>","session":"<id>","at":1764130100}
 data: {"what":"seen","eid":"<eid>","at":1764130100,"handled":true}
 ```
 
-- `session`: a session row as in `GET /v1/state`; `row: null` means the session is gone. `id` and `device` are that device's, as its entry in `GET /v1/state` carries them (left out when the device never sent them), so a watcher can place a device it did not have at its last fetch.
+- `session`: a session row as in `GET /v1/state`; `row: null` means the session is gone. A second app joining a proxy row's `vias`, or one of several leaving it, is not pushed (`api/events.md`); `GET /v1/state` has the current `vias`. `id` and `device` are that device's, as its entry in `GET /v1/state` carries them (left out when the device never sent them), so a watcher can place a device it did not have at its last fetch.
 - `queue`: a new queue row, as in `GET /v1/queue`.
 - `need`: the whole `needs` list of `GET /v1/state`, sent whenever it changes.
 - `seen`: a `PUT /v1/seen` mark; `handled` only when true.

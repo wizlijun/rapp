@@ -1,7 +1,7 @@
 //! The pure in-memory model: current state per device, the event queue, and "needs you".
 //! No I/O. The rules are in `api/events.md`; the whole struct is what gets saved to disk.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -22,6 +22,49 @@ struct Row {
     /// When a user last looked at this session (Unix seconds); kept across new states.
     #[serde(default)]
     seen: Option<u64>,
+    /// A proxy row's (`src: "app"`) senders that report it now. Old files have none: their `by` stands in.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    vias: BTreeSet<String>,
+}
+
+impl Row {
+    fn proxy(&self) -> bool {
+        is_proxy(&self.data)
+    }
+
+    fn by(&self) -> Option<&str> {
+        self.data.get("by").and_then(Value::as_str)
+    }
+
+    /// The senders reporting this proxy row.
+    fn reporters(&mut self) -> &mut BTreeSet<String> {
+        if self.vias.is_empty() {
+            if let Some(b) = self.by().map(str::to_string) {
+                self.vias.insert(b);
+            }
+        }
+        &mut self.vias
+    }
+
+    /// Takes `sender` off this proxy row; true when nobody reports it any more. `by` moves to one who still does.
+    fn leave(&mut self, sender: &str) -> bool {
+        let set = self.reporters();
+        set.remove(sender);
+        let Some(next) = set.iter().next().cloned() else { return true };
+        if self.by() == Some(sender) {
+            self.data.insert("by".into(), json!(next));
+        }
+        false
+    }
+}
+
+fn is_proxy(data: &Map<String, Value>) -> bool {
+    data.get("src").and_then(Value::as_str) == Some("app")
+}
+
+/// Two proxy reports say the same thing.
+fn same_report(a: &Map<String, Value>, b: &Map<String, Value>) -> bool {
+    ["state", "kind", "app"].iter().all(|k| a.get(*k) == b.get(*k))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,26 +164,40 @@ impl Store {
             dev.device = Some(s.to_string());
         }
         dev.last = dev.last.max(ev.at);
+        let via = ev.body.get("via").is_some();
+        // A proxy report that changes nothing a watcher sees: no push, no queue line.
+        let mut quiet = false;
         match ev.t {
             Kind::State => {
                 let session = ev.body["session"].as_str().unwrap_or_default().to_string();
-                put_row(dev, session.clone(), row_data(&ev.body, ev.at, &ev.sender, ev.body.get("src")));
-                self.changes.push(session_change(dev, &session, dev.sessions.get(&session)));
+                let data = row_data(&ev.body, ev.at, &ev.sender, ev.body.get("src"));
+                match put_report(dev, &session, data, &ev.sender, via) {
+                    Put::Joined => quiet = true,
+                    Put::Replaced => self.changes.push(session_change(dev, &session, dev.sessions.get(&session))),
+                }
             }
             Kind::Gone => {
                 if let Some(s) = ev.body.get("session").and_then(Value::as_str) {
-                    // A proxy's gone (it names `via`) removes only the row that proxy reported.
-                    let own = ev.body.get("via").is_none()
-                        || dev.sessions.get(s).is_some_and(|r| r.data.get("by").and_then(Value::as_str) == Some(ev.sender.as_str()));
-                    if own && dev.sessions.remove(s).is_some() {
+                    // A proxy's gone (it names `via`) takes only that proxy off the row; the row goes with its
+                    // last reporter. A gone without `via` deletes the row whoever reported it.
+                    let drop = match dev.sessions.get_mut(s) {
+                        None => false,
+                        Some(_) if !via => true,
+                        Some(r) if r.proxy() => r.leave(&ev.sender),
+                        Some(r) => r.by() == Some(ev.sender.as_str()),
+                    };
+                    if drop {
+                        dev.sessions.remove(s);
                         self.changes.push(session_change(dev, s, None));
+                    } else if via {
+                        quiet = true;
                     }
                 }
             }
             Kind::Snap => {
                 let mut dropped = Vec::new();
                 dev.sessions.retain(|sid, r| {
-                    let keep = r.data.get("by").and_then(Value::as_str) != Some(ev.sender.as_str());
+                    let keep = if r.proxy() { !r.leave(&ev.sender) } else { r.by() != Some(ev.sender.as_str()) };
                     if !keep {
                         dropped.push(sid.clone());
                     }
@@ -150,8 +207,10 @@ impl Store {
                 for it in ev.body.get("sessions").and_then(Value::as_array).into_iter().flatten() {
                     if let Some(m) = it.as_object() {
                         if let Some(s) = m.get("session").and_then(Value::as_str) {
-                            put_row(dev, s.to_string(), row_data(m, ev.at, &ev.sender, ev.body.get("src")));
-                            put.push(s.to_string());
+                            let data = row_data(m, ev.at, &ev.sender, ev.body.get("src"));
+                            if let Put::Replaced = put_report(dev, s, data, &ev.sender, via) {
+                                put.push(s.to_string());
+                            }
                         }
                     }
                 }
@@ -176,6 +235,7 @@ impl Store {
                 Some(r)
             }
             Kind::Snap => None,
+            _ if quiet => None,
             _ => {
                 let mut r = ev.body.clone();
                 r.insert("eid".into(), Value::String(eid));
@@ -390,6 +450,10 @@ fn row_json(r: &Row) -> Value {
     if let Some(t) = r.seen {
         m.insert("seen".into(), json!(t));
     }
+    if r.proxy() {
+        let vias: Vec<&str> = if r.vias.is_empty() { r.by().into_iter().collect() } else { r.vias.iter().map(String::as_str).collect() };
+        m.insert("vias".into(), json!(vias));
+    }
     Value::Object(m)
 }
 
@@ -441,14 +505,38 @@ fn row_data(src: &Map<String, Value>, at: u64, by: &str, envelope_src: Option<&V
     m
 }
 
-fn put_row(dev: &mut Device, session: String, data: Map<String, Value>) {
+enum Put {
+    /// Another proxy already reported the same: the sender joins the row's reporters, nothing else moves.
+    Joined,
+    Replaced,
+}
+
+/// Puts a `state` body (or a snap item) as the row of `session`. A proxy report that says what the row already
+/// says joins it; any other report replaces the row, and a proxy row's reporters become this sender alone (or
+/// stay as they were when this sender was among them).
+fn put_report(dev: &mut Device, session: &str, data: Map<String, Value>, sender: &str, via: bool) -> Put {
+    let proxy = via && is_proxy(&data);
+    let mut vias = BTreeSet::new();
+    if proxy {
+        if let Some(r) = dev.sessions.get_mut(session).filter(|r| r.proxy() && same_report(&r.data, &data)) {
+            let set = r.reporters();
+            if !set.contains(sender) {
+                set.insert(sender.to_string());
+                return Put::Joined;
+            }
+            vias = set.clone();
+        }
+        vias.insert(sender.to_string());
+    }
     let at = data["at"].as_u64().unwrap_or(0);
-    let first = match dev.sessions.get(&session) {
+    let old = dev.sessions.get(session);
+    let first = match old {
         Some(old) if old.data.get("state") == data.get("state") && old.data.get("seq") == data.get("seq") => old.first,
         _ => at,
     };
-    let seen = dev.sessions.get(&session).and_then(|old| old.seen);
-    dev.sessions.insert(session, Row { data, first, seen });
+    let seen = old.and_then(|old| old.seen);
+    dev.sessions.insert(session.to_string(), Row { data, first, seen, vias });
+    Put::Replaced
 }
 
 #[cfg(test)]
@@ -564,6 +652,85 @@ mod tests {
         feed_line(&mut s, ev("appPad", 1, "gone"));
         assert_eq!(session_row(&s, "devA", "com.x")["by"], "appMac", "iPad's gone leaves the Mac's report");
         feed_line(&mut s, ev("appMac", 2, "gone"));
+        assert!(s.state()["devices"][0]["sessions"].as_array().unwrap().is_empty());
+    }
+
+    fn proxy(via: &str, n: u64, t: &str, state: &str) -> Value {
+        json!({"v":1,"fp":"devA","id":"111111111","epoch":"e","n":n,"at":10 + n,"src":"app","via":via,
+               "t":t,"session":"com.x","name":"X","state":state,"kind":"permission","app":"com.x"})
+    }
+    fn queued_ts(s: &Store) -> Vec<String> {
+        s.queue(None, 50).unwrap()["events"].as_array().unwrap().iter().map(|e| e["t"].as_str().unwrap().to_string()).collect()
+    }
+
+    #[test]
+    fn a_shared_proxy_row_outlives_one_reporter_going() {
+        let mut s = st();
+        feed_line(&mut s, proxy("appMac", 1, "state", "blocked"));
+        s.take_changes();
+        feed_line(&mut s, proxy("appPad", 1, "state", "blocked"));
+        assert!(s.take_changes().is_empty(), "the same report from a second app moves nothing");
+        assert_eq!(session_row(&s, "devA", "com.x")["vias"], json!(["appMac", "appPad"]));
+        feed_line(&mut s, proxy("appPad", 2, "gone", "blocked"));
+        assert!(s.take_changes().is_empty(), "the iPad's gone leaves the Mac's report standing");
+        let row = session_row(&s, "devA", "com.x");
+        assert_eq!((row["state"].as_str(), row["by"].as_str()), (Some("blocked"), Some("appMac")));
+        assert_eq!(row["vias"], json!(["appMac"]));
+        assert_eq!(s.state()["needs"].as_array().unwrap().len(), 1);
+        assert_eq!(queued_ts(&s), ["state"], "one thing, one queue line");
+        feed_line(&mut s, proxy("appMac", 2, "gone", "blocked"));
+        assert!(s.state()["devices"][0]["sessions"].as_array().unwrap().is_empty());
+        assert_eq!(queued_ts(&s), ["gone", "state"]);
+    }
+
+    #[test]
+    fn a_different_proxy_report_takes_the_row_over() {
+        let mut s = st();
+        feed_line(&mut s, proxy("appMac", 1, "state", "blocked"));
+        feed_line(&mut s, proxy("appPad", 1, "state", "working"));
+        let row = session_row(&s, "devA", "com.x");
+        assert_eq!((row["state"].as_str(), row["by"].as_str()), (Some("working"), Some("appPad")));
+        assert_eq!(row["vias"], json!(["appPad"]));
+        assert_eq!(queued_ts(&s), ["state", "state"]);
+        s.take_changes();
+        feed_line(&mut s, proxy("appPad", 2, "gone", "working"));
+        assert!(s.state()["devices"][0]["sessions"].as_array().unwrap().is_empty());
+        assert!(s.take_changes().iter().any(|c| c["what"] == "session" && c["row"].is_null()));
+    }
+
+    #[test]
+    fn a_proxy_snap_leaves_a_shared_row_in_place() {
+        let mut s = st();
+        feed_line(&mut s, proxy("appMac", 1, "state", "blocked"));
+        feed_line(&mut s, proxy("appPad", 1, "state", "blocked"));
+        s.take_changes();
+        feed_line(&mut s, json!({"v":1,"fp":"devA","epoch":"e","n":2,"at":20,"src":"app","via":"appPad","t":"snap","sessions":[]}));
+        assert!(s.take_changes().iter().all(|c| c["what"] != "session"), "nothing a watcher sees moved");
+        let row = session_row(&s, "devA", "com.x");
+        assert_eq!((row["state"].as_str(), row["by"].as_str()), (Some("blocked"), Some("appMac")));
+        assert_eq!(row["vias"], json!(["appMac"]));
+        // A snap that carries the same report joins it again, quietly.
+        feed_line(&mut s, json!({"v":1,"fp":"devA","epoch":"e","n":3,"at":30,"src":"app","via":"appPad","t":"snap",
+                                 "sessions":[{"session":"com.x","name":"X","state":"blocked","kind":"permission","app":"com.x"}]}));
+        assert!(s.take_changes().iter().all(|c| c["what"] != "session"));
+        assert_eq!(session_row(&s, "devA", "com.x")["vias"], json!(["appMac", "appPad"]));
+        // The last reporter's snap drops it.
+        feed_line(&mut s, json!({"v":1,"fp":"devA","epoch":"e","n":4,"at":40,"src":"app","via":"appPad","t":"snap","sessions":[]}));
+        feed_line(&mut s, json!({"v":1,"fp":"devA","epoch":"e","n":3,"at":40,"src":"app","via":"appMac","t":"snap","sessions":[]}));
+        assert!(s.state()["devices"][0]["sessions"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_old_files_proxy_row_counts_its_by_as_the_reporter() {
+        let mut s = st();
+        feed_line(&mut s, proxy("appMac", 1, "state", "blocked"));
+        let mut v = serde_json::to_value(&s).unwrap();
+        v["devices"]["devA"]["sessions"]["com.x"].as_object_mut().unwrap().remove("vias");
+        let mut s: Store = serde_json::from_value(v).unwrap();
+        feed_line(&mut s, proxy("appPad", 1, "state", "blocked"));
+        feed_line(&mut s, proxy("appPad", 2, "gone", "blocked"));
+        assert_eq!(session_row(&s, "devA", "com.x")["by"], "appMac");
+        feed_line(&mut s, proxy("appMac", 2, "gone", "blocked"));
         assert!(s.state()["devices"][0]["sessions"].as_array().unwrap().is_empty());
     }
 
