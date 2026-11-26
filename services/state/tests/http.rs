@@ -156,3 +156,23 @@ async fn a_stopped_serve_closes_its_connections() {
     // The connection open before the stop must not keep serving the old store.
     assert_eq!(on_conn(&mut s, "/v1/state").await, None);
 }
+
+#[tokio::test]
+async fn an_aborted_serve_does_not_save() {
+    let d = tempfile::tempdir().unwrap();
+    let data = d.path().join("data");
+    let lines: Arc<Mutex<Vec<String>>> = Arc::default();
+    let sink = lines.clone();
+    let log = Log::new(move |v| sink.lock().unwrap().push(v.to_string()));
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    let task = tokio::spawn(serve_with_log(Config { data: Some(data.clone()), ..old_ok() }, l, log));
+    assert_eq!(post(addr, "/v1/events", SAMPLES).await, (204, Value::Null));
+    // Stopped inside the 1 s save delay: its saver must not live on and save after all.
+    task.abort();
+    let _ = task.await;
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    let all = lines.lock().unwrap().join("\n");
+    assert!(!all.contains(r#""event":"saved""#), "{all}");
+    assert!(!data.join("state.json").exists());
+}
