@@ -15,6 +15,8 @@ import 'phrase_send.dart';
 import 'phrases.dart';
 import 'remote_session.dart';
 import 'session_port.dart';
+import 'strip_cmds.dart';
+import 'strip_tools.dart';
 
 class PhraseStrip extends StatefulWidget {
   const PhraseStrip({super.key, required this.state, required this.session, required this.port});
@@ -40,11 +42,32 @@ class _PhraseStripState extends State<PhraseStrip> {
     super.dispose();
   }
 
-  List<Phrase> get _list => widget.state.prefs.phrases;
+  AgentTool? get _tool => widget.state.stripToolOf(widget.session);
 
-  /// One tap on [p] (the [i]th; null from the 全部 sheet).
-  PhraseOutcome _tap(Phrase p, int? i) {
-    final o = sendPhrase(state: widget.state, session: widget.session, port: widget.port, p: p);
+  /// What the strip shows now: each item with its index in the whole `prefs.phrases` (the key and the edit index).
+  /// Commands only with a tool in front.
+  List<(int, StripItem)> get _items {
+    final tool = _tool;
+    return [
+      for (final (i, it) in widget.state.prefs.phrases.indexed)
+        if (it is Phrase || tool != null) (i, it),
+    ];
+  }
+
+  /// One tap on [p] (the [i]th of the whole list; null from the 全部 sheet).
+  PhraseOutcome _tap(Phrase p, int? i) =>
+      _done(sendPhrase(state: widget.state, session: widget.session, port: widget.port, p: p), i);
+
+  /// One tap on the command [c]: grey ones say what is missing.
+  PhraseOutcome _tapCmd(StripCmd c, int? i) {
+    final tool = _tool;
+    if (tool == null) return PhraseOutcome.missing;
+    if (actionFor(c, tool) == null) return _done(PhraseOutcome.missing, i, tool: tool);
+    final o = sendStripCmd(state: widget.state, session: widget.session, port: widget.port, c: c, tool: tool);
+    return _done(o, i, tool: tool);
+  }
+
+  PhraseOutcome _done(PhraseOutcome o, int? i, {AgentTool? tool}) {
     if (!mounted) return o;
     switch (o) {
       case PhraseOutcome.sent:
@@ -54,8 +77,9 @@ class _PhraseStripState extends State<PhraseStrip> {
         _tickTimer = Timer(phraseTickTime, () {
           if (mounted) setState(() => _ticked = null);
         });
-      case PhraseOutcome.offline || PhraseOutcome.busy:
-        _say(phraseHint(o)!);
+      case PhraseOutcome.offline || PhraseOutcome.busy || PhraseOutcome.missing:
+        final h = stripHint(o, tool: tool);
+        if (h != null) _say(h);
       case PhraseOutcome.put || PhraseOutcome.tooSoon:
         break;
     }
@@ -70,31 +94,35 @@ class _PhraseStripState extends State<PhraseStrip> {
     });
   }
 
+  /// The long-press menu of the [i]th item of the whole list.
   Future<void> _menu(int i, Offset at) async {
-    final p = _list[i];
-    final pick = await showRappMenu<String>(context, position: menuAt(context, at), items: const [
-      RappMenuItem(value: 'put', key: Key('phrase-menu-put'), label: '放进输入框再改'),
-      RappMenuItem(value: 'edit', key: Key('phrase-menu-edit'), label: '编辑'),
-      RappMenuItem(value: 'first', key: Key('phrase-menu-first'), label: '移到最前'),
-      RappMenuItem(value: 'delete', key: Key('phrase-menu-delete'), label: '删除'),
+    final all = widget.state.prefs.phrases;
+    if (i >= all.length) return;
+    final item = all[i];
+    final pick = await showRappMenu<String>(context, position: menuAt(context, at), items: [
+      if (item is Phrase) const RappMenuItem(value: 'put', key: Key('phrase-menu-put'), label: '放进输入框再改'),
+      const RappMenuItem(value: 'edit', key: Key('phrase-menu-edit'), label: '编辑'),
+      const RappMenuItem(value: 'first', key: Key('phrase-menu-first'), label: '移到最前'),
+      const RappMenuItem(value: 'delete', key: Key('phrase-menu-delete'), label: '删除'),
     ]);
     if (!mounted || pick == null) return;
-    final l = List.of(_list);
-    final at0 = l.indexOf(p);
+    final l = List.of(widget.state.prefs.phrases);
+    final at0 = l.indexOf(item);
     if (at0 < 0) return; // changed meanwhile
     switch (pick) {
       case 'put':
-        putIntoComposer(widget.session, p.text);
+        if (item is Phrase) putIntoComposer(widget.session, item.text);
       case 'edit':
-        final e = await editPhrase(context, p: p);
+        final StripItem? e =
+            item is StripCmd ? await editStripCmd(context, c: item) : await editPhrase(context, p: item as Phrase);
         if (e == null) return;
-        final now = List.of(_list);
-        final j = now.indexOf(p);
-        if (j >= 0) widget.state.setPhrases(now..[j] = e);
+        final now = List.of(widget.state.prefs.phrases);
+        final j = now.indexOf(item);
+        if (j >= 0) widget.state.setStripItems(now..[j] = e);
       case 'first':
-        widget.state.setPhrases([p, ...l..removeAt(at0)]);
+        widget.state.setStripItems([item, ...l..removeAt(at0)]);
       case 'delete':
-        widget.state.setPhrases(l..removeAt(at0));
+        widget.state.setStripItems(l..removeAt(at0));
     }
   }
 
@@ -124,16 +152,26 @@ class _PhraseStripState extends State<PhraseStrip> {
                 ),
                 Flexible(
                   child: ListView(shrinkWrap: true, children: [
-                    for (final (i, p) in _list.indexed)
-                      ListTile(
-                        key: Key('phrases-all-$i'),
-                        title: Text(p.text, style: TextStyle(color: t.text)),
-                        trailing: p.put ? Icon(Icons.keyboard_return, color: t.muted, size: 18) : null,
-                        onTap: () {
-                          final o = _tap(p, i);
-                          if (o == PhraseOutcome.sent || o == PhraseOutcome.put) Navigator.of(sheet).pop();
-                        },
-                      ),
+                    for (final (i, it) in _items)
+                      if (it case final StripCmd c)
+                        ListTile(
+                          key: Key('phrases-all-$i'),
+                          title: Text(c.labelOf(), style: TextStyle(color: t.text)),
+                          onTap: () {
+                            final o = _tapCmd(c, i);
+                            if (o == PhraseOutcome.sent) Navigator.of(sheet).pop();
+                          },
+                        )
+                      else if (it case final Phrase p)
+                        ListTile(
+                          key: Key('phrases-all-$i'),
+                          title: Text(p.text, style: TextStyle(color: t.text)),
+                          trailing: p.put ? Icon(Icons.keyboard_return, color: t.muted, size: 18) : null,
+                          onTap: () {
+                            final o = _tap(p, i);
+                            if (o == PhraseOutcome.sent || o == PhraseOutcome.put) Navigator.of(sheet).pop();
+                          },
+                        ),
                   ]),
                 ),
               ]),
@@ -151,9 +189,9 @@ class _PhraseStripState extends State<PhraseStrip> {
         final blocked = phraseBlock(widget.state, widget.session) != null;
         final hint = _hint;
         Widget chip(Key key, String label, {required VoidCallback onTap, GestureLongPressStartCallback? onLong,
-            bool ticked = false, bool put = false}) {
-          final color = ticked ? t.on : t.line;
-          return Padding(
+            bool ticked = false, bool put = false, bool cmd = false, bool grey = false}) {
+          final color = ticked ? t.on : (cmd ? t.accent : t.line);
+          Widget c = Padding(
             padding: const EdgeInsets.only(right: 6),
             child: GestureDetector(
               key: key,
@@ -177,9 +215,12 @@ class _PhraseStripState extends State<PhraseStrip> {
               ),
             ),
           );
+          if (grey) c = Opacity(opacity: .4, child: c);
+          return cmd ? Semantics(label: '命令：$label', button: true, excludeSemantics: true, child: c) : c;
         }
 
-        final list = _list;
+        final tool = _tool;
+        final list = _items;
         return SizedBox(
           height: phraseStripChip,
           child: Row(children: [
@@ -196,12 +237,20 @@ class _PhraseStripState extends State<PhraseStrip> {
                         scrollDirection: Axis.horizontal,
                         padding: EdgeInsets.zero,
                         children: [
-                          for (final (i, p) in list.indexed)
-                            chip(Key('phrase-$i'), p.text,
-                                ticked: _ticked == i,
-                                put: p.put,
-                                onTap: () => _tap(p, i),
-                                onLong: (d) => _menu(i, d.globalPosition)),
+                          for (final (i, it) in list)
+                            if (it case final StripCmd c)
+                              chip(Key('phrase-$i'), c.labelOf(),
+                                  ticked: _ticked == i,
+                                  cmd: true,
+                                  grey: tool != null && actionFor(c, tool) == null,
+                                  onTap: () => _tapCmd(c, i),
+                                  onLong: (d) => _menu(i, d.globalPosition))
+                            else if (it case final Phrase p)
+                              chip(Key('phrase-$i'), p.text,
+                                  ticked: _ticked == i,
+                                  put: p.put,
+                                  onTap: () => _tap(p, i),
+                                  onLong: (d) => _menu(i, d.globalPosition)),
                         ],
                       ),
                     ),
