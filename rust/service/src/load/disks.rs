@@ -97,16 +97,23 @@ impl DiskReader {
         F: Fn(&Path) -> Option<Stat> + Send + Sync + 'static,
     {
         let (locate, stat): (Arc<Locate>, _) = (Arc::new(locate), Arc::new(stat));
-        let mut located = Vec::new();
+        // Each distinct path string is located once; every `Covered` keeps its place in `paths`.
+        let mut uniq: Vec<&str> = vec![];
         for c in &paths {
-            let (p, locate) = (PathBuf::from(&c.path), locate.clone());
-            located.push(self.guarded(format!("locate:{}", c.path), wait, move || locate(&p)));
+            if !uniq.contains(&c.path.as_str()) {
+                uniq.push(&c.path);
+            }
         }
-        let located = futures_join(located).await;
+        let mut located = Vec::new();
+        for p in &uniq {
+            let (pb, locate) = (PathBuf::from(p), locate.clone());
+            located.push(self.guarded(format!("locate:{p}"), wait, move || locate(&pb)));
+        }
+        let located: HashMap<&str, _> = uniq.iter().copied().zip(futures_join(located).await).collect();
         let mut at: Vec<Option<(u64, PathBuf, bool)>> = Vec::with_capacity(paths.len());
-        for (c, found) in paths.iter().zip(located) {
+        for c in &paths {
             let mut idents = self.idents.lock().unwrap();
-            at.push(match found {
+            at.push(match located[c.path.as_str()].clone() {
                 Some(Some((dev, mount))) => {
                     idents.insert(c.path.clone(), (dev, mount.clone()));
                     Some((dev, mount, false))
@@ -295,6 +302,29 @@ mod tests {
         assert!(again[0].unreadable);
         assert_eq!(again[0].mount, first[0].mount);
         assert_eq!(again[0].dev, first[0].dev);
+    }
+
+    #[tokio::test]
+    async fn the_same_path_twice_is_one_healthy_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut two = cov(dir.path());
+        two.kind = CoverKind::Term;
+        two.term = Some("pty/1".into());
+        let disks = DiskReader::default().read(vec![cov(dir.path()), two], Duration::from_secs(1)).await;
+        assert_eq!(disks.len(), 1);
+        assert!(!disks[0].unreadable, "{disks:?}");
+        assert_eq!(disks[0].paths.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_symlink_across_file_systems_is_the_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let link = dir.path().join("dev");
+        std::os::unix::fs::symlink("/dev", &link).unwrap();
+        let alone = DiskReader::default().read(vec![cov(Path::new("/dev"))], Duration::from_secs(1)).await;
+        let via = DiskReader::default().read(vec![cov(&link)], Duration::from_secs(1)).await;
+        assert_eq!(via[0].mount, alone[0].mount);
+        assert_eq!(via[0].dev, alone[0].dev);
     }
 
     #[tokio::test]
