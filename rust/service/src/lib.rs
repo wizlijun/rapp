@@ -21,6 +21,7 @@ mod relay_link;
 mod share_cmds;
 mod sharing;
 mod shares;
+mod sink;
 mod state;
 mod term;
 mod update;
@@ -166,6 +167,10 @@ impl Service {
         if let Some(why) = unreadable {
             log.event(Lvl::Warn, "maps_unreadable", json!({"err": why}));
         }
+        let (sinks, unreadable) = sink::Sinks::load(&opts.home);
+        if let Some(why) = unreadable {
+            log.event(Lvl::Warn, "state_sinks_unreadable", json!({"err": why}));
+        }
         let server = device_server_config(&identity, &[ALPN_DEVICE, ALPN_PEER])?;
         let endpoint = quinn::Endpoint::server(server, ([0, 0, 0, 0], port).into()).with_context(|| format!("bind udp port {port}"))?;
         let port = endpoint.local_addr()?.port();
@@ -204,6 +209,7 @@ impl Service {
             labels,
             maps,
             numbers: numbers::Numbers::new(),
+            sinks,
             own: own::Own::new(opts.own_ports),
             probed: probe::Probed::default(),
             forwards: forward::Forwards::new(),
@@ -239,6 +245,7 @@ impl Service {
             autolock::spawn(state.clone(), opts.lock_grace),
             relay_link::spawn(state.clone(), opts.advertise_lan),
             spawn_forward_sums(state.clone(), opts.forward_sum_every),
+            sink::spawn(state.clone()),
         ];
         if let Some(data) = opts.data {
             let name = state.cfg.lock().unwrap().name.clone();

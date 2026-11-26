@@ -147,6 +147,7 @@ pub async fn shares(state: &Arc<State>, cmd: &Value) -> Value {
         })
         .collect();
     let items = reply["shares"].as_array().map(|a| a.as_slice()).unwrap_or_default();
+    crate::sink::saw(state, &id, items);
     crate::numbers::saw(state, &id, &name, &numbers(items));
     // A local port for every share this device may use, on its share number when it can; the
     // ones of shares that are gone, or no longer for this device, are given back first.

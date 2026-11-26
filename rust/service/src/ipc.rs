@@ -148,6 +148,7 @@ fn handle(state: &State, cmd: &Value) -> Value {
         "update_dismiss" => update::dismiss(state, cmd["version"].as_str().unwrap_or("")),
         "set_update" => update::set(state, cmd["auto_update"].as_bool(), cmd["check_updates"].as_bool()),
         "term" => crate::term::settings(state),
+        "state" => crate::sink::ipc(state),
         "set_term" => crate::term::set(state, cmd),
         "labels" | "set_label" | "reset_label" => crate::labels::ipc(state, cmd),
         "history" => {
@@ -255,6 +256,7 @@ async fn hosts(state: &Arc<State>) -> Value {
 async fn reached(state: &Arc<State>, id: &str, name: &str, mut shares: Value) -> Value {
     use crate::share_cmds::{addr, number, numbers, protocol, told};
     let list = shares.as_array_mut().map(std::mem::take).unwrap_or_default();
+    crate::sink::saw(state, id, &list);
     crate::numbers::saw(state, id, name, &numbers(&list));
     let wants = rapp_ports::wants(&list);
     state.maps.keep(id, &wants.iter().map(|(port, _)| *port).collect::<Vec<u16>>());
