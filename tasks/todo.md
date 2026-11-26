@@ -1433,3 +1433,9 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] 对齐 macOS `0.15.45`–`0.15.50`：补齐 `scripts/linux/rapp` 对 `term`、`state`、`load` 三个顶层 CLI 子命令的分发；修复 `rust/term/src/pty/fg.rs` Linux `execve` 测试竞态；补充 `TargetPlatform.linux` 下终端恢复（`term_restore_test.dart`）与常用语条按工具发命令（`phrase_strip_cmds_test.dart`）回归用例；扩充 `scripts/test-linux-launcher.py` 与 `scripts/test-linux-bundle.py` 端到端校验（覆盖 `rapp term restore --list/--forget`、`rapp state on/off` + `rapp-state` 伴随服务、`LinuxSampler` + `rapp load --json` / `rapp load pick --json`）。
 - [x] [v0.15.45](https://github.com/wizlijun/rapp/releases/tag/v0.15.45)（源码 `47f5046a`）与 [v0.15.50](https://github.com/wizlijun/rapp/releases/tag/v0.15.50)（源码 `e8b1627d`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致。
 - [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01545-parity.md`、`docs/superpowers/plans/2026-11-26-linux-01546-parity.md` 与 `docs/superpowers/plans/2026-11-26-linux-01550-parity.md`。
+
+## Linux 0.15.51 版本跟随对齐与发布（2026-11-26）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），将 Linux / Omarchy `x86_64` 产物构建并挂载至已发布的 [v0.15.51](https://github.com/wizlijun/rapp/releases/tag/v0.15.51) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.51`（`feat/rapp-state-p2`）：Linux 桌面端 `main.dart` / `GlobalSections` / `StateSection`（`0600` 权限保存 `local/state.json`）与 `StateSync`（本机或端口映射发现 `rapp-state`、`/v1/watch` SSE 实时流与 `/v1/seen` 多端已读同步、离线回退本机队列）完整生效；补充 `gui/test/pages/state_section_test.dart`（`TargetPlatform.linux` 下 `GlobalSections` 与 `0600` 权限断言）及 `scripts/test-linux-bundle.py`（IPC `state.url` 与 `/v1/watch` SSE `hello` 端到端断言）。
+- [x] `v0.15.51`（源码 `87ace3f2`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01551-parity.md`。

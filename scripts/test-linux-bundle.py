@@ -3,6 +3,7 @@
 
 Does not launch the GUI, install a service, contact a relay or use saved devices.
 """
+import http.client
 import json
 import os
 import queue
@@ -237,10 +238,23 @@ with tempfile.TemporaryDirectory(prefix='rapp-bundle-') as td, EchoServer(('127.
                 assert cli('term', 'restore', '--list') == '没有可以恢复的终端\n'
                 state0 = cli('state')
                 assert '状态服务：没开' in state0, state0
+                assert ipc({'cmd': 'state'})['url'] is None
                 state_on = cli('state', 'on')
                 assert '已打开状态服务' in state_on, state_on
+                st_ipc = ipc({'cmd': 'state'})
+                assert st_ipc['running'] is True and st_ipc['url'] == 'http://127.0.0.1:8102', st_ipc
+                sse = http.client.HTTPConnection('127.0.0.1', 8102, timeout=3)
+                try:
+                    sse.request('GET', '/v1/watch', headers={'Accept': 'text/event-stream'})
+                    resp = sse.getresponse()
+                    assert resp.status == 200, resp.status
+                    hello_line = resp.readline().decode('utf-8').strip()
+                    assert hello_line.startswith('data:') and json.loads(hello_line[5:].strip()) == {'what': 'hello'}, hello_line
+                finally:
+                    sse.close()
                 state_off = cli('state', 'off')
                 assert '已关掉状态服务' in state_off, state_off
+                assert ipc({'cmd': 'state'})['url'] is None
                 assert not ipc({'cmd': 'shares'})['shares'], 'state off left a share behind'
                 load_end = time.monotonic() + 8
                 load_json = None

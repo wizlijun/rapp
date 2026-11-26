@@ -102,17 +102,19 @@ Devices-tab saved-terminal recovery, zsh/bash/fish OSC 7502 shell hooks with
 venv/conda reactivation and non-executing command prefill, secret-line filtering,
 and 新建 / Ctrl+Shift+T starting in the current or last terminal's directory),
 device headroom/load bars with 1-hour detail sparklines and Needs You resource
-warnings, companion state service (`rapp-state`) and event outbox, intent-following
+warnings, companion state service (`rapp-state`), event outbox and cross-device
+StateSync status queue / Needs You sync (`/v1/watch`, `/v1/seen`, and 状态服务
+settings), intent-following
 IME switching (local `fcitx5-remote` / `ibus` Chinese in the writing panel and
 English on the stage, remote auto-English before stage keys, streamed terminal
 `typeToCompose: false` default, and folded 本机 column when no local service is
 present), and remote macOS Terminal consent prompts with screen preservation
-share the macOS 0.15.50 layout and rules.
+share the macOS 0.15.51 layout and rules.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and
 reattach without reconnecting. This release uses protocol v16 (compatible with
-macOS 0.15.35–0.15.50); update both peers when coming from protocol v15. Incoming GUI
+macOS 0.15.35–0.15.51); update both peers when coming from protocol v15. Incoming GUI
 state rules are forwarded by the Linux client to compatible hosts (such as
 macOS 0.15.35+) and safely ignored by the Linux desktop/app host. Off-stage and
 hidden/minimized embedded or detached sessions pause pictures but keep activity
