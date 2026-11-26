@@ -5,23 +5,21 @@ use std::collections::VecDeque;
 /// Events kept for the state service to take.
 pub const CACHE_MAX: usize = 200;
 
-/// Numbered, enveloped events not yet taken; the oldest drop when it is full.
+/// Numbered (from `Me::numbers`), enveloped events not yet taken; the oldest drop when it is full.
 pub struct Cache {
     me: Me,
     events: VecDeque<Value>,
-    next: u64,
     dropped: u64,
     gap: bool,
 }
 
 impl Cache {
     pub fn new(me: Me) -> Self {
-        Cache { me, events: VecDeque::new(), next: 1, dropped: 0, gap: false }
+        Cache { me, events: VecDeque::new(), dropped: 0, gap: false }
     }
 
     fn envelope(&mut self, at: u64) -> Map<String, Value> {
-        let n = self.next;
-        self.next += 1;
+        let n = self.me.numbers.take();
         let mut m = Map::new();
         m.insert("v".into(), json!(1));
         m.insert("fp".into(), json!(self.me.fp));
@@ -92,7 +90,7 @@ mod tests {
     use super::*;
 
     fn cache() -> Cache {
-        Cache::new(Me { fp: "f".into(), id: None, device: "d".into(), epoch: "e".into() })
+        Cache::new(Me { fp: "f".into(), id: None, device: "d".into(), epoch: "e".into(), numbers: Default::default() })
     }
 
     #[test]

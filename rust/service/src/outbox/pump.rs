@@ -331,7 +331,7 @@ mod tests {
     use tokio::time::Instant;
 
     fn me() -> Me {
-        Me { fp: "a".repeat(64), id: Some("111111111".into()), device: "mac".into(), epoch: "e1".into() }
+        Me { fp: "a".repeat(64), id: Some("111111111".into()), device: "mac".into(), epoch: "e1".into(), numbers: Default::default() }
     }
 
     /// A dial that follows a script first, then works only while `open`; it notes when each dial came.
@@ -752,6 +752,39 @@ mod tests {
         assert_eq!((all[4].status, all[4].lines[0]["t"].as_str(), all[4].lines[0]["gap"].as_bool()), (400, Some("snap"), Some(true)));
         assert_eq!(ns(&all[5].lines), [203]);
         assert_eq!((st.refused, st.dropped, st.up), (1, 1, true));
+    }
+
+    /// One pump run with `me` that takes one list and its snap; what the service took.
+    async fn one_run(me: Me, state: &str, seq: u64) -> Vec<Value> {
+        let fake = Fake::new("rapp-state");
+        let dial = FakeDial::new(&fake, true);
+        let (tx, rx) = mpsc::channel(16);
+        let stats = Mutex::new(Stats::default());
+        let log = Log::none();
+        let drive = async {
+            tx.send((list("idle", seq, "x"), seq)).await.unwrap();
+            fake.until(|got| got.iter().any(|g| g.status / 100 == 2 && g.lines.iter().any(|l| l["t"] == "snap"))).await;
+            tx.send((list(state, seq + 1, "x"), seq + 1)).await.unwrap();
+            fake.until(|got| got.iter().any(|g| g.status / 100 == 2 && g.lines.iter().any(|l| l["t"] == "state"))).await;
+            settle().await;
+            drop(tx);
+        };
+        tokio::join!(pump(me, rx, dial.clone(), &log, &stats), drive);
+        fake.taken()
+    }
+
+    /// Spec §6: one epoch per start of `rapp-service`, so a new run (the service turned off and on,
+    /// a crash, another dest and back) goes on numbering where the last one stopped. From 1 again,
+    /// the service would take every event as one it has seen.
+    #[tokio::test(start_paused = true)]
+    async fn a_second_run_numbers_on() {
+        let me = me();
+        let first = ns(&one_run(me.clone(), "working", 0).await);
+        let second = ns(&one_run(me.clone(), "blocked", 5).await);
+        assert_eq!(first.len(), 2, "{first:?}");
+        assert_eq!(second.len(), 2, "{second:?}");
+        assert!(second[0] > *first.last().unwrap(), "{first:?} then {second:?}");
+        assert!(second.windows(2).all(|w| w[0] < w[1]), "{second:?}");
     }
 
     #[tokio::test(start_paused = true)]

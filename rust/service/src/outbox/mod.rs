@@ -19,6 +19,7 @@ use crate::state::State;
 use rapp_net::log::{Log, Lvl};
 use serde_json::{json, Value};
 use std::future::Future;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{mpsc, Notify};
@@ -39,6 +40,27 @@ pub struct Me {
     pub id: Option<String>,
     pub device: String,
     pub epoch: String,
+    /// Where `n` comes from: the outbox's, shared by every pump run.
+    pub numbers: Numbers,
+}
+
+/// The event numbers of one start of `rapp-service`. Every pump run (and its cache) takes from
+/// the same counter, so `n` only rises within the epoch (spec §6): a run that started again from
+/// 1 would be taken by the service as events it has seen.
+#[derive(Clone, Debug)]
+pub struct Numbers(Arc<AtomicU64>);
+
+impl Default for Numbers {
+    fn default() -> Self {
+        Numbers(Arc::new(AtomicU64::new(1)))
+    }
+}
+
+impl Numbers {
+    /// The next number.
+    pub fn take(&self) -> u64 {
+        self.0.fetch_add(1, Ordering::Relaxed)
+    }
 }
 
 /// A fresh epoch: 6 random hex characters.
@@ -55,11 +77,13 @@ pub struct Outbox {
     dest: Mutex<Option<Dest>>,
     /// Woken when terminal sessions may have been turned on.
     poke: Notify,
+    /// The numbers of this start, for every run.
+    numbers: Numbers,
 }
 
 impl Outbox {
     pub fn new() -> Outbox {
-        Outbox { stats: Mutex::default(), dest: Mutex::new(None), poke: Notify::new() }
+        Outbox { stats: Mutex::default(), dest: Mutex::new(None), poke: Notify::new(), numbers: Numbers::default() }
     }
 
     /// Terminal sessions may have been turned on: look at `term.json` now, not at the next retry.
@@ -98,7 +122,7 @@ pub fn spawn(state: Arc<State>) -> JoinHandle<()> {
         let epoch = new_epoch();
         let me = || {
             let cfg = state.cfg.lock().unwrap();
-            Me { fp: state.identity.fp.to_string(), id: cfg.id.clone(), device: cfg.name.clone(), epoch: epoch.clone() }
+            Me { fp: state.identity.fp.to_string(), id: cfg.id.clone(), device: cfg.name.clone(), epoch: epoch.clone(), numbers: state.outbox.numbers.clone() }
         };
         let run = |dest: Dest| run_dest(state.clone(), me(), dest);
         let forget = |id: &str| sink::forget(&state, id, "outbox");
@@ -154,6 +178,10 @@ async fn follow<R, F>(
                 }
             }
         };
+        if end.is_some() {
+            // The run is over and its cache gone with it: `rapp state` must not show what it had.
+            outbox.reset(Some(dest.clone()));
+        }
         // Stopped for another service (or none): start over at once. Gone: forget it, which is a
         // change. Anything else (or a forget that changed nothing) waits for a change, so a
         // service that keeps ending is not run again and again.
@@ -253,7 +281,7 @@ mod tests {
     use tokio::sync::mpsc;
 
     fn me() -> Me {
-        Me { fp: "a".repeat(64), id: Some("111111111".into()), device: "mac".into(), epoch: "e1".into() }
+        Me { fp: "a".repeat(64), id: Some("111111111".into()), device: "mac".into(), epoch: "e1".into(), numbers: Numbers::default() }
     }
 
     #[test]
@@ -344,6 +372,31 @@ mod tests {
         let st = status_of(&outbox);
         assert_eq!(st, json!({"active":false,"cached":0,"sent":0,"dropped":0,"refused":0,"last_ok":null,"up":false,"dest":null}));
         assert_eq!(dests.lock().unwrap().len(), 1, "no new run without a service");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_ended_run_leaves_no_stats() {
+        let dir = tempfile::tempdir().unwrap();
+        let (sinks, _) = Sinks::load(dir.path());
+        sinks.set_local(Some(8102));
+        let outbox = Outbox::new();
+        let runs = Mutex::new(0);
+        let run = |_: Dest| {
+            *runs.lock().unwrap() += 1;
+            let outbox = &outbox;
+            async move {
+                *outbox.stats.lock().unwrap() = Stats { active: true, up: true, cached: 3, sent: 7, ..Stats::default() };
+                PumpEnd::ListsClosed
+            }
+        };
+        let log = Log::none();
+        tokio::select! {
+            _ = follow(&sinks, || None, &outbox, &log, |_| false, run) => panic!("follow ended"),
+            () = tokio::time::sleep(Duration::from_millis(1)) => {}
+        }
+        assert_eq!(*runs.lock().unwrap(), 1, "not run again without a change");
+        let st = status_of(&outbox);
+        assert_eq!(st, json!({"active":false,"cached":0,"sent":0,"dropped":0,"refused":0,"last_ok":null,"up":false,"dest":{"local":8102}}));
     }
 
     #[test]
