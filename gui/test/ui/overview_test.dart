@@ -952,6 +952,67 @@ void main() {
     expect(find.descendant(of: find.byKey(fav), matching: find.text('新建')), findsOneWidget);
   }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 
+  testWidgets('Linux: terminal block shows fg program title with CLI subtitle and 新建 runs one at a time',
+      (tester) async {
+    capsOf = {
+      'm1': {'graphical': true, 'desktop': true, 'applications': false, 'terminal': true, 'ports': true},
+    };
+    final term = FakeTermSessionPort();
+    await boot(tester, apps: ['m1/term:pty:a'], termPort: term);
+    term.play(const ReadyEvent(1, 'x'));
+    final inner = t.onSend!;
+    int? pendingReq;
+    t.onSend = (m) {
+      if (m['cmd'] == 'open_term') {
+        pendingReq = m['req'] as int?;
+      } else {
+        inner(m);
+      }
+    };
+    await tester.runAsync(() async {
+      t.emit({
+        'event': 'terms',
+        'id': 'm1',
+        'terms': [
+          {
+            'id': 'term:pty:a',
+            'name': 'zsh',
+            'title': '~/git/rapp · 2',
+            'fg': 'claude',
+            'shell': false,
+            'command': 'zsh',
+            'activity': 1,
+            'dead': false,
+            'ps': {'state': 'blocked', 'kind': 'permission', 'msg': 'approve Bash: ls', 'seq': 2},
+          },
+        ],
+        'hosts': [
+          {
+            'host': null,
+            'launchers': ['ghostty'],
+            'shells': [{'name': 'zsh', 'path': '/bin/zsh', 'default': true}],
+          },
+        ],
+      });
+      for (var i = 0; i < 4; i++) {
+        await flush();
+      }
+    });
+    s.toggleFavorite('m1', termsEntry, termsEntryName);
+    await show(tester);
+    expect(inside('block-m1/term:pty:a', find.text('claude · ~/git/rapp · 2')), findsOneWidget);
+    expect(inside('block-m1/term:pty:a', find.text('CLI · 等确认 · approve Bash: ls')), findsOneWidget);
+    const fav = Key('ov-favorite-m1/terms:');
+    await tester.tap(find.byKey(fav));
+    await tester.pump();
+    await tester.tap(find.byKey(fav));
+    await tester.pump();
+    expect(t.sent.where((m) => m['cmd'] == 'open_term'), hasLength(1));
+    expect(s.hint, '正在新建终端，请稍候');
+    t.emit({'event': 'term_created', 'req': pendingReq, 'id': 'm1', 'term': 'term:pty:b'});
+    await settle(tester);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
   testWidgets('count taps', (tester) async {
     await boot(tester, apps: ['m1/a']);
     port.emit(const DisconnectedEvent(1, 'user'));

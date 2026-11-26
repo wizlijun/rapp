@@ -87,13 +87,14 @@ dropdown menu, overview Local column inbound sessions, OSC 7501 program
 status, GUI app state rules client support, top-bar status queue, Needs You
 direct jump, OSC 0/1/2 terminal titles (with · 2 numbering on clashes),
 multi-terminal Ctrl+Shift+T / Ctrl+Shift+W / End Terminal / clean exit /
-host `<dir> · <prog>` window titles, and overview favorite Terminal
-restore/creation share the macOS 0.15.35 layout and rules.
+host `<dir> · <prog>` window titles, foreground-program terminal titles with
+CLI subtitle, single-flight New Terminal, and overview favorite Terminal
+restore/creation share the macOS 0.15.37 layout and rules.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and
 reattach without reconnecting. This release uses protocol v16 (compatible with
-macOS 0.15.35); update both peers when coming from protocol v15. Incoming GUI
+macOS 0.15.35–0.15.37); update both peers when coming from protocol v15. Incoming GUI
 state rules are forwarded by the Linux client to compatible hosts (such as
 macOS 0.15.35) and safely ignored by the Linux desktop/app host. Off-stage and
 hidden/minimized embedded or detached sessions pause pictures but keep activity
