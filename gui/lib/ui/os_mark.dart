@@ -1,9 +1,12 @@
-// The system mark beside a device's lamp on the overview (全景): one colour, drawn with paths, the lamp's size.
+// The system mark beside a device's lamp on the overview (全景): one colour, the lamp's size. The marks are the
+// makers' own (os_mark_paths.dart); tablets and phones are a device body with that mark cut out of it.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import 'device_os.dart';
+import 'os_mark_paths.dart';
+import 'svg_path.dart';
 import 'tokens.dart';
 
 /// What system a device is, as a small mark the size of a [StatusLamp]. The word shows on hover and is what
@@ -52,8 +55,6 @@ class OsMarkPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = line;
     switch (os) {
-      case DeviceOs.omarchy:
-        canvas.drawPath(_paths[os]!, stroke);
       case DeviceOs.unknown:
         _unknown(canvas, fill, stroke);
       default:
@@ -94,39 +95,19 @@ class OsMarkPainter extends CustomPainter {
 }
 
 /// Built once: a spinning lamp beside the mark repaints it every frame, and the path ops are not free.
-final Map<DeviceOs, Path> _paths = {
-  DeviceOs.macos: _apple(),
-  DeviceOs.windows: _panes(),
-  DeviceOs.omarchy: _omarchy(),
-  DeviceOs.linux: _penguin(),
-  DeviceOs.ipad: _device(const Rect.fromLTWH(3, 1, 18, 22), 3, .62, _apple()),
-  DeviceOs.androidTablet: _device(const Rect.fromLTWH(3, 1, 18, 22), 3, .62, _robot()),
-  DeviceOs.iphone: _device(const Rect.fromLTWH(6, 0.5, 12, 23), 3.2, .7, _apple()),
-  DeviceOs.androidPhone: _device(const Rect.fromLTWH(6, 0.5, 12, 23), 3.2, .7, _robot()),
-};
-
-/// An apple with a bite and a leaf.
-Path _apple() {
-  final body = Path.combine(
-    PathOperation.union,
-    Path()..addOval(Rect.fromCenter(center: const Offset(9.4, 14.6), width: 11, height: 13)),
-    Path()..addOval(Rect.fromCenter(center: const Offset(14.6, 14.6), width: 11, height: 13)),
-  );
-  final bitten = Path.combine(
-    PathOperation.difference,
-    body,
-    Path()..addOval(Rect.fromCircle(center: const Offset(21.4, 12.4), radius: 3.1)),
-  );
-  return bitten
-    ..addPath(
-      Path()
-        ..moveTo(12.2, 7.1)
-        ..cubicTo(11.8, 4.6, 13.6, 2.7, 16.2, 2.5)
-        ..cubicTo(16.4, 5, 14.7, 6.9, 12.2, 7.1)
-        ..close(),
-      Offset.zero,
-    );
-}
+final Map<DeviceOs, Path> _paths = () {
+  final apple = parseSvgPath(appleSvg), android = parseSvgPath(androidSvg);
+  return {
+    DeviceOs.macos: apple,
+    DeviceOs.windows: parseSvgPath(windowsSvg),
+    DeviceOs.omarchy: parseSvgPath(omarchySvg),
+    DeviceOs.linux: parseSvgPath(linuxSvg),
+    DeviceOs.ipad: _device(const Rect.fromLTWH(3, 1, 18, 22), 3, .62, apple),
+    DeviceOs.androidTablet: _device(const Rect.fromLTWH(3, 1, 18, 22), 3, .66, android),
+    DeviceOs.iphone: _device(const Rect.fromLTWH(6, 0.5, 12, 23), 3.2, .7, apple),
+    DeviceOs.androidPhone: _device(const Rect.fromLTWH(6, 0.5, 12, 23), 3.2, .74, android),
+  };
+}();
 
 /// A tablet or phone body with [mark] cut out of its screen, [share] of its width. Cut out rather than drawn
 /// inside an outline: at the lamp's size an outline leaves the mark a few pixels and it turns to a blot.
@@ -141,89 +122,5 @@ Path _device(Rect r, double radius, double share, Path mark) {
     PathOperation.difference,
     Path()..addRRect(RRect.fromRectAndRadius(r, Radius.circular(radius))),
     mark.transform(m.storage),
-  );
-}
-
-/// Four panes, 2×2 with gaps.
-Path _panes() {
-  const a = 3.5, b = 11.2, c = 12.8, d = 20.5;
-  return Path()
-    ..addRect(const Rect.fromLTRB(a, a, b, b))
-    ..addRect(const Rect.fromLTRB(c, a, d, b))
-    ..addRect(const Rect.fromLTRB(a, c, b, d))
-    ..addRect(const Rect.fromLTRB(c, c, d, d));
-}
-
-/// Omarchy's mark, simplified from the project's own: a square inside a square, each line broken where the
-/// original is open (the outer one at the top and the bottom, the inner one at its top right). Drawn as lines
-/// of the lamp's weight; the original's thin double lines blur together at this size.
-Path _omarchy() {
-  const o0 = 2.0, o1 = 22.0, i0 = 7.2, i1 = 16.8;
-  return Path()
-    ..moveTo(13.6, o0)
-    ..lineTo(o1, o0)
-    ..lineTo(o1, o1)
-    ..lineTo(15.6, o1)
-    ..moveTo(12.4, o1)
-    ..lineTo(o0, o1)
-    ..lineTo(o0, o0)
-    ..lineTo(10.4, o0)
-    ..moveTo(15.2, i0)
-    ..lineTo(i1, i0)
-    ..lineTo(i1, i1)
-    ..lineTo(i0, i1)
-    ..lineTo(i0, i0)
-    ..lineTo(12.4, i0);
-}
-
-/// A penguin: head and body in one, the belly left open, two feet.
-Path _penguin() {
-  final figure = Path.combine(
-    PathOperation.union,
-    Path()..addOval(Rect.fromCircle(center: const Offset(12, 6.6), radius: 4.3)),
-    Path()..addOval(Rect.fromCenter(center: const Offset(12, 14.6), width: 13, height: 14.6)),
-  );
-  final bellied = Path.combine(
-    PathOperation.difference,
-    figure,
-    Path()..addOval(Rect.fromCenter(center: const Offset(12, 15.6), width: 7.4, height: 9.6)),
-  );
-  return Path.combine(
-    PathOperation.union,
-    bellied,
-    Path()
-      ..addOval(Rect.fromCenter(center: const Offset(8.4, 21.4), width: 6.4, height: 3))
-      ..addOval(Rect.fromCenter(center: const Offset(15.6, 21.4), width: 6.4, height: 3)),
-  );
-}
-
-/// The Android robot's head: a half disc, two feelers, eyes cut out.
-Path _robot() {
-  final head = Path()
-    ..moveTo(2.5, 17)
-    ..arcToPoint(const Offset(21.5, 17), radius: const Radius.circular(9.5))
-    ..close();
-  Path feeler(Offset from, Offset to) {
-    final d = to - from;
-    final n = Offset(-d.dy, d.dx) / d.distance * 1.3;
-    return Path()
-      ..moveTo(from.dx + n.dx, from.dy + n.dy)
-      ..lineTo(to.dx + n.dx, to.dy + n.dy)
-      ..lineTo(to.dx - n.dx, to.dy - n.dy)
-      ..lineTo(from.dx - n.dx, from.dy - n.dy)
-      ..close();
-  }
-
-  final withFeelers = Path.combine(
-    PathOperation.union,
-    head,
-    feeler(const Offset(7.4, 10), const Offset(4.6, 4.6))..addPath(feeler(const Offset(16.6, 10), const Offset(19.4, 4.6)), Offset.zero),
-  );
-  return Path.combine(
-    PathOperation.difference,
-    withFeelers,
-    Path()
-      ..addOval(Rect.fromCircle(center: const Offset(8, 12.6), radius: 1.4))
-      ..addOval(Rect.fromCircle(center: const Offset(16, 12.6), radius: 1.4)),
   );
 }
