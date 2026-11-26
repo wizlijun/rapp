@@ -1232,3 +1232,16 @@ macOS、Linux、Duo、iPad 各一遍。
 
 - [x] service 的 `list_apps` 回报 `os`（macos / windows / linux / omarchy）；hub 记进 hosts.json 并转给 GUI；总览每个设备列在状态灯左边画单色系统图标（9 种，含「未知」），悬停显示系统名。分支 `feat/device-os-marks`。
 - [ ] 实机检查：① Mac 本机列显示苹果；② 已升级的另一台 Mac / Omarchy / Linux 列显示对的图标；③ 未升级的设备显示「未知」，升级后变对；④ 设备离线后图标还在；⑤ iPad、iPhone 本机列是平板 / 手机外形加苹果；⑥ 三套主题下都看得清；⑦ 悬停显示系统名。
+
+## 设备负载（规格 `docs/superpowers/specs/2026-11-26-rapp-device-load-design.md`，计划 `docs/superpowers/plans/2026-11-26-rapp-device-load.md`，分支 `feat/device-load`）
+
+- [x] 服务采样 CPU / GPU / 内存 / 磁盘 / 温度 / 电池，算余力和警告；hub 每台在线设备一条 `watch_load`；`rapp load` / `rapp load pick`；总览设备列的余力行和明细；资源警告进「需要你」，带建议动作和「1小时内不再提醒」。
+- 实机检查：
+  - [ ] 1. 本机列显示余力
+  - [ ] 2. 另一台 Mac 和 Linux 机器的列显示余力
+  - [ ] 3. 把一块盘写到剩不到 10% 且不到 20 GB：余力行变橙，「需要你」里有这一行
+  - [ ] 4. 点「1小时内不再提醒」：这一行不见了
+  - [ ] 5. 点「到 <设备> 上新建终端」：终端开在那台设备上
+  - [ ] 6. `rapp load`、`rapp load pick --json` 能用
+  - [ ] 7. 活动监视器里服务 CPU 一直低于 0.5%，开 1 小时后内存（RSS）涨不到 5 MB
+  - [ ] 8. 没升级的旧设备：没有余力行，日志里也没有相关记录

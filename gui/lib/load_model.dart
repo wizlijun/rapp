@@ -1,6 +1,9 @@
 // A device's load as its service says (device-load spec §5-§7): the snapshot, its warnings and the last hour.
 // The rules live in the service; this only reads what it concluded (spec §6), it never recomputes a level.
 
+/// Asks a device for its load once; [top] asks for the process list too.
+typedef LoadNow = Future<Map<String, dynamic>> Function({bool top});
+
 /// A warning's level; [normal] when a device has none.
 enum LoadLevel { normal, warn, danger }
 

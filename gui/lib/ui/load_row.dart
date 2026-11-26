@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 import '../load_model.dart';
 import 'tokens.dart';
 
-typedef LoadNow = Future<Map<String, dynamic>> Function({bool top});
+export '../load_model.dart' show LoadNow;
 
 const _detailWidth = 380.0;
 const _gap = 6.0;
@@ -63,37 +63,12 @@ class _LoadRowState extends State<LoadRow> {
   void _closeDetail() {
     final r = _detail;
     _detail = null;
-    if (r == null) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final nav = r.navigator;
-      if (nav == null || !r.isActive) return;
-      // On top it is popped, so the dialog's future completes; under another route it is taken out from there.
-      r.isCurrent ? nav.pop() : nav.removeRoute(r);
-    });
+    // On top it is popped, so the dialog's future completes; under another route it is taken out from there.
+    _closeAfterFrame(r);
   }
 
   Future<void> _open(BuildContext anchor) async {
-    final box = anchor.findRenderObject()! as RenderBox;
-    final overlay = Navigator.of(anchor).overlay!.context.findRenderObject()! as RenderBox;
-    final rect = MatrixUtils.transformRect(box.getTransformTo(overlay), Offset.zero & box.size);
-    await showGeneralDialog<void>(
-      context: anchor,
-      barrierDismissible: true,
-      barrierLabel: '关闭',
-      barrierColor: Colors.transparent,
-      transitionDuration: Duration.zero,
-      pageBuilder: (context, _, _) {
-        _detail = ModalRoute.of(context);
-        return CustomSingleChildLayout(
-          delegate: _DetailLayout(rect, MediaQuery.viewInsetsOf(context).bottom),
-          child: ValueListenableBuilder(
-            valueListenable: _live,
-            builder: (context, load, _) =>
-                load == null ? const SizedBox.shrink() : LoadDetail(load: load, loadNow: widget.loadNow),
-          ),
-        );
-      },
-    );
+    await showLoadDetail(anchor, load: _live, loadNow: widget.loadNow, onRoute: (r) => _detail = r);
     _detail = null;
   }
 
@@ -133,6 +108,64 @@ class _LoadRowState extends State<LoadRow> {
       ),
     );
   }
+}
+
+/// Where [anchor] is in its navigator's overlay.
+Rect _rectOf(BuildContext anchor) {
+  final box = anchor.findRenderObject()! as RenderBox;
+  final overlay = Navigator.of(anchor).overlay!.context.findRenderObject()! as RenderBox;
+  return MatrixUtils.transformRect(box.getTransformTo(overlay), Offset.zero & box.size);
+}
+
+/// Opens [LoadDetail] under [anchor] (above it when there is more room there): the 余力 row's tap, and 需要你's
+/// 「看占用最多的进程」 ([top]: the process list is asked for at once). It follows [load], and closes when that goes.
+/// [onRoute] is told the detail's route. Completes when the detail closes.
+Future<void> showLoadDetail(
+  BuildContext anchor, {
+  required ValueListenable<DeviceLoad?> load,
+  LoadNow? loadNow,
+  bool top = false,
+  void Function(Route<Object?>? route)? onRoute,
+}) {
+  final rect = _rectOf(anchor);
+  return showGeneralDialog<void>(
+    context: anchor,
+    barrierDismissible: true,
+    barrierLabel: '关闭',
+    barrierColor: Colors.transparent,
+    transitionDuration: Duration.zero,
+    pageBuilder: (context, _, _) {
+      final route = ModalRoute.of(context);
+      onRoute?.call(route);
+      return CustomSingleChildLayout(
+        delegate: _DetailLayout(rect, MediaQuery.viewInsetsOf(context).bottom),
+        child: ValueListenableBuilder(
+          valueListenable: load,
+          builder: (context, l, _) {
+            if (l == null) {
+              _closeAfterFrame(route);
+              return const SizedBox.shrink();
+            }
+            return LoadDetail(load: l, loadNow: loadNow, top: top);
+          },
+        ),
+      );
+    },
+  );
+}
+
+/// The detail routes already being closed: the owner and the detail's own builder may both ask.
+final _closing = Expando<bool>();
+
+/// Closes [r] once this frame is built: popped when on top, else taken out from under what was pushed over it.
+void _closeAfterFrame(Route<Object?>? r) {
+  if (r == null || _closing[r] == true) return;
+  _closing[r] = true;
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    final nav = r.navigator;
+    if (nav == null || !r.isActive) return;
+    r.isCurrent ? nav.pop() : nav.removeRoute(r);
+  });
 }
 
 /// Ten segments, one per 10 of headroom.
@@ -206,9 +239,12 @@ num? _num(Object? v) => v is num ? v : null;
 
 /// Every item, one line each with its hour; the disks and what they cover; the processes on request.
 class LoadDetail extends StatefulWidget {
-  const LoadDetail({super.key, required this.load, this.loadNow});
+  const LoadDetail({super.key, required this.load, this.loadNow, this.top = false});
   final DeviceLoad load;
   final LoadNow? loadNow;
+
+  /// Asks for the process list as it opens (需要你's 「看占用最多的进程」).
+  final bool top;
 
   @override
   State<LoadDetail> createState() => _LoadDetailState();
@@ -219,10 +255,24 @@ class _LoadDetailState extends State<LoadDetail> {
   List<String>? _top;
   var _asking = false;
 
+  @override
+  void initState() {
+    super.initState();
+    final ask = widget.loadNow;
+    if (widget.top && ask != null) {
+      _asking = true;
+      _fetchTop(ask);
+    }
+  }
+
   Future<void> _askTop() async {
     final ask = widget.loadNow;
     if (ask == null || _asking) return;
     setState(() => _asking = true);
+    await _fetchTop(ask);
+  }
+
+  Future<void> _fetchTop(LoadNow ask) async {
     List<String> lines;
     try {
       lines = _topLines((await ask(top: true))['top']);

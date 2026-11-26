@@ -2,7 +2,6 @@
 // It takes the stage's place; the top bar and overlays stay as they are.
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
 import '../embed/traffic_label.dart';
@@ -291,15 +290,9 @@ class _Column extends StatelessWidget {
     final id = col.id;
     final small = Theme.of(context).textTheme.bodySmall;
     final favorites = id == null ? const <AppRef>[] : [for (final f in state.idleFavorites) if (f.device == id) f];
-    // 余力 (device-load §7): a remote device's from the hub's watch while it is online; this machine's from its
-    // service, which iOS does not have.
-    final hub = state.hub, local = monitor;
-    final load = id != null
-        ? (col.offline ? null : hub?.loads[id])
-        : (defaultTargetPlatform == TargetPlatform.iOS ? null : local?.load);
-    final LoadNow? loadNow = id != null
-        ? (hub == null ? null : ({bool top = false}) => hub.loadNow(id, top: top))
-        : local?.loadNow;
+    // 余力 (device-load §7), read where 需要你 reads it.
+    final load = columnLoad(state.hub, monitor, id, offline: col.offline);
+    final loadNow = columnLoadNow(state.hub, monitor, id);
     return SizedBox(
       key: Key('column-${id ?? 'local'}'),
       width: _colWidth,

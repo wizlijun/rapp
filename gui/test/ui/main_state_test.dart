@@ -16,6 +16,8 @@ import 'package:rapp/paths.dart';
 import 'package:rapp/history/draft_store.dart';
 import 'package:rapp/history/input_recorder.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/load_model.dart';
+import 'package:rapp/service_client.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/lifecycle.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -6117,6 +6119,106 @@ void main() {
       expect(s.needs.map((n) => n.target), ['term:pty:a', 'term:pty:b']);
     });
   });
+
+  group('resource needs', () {
+    const diskText = '磁盘约 40 分钟后写满（/，剩 6%，含 ~/git/rapp）';
+    Map<String, dynamic> loadEv(String id, List<(String, String, String)> warnings, {int headroom = 50, double cpu = 10}) => {
+          'event': 'load', 'id': id, 'at': 1764100000, 'headroom': headroom, 'tightest': 'disk', 'term': true,
+          'items': {'cpu': {'pct': cpu}},
+          'disks': [
+            {
+              'mount': '/', 'total': 100 * 1000000000, 'avail': 6 * 1000000000, 'level': 'warn',
+              'paths': [{'kind': 'term', 'path': '/Users/x/git/rapp', 'term': 'term:pty:a'}],
+            },
+          ],
+          'warnings': [for (final (item, level, text) in warnings) {'item': item, 'level': level, 'text': text}],
+          'history': [],
+        };
+    Future<void> emitLoad(String id, List<(String, String, String)> warnings, {int headroom = 50}) async {
+      t.emit(loadEv(id, warnings, headroom: headroom));
+      await pump();
+    }
+
+    test('resource_need_rows', () async {
+      await emitLoad('111', [('disk:/', 'warn', diskText)]);
+      final n = s.needs.single;
+      expect((n.kind, n.target, n.device, n.title), (NeedKind.resource, '111\ndisk:/', '111', 'disk:/'));
+      expect(n.text, 'mini $diskText');
+      // The row goes to the device's panel.
+      s.goToNeed(n);
+      expect((s.panel, s.deviceTab), (PanelTab.devices, '111'));
+    });
+
+    test('snooze_hides_until_danger', () async {
+      var now = DateTime(2026, 11, 26, 10);
+      final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), clock: () => now);
+      addTearDown(st.dispose);
+      await emitLoad('111', [('disk:/', 'warn', diskText)]);
+      expect(st.needs.where((n) => n.kind == NeedKind.resource), hasLength(1));
+      st.snoozeLoad('111', 'disk:/', LoadLevel.warn);
+      expect(st.needs.where((n) => n.kind == NeedKind.resource), isEmpty);
+      expect(st.prefs.loadSnooze.keys, ['111\ndisk:/']);
+      await emitLoad('111', [('disk:/', 'danger', '磁盘只剩 0.8 GB（/，剩 1%）')]);
+      expect(st.needs.single.text, 'mini 磁盘只剩 0.8 GB（/，剩 1%）');
+      await emitLoad('111', [('disk:/', 'warn', diskText)]);
+      expect(st.needs.where((n) => n.kind == NeedKind.resource), isEmpty);
+      now = now.add(const Duration(minutes: 59));
+      expect(st.needs.where((n) => n.kind == NeedKind.resource), isEmpty);
+      now = now.add(const Duration(minutes: 1));
+      expect(st.needs.single.text, 'mini $diskText');
+    });
+
+    test('hint_on_rise_only', () async {
+      // The first load, already in warn, says nothing.
+      await emitLoad('111', [('cpu', 'warn', 'CPU 持续 90% 以上')]);
+      expect(s.hint, '');
+      await emitLoad('111', []);
+      expect(s.hint, '');
+      await emitLoad('111', [('cpu', 'warn', 'CPU 持续 90% 以上')]);
+      expect(s.hint, 'mini CPU 持续 90% 以上');
+      s.hint = '';
+      await emitLoad('111', [('cpu', 'warn', 'CPU 持续 90% 以上')]);
+      expect(s.hint, '');
+      await emitLoad('111', [('cpu', 'danger', '过热，系统正在降频')]);
+      expect(s.hint, 'mini 过热，系统正在降频');
+      s.hint = '';
+      // normal → danger rises too; a snoozed item does not hint at the level it was snoozed at.
+      await emitLoad('111', [('cpu', 'danger', '过热，系统正在降频'), ('mem', 'danger', '内存只剩 3%')]);
+      expect(s.hint, 'mini 内存只剩 3%');
+      s.hint = '';
+      s.snoozeLoad('111', 'gpu', LoadLevel.warn);
+      await emitLoad('111', [('gpu', 'warn', 'GPU 持续 90% 以上')]);
+      expect(s.hint, '');
+    });
+
+    test('offline_device_has_no_resource_rows', () async {
+      await emitLoad('111', [('disk:/', 'warn', diskText)]);
+      expect(s.needs.where((n) => n.kind == NeedKind.resource), hasLength(1));
+      t.emit({'event': 'presence', 'id': '111', 'online': true});
+      t.emit({'event': 'presence', 'id': '111', 'online': false});
+      await pump();
+      // The hub has not said `gone` yet: its last numbers are still there, but an offline device has no rows.
+      expect(hub.loads.containsKey('111'), isTrue);
+      expect(s.needs.where((n) => n.kind == NeedKind.resource), isEmpty);
+    });
+
+    test('the local device has rows on macOS, none on iOS', () async {
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final m = _PushMonitor();
+      addTearDown(m.dispose);
+      final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), monitor: m);
+      addTearDown(st.dispose);
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      m.status = const ServiceStatus(id: 'me', name: 'MacBook');
+      final first = Map<String, dynamic>.from(loadEv('me', [('mem', 'warn', '内存只剩 8%')]))..remove('event');
+      m.load = DeviceLoad.fromJson(first);
+      m.push();
+      final n = st.needs.single;
+      expect((n.kind, n.target, n.device, n.text), (NeedKind.resource, 'me\nmem', 'me', 'MacBook 内存只剩 8%'));
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      expect(st.needs, isEmpty);
+    });
+  });
 }
 
 /// A port whose `start` waits for the test to release it (null: ok, else the error thrown).
@@ -6159,4 +6261,10 @@ class _DelayedTakeEditor extends FakeEditor {
     await gate.future;
     return super.take();
   }
+}
+
+/// A service monitor the test fills by hand.
+class _PushMonitor extends ServiceMonitor {
+  _PushMonitor() : super(readToken: () async => null);
+  void push() => notifyListeners();
 }
