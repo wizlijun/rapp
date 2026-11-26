@@ -4,44 +4,74 @@
 //!
 //! A new key is made in the client process: only its join hash crosses the socket, so the root
 //! of the key never reaches the relay process (§7.4).
+//!
+//! The admin socket exists only on unix. Elsewhere (Windows) this module keeps the same names with
+//! nothing behind them: `Server::bind` opens nothing, `serve` serves nothing, and `call` /
+//! `issue_key` fail saying the admin socket is not available on this system.
 
 use std::collections::HashSet;
 use std::fmt;
+#[cfg(unix)]
 use std::io;
 use std::net::SocketAddr;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+#[cfg(unix)]
+use std::sync::Mutex;
+#[cfg(unix)]
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
-use rapp_net::log::{Log, Lvl};
+use anyhow::Result;
+#[cfg(unix)]
+use anyhow::{bail, Context};
+use rapp_net::log::Log;
+#[cfg(unix)]
+use rapp_net::log::Lvl;
+#[cfg(unix)]
 use rapp_wire::line::{err, ok, read_json, write_json};
+#[cfg(unix)]
 use rapp_wire::msg::is_valid_id;
-use rapp_wire::{join_hash, Fp, Key};
+#[cfg(unix)]
+use rapp_wire::join_hash;
+use rapp_wire::{Fp, Key};
+#[cfg(unix)]
 use serde::Deserialize;
-use serde_json::{json, Value};
+#[cfg(unix)]
+use serde_json::json;
+use serde_json::Value;
+#[cfg(unix)]
 use tokio::io::BufReader;
+#[cfg(unix)]
 use tokio::net::{UnixListener, UnixStream};
 
 use crate::audit::Audit;
+#[cfg(unix)]
 use crate::config::Enroll;
 use crate::store::{Registry, Revoked};
 
+#[cfg(unix)]
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub const SOCKET: &str = "admin.sock";
 
+#[cfg(unix)]
 /// A request line longer than this is refused.
 const MAX_REQUEST: usize = 8192;
+#[cfg(unix)]
 /// The request line has to arrive within this.
 const REQUEST_WAIT: Duration = Duration::from_secs(5);
+#[cfg(unix)]
 /// A reply line may be long (`devices` lists every device).
 const MAX_REPLY: usize = 4 << 20;
+#[cfg(unix)]
 /// How long `call` waits for the whole exchange.
 const CALL_WAIT: Duration = Duration::from_secs(10);
 
+#[cfg(unix)]
 const BAD_REQUEST: &str = "bad request";
+#[cfg(unix)]
 const NOT_FOUND: &str = "not found";
 
 pub fn socket_path(data: &Path) -> PathBuf {
@@ -60,6 +90,7 @@ impl fmt::Display for NotRunning {
 
 impl std::error::Error for NotRunning {}
 
+#[cfg(unix)]
 /// One request to the relay serving `data`, and its reply. A relay that is not running is a
 /// `NotRunning` error.
 pub async fn call(data: &Path, req: Value) -> Result<Value> {
@@ -81,6 +112,7 @@ pub async fn call(data: &Path, req: Value) -> Result<Value> {
     tokio::time::timeout(CALL_WAIT, exchange).await.context("no reply on the admin socket")?.context("admin reply")
 }
 
+#[cfg(unix)]
 /// What `key` (`rotate: false`) and `rotate-key` (`rotate: true`) do: makes a new key for the relay
 /// serving `data` and stores its join hash there. `None`: a key was set before and `rotate` is
 /// false (a key is shown only once).
@@ -102,6 +134,7 @@ pub async fn issue_key(data: &Path, rotate: bool) -> Result<Option<Key>> {
     }
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 /// What the admin commands need from the running relay.
 pub(crate) trait Control: Send + Sync {
     fn registry(&self) -> &dyn Registry;
@@ -122,6 +155,7 @@ pub(crate) trait Control: Send + Sync {
     fn key_changed(&self);
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 pub(crate) struct Ctx {
     pub data: PathBuf,
     pub fp: Fp,
@@ -130,6 +164,7 @@ pub(crate) struct Ctx {
     pub relay: Arc<dyn Control>,
 }
 
+#[cfg(unix)]
 #[derive(Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 enum Cmd {
@@ -151,6 +186,7 @@ enum Cmd {
     },
 }
 
+#[cfg(unix)]
 /// The listening admin socket. Dropping it stops serving and removes the socket file.
 pub(crate) struct Server {
     path: PathBuf,
@@ -158,6 +194,7 @@ pub(crate) struct Server {
     task: Option<tokio::task::JoinHandle<()>>,
 }
 
+#[cfg(unix)]
 impl Server {
     /// Binds `<data>/admin.sock` (0600). A socket another relay answers on is an error; a file
     /// left behind by one that is gone is replaced.
@@ -187,6 +224,7 @@ impl Server {
     }
 }
 
+#[cfg(unix)]
 impl Drop for Server {
     fn drop(&mut self) {
         if let Some(t) = self.task.take() {
@@ -197,6 +235,7 @@ impl Drop for Server {
     }
 }
 
+#[cfg(unix)]
 async fn connection(h: Arc<Handler>, st: UnixStream) {
     let (r, mut w) = st.into_split();
     let mut r = BufReader::new(r);
@@ -211,12 +250,14 @@ async fn connection(h: Arc<Handler>, st: UnixStream) {
     let _ = write_json(&mut w, &reply).await;
 }
 
+#[cfg(unix)]
 struct Handler {
     ctx: Ctx,
     /// One `set_join` or `enroll` at a time: each is a check-then-write.
     lock: Mutex<()>,
 }
 
+#[cfg(unix)]
 impl Handler {
     fn relay(&self) -> &dyn Control {
         &*self.ctx.relay
@@ -344,6 +385,7 @@ impl Handler {
     }
 }
 
+#[cfg(unix)]
 /// A `revoke` target: an ID (9 digits), or a fingerprint or a prefix of one (8 to 64 hex digits,
 /// either case) that matches exactly one device. Anything else names no device: `not found`.
 fn resolve(reg: &dyn Registry, target: &str) -> Result<Fp, &'static str> {
@@ -363,6 +405,7 @@ fn resolve(reg: &dyn Registry, target: &str) -> Result<Fp, &'static str> {
     }
 }
 
+#[cfg(unix)]
 /// Sets `enroll` in `<data>/config.json` and leaves every other item as it was. A missing file
 /// is created (0600); an existing one keeps its mode.
 fn persist_enroll(data: &Path, state: Enroll) -> Result<()> {
@@ -385,4 +428,45 @@ fn persist_enroll(data: &Path, state: Enroll) -> Result<()> {
             .with_context(|| format!("chmod {}", path.display()))?;
     }
     Ok(())
+}
+
+// The stand-in on systems without unix sockets: the same names, nothing behind them.
+
+#[cfg(not(unix))]
+fn unavailable(data: &Path) -> anyhow::Error {
+    anyhow::anyhow!("the admin socket is not available on this system ({})", socket_path(data).display())
+}
+
+/// One request to the relay serving `data`, and its reply. On this system there is no admin
+/// socket: always an error.
+#[cfg(not(unix))]
+pub async fn call(data: &Path, _req: Value) -> Result<Value> {
+    Err(unavailable(data))
+}
+
+/// What `key` and `rotate-key` do on unix. On this system there is no admin socket: always an
+/// error.
+#[cfg(not(unix))]
+pub async fn issue_key(data: &Path, _rotate: bool) -> Result<Option<Key>> {
+    Err(unavailable(data))
+}
+
+/// No admin socket on this system: binding opens nothing and serving serves nothing.
+#[cfg(not(unix))]
+pub(crate) struct Server;
+
+#[cfg(not(unix))]
+impl Server {
+    pub(crate) async fn bind(_data: &Path) -> Result<Server> {
+        Ok(Server)
+    }
+
+    pub(crate) fn serve(&mut self, _ctx: Ctx) {}
+}
+
+/// Nothing to stop or remove. The relay's stop drops the server the same way on every system, and
+/// without this impl that `drop(admin)` would be a drop of a value with nothing to drop.
+#[cfg(not(unix))]
+impl Drop for Server {
+    fn drop(&mut self) {}
 }
