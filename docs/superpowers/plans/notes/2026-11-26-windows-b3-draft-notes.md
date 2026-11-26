@@ -144,7 +144,7 @@
 - 假平台在锁屏时拒绝 activate。
 - 测试比较字节，不算 SHA-256。
 - `CLIP_NAME_LIMIT` 为 1024。
-- “target not frontmost” 这条路径没有测试。
+- “target not frontmost” 补了测试（第四批）：`paste_when_the_target_stays_behind_fails_with_the_fixed_text`。假平台新增 `set_stays_behind`，打开后 `activate` 不把程序带到最前；测试同时查目标在后面时的复制不宣布（`host_copy_is_announced` 里原来也有这一段）。
 
 任务 17
 - 会话的 `is_locked` 闭包同时检查会话的 `alive`。

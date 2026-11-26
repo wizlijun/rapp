@@ -52,6 +52,8 @@ struct State {
     generation: u64,
     alive: bool,
     frontmost: bool,
+    /// `activate` leaves the app behind (another app keeps the front, A unlocked).
+    stays_behind: bool,
     open_error: Option<OpenError>,
     capture_error: Option<String>,
     /// `Capture::frame` calls so far (whether or not they returned a picture).
@@ -216,6 +218,7 @@ impl FakePlatform {
             generation: 1,
             alive: true,
             frontmost: true,
+            stays_behind: false,
             open_error: None,
             capture_error: None,
             frame_calls: 0,
@@ -425,6 +428,11 @@ impl FakePlatform {
         self.st().frontmost = on;
     }
 
+    /// While on, `activate` does not bring the app to the front (it still logs "activate").
+    pub fn set_stays_behind(&self, on: bool) {
+        self.st().stays_behind = on;
+    }
+
     /// The focused control and its parents in global points; `None`: the query misses.
     pub fn set_focus_chain(&self, chain: Option<Vec<Rect>>) {
         let mut s = self.st();
@@ -612,8 +620,8 @@ impl TargetOps for FakeTarget {
     fn activate(&mut self) -> bool {
         let mut s = lock_state(&self.0);
         s.log.push("activate".to_string());
-        // Nothing comes to the front over the lock screen.
-        if s.locked {
+        // Nothing comes to the front over the lock screen, or past an app that keeps the front.
+        if s.locked || s.stays_behind {
             return false;
         }
         s.frontmost = true;

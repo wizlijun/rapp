@@ -1315,6 +1315,30 @@ fn paste_when_locked_fails_with_the_fixed_text() {
     assert!(!platform.log().iter().any(|l| l.starts_with("clipboard")), "{:?}", platform.log());
 }
 
+/// `Paster.swift:139-151` on an unlocked A whose target stays behind another app: no paste key,
+/// and after the ten tries B hears "target not frontmost". A copy made while the target is behind
+/// is not this session's (`ClipboardWatcher`), so it is not announced either.
+#[test]
+fn paste_when_the_target_stays_behind_fails_with_the_fixed_text() {
+    let (platform, host) = serve();
+    let mut c = clip_ready(&host);
+    platform.set_frontmost(false);
+    platform.set_stays_behind(true);
+    platform.set_clipboard(text_clip("copied elsewhere"));
+    assert_eq!(c.quiet_for(host_time(2.0), |m| !is_clip(m)), Ok(()));
+    platform.clear_log();
+
+    let sent = Instant::now();
+    send_paste(&mut c, 5, PasteSource::Text("from B".to_string()));
+    assert_eq!(pasted(&mut c, 5), "target not frontmost");
+    // Ten more looks, 0.05 s apart, before giving up.
+    assert!(sent.elapsed() >= host_time(0.5), "answered after {:?}", sent.elapsed());
+    let log = platform.log();
+    assert!(log.iter().any(|l| l == "activate"), "{log:?}");
+    assert!(!log.iter().any(|l| l == "paste_key"), "{log:?}");
+    assert!(!host.saw(|e| e["event"] == "session" && e["state"] == "ended"));
+}
+
 #[test]
 fn paste_item_not_uploaded() {
     let (platform, host) = serve();
