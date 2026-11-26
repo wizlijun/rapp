@@ -62,8 +62,19 @@ pub fn log(event: &str, fields: Value) {
     eprintln!("{line}");
 }
 
+/// The stderr line another task parses to recognise "port already in use".
+fn bind_failed_line(port: u16, e: &std::io::Error) -> Value {
+    json!({"event": "bind_failed", "port": port, "error": format!("{:?}", e.kind())})
+}
+
 pub async fn run(cfg: Config) -> anyhow::Result<()> {
-    let listener = TcpListener::bind(("127.0.0.1", cfg.port)).await?;
+    let listener = match TcpListener::bind(("127.0.0.1", cfg.port)).await {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("{}", bind_failed_line(cfg.port, &e));
+            return Err(e.into());
+        }
+    };
     log("listening", json!({"port": cfg.port}));
     serve(cfg, listener).await
 }
@@ -77,13 +88,9 @@ pub async fn cli(args: Vec<String>) -> i32 {
             return 2;
         }
     };
-    let port = cfg.port;
     match run(cfg).await {
         Ok(()) => 0,
         Err(e) => {
-            if let Some(io) = e.downcast_ref::<std::io::Error>() {
-                eprintln!("{}", json!({"event": "bind_failed", "port": port, "error": format!("{:?}", io.kind())}));
-            }
             eprintln!("rapp-state 起不来：{e}");
             1
         }
@@ -105,6 +112,13 @@ mod tests {
         assert_eq!(a("--port").unwrap_err(), "--port 后面要写端口");
         assert_eq!(a("--keep-days 0").unwrap_err(), "--keep-days 要写正整数");
         assert_eq!(a("--frob").unwrap_err(), "不认识的参数：--frob");
+    }
+
+    #[test]
+    fn bind_failed_line_format() {
+        let e = std::io::Error::from(std::io::ErrorKind::AddrInUse);
+        assert_eq!(bind_failed_line(8102, &e), json!({"event":"bind_failed","port":8102,"error":"AddrInUse"}));
+        assert_eq!(bind_failed_line(8102, &e).to_string(), r#"{"error":"AddrInUse","event":"bind_failed","port":8102}"#);
     }
 
     #[tokio::test]
