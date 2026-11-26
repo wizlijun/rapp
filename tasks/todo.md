@@ -1374,7 +1374,7 @@ macOS、Linux、Duo、iPad 各一遍。
   - [ ] ③ 纯服务器上 `rapp state on`，在 Mac 上 `rapp hosts` 一次后，别的设备的 `rapp state` 都看到它
   - [ ] ④ 没开状态服务的网里，`rapp state` 显示发件箱没在发
 - [ ] P1 遗留小问题（总审查记下的，不挡合并）：
-  - [ ] Linux 机器上跑一遍 `scripts/test-linux-build.py`、`test-linux-bundle.py`（已加 `rapp-state`，macOS 上跑不了）
+  - [x] Linux 机器上跑一遍 `scripts/test-linux-build.py`、`test-linux-bundle.py`（已加 `rapp-state`，macOS 上跑不了）
   - [ ] 状态服务反复起不来时，本机发件箱一直对着本机那个死端口，不会改投别台的状态服务；`rapp state` 还列着“本机的 <端口>”
   - [ ] 开着时改 `local/services.json` 的端口要先 `rapp state off` 再 `on` 才生效（写进配置参考）
   - [ ] 用户手动建的分享备注恰好是“状态服务”时，`off` 会把它当成自己的删掉
@@ -1408,3 +1408,10 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 5 在 Mac 本机给本机新建：只提示，不切桌面，授权框就在本机屏幕上
 - [ ] 6 「恢复所选」碰到授权框也是同样的提示和切桌面
 - [ ] 7 多屏 Mac（用户截图里框在屏幕 2）：画面上正开着它的屏幕 2 时新建，不被切回主屏，提示「不在这块屏上就换一块屏看看」
+
+## Linux 0.15.45 与 0.15.50 版本跟随对齐与发布（2026-11-26）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），依次将 Linux / Omarchy `x86_64` 产物构建并挂载至已发布的 `v0.15.45` 与 `v0.15.50` GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.45`–`0.15.50`：补齐 `scripts/linux/rapp` 对 `term`、`state`、`load` 三个顶层 CLI 子命令的分发；修复 `rust/term/src/pty/fg.rs` Linux `execve` 测试竞态；补充 `TargetPlatform.linux` 下终端恢复（`term_restore_test.dart`）与常用语条按工具发命令（`phrase_strip_cmds_test.dart`）回归用例；扩充 `scripts/test-linux-launcher.py` 与 `scripts/test-linux-bundle.py` 端到端校验（覆盖 `rapp term restore --list/--forget`、`rapp state on/off` + `rapp-state` 伴随服务、`LinuxSampler` + `rapp load --json` / `rapp load pick --json`）。
+- [x] [v0.15.45](https://github.com/wizlijun/rapp/releases/tag/v0.15.45)（源码 `47f5046a`）与 [v0.15.50](https://github.com/wizlijun/rapp/releases/tag/v0.15.50)（源码 `e8b1627d`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致。
+- [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01545-parity.md`、`docs/superpowers/plans/2026-11-26-linux-01546-parity.md` 与 `docs/superpowers/plans/2026-11-26-linux-01550-parity.md`。
