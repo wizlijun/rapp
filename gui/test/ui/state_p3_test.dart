@@ -311,6 +311,18 @@ void main() {
       }, sync: sync);
     });
 
+    test('a desktop screen does not go up', () {
+      final sync = FakeStateSync(tmp.path);
+      env((a, t, port, st, sid) {
+        st.openOrSwitch('111', 'desktop:22', '屏幕 2');
+        a.flushMicrotasks();
+        expect(st.recordFor('111/desktop:22'), isNotNull);
+        expect(sync.out.desksSet.last, [
+          {'id': '111', 'fp': 'devA', 'app': codex, 'name': 'ChatGPT'},
+        ]);
+      }, sync: sync);
+    });
+
     test('a device whose fingerprint is unknown goes up with its id only', () {
       final sync = FakeStateSync(tmp.path);
       env((a, t, port, st, sid) {

@@ -1824,6 +1824,8 @@ class MainState extends ChangeNotifier {
     final h = hub;
     final sync = stateSync;
     if (h == null || sync == null || !_fromService) return const [];
+    // Before the hub has said who this app is (an old hub, or its first hosts event not in yet) there is no `me`:
+    // this app's own desk then counts as elsewhere too, for that while; what it lists is open here and skipped anyway.
     final me = h.meFp;
     final listedKeys = {for (final e in listed) e.key};
     final desks = [for (final d in sync.desks) if (d['fp'] is String && d['fp'] != me) d];
@@ -2060,9 +2062,10 @@ class MainState extends ChangeNotifier {
   }
 
   /// The sessions this app has open, as its desk goes up to the state service: one per record in any phase (a
-  /// disconnected one too), not the terminal list; the device's fingerprint when known. By key.
+  /// disconnected one too), not the terminal list nor a desktop's extra screens (they come and go with the displays;
+  /// the desktop itself stands for them); the device's fingerprint when known. By key.
   List<Map<String, Object?>> get deskSessions {
-    final rs = [for (final r in _records.values) if (r.app != termsEntry) r]..sort((a, b) => a.key.compareTo(b.key));
+    final rs = [for (final r in _records.values) if (r.app != termsEntry && !isDesktopScreen(r.app)) r]..sort((a, b) => a.key.compareTo(b.key));
     return [
       for (final r in rs) {'id': r.id, 'fp': ?_hostFp(r.id), 'app': r.app, 'name': r.appName},
     ];

@@ -89,10 +89,11 @@ void main() {
     final card = find.byKey(const Key('elsewhere-m1/com.x'));
     expect(card, findsOneWidget);
     expect(find.descendant(of: card, matching: find.text('X')), findsOneWidget);
-    expect(find.descendant(of: card, matching: find.text('在 Mac 上开着')), findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('mini · 在 Mac 上开着')), findsOneWidget);
     expect(find.descendant(of: card, matching: find.text('打开')), findsOneWidget);
-    // the device's name gives way to where it is open
-    expect(find.descendant(of: card, matching: find.textContaining('mini')), findsNothing);
+    // the device it runs on stays ahead of where it is open; 没有打开 gives way
+    expect(find.descendant(of: card, matching: find.textContaining('mini')), findsOneWidget);
+    expect(find.descendant(of: card, matching: find.textContaining('没有打开')), findsNothing);
     expect(t.sent.where((m) => m['cmd'] == 'open'), isEmpty);
 
     await tester.tap(card);

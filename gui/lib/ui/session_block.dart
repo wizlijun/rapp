@@ -333,9 +333,9 @@ class SessionBlock extends StatelessWidget {
 
   String _led(String line) => _lead == null ? line : '$_lead · $line';
 
-  /// The second line of a 别处开着 card: [SessionEntry.openOn] where the device's name and the status go, after the
-  /// terminal's kind, with what its program says it is doing.
-  String get _openOnLine => [?_kind, entry.openOn!, ?_program].join(' · ');
+  /// The second line of a 别处开着 card: the terminal's kind, the device it runs on, then [SessionEntry.openOn] where
+  /// the status goes, with what its program says it is doing.
+  String get _openOnLine => [?_kind, entry.device, entry.openOn!, ?_program].join(' · ');
 
   /// What a terminal's program says it is doing, while the session itself is up; it takes the traffic's place.
   String? get _program {
