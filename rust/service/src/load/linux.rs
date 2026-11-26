@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn heat_bands() {
-        for (m, lv) in [(79999, HeatLevel::Normal), (80000, HeatLevel::Hot), (95000, HeatLevel::Critical)] {
+        for (m, lv) in [(79999, HeatLevel::Normal), (80000, HeatLevel::Hot), (90000, HeatLevel::Serious), (95000, HeatLevel::Critical)] {
             let d = tempfile::tempdir().unwrap();
             std::fs::create_dir(d.path().join("thermal_zone0")).unwrap();
             std::fs::write(d.path().join("thermal_zone0/temp"), m.to_string()).unwrap();

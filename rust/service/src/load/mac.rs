@@ -43,16 +43,15 @@ pub(crate) fn cpu_pct(prev: &[[u32; 4]], now: &[[u32; 4]]) -> Option<f32> {
     Some(busy as f32 / total as f32 * 100.0)
 }
 
-pub(crate) fn avail_bytes(free: u64, inactive: u64, purgeable: u64, speculative: u64, page: u64) -> u64 {
-    (free + inactive + purgeable + speculative) * page
+/// `free` from host_statistics64 already includes speculative pages.
+pub(crate) fn avail_bytes(free: u64, inactive: u64, purgeable: u64, page: u64) -> u64 {
+    (free + inactive + purgeable) * page
 }
 
-fn cpu_ticks() -> Option<Vec<[u32; 4]>> {
+fn cpu_ticks(host: libc::mach_port_t) -> Option<Vec<[u32; 4]>> {
     let mut n: libc::natural_t = 0;
     let mut info: libc::processor_info_array_t = std::ptr::null_mut();
     let mut cnt: libc::mach_msg_type_number_t = 0;
-    #[allow(deprecated)]
-    let host = unsafe { libc::mach_host_self() };
     let kr = unsafe { libc::host_processor_info(host, libc::PROCESSOR_CPU_LOAD_INFO, &mut n, &mut info, &mut cnt) };
     if kr != 0 || info.is_null() {
         return None;
@@ -82,12 +81,10 @@ fn sysctl<T: Copy>(name: &str, init: T) -> Option<T> {
     (rc == 0).then_some(v)
 }
 
-fn mem() -> Option<Mem> {
+fn mem(host: libc::mach_port_t) -> Option<Mem> {
     let total: u64 = sysctl("hw.memsize", 0u64)?;
     let mut st: libc::vm_statistics64 = unsafe { std::mem::zeroed() };
     let mut cnt = libc::HOST_VM_INFO64_COUNT;
-    #[allow(deprecated)]
-    let host = unsafe { libc::mach_host_self() };
     let kr = unsafe { libc::host_statistics64(host, libc::HOST_VM_INFO64, &mut st as *mut _ as *mut _, &mut cnt) };
     if kr != 0 {
         return None;
@@ -97,7 +94,6 @@ fn mem() -> Option<Mem> {
         st.free_count as u64,
         st.inactive_count as u64,
         st.purgeable_count as u64,
-        st.speculative_count as u64,
         page,
     )
     .min(total);
@@ -107,6 +103,8 @@ fn mem() -> Option<Mem> {
 }
 
 pub struct MacSampler {
+    /// Host port, taken once: every mach_host_self() call adds a user reference that is never released.
+    host: libc::mach_port_t,
     prev: Option<Vec<[u32; 4]>>,
     /// notify token for the thermal-pressure key, registered once.
     thermal: Option<libc::c_int>,
@@ -117,7 +115,9 @@ impl MacSampler {
         let key = CString::new("com.apple.system.thermalpressurelevel").unwrap();
         let mut token: libc::c_int = 0;
         let rc = unsafe { notify_register_check(key.as_ptr(), &mut token) };
-        MacSampler { prev: None, thermal: (rc == 0).then_some(token) }
+        #[allow(deprecated)]
+        let host = unsafe { libc::mach_host_self() };
+        MacSampler { host, prev: None, thermal: (rc == 0).then_some(token) }
     }
 
     fn heat(&self) -> Option<Heat> {
@@ -132,7 +132,7 @@ impl MacSampler {
 impl Sampler for MacSampler {
     fn sample(&mut self) -> Sample {
         let mut s = Sample { at: super::now_secs(), ..Default::default() };
-        if let Some(now) = cpu_ticks() {
+        if let Some(now) = cpu_ticks(self.host) {
             if let Some(pct) = self.prev.as_deref().and_then(|p| cpu_pct(p, &now)) {
                 let mut l = [0f64; 1];
                 let load1 = (unsafe { libc::getloadavg(l.as_mut_ptr(), 1) } == 1).then_some(l[0] as f32);
@@ -140,7 +140,7 @@ impl Sampler for MacSampler {
             }
             self.prev = Some(now);
         }
-        s.mem = mem();
+        s.mem = mem(self.host);
         s.heat = self.heat();
         s
     }
@@ -181,6 +181,6 @@ mod tests {
 
     #[test]
     fn avail_arithmetic() {
-        assert_eq!(avail_bytes(1, 2, 3, 4, 16384), 10 * 16384);
+        assert_eq!(avail_bytes(1, 2, 3, 16384), 6 * 16384);
     }
 }
