@@ -170,7 +170,7 @@ sha256sums=('$(sha256sum "$archive" | cut -d' ' -f1)')
 package() {
   install -d "\$pkgdir/opt/rapp" "\$pkgdir/usr/bin"
   cp -a "\$srcdir/$name/." "\$pkgdir/opt/rapp/"
-  for binary in rapp rapp-client rapp-host rapp-hub rapp-service rapp-term rapp-cli; do
+  for binary in rapp rapp-client rapp-host rapp-hub rapp-service rapp-term rapp-state rapp-cli; do
     ln -s "/opt/rapp/\$binary" "\$pkgdir/usr/bin/\$binary"
   done
   install -Dm644 "\$srcdir/$name/LICENSE" "\$pkgdir/usr/share/licenses/rapp-omarchy/LICENSE"

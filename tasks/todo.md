@@ -1256,3 +1256,16 @@ macOS、Linux、Duo、iPad 各一遍。
   - [ ] 9. 标题 65 个字、标题里有换行：对话框里红字说明，不关闭；备注里的换行变成空格
   - [ ] 10. 按 App 分组时，改了标题的会话仍在原来那个 App 组里
   - [ ] 11. `service.log` 里只记 `set_label` 这件事，不出现标题、备注和 app
+
+## rapp-state 状态服务（2026-11-26，规格 `docs/superpowers/specs/2026-11-26-rapp-state-design.md`，分支 `feat/rapp-state-p1`）
+
+- [x] P1：`rapp-state` 服务、`rapp-service` 的发件箱（终端程序状态）、附带服务（`local/services.json`）、`Share.kind` 和 `Op::StateSink` 找服务、`rapp state [on|off]`、进 macOS 和 Linux 安装包。release 构建的 `rapp-state` 二进制 1,850,784 字节（约 1.8 MB，本机 Apple 芯片）。规格 §18 第 4 条“hyper 进来以后安装包大多少”：还要打一次包，对比 zip 或 pkg 前后的大小
+- [ ] P1 实机检查：
+  - [ ] ① 两台真机，一台 `rapp state on`，另一台跑 Claude Code，`curl localhost:<分享号>/v1/queue` 里有 working、blocked、done
+  - [ ] ② 停状态服务期间让状态变 3 次，服务恢复后补到
+  - [ ] ③ 纯服务器上 `rapp state on`，在 Mac 上 `rapp hosts` 一次后，别的设备的 `rapp state` 都看到它
+  - [ ] ④ 没开状态服务的网里，`rapp state` 显示发件箱没在发
+- [ ] P2：app 接入（接入点设置、`/v1/watch`、`/v1/seen`，队列和需要你改从服务来，iOS 经内嵌 hub）。计划还没写；写之前先问用户规格 §17 第 3–5 条（队列里的程序状态行只从服务来；断开的会话、离线的设备不进全局；别处开着的会话只列出来、不自动打开）。要解决：纯服务器上开的状态服务，要等一台 GUI 设备看过一次它的分享表（`rapp hosts` 或分享页）才传得开，P2 里看要不要借 `list_apps` 的回复带出来（规格 §7.2）。还有规格 §18 第 3 条（iOS 前台 SSE 长连接是否稳）
+- [ ] P3：桌面和代报（`/v1/desk`、“别处开着”那一组、GUI 客户端推断状态代报、远程开启用设备间新请求 `SetService`）。计划还没写；写之前先问用户规格 §17 第 6 条
+- [ ] P4：`rapp emit`（IPC 的 `emit`、命令行、`RAPP_TERM`）。计划还没写
+- [ ] 规格 §18 第 1、2、5 条仍没验证：设备时钟差；发件箱对终端 `watch_terms` 的开销和会话从关到开的跟随；Windows 上 `rapp-service` 的现状

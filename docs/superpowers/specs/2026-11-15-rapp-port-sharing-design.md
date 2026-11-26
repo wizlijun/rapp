@@ -278,6 +278,10 @@ relay 规格里，经中继的每一条流都要在里面再做一次 TLS 握手
 - **存在哪**：设备数据目录 `local/shares.json`（0600，不进 git）。每项：端口、备注、只给谁、是否原样转发（§10.4）、是否放开公网网页（§10.3）。
 - 上限：一台设备最多分享 64 个端口（我定的）。
 
+**`Share.kind`（rapp-state P1）**：分享表的每一项可带可选字段 `kind`（`rust/service/src/shares.rs` 的 `Share`）。现在只有 `"state"`：这一项是 `rapp-state` 状态服务。没有 `kind` 的是普通分享，不写进 `shares.json`；旧设备忽略这个字段。`Op::Shares`、`Op::ListShares` 的回复和本机 IPC 的 `shares`、`hosts` 都带上它。用途见《rapp-state 设计》§7.2。
+
+**`Op::StateSink{id,port,on}`**：设备之间的一个请求，“设备 `id` 的端口 `port` 上有（`on:false`：没了）状态服务”，一行回复就关流（`rust/wire`，`rust/service/src/sink.rs`）。知道的设备告诉自己认识的设备，收到的记进 `local/state-sinks.json`。全部做法见《rapp-state 设计》§7.2。
+
 **命令只有四个**（操作评审 M6）：
 
 | 命令 | 做什么 |

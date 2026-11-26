@@ -30,8 +30,8 @@ rm -rf "$DIST" && mkdir -p "$DIST"
 echo "== swift (rapp-host, rapp-client)"
 swift build -c release
 
-echo "== rust (rapp-service, rapp-hub, rapp-term, rapp-cli)"
-(cd rust && cargo build --release -p rapp-service -p rapp-hub -p rapp-term -p rapp-cli)
+echo "== rust (rapp-service, rapp-hub, rapp-term, rapp-state, rapp-cli)"
+(cd rust && cargo build --release -p rapp-service -p rapp-hub -p rapp-term -p rapp-state -p rapp-cli)
 
 echo "== flutter (rapp.app)"
 # Universal builds fail in lipo with this Xcode; the GUI ships arm64 only.
@@ -41,7 +41,7 @@ echo "== bundle"
 APP=$DIST/stage/rapp.app
 mkdir -p "$DIST/stage"
 cp -R gui/build/macos/Build/Products/Release/rapp.app "$APP"
-cp rust/target/release/rapp-service rust/target/release/rapp-hub rust/target/release/rapp-term rust/target/release/rapp-cli "$APP/Contents/MacOS/"
+cp rust/target/release/rapp-service rust/target/release/rapp-hub rust/target/release/rapp-term rust/target/release/rapp-state rust/target/release/rapp-cli "$APP/Contents/MacOS/"
 cp .build/release/rapp-host .build/release/rapp-client "$APP/Contents/MacOS/"
 # Inside out: frameworks, helpers (with fixed identifiers), then the app (keeping its entitlements).
 SIGN=(codesign --force $(runtime_flags "$KIND") --sign "$SIGN_ID")
