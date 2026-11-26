@@ -549,6 +549,28 @@ async fn restore_reuses_key_and_prefills_without_running() {
 }
 
 #[tokio::test]
+async fn restore_never_answers_a_startup_question() {
+    let Some((_d, term, home)) = zsh_setup() else { return };
+    // A startup file that asks before the first prompt, for longer than the 2 s an unhooked shell is given.
+    std::fs::write(home.path().join(".zshrc"), "PS1='%# '\nread -k 1 'ans?[Y/n] '\necho \"GOT<$ans>\"\n").unwrap();
+    let k = "00000000000000a5";
+    let snap = Snapshot { v: 1, key: k.into(), name: "ask".into(), shell: "/bin/zsh".into(), cmd: Some("echo RAN".into()), prog: Some("echo".into()), started: 1, saved: 2, ..Default::default() };
+    saved::write(&term, &snap).unwrap();
+    let mut w = zsh_window(&term, home.path(), &["--restore", k]);
+    w.wait_output("[Y/n]");
+    std::thread::sleep(Duration::from_secs(3));
+    assert!(!w.output().contains("GOT<"), "the command answered the question: {:?}", w.output());
+    w.type_in(b"n");
+    w.wait_output("GOT<n>");
+    // Typed at the prompt that follows.
+    let end = Instant::now() + WAIT;
+    while !w.output().split_once("GOT<n>").is_some_and(|(_, after)| after.contains("133;A\x07echo RAN")) {
+        assert!(Instant::now() < end, "never typed at the prompt: {:?}", w.output());
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[tokio::test]
 async fn restore_unknown_key_starts_fresh() {
     let d = short_dir();
     let k = "00000000000000b2";

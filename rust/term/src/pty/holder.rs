@@ -46,8 +46,11 @@ const DEFAULT_SIZE: (u16, u16) = (80, 24);
 const SNAPSHOT_QUIET: Duration = Duration::from_secs(2);
 /// ... or once things kept changing for this long, so a program that never settles is still saved.
 const SNAPSHOT_MAX_WAIT: Duration = Duration::from_secs(10);
-/// How long a restored terminal waits for its shell's first prompt before it pre-types the command anyway.
+/// How long a restored terminal waits for its shell's first prompt before it pre-types the command anyway, when the
+/// shell has no hook to mark its prompts.
 const PREFILL_WAIT: Duration = Duration::from_secs(2);
+/// How long a restored terminal waits for a hooked shell's first prompt; past it the command is not typed at all.
+const PREFILL_HOOKED_WAIT: Duration = Duration::from_secs(30);
 /// How often, and how far apart, a snapshot to restore that cannot be read is tried again.
 const RESTORE_TRIES: u32 = 5;
 const RESTORE_GAP: Duration = Duration::from_millis(200);
@@ -97,6 +100,20 @@ fn hook_launch(opts: &RunOpts, restore: Option<&super::shell::Restore>) -> Optio
     };
     let dir = super::shell::install(&opts.dir).ok()?;
     super::shell::launch(&opts.command, &dir, zdotdir, restore)
+}
+
+/// Whether the restored command is to be pre-typed now. A hooked shell marks its prompts, so it is typed only at the
+/// first one: whatever asks something before it (a `[Y/n]` in a startup file) must not get the command as its
+/// answer, and a shell that shows no prompt in `PREFILL_HOOKED_WAIT` never gets it. Without the hook there is no
+/// mark to wait for: it is typed after `PREFILL_WAIT`.
+async fn prefill_due(prompted: &tokio::sync::Notify, hooked: bool) -> bool {
+    match hooked {
+        true => tokio::time::timeout(PREFILL_HOOKED_WAIT, prompted.notified()).await.is_ok(),
+        false => {
+            let _ = tokio::time::timeout(PREFILL_WAIT, prompted.notified()).await;
+            true
+        }
+    }
 }
 
 /// Run the program until it exits or the window goes; its exit code.
@@ -275,8 +292,11 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
     let snapshots = tokio::spawn(keep_snapshot(shared.clone(), opts.dir.clone(), shell_of(&opts.command), started));
     if let Some(text) = prefill_text {
         let sh = shared.clone();
+        let hooked = hook.is_some();
         tokio::spawn(async move {
-            let _ = tokio::time::timeout(PREFILL_WAIT, sh.prompted.notified()).await;
+            if !prefill_due(&sh.prompted, hooked).await {
+                return;
+            }
             // Typed, never run: no line end, nor any other control character.
             let text: String = text.chars().filter(|c| !c.is_control()).collect();
             if !text.is_empty() {
@@ -838,6 +858,42 @@ impl Drop for Raw {
 mod tests {
     use super::*;
     use std::collections::VecDeque;
+
+    #[tokio::test(start_paused = true)]
+    async fn a_hooked_shell_is_pre_typed_only_at_its_prompt() {
+        // The first prompt comes after 3 s (a slow startup, a [Y/n] question first).
+        let n = Arc::new(tokio::sync::Notify::new());
+        let due = tokio::spawn({
+            let n = n.clone();
+            async move { prefill_due(&n, true).await }
+        });
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        assert!(!due.is_finished(), "not at 2 s: the shell has not prompted");
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        n.notify_one();
+        assert!(due.await.unwrap());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_hooked_shell_that_never_prompts_is_never_pre_typed() {
+        let n = tokio::sync::Notify::new();
+        let t = tokio::time::Instant::now();
+        assert!(!prefill_due(&n, true).await);
+        assert_eq!(t.elapsed(), PREFILL_HOOKED_WAIT);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_unhooked_shell_is_pre_typed_after_2_s() {
+        let n = tokio::sync::Notify::new();
+        let t = tokio::time::Instant::now();
+        assert!(prefill_due(&n, false).await);
+        assert_eq!(t.elapsed(), PREFILL_WAIT);
+        // A prompt already marked (the permit kept) is not waited for.
+        n.notify_one();
+        let t = tokio::time::Instant::now();
+        assert!(prefill_due(&n, true).await);
+        assert_eq!(t.elapsed(), Duration::ZERO);
+    }
 
     /// Hands out one chunk per read.
     struct Chunks(VecDeque<&'static [u8]>);
