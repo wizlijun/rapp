@@ -1433,3 +1433,16 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] 对齐 macOS `0.15.45`–`0.15.50`：补齐 `scripts/linux/rapp` 对 `term`、`state`、`load` 三个顶层 CLI 子命令的分发；修复 `rust/term/src/pty/fg.rs` Linux `execve` 测试竞态；补充 `TargetPlatform.linux` 下终端恢复（`term_restore_test.dart`）与常用语条按工具发命令（`phrase_strip_cmds_test.dart`）回归用例；扩充 `scripts/test-linux-launcher.py` 与 `scripts/test-linux-bundle.py` 端到端校验（覆盖 `rapp term restore --list/--forget`、`rapp state on/off` + `rapp-state` 伴随服务、`LinuxSampler` + `rapp load --json` / `rapp load pick --json`）。
 - [x] [v0.15.45](https://github.com/wizlijun/rapp/releases/tag/v0.15.45)（源码 `47f5046a`）与 [v0.15.50](https://github.com/wizlijun/rapp/releases/tag/v0.15.50)（源码 `e8b1627d`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致。
 - [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01545-parity.md`、`docs/superpowers/plans/2026-11-26-linux-01546-parity.md` 与 `docs/superpowers/plans/2026-11-26-linux-01550-parity.md`。
+
+## Windows 版：现在在 Windows 上关着的测试
+
+计划 A Task 7 规则 2：这些测试在 Windows 上挂了 `#[cfg(unix)]`，macOS / Linux 照常跑。到了写着的那一段，打开它，或者写出 Windows 的版本。
+
+- [ ] `rust/term/tests/cli.rs`、`pty.rs`、`serve.rs`、`shell_hook.rs`（整个文件）—— E 段做完时打开
+- [ ] `rust/term/src/pty/fg.rs::tests::status_roundtrips_without_new_fields` —— E 段做完时打开
+- [ ] `rust/term/src/pty/view.rs::tests::viewers_are_counted` —— E 段做完时打开
+- [ ] `rust/term/src/pty/shell.rs::tests::install_rewrites_on_version_change` —— E 段做完时打开
+- [ ] `rust/update/src/apply.rs::tests::exdev_copy_with_failed_delete_keeps_bundle_whole` —— G 段做完时打开（Windows 上只读目录挡不住删里面的文件，要换个挡法）
+- [ ] `services/state/src/disk.rs::tests::files_are_private`、`loose_modes_are_made_private` —— rapp-state 在 Windows 上自己设私有时打开（现在靠继承 `<数据根>\local` 的访问列表；哪一段做还没定，最晚 G 段打包 rapp-state 之前）
+- [ ] `rust/service/src/load/disks.rs::tests::hung_disk_is_unreadable_and_others_still_come` —— 不跟某一段走：要两块文件系统，等有两块盘的 Windows 测试机再写 Windows 版
+- [ ] `rust/service/src/load/disks.rs::tests::a_symlink_across_file_systems_is_the_target`、`a_symlink_does_not_change_the_mount` —— 不跟某一段走：Windows 上建符号链接要管理员或开发者模式；要测就改用目录联接（junction）

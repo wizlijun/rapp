@@ -83,6 +83,10 @@ async fn first_start_generates_id_and_password() {
             assert_eq!(mode & 0o777, 0o600, "{f}");
         }
     }
+    #[cfg(windows)]
+    for f in ["service.json", "ipc.token"] {
+        assert_eq!(rapp_net::private::acl(&home.path().join(f)).unwrap(), rapp_net::private::private_acl().unwrap(), "{f}");
+    }
     let st = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await;
     // B reaches A by `id@ip`: one per local IPv4, port shown as it is not 22028.
     let want_tail = format!(":{}", svc.port);
@@ -158,7 +162,7 @@ async fn open_splices_bytes_to_worker_and_kick_ends_it() {
 #[tokio::test]
 async fn open_unknown_worker_binary_is_an_error() {
     let a = service().await;
-    std::fs::remove_file(a.bins.path().join("rapp-host")).unwrap();
+    std::fs::remove_file(a.bins.path().join(format!("rapp-host{}", std::env::consts::EXE_SUFFIX))).unwrap();
     let ep = b_endpoint();
     let (conn, _) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
     let r = req(&conn, json!({"op":"open","app":"com.example.echo"})).await;
@@ -1230,7 +1234,7 @@ async fn lock_failure_is_recorded() {
 async fn linux_without_graphical_host_lists_capabilities_and_still_serves_terms_and_ports() {
     let home = tempfile::tempdir().unwrap();
     let bins = bins();
-    std::fs::remove_file(bins.path().join("rapp-host")).unwrap();
+    std::fs::remove_file(bins.path().join(format!("rapp-host{}", std::env::consts::EXE_SUFFIX))).unwrap();
     service_json(home.path());
     let svc = start_service(home.path(), bins.path(), Duration::from_secs(60)).await;
     let st = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await;
