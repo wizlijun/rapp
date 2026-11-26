@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
+import 'package:rapp/state/state_sync.dart';
+import 'package:rapp/ui/tokens.dart';
 import 'package:rapp/ui/load_row.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/needs_you.dart';
@@ -216,5 +218,40 @@ void main() {
     expect(find.text('mini 电池只剩 18%'), findsNothing);
     expect(s.prefs.loadSnooze.keys, ['m1\nbattery']);
     await staleLoads(tester);
+  });
+
+  testWidgets('grey_need_row_is_muted_counted_and_inert', (tester) async {
+    await setUpState(tester);
+    final dir = Directory.systemTemp.createTempSync('needs_grey');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final sync = FakeStateSync(dir.path)..ids['F'] = 'm1';
+    final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), stateSync: sync, clock: () => now);
+    addTearDown(st.dispose);
+    t.emit({'event': 'presence', 'id': 'm1', 'online': true});
+    await tester.runAsync(flush);
+    t.emit({'event': 'presence', 'id': 'm1', 'online': false});
+    await tester.runAsync(flush);
+    sync
+      ..status = StateStatus.connected
+      ..needs = [
+        {'fp': 'F', 'id': 'm1', 'session': 't1', 'kind': 'permission', 'since': 5},
+      ]
+      ..push();
+    await tester.pumpWidget(wrap(SizedBox(
+      width: 1000,
+      height: 1400,
+      child: Align(alignment: Alignment.topRight, child: SizedBox(height: 48, child: NeedsYouAnchor(state: st))),
+    )));
+    st.toggleCorner(Corner.needs);
+    await tester.pump();
+    final text = st.needs.firstWhere((n) => n.greyWord != null).text;
+    expect(find.text('$text · 设备离线'), findsOneWidget);
+    expect(tester.widget<Text>(find.text('$text · 设备离线')).style!.color, RappTokens.of(tester.element(find.text('$text · 设备离线'))).muted);
+    expect(find.text('打开'), findsNothing);
+    expect(tester.widget<Text>(find.byKey(const Key('needs-count'))).data, '${st.needs.length}');
+    await tester.tap(find.text('$text · 设备离线'));
+    await tester.pump();
+    expect(st.currentKey, isNull);
+    expect(st.corner, Corner.needs);
   });
 }

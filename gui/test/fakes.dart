@@ -298,6 +298,12 @@ class FakeStateSync extends StateSync {
   @override
   String? idOf(String fp) => ids[fp];
 
+  /// Session rows by `fp\nid`.
+  final Map<String, Map<String, Object?>> sessions = {};
+
+  @override
+  Map<String, Object?>? session(String fp, String id) => sessions['$fp\n$id'];
+
   @override
   bool fresh(Map<String, Object?> row) => freshEids.contains(row['eid']);
 

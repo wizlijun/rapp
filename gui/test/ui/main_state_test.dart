@@ -6199,6 +6199,83 @@ void main() {
     });
   });
 
+  group('state service needs', () {
+    late FakeStateSync sync;
+    late MainState st;
+    void setUpSt() {
+      s.dispose();
+      sync = FakeStateSync(tmp.path)..ids['F'] = '111';
+      st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), stateSync: sync, clock: () => DateTime.fromMillisecondsSinceEpoch(1000 * 1000));
+      addTearDown(st.dispose);
+    }
+
+    setUp(setUpSt);
+
+    Map<String, Object?> need(String session, {String id = '111', int since = 100, String? fp = 'F'}) =>
+        {'fp': ?fp, 'id': id, 'session': session, 'kind': 'permission', 'app': 'claude-code', 'msg': 'approve', 'since': since};
+    void connect(List<Map<String, Object?>> needs) {
+      sync
+        ..status = StateStatus.connected
+        ..needs = needs
+        ..push();
+    }
+
+    test('an offline device: its blocked terminal comes from the service, grey, counted', () async {
+      hub.termLists['111'] = TermList('111', terms: []);
+      t.emit({'event': 'presence', 'id': '111', 'online': true});
+      await pump();
+      t.emit({'event': 'presence', 'id': '111', 'online': false});
+      await pump();
+      sync.sessions['F\nt1'] = {'session': 't1', 'name': 'rapp'};
+      connect([need('t1')]);
+      final n = st.needs.where((x) => x.kind == NeedKind.terminal).single;
+      expect(n.greyWord, '设备离线');
+      expect(n.text, startsWith('rapp @ mini：'));
+      expect(n.at, 100);
+      expect(st.needCount, st.needs.length);
+      expect(st.needs.where((x) => x.greyWord != null), hasLength(1));
+      st.goToNeed(n);
+      expect(st.currentKey, isNull);
+    });
+
+    test('a device this app computes is not doubled and takes the service since', () {
+      TermRow term(String id) =>
+          TermRow(id, id, 'claude', null, 1, 0, 0, false, false, ps: const TermPs('blocked', seq: 1));
+      hub.termLists['111'] = TermList('111', terms: [term('t1'), term('t2')]);
+      connect([need('t1', since: 50)]);
+      final ns = st.needs.where((x) => x.kind == NeedKind.terminal).toList();
+      expect(ns.map((x) => x.target), ['t2', 't1']);
+      expect(ns[0].at, 1000);
+      expect(ns[1].at, 50);
+      expect(ns.every((x) => x.greyWord == null), isTrue);
+    });
+
+    test('a need from a device not in the host list is skipped', () {
+      connect([need('t1', id: '999')]);
+      expect(st.needs, isEmpty);
+    });
+
+    test('a need with no id resolves its fp through the state devices', () {
+      sync.ids['G'] = '222';
+      connect([
+        {'fp': 'G', 'session': 't9', 'kind': 'permission', 'since': 5},
+      ]);
+      final n = st.needs.single;
+      expect((n.kind, n.target, n.device, n.greyWord), (NeedKind.terminal, 't9', '222', null));
+      expect(n.title, 't9');
+    });
+
+    test('not connected: needs are what they were', () {
+      sync.needs = [need('t1')];
+      expect(st.needs, isEmpty);
+      TermRow term(String id) =>
+          TermRow(id, id, 'claude', null, 1, 0, 0, false, false, ps: const TermPs('blocked', seq: 1));
+      hub.termLists['111'] = TermList('111', terms: [term('t1')]);
+      expect(st.needs.single.at, 1000);
+      expect(st.needs.single.greyWord, isNull);
+    });
+  });
+
   group('terminal needs', () {
     TermRow row(String id, TermPs? ps, {bool dead = false}) =>
         TermRow(id, id.split(':').last, 'claude', null, 1, 0, 0, dead, false, ps: ps);

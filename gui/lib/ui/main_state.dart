@@ -98,9 +98,16 @@ enum NeedKind { session, device, terminal, app, resource }
 /// record key), or a load warning (device-load §8: [target] `<device>\n<item>`, [device] its device, [title] the
 /// item). Newer [seq] first.
 class NeedItem {
-  const NeedItem(this.kind, this.target, this.text, this.seq, {this.reconnectWord = '重连', this.device, this.title});
+  const NeedItem(this.kind, this.target, this.text, this.seq,
+      {this.reconnectWord = '重连', this.device, this.title, this.at = 0, this.greyWord});
   final String reconnectWord;
   final String? device, title;
+
+  /// Unix seconds it was first seen (the service's `since` for a service need); newest first.
+  final int at;
+
+  /// Why it cannot be followed (设备离线 / 已断开); null when it can. A grey row is counted but does nothing.
+  final String? greyWord;
   final NeedKind kind;
   final String target;
   final String text;
@@ -830,6 +837,7 @@ class MainState extends ChangeNotifier {
   /// A tap on a 需要你 row: a blocked terminal opens (or comes up), a dropped session comes on stage
   /// (its reconnect is there), a dropped device shows its panel.
   void goToNeed(NeedItem n) {
+    if (n.greyWord != null) return;
     switch (n.kind) {
       case NeedKind.terminal:
         if (!hubUsable) return;
@@ -1493,6 +1501,50 @@ class MainState extends ChangeNotifier {
   /// When (`_seq`) each blocked-terminal ask (device, session, ps.seq) was first seen; only orders [needs].
   final Map<String, int> _termNeedSeq = {};
 
+  /// When (Unix seconds) each need was first seen, same keys as [_termNeedSeq] plus `sess\n…` and `dev\n…`.
+  final Map<String, int> _needAt = {};
+
+  int _firstSeen(String key) => _needAt.putIfAbsent(key, () => _now().millisecondsSinceEpoch ~/ 1000);
+
+  /// The service's `since` for the need of terminal [session] on [id], else null.
+  int? _serviceSince(String id, String session) {
+    final sync = stateSync;
+    if (sync == null || !_fromService) return null;
+    for (final n in sync.needs) {
+      final nid = n['id'] is String ? n['id'] as String : (n['fp'] is String ? sync.idOf(n['fp'] as String) : null);
+      if (nid == id && n['session'] == session) {
+        final since = n['since'];
+        return since is num ? since.toInt() : null;
+      }
+    }
+    return null;
+  }
+
+  /// Blocked terminals of devices this app does not read itself (dropped, or not listed), from the service.
+  Iterable<NeedItem> _serviceNeeds(Set<String> seen) sync* {
+    final sync = stateSync!;
+    final local = {...?hub?.termLists.keys}..removeAll(_offlineSince.keys);
+    final hosts = {for (final h in hub?.hosts ?? const <HubHost>[]) h.id};
+    for (final n in sync.needs) {
+      final fp = n['fp'];
+      final rawId = n['id'];
+      final id = rawId is String ? rawId : (fp is String ? sync.idOf(fp) : null);
+      final session = n['session'];
+      if (id == null || session is! String || !hosts.contains(id) || local.contains(id)) continue;
+      final ps = termPs({'state': 'blocked', 'kind': n['kind'], 'app': n['app'], 'msg': n['msg']});
+      if (ps == null) continue;
+      final row = fp is String ? sync.session(fp, session) : null;
+      final nm = row?['title'] ?? row?['name'] ?? n['title'] ?? n['name'] ?? session;
+      final host = row?['host'] ?? n['host'];
+      final title = termDisplayName(nm is String ? nm : session, host is String ? host : null);
+      final since = n['since'];
+      final seq = n['seq'];
+      seen.add('svc\n$id\n$session');
+      yield NeedItem(NeedKind.terminal, session, '$title @ ${deviceName(id)}：${termAskWord(ps)}', seq is num ? seq.toInt() : 0,
+          device: id, title: title, at: since is num ? since.toInt() : 0, greyWord: offlineWord(id, session));
+    }
+  }
+
   /// Everything waiting for the person, newest first. Handled things leave on their own.
   List<NeedItem> get needs {
     final seen = <String>{};
@@ -1500,10 +1552,11 @@ class MainState extends ChangeNotifier {
       for (final r in _records.values)
         if (r.phase == Phase.disconnected)
           NeedItem(NeedKind.session, r.key, '${r.appName} @ ${deviceName(r.id)} 已断开：${disconnectWord(r.reason)}', r.seq,
-              reconnectWord: reconnectLabel(r.reason)),
+              reconnectWord: reconnectLabel(r.reason), at: _firstSeen('sess\n${r.key}')),
       for (final h in hub?.hosts ?? const <HubHost>[])
         if (_seenOnline.contains(h.id) && _offlineSince.containsKey(h.id))
-          NeedItem(NeedKind.device, h.id, '${deviceName(h.id)} 离线', _offlineSince[h.id]!),
+          NeedItem(NeedKind.device, h.id, '${deviceName(h.id)} 离线', _offlineSince[h.id]!,
+              at: _firstSeen('dev\n${h.id}')),
       // A device that dropped keeps its last list; its terminals cannot be opened, so they are not asks.
       for (final e in hub?.termLists.entries ?? const <MapEntry<String, TermList>>[])
         if (!_offlineSince.containsKey(e.key))
@@ -1515,7 +1568,7 @@ class MainState extends ChangeNotifier {
               final title = termDisplayName(r.shown, r.host);
               return NeedItem(NeedKind.terminal, r.id, '$title @ ${deviceName(e.key)}：${termAskWord(r.ps!)}',
                   _termNeedSeq.putIfAbsent(key, () => ++_seq),
-                  device: e.key, title: title);
+                  device: e.key, title: title, at: _serviceSince(e.key, r.id) ?? _firstSeen(key));
             }(),
       // An app whose screen shows a sure block waits for the person; a guess (or out-of-date rules) does not.
       for (final r in _records.values)
@@ -1525,7 +1578,7 @@ class MainState extends ChangeNotifier {
             seen.add(key);
             return NeedItem(NeedKind.app, r.key,
                 '${r.appName} @ ${deviceName(r.id)}：${termAskWord(remote[r.sid]!.inferredPs!)}',
-                _termNeedSeq.putIfAbsent(key, () => ++_seq));
+                _termNeedSeq.putIfAbsent(key, () => ++_seq), at: _firstSeen(key));
           }(),
       // A load warning on an online device (device-load §8), unless snoozed; a rise comes first again.
       for (final MapEntry(key: id, value: l) in deviceLoads.entries)
@@ -1536,11 +1589,19 @@ class MainState extends ChangeNotifier {
               seen.add(key);
               return NeedItem(NeedKind.resource, '$id\n${w.item}', '${loadDeviceName(id)} ${w.text}',
                   _termNeedSeq.putIfAbsent(key, () => ++_seq),
-                  device: id, title: w.item);
+                  device: id, title: w.item, at: _firstSeen(key));
             }(),
     ];
+    if (_fromService) out.addAll(_serviceNeeds(seen));
+    for (final r in _records.values) {
+      if (r.phase == Phase.disconnected) seen.add('sess\n${r.key}');
+    }
+    for (final h in hub?.hosts ?? const <HubHost>[]) {
+      if (_seenOnline.contains(h.id) && _offlineSince.containsKey(h.id)) seen.add('dev\n${h.id}');
+    }
     _termNeedSeq.removeWhere((k, _) => !seen.contains(k));
-    out.sort((a, b) => b.seq.compareTo(a.seq));
+    _needAt.removeWhere((k, _) => !seen.contains(k));
+    out.sort((a, b) => b.at != a.at ? b.at.compareTo(a.at) : b.seq.compareTo(a.seq));
     return out;
   }
 
