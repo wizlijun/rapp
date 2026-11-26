@@ -181,9 +181,9 @@ pub async fn serve_request(state: &Arc<State>, mut s: Pipe, peer: Peer) -> Resul
 }
 
 /// The `list_apps` reply: the apps, A's missing permissions (newer macOS hosts only), what this
-/// device can serve, and its rApp version (shown under its column in B's overview).
+/// device can serve, what system it is and its rApp version (both shown on its column in B's overview).
 fn list_apps_reply(apps: Value, perms: Option<Value>, caps: Value) -> Value {
-    let mut r = json!({"apps": apps, "capabilities": caps, "version": env!("CARGO_PKG_VERSION")});
+    let mut r = json!({"apps": apps, "capabilities": caps, "os": workers::os_name(), "version": env!("CARGO_PKG_VERSION")});
     if let Some(perms) = perms {
         r["permissions"] = perms;
     }
@@ -226,6 +226,9 @@ pub async fn serve_value(state: &Arc<State>, mut s: Pipe, v: Value, peer: Peer) 
             | Op::ForgetTerms { .. }
             | Op::EndTerm { .. }),
         ) => crate::term::request(state, &mut s, &peer, op).await,
+        Ok(op @ (Op::WatchLabels | Op::SetLabel { .. } | Op::ResetLabel { .. })) => {
+            crate::labels::request(state, &mut s, &peer, op).await
+        }
         Ok(Op::Open { app, .. }) if rapp_term::id::is_term(&app) => crate::term::open(state, &mut s, &app, peer).await,
         Ok(Op::Open { app, side }) => open(state, s, &app, side, peer).await,
         Ok(Op::ListShares) => crate::forward::serve_list(state, s, peer).await,
@@ -254,15 +257,12 @@ fn open_fields(app: &str, side: bool) -> Value {
 }
 
 async fn open(state: &Arc<State>, mut s: Pipe, app: &str, side: bool, peer: Peer) -> Result<()> {
-    // Counts as "in use" for the updater from now until the session ends.
-    let _opening = match crate::update::begin_open(state) {
-        Ok(g) => g,
-        Err(e) => {
-            let r = err(e);
-            log_request(state, &peer, open_fields(app, side), &r);
-            return reply_and_finish(&mut s, r).await;
-        }
-    };
+    // Refused while an install goes in; counts as remote use for the auto-update.
+    if let Err(e) = crate::update::begin_open(state) {
+        let r = err(e);
+        log_request(state, &peer, open_fields(app, side), &r);
+        return reply_and_finish(&mut s, r).await;
+    }
     let (port, token) = match workers::start_session(state, app).await {
         Ok(w) => w,
         Err(e) => {
@@ -374,6 +374,7 @@ mod list_apps_tests {
         assert_eq!(r["version"], env!("CARGO_PKG_VERSION"));
         assert!(r.get("permissions").is_none());
         assert_eq!(r["capabilities"]["graphical"], true);
+        assert_eq!(r["os"], crate::workers::os_name());
         let r = list_apps_reply(json!([]), Some(json!({"accessibility": true})), json!({}));
         assert_eq!(r["permissions"]["accessibility"], true);
         assert_eq!(r["version"], env!("CARGO_PKG_VERSION"));

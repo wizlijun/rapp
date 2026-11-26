@@ -96,6 +96,8 @@ pub struct State {
     pub forward_log: crate::forward_log::ForwardLog,
     /// The ports this device shares (`shares.json`).
     pub shares: crate::shares::Shares,
+    /// The titles and notes the user gave this device's sessions (`labels.json`).
+    pub labels: crate::labels::Labels,
     /// The local ports that carry to other devices' shares.
     pub maps: crate::maps::Maps,
     /// The share numbers other devices are seen to use.
@@ -114,6 +116,8 @@ pub struct State {
     pub(crate) pacer: Arc<crate::pace::Pacer>,
     /// Sends requests to other devices (LAN first, then the relay).
     pub outbound: rapp_conn::dial::Outbound,
+    /// The last remote use and the GUI's remote windows (what the auto-update waits out).
+    pub activity: crate::activity::Activity,
 }
 
 impl State {
@@ -155,6 +159,7 @@ impl State {
 
     /// The new session's sid, its kick, and what wakes it when it is marked taken over.
     pub fn add_session(&self, peer: &Peer, app: &str, side: bool) -> (u64, Arc<Notify>, Arc<Notify>) {
+        self.activity.touch();
         let (kick, taken_notify) = (Arc::new(Notify::new()), Arc::new(Notify::new()));
         let since = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let mut s = self.sessions.lock().unwrap();

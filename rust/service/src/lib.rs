@@ -1,5 +1,6 @@
 //! rapp-service (spec §3): A side. Authenticates B, runs `rapp-host` workers, serves local IPC.
 
+mod activity;
 pub mod autolock;
 mod channel;
 mod cm;
@@ -8,6 +9,7 @@ mod data;
 mod forward;
 pub mod forward_log;
 mod ipc;
+mod labels;
 mod maps;
 mod numbers;
 mod own;
@@ -101,6 +103,11 @@ pub struct UpdateOpts {
     pub gui_wait: Duration,
     /// The file the pkg writes its install level to; `None` skips the check (install-level spec).
     pub install_level: Option<PathBuf>,
+    /// An auto install waits until nobody used this Mac, here or from far away, for this long.
+    pub quiet: Duration,
+    /// After an auto install found rApp still open once the GUI was asked to quit, the next try
+    /// waits this long, so the GUI does not quit and come back every `idle_poll`.
+    pub auto_backoff: Duration,
 }
 
 impl UpdateOpts {
@@ -116,6 +123,8 @@ impl UpdateOpts {
             healthy_after: Duration::from_secs(30),
             gui_wait: Duration::from_secs(10),
             install_level: Some(PathBuf::from(rapp_update::INSTALL_LEVEL_FILE)),
+            quiet: Duration::from_secs(600),
+            auto_backoff: Duration::from_secs(30 * 60),
         }
     }
 }
@@ -148,6 +157,10 @@ impl Service {
         let (shares, unreadable) = shares::Shares::load(&opts.home);
         if let Some(why) = unreadable {
             log.event(Lvl::Warn, "shares_unreadable", json!({"err": why}));
+        }
+        let (labels, unreadable) = labels::Labels::load(&opts.home);
+        if let Some(why) = unreadable {
+            log.event(Lvl::Warn, "labels_unreadable", json!({"err": why}));
         }
         let (maps, unreadable) = maps::Maps::load(&opts.home, opts.map_ports.0, opts.map_ports.1);
         if let Some(why) = unreadable {
@@ -188,6 +201,7 @@ impl Service {
             relay_settings: tokio::sync::watch::channel(0).0,
             forward_log: forward_log::ForwardLog::new(log.clone()),
             shares,
+            labels,
             maps,
             numbers: numbers::Numbers::new(),
             own: own::Own::new(opts.own_ports),
@@ -197,6 +211,7 @@ impl Service {
             channels: opts.channels,
             pacer: pace::Pacer::new(opts.pacing),
             outbound: rapp_conn::dial::Outbound::new(client_ep, identity.clone(), name),
+            activity: Default::default(),
         };
         let id = state.cfg.lock().unwrap().id.clone();
         let version = env!("CARGO_PKG_VERSION");

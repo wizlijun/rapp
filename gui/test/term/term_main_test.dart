@@ -218,7 +218,11 @@ void main() {
     expect(s.labelOf(AppRef('111', app, 'zsh')), 'codex · zsh');
     await tester.pumpWidget(wrap(SizedBox(width: 330, height: 400, child: SessionsTab(state: s))));
     expect(find.text('codex · zsh'), findsOneWidget);
-    expect(find.text('CLI · 局域网'), findsOneWidget);
+    // The side panel's card is the overview's: CLI, then what the session is doing; no route.
+    // Embedded and up: the traffic branch, which says CLI too.
+    expect(find.text('CLI · '), findsOneWidget);
+    expect(find.text('0 KB/s'), findsOneWidget);
+    expect(find.textContaining('局域网'), findsNothing);
   });
 
   testWidgets('the title follows a rename', (tester) async {

@@ -217,6 +217,12 @@ void main() {
       svc.extraStatus = {...changed, 'relay_error': 'bad key'};
       await tester.tap(find.text('保存'));
       await tester.runAsync(() => until(() => svc.received.any((c) => c['cmd'] == 'set_relay')));
+      // The refresh after it reads the status, then the labels: the dialog closes once both are back.
+      bool refreshed() => svc.received.skipWhile((c) => c['cmd'] != 'set_relay').any((c) => c['cmd'] == 'labels');
+      for (var i = 0; i < 50 && !refreshed(); i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await tester.pump();
+      }
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
       await tester.pumpAndSettle();
       expect(svc.received.lastWhere((c) => c['cmd'] == 'set_relay'),

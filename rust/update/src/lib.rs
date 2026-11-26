@@ -28,9 +28,20 @@ pub const INSTALL_LEVEL: u32 = 1;
 pub const INSTALL_LEVEL_FILE: &str = "/Library/Application Support/rapp/install-level";
 /// Where to get the pkg when the running app needs it run again.
 /// Where the pkg links the bundled rapp-cli. ps shows a process started through it by this path,
-/// not the bundle's, so the in-use check (K17) looks for it too.
+/// not the bundle's; it never blocks an install (cli-update §5.1: `rapp update` runs through it).
 pub const CLI_LINK: &str = "/usr/local/bin/rapp";
 pub const RELEASES_PAGE: &str = "https://github.com/wizlijun/rapp/releases/latest";
+
+/// The arguments `runner::IOREG` is run with.
+pub const IOREG_ARGS: [&str; 6] = ["-c", "IOHIDSystem", "-d", "4", "-k", "HIDIdleTime"];
+
+/// The first `"HIDIdleTime" = <ns>` in ioreg's output.
+pub fn parse_hid_idle(out: &str) -> Option<std::time::Duration> {
+    out.lines().find_map(|l| {
+        let (_, rest) = l.split_once("\"HIDIdleTime\" = ")?;
+        rest.trim().parse::<u64>().ok().map(std::time::Duration::from_nanos)
+    })
+}
 
 /// True when the installer that ran here is older than this build: no level file, one that is not
 /// a number, or a number below [INSTALL_LEVEL].
@@ -207,6 +218,14 @@ pub fn now_secs() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hid_idle_parses() {
+        let out = "    | |     \"HIDIdleTime\" = 103471775250\n";
+        assert_eq!(super::parse_hid_idle(out), Some(std::time::Duration::from_nanos(103471775250)));
+        assert_eq!(super::parse_hid_idle(""), None);
+        assert_eq!(super::parse_hid_idle("\"HIDIdleTime\" = x"), None);
+    }
+
     #[test]
     fn reinstall_until_the_level_is_reached() {
         use super::needs_reinstall;

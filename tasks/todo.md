@@ -1239,3 +1239,65 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 快照存命令时，双引号里的 `\"` 没跳过：`TOKEN="abc\" def" claude` 会存成 `def" claude`，漏出值的一部分。做法：`strip_assignments` 在双引号里也认 `\`。
 - [ ] 规格的密钥规则表补上 `docker/podman login -p`（代码已拦）。
 - [ ] `rust/term/tests/shell_hook.rs`：`strip_osc` 插进了 `home()` 和它的注释之间，把注释挪回 `home()` 上。
+
+## Linux 0.15.38 新建终端防重开与前台程序标题对齐与发布（2026-11-26）
+
+- [x] 对齐 macOS 0.15.37：`rapp-term serve` 跳过请求方已断开的排队 `open`、`rapp-hub` 禁止重发 `open_term`/`end_term` 并将 `open_term` 超时放宽至 45 秒、GUI 单设备「新建」串行互斥（提示「正在新建终端，请稍候」），以及文字终端标题显示前台程序 `<程序> · <标题>` 且 `CLI` 移至副标题。
+- [x] 补充 `TargetPlatform.linux` 回归用例（覆盖总览终端块 `claude · ~/git/rapp · 2` 前台标题、`CLI · …` 副标题与「新建」单并发防重开提示）；Flutter 3.50.0 全量 3266 项通过（3 跳过），`analyze` 无 error/warning；Rust 全套 clippy `-D warnings` 与测试通过。
+- [x] [Linux v0.15.38](https://github.com/wizlijun/rapp/releases/tag/v0.15.38) 已发布（源码 `8ac509fe`，`--latest=false`）；两包 41 文件逐字节一致、14 个 ELF 依赖完整、`BUILD-INFO.json` 与隔离网络命名空间服务/CLI/端口共享测试通过；三个远端附件大小与 SHA256 与本地一致，macOS Latest 保留 `v0.15.37`。
+- [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01538-parity.md`。
+
+## rapp update / 自动升级（规格：`docs/superpowers/specs/2026-11-26-rapp-cli-update-design.md`，分支 `feat/cli-update`）
+- [x] 服务：记最后一次远程活动和 GUI 的远程窗口数；所有安装都先请 GUI 退出（`quit_gui`），装好再打开；自动升级只在 10 分钟没人操作时装
+- [x] CLI：`rapp update`、`update check`、`update status`、`update rollback`，`--json`、`--yes`、`--timeout`，退出码按 §5.4
+- [x] GUI：看到 `quit_gui` 就退出（主窗口和 `--cm` 窗口），报告远程窗口数，文案「10 分钟没人操作时会自动装好」
+- 第一次升级到带这个功能的版本，还要手工点一次「立即升级」；之后才会自动装
+- 实机检查（要等一个比它更新的版本发布出来才能做，§5.8）：
+  - [ ] 1. 开着几个文本终端，里面跑着 claude，执行 `rapp update`：升级完成，终端里的程序照样跑，窗口照样能用
+  - [ ] 2. GUI 开着时执行 `rapp update`：GUI 退出，装好后重新打开，没有弹 ⌘Q 确认
+  - [ ] 3. MacBook-M4-Pro 连着在看终端，但两边都 10 分钟不碰：自动装上，M4-Pro 那边断开几秒后自己重连
+  - [ ] 4. 本机一直在打字：不自动装（`rapp update status` 不显示原因；日志里 `update_auto_wait` 写着「最近本机有人操作」）
+  - [ ] 5. M4-Pro 一直往终端里输入：不自动装
+  - [ ] 5a. 本机开着一个看别的设备桌面的远程窗口：不自动装；只开着文本终端标签页：照样自动装，重开后标签页恢复
+  - [ ] 6. `rapp update --json`、`rapp update check --json`、`rapp update status --json` 的输出能被 `jq` 解析，退出码符合 §5.4
+  - [ ] 7. `rapp update --timeout 1`：退出码 5
+  - [ ] 8. 开着「rApp 连接管理」小窗（`--cm`）时执行 `rapp update`：小窗也关掉，升级不会因为它卡住
+- 审查留下的两条小问题（没修）：
+  - [ ] ps 的 `comm` 分不出 `--cm` 小窗和主窗口：上次服务留下的孤儿 `--cm` 会被当成「主窗口开着」，升级后多开一次主窗口（要改读 `args=`）
+  - [ ] 安装中途 panic 会让 `quit_gui` 一直是 true，GUI 一打开就退，直到服务重启（可用 drop guard 清掉）
+
+## 设备系统图标（2026-11-26，规格 `docs/superpowers/specs/2026-11-26-rapp-device-os-marks-design.md`，计划 `docs/superpowers/plans/2026-11-26-device-os-marks.md`）
+
+- [x] service 的 `list_apps` 回报 `os`（macos / windows / linux / omarchy）；hub 记进 hosts.json 并转给 GUI；总览每个设备列在状态灯左边画单色系统图标（9 种，含「未知」），悬停显示系统名。分支 `feat/device-os-marks`。
+- [ ] 实机检查：① Mac 本机列显示苹果；② 已升级的另一台 Mac / Omarchy / Linux 列显示对的图标；③ 未升级的设备显示「未知」，升级后变对；④ 设备离线后图标还在；⑤ iPad、iPhone 本机列是平板 / 手机外形加苹果；⑥ 三套主题下都看得清；⑦ 悬停显示系统名。
+
+## 会话标注（2026-11-26，规格 `docs/superpowers/specs/2026-11-26-rapp-session-labels-design.md`，计划 `docs/superpowers/plans/2026-11-26-rapp-session-labels.md`，分支 `feat/session-labels`）
+
+- [x] 第一期：被控端服务存 `labels.json`（标题 ≤64 字、备注 ≤200 字），新 Op `WatchLabels` / `SetLabel` / `ResetLabel`、`OpenTerm.label_from`；本机 IPC `labels` / `set_label` / `reset_label`；hub 每台在线设备一个标注 watch，推 `labels` 事件，旧设备推 `unsupported`
+- [x] GUI：总览、顶栏会话列表、侧栏会话页、「打开应用」菜单都显示标注标题和备注；卡片右键 / 长按「改标题和备注…」「还原」；有标注但没打开的会话排在所属分组末尾（「没有打开 · 打开」或「已停止 · 启动」，后者在家目录新开并搬走标注）；本机列「正在被接入」卡片并进同一张卡片，下面列出「有标注的会话」
+- 第二期（等 `feat/term-restore` 合入后做，规则见规格 §7.2）：
+  - [ ] 钉住：标注表里的 `term:pty:<key>` 交给 serve，holder 在 shell 退出 /「结束终端」时不删钉住的快照，改记 `ended`
+  - [ ] `HostRow.saved` 加 `pinned`、`ended`；`ended` 的不进「恢复上次的终端」，钉住的不参加 30 天 / 50 个清理，`ForgetTerms` 跳过
+  - [ ] 「启动」有快照时用 `RestoreTerms{keys:[key]}` 恢复原目录；还原标注时解除钉住，已 `ended` 的快照删掉
+- 小项（审查时看到，不急）：
+  - [ ] 状态队列那几行（`_trackPrograms`、`termDisplayName`）和「已结束 …」提示还用默认名，没用标注标题
+  - [ ] 设备关了终端会话时，有标注的终端仍显示「已停止 · 启动」，点了会失败；应隐藏或说明
+- 实机检查：
+  - [ ] 1. A 上给一个终端改标题和备注，B、iPad 上同一张卡马上变；B 改回来，A 也变
+  - [ ] 2. 退出重开 GUI、重启被控端服务：标注还在
+  - [ ] 3. 「还原」后标题回到默认名，提示「已还原，标题回到 …」；没打开的那张卡消失
+  - [ ] 4. 有标注的终端里 `exit`：每台客户端都出「已停止 · 启动」，点「启动」在家目录新开，标注跟过去，提示「原来的目录没有记下，已在家目录新开」
+  - [ ] 5. 有标注的图形 App 没打开：卡片在设备列末尾写「没有打开 · 打开」，点了打开；不计入顶部计数
+  - [ ] 6. 被控端本机列：被接入的卡片显示标注，右键能改；没人接入的有标注会话列在「有标注的会话」下，能改能还原
+  - [ ] 7. 连一台没升级的设备：卡片没有标注菜单，其他照常
+  - [ ] 8. 设备离线：没打开的标注卡收起；已打开的卡菜单变灰，写「设备离线，连上后再改」
+  - [ ] 9. 标题 65 个字、标题里有换行：对话框里红字说明，不关闭；备注里的换行变成空格
+  - [ ] 10. 按 App 分组时，改了标题的会话仍在原来那个 App 组里
+  - [ ] 11. `service.log` 里只记 `set_label` 这件事，不出现标题、备注和 app
+
+## Linux 0.15.42 统一会话卡片、rapp update 命令与设备系统图标对齐与发布（2026-11-26）
+
+- [x] 对齐 macOS 0.15.39–0.15.41：顶栏、侧栏「会话」页与总览统一 `SessionBlock` / `FavoriteBlock` 卡片；补齐 Linux 启动脚本 `rapp update` 分发与 `rapp-cli` 在 Linux 下的当前版本回报及发布页链接映射（`not_launchd`，退出码 `7`）；核对实机 `/usr/share/omarchy/shell` 识别 `omarchy` 系统图标。
+- [x] 补充 `TargetPlatform.linux` 侧栏统一卡片/常用终端回归用例（`gui/test/ui/side_panel_test.dart`）及打包启动器/集成断言（`scripts/test-linux-launcher.py`、`scripts/test-linux-bundle.py`）；Flutter 3.50.0 全量 3282 项通过（4 跳过），Rust 全套 clippy `-D warnings` 与测试通过。
+- [x] [Linux v0.15.42](https://github.com/wizlijun/rapp/releases/tag/v0.15.42) 已发布（源码 `018e8d3b`，`--latest=false`）；两包 41 文件逐字节一致、14 个 ELF 依赖完整、`BUILD-INFO.json` 与隔离网络命名空间测试通过；三个远端附件大小与 SHA256 与本地一致，保留 macOS Latest。
+- [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01542-parity.md`。

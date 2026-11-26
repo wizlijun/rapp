@@ -47,4 +47,16 @@ void main() {
     expect(const IosPaths('/a/Library/Application Support', '/a/Documents').dataRoot,
         '/a/Library/Application Support/rapp');
   });
+
+  test('idiom: pad or phone from the channel, empty when it says nothing', () async {
+    const channel = MethodChannel('test/ios-idiom');
+    Object? answer = 'pad';
+    final m = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    m.setMockMethodCallHandler(channel, (c) async => c.method == 'idiom' ? answer : null);
+    addTearDown(() => m.setMockMethodCallHandler(channel, null));
+    final ios = IosChannel(channel);
+    expect(await ios.idiom(), 'pad');
+    answer = null;
+    expect(await ios.idiom(), '');
+  });
 }

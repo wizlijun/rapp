@@ -1,5 +1,6 @@
 // Session list model: entries, grouping, prev/next stepping.
 import '../hub_client.dart' show TermPs;
+import '../labels.dart';
 import '../term/term_id.dart';
 import 'lamp.dart';
 import 'projects.dart';
@@ -26,7 +27,15 @@ class SessionEntry {
     this.ps,
     this.inferred = false,
     this.fg,
+    this.label,
+    this.standby,
   });
+
+  /// The title and note the user gave this session on its device; null: none (or the device predates labels).
+  final SessionLabel? label;
+
+  /// Not open in this window: a card that stands for a labelled session (see [Standby]); null for an open one.
+  final Standby? standby;
 
   /// A text terminal's program in front (claude, codex, zsh), from its live row; null when not known.
   final String? fg;
@@ -64,8 +73,23 @@ class SessionEntry {
 
   String get key => '$id/$app';
 
-  /// What the session is called wherever it is listed: `<program> · <name>` for a text terminal ([termTitle]).
-  String get title => isTermApp(app) ? termTitle(appName, fg: fg) : appName;
+  /// What the session is called when it has no label: `<program> · <name>` for a text terminal ([termTitle]).
+  String get defaultTitle => isTermApp(app) ? termTitle(appName, fg: fg) : appName;
+
+  /// What the session is called wherever it is listed: its label's title, else [defaultTitle].
+  String get title => label?.title.isNotEmpty == true ? label!.title : defaultTitle;
+
+  /// The label's note; empty when there is none.
+  String get note => label?.note ?? '';
+}
+
+/// Why a labelled session's card is there without being open in this window.
+enum Standby {
+  /// Running on its device, not open here: 「打开」.
+  open,
+
+  /// A text terminal that is gone: 「启动」 opens a new one that takes its label.
+  stopped,
 }
 
 /// The open button's word for a row in [lamp]'s state (K10).
@@ -93,6 +117,13 @@ class SessionGroup {
 }
 
 const otherGroupTitle = '未归项目的';
+
+/// [groups] with each group's standing cards ([SessionEntry.standby]) moved to its end, in their order.
+List<SessionGroup> standLast(List<SessionGroup> groups) => [
+      for (final g in groups)
+        SessionGroup(g.title, [...g.entries.where((e) => e.standby == null), ...g.entries.where((e) => e.standby != null)],
+            projectId: g.projectId),
+    ];
 
 /// [all] sorted by device, then app name; stable.
 List<SessionEntry> _byDeviceThenApp(List<SessionEntry> all) {
@@ -127,7 +158,8 @@ List<SessionGroup> groupSessions(List<SessionEntry> all, Grouping g,
     if (rest.isNotEmpty) groups.add(SessionGroup(otherGroupTitle, rest));
     return groups;
   }
-  String titleOf(SessionEntry e) => g == Grouping.device ? e.device : e.title;
+  // By app: what it is, not what the user called it (a label does not move a session to a group of its own).
+  String titleOf(SessionEntry e) => g == Grouping.device ? e.device : e.defaultTitle;
   final byTitle = <String, List<SessionEntry>>{};
   for (final e in _byDeviceThenApp(all)) {
     byTitle.putIfAbsent(titleOf(e), () => []).add(e);

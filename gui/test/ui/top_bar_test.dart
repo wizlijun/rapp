@@ -15,6 +15,7 @@ import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/needs_you.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/project_menu.dart';
+import 'package:rapp/ui/session_block.dart';
 import 'package:rapp/ui/session_model.dart';
 import 'package:rapp/ui/session_switcher.dart';
 import 'package:rapp/ui/tokens.dart';
@@ -185,6 +186,22 @@ void main() {
       await tester.pump();
       expect(s.currentKey, '111/Mail');
       expect(s.corner, isNull);
+    });
+
+    testWidgets('each row in the list is the overview block: the same words, no route', (tester) async {
+      await tester.pumpWidget(wrap(top()));
+      await three(tester);
+      await tester.tap(find.byKey(const Key('session-block')));
+      await tester.pump();
+      final row = find.byKey(const ValueKey('switch-222/Notes'));
+      expect(find.descendant(of: row, matching: find.byType(SessionBlock)), findsOneWidget);
+      final words = [
+        for (final w in tester.widgetList<Text>(find.descendant(of: row, matching: find.byType(Text)))) w.data,
+      ];
+      final e = s.entries.firstWhere((e) => e.key == '222/Notes');
+      // The overview's second line for a session that is up with no traffic data: its lamp word.
+      expect(words, [e.title, e.lamp == Lamp.active ? '活动' : lampWord(e.lamp)]);
+      expect(words.any((w) => w!.contains('局域网')), isFalse);
     });
 
     testWidgets('the list groups by device even when the panel groups by app', (tester) async {

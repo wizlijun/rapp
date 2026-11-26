@@ -18,6 +18,8 @@ pub trait Carrier: Send + Sync + 'static {
     fn log(&self) -> &Log;
     /// A forward to `port` of the device `id`; the error is the reason the log gives.
     fn open(&self, id: &str, port: u16) -> impl Future<Output = Result<Pipe, String>> + Send;
+    /// Bytes moved over a map's connection lately (at most every `TRAFFIC_TICK`).
+    fn traffic(&self) {}
 }
 
 /// `ensure` for the shares `(port, wanted)` of the device `id`: away from `avoid` (numbers seen
@@ -97,7 +99,8 @@ async fn carry<C: Carrier>(c: &C, mut tcp: TcpStream, local: u16) {
     };
     match c.open(&map.id, map.port).await {
         Ok(mut far) => {
-            let _ = rapp_net::quic::splice(&mut tcp, &mut far).await;
+            let meter = rapp_net::quic::Meter::default();
+            let _ = rapp_net::quic::splice_watched(&mut tcp, &mut far, &meter, rapp_net::quic::TRAFFIC_TICK, || c.traffic()).await;
         }
         Err(e) => {
             let fields = json!({"id": map.id, "port": map.port, "local": map.local, "reason": e});

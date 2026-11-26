@@ -234,7 +234,7 @@ class _DevicesTabState extends State<DevicesTab> {
   SessionEntry? _session(String id, String app) {
     for (final g in state.groups) {
       for (final e in g.entries) {
-        if (e.key == '$id/$app') return e;
+        if (e.key == '$id/$app' && e.standby == null) return e;
       }
     }
     return null;

@@ -87,15 +87,19 @@ dropdown menu, overview Local column inbound sessions, OSC 7501 program
 status, GUI app state rules client support, top-bar status queue, Needs You
 direct jump, OSC 0/1/2 terminal titles (with · 2 numbering on clashes),
 multi-terminal Ctrl+Shift+T / Ctrl+Shift+W / End Terminal / clean exit /
-host `<dir> · <prog>` window titles, and overview favorite Terminal
-restore/creation share the macOS 0.15.35 layout and rules.
+host `<dir> · <prog>` window titles, foreground-program terminal titles with
+CLI subtitle, single-flight New Terminal, unified SessionBlock / FavoriteBlock
+cards across the overview, top-bar session list and side-panel Sessions tab,
+overview device OS marks (detecting Omarchy via `/usr/share/omarchy/shell` vs
+Linux), and favorite Terminal restore/creation share the macOS 0.15.41 layout
+and rules.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and
 reattach without reconnecting. This release uses protocol v16 (compatible with
-macOS 0.15.35); update both peers when coming from protocol v15. Incoming GUI
+macOS 0.15.35–0.15.41); update both peers when coming from protocol v15. Incoming GUI
 state rules are forwarded by the Linux client to compatible hosts (such as
-macOS 0.15.35) and safely ignored by the Linux desktop/app host. Off-stage and
+macOS 0.15.35+) and safely ignored by the Linux desktop/app host. Off-stage and
 hidden/minimized embedded or detached sessions pause pictures but keep activity
 signals, then resume from the existing canvas. Minimization requires compositor
 support; Wayland does not provide general window-occlusion detection.
@@ -123,7 +127,10 @@ the input method. Composition and commits remain owned by the local input method
 Linux can share ports and text terminals. New terminal windows require a graphical
 session, a supported terminal app, and a working systemd user manager.
 They run in separate transient user services and survive a rapp-service restart.
-Run `rapp share`, `rapp unshare`, `rapp hosts`, or `rapp pipe` for CLI access.
+Run `rapp share`, `rapp unshare`, `rapp hosts`, `rapp pipe`, or `rapp update`
+(`status` / `check` / `rollback`, with `--json`) for CLI access; on Linux
+online self-replacement is disabled (`not_launchd`, exit 7) and directs to the
+release packages, while `rapp update status` reports the installed version.
 No arguments opens the GUI; `./rapp-gui` opens it explicitly.
 For direct LAN access, allow the service's UDP listener (default 22028) from the
 intended peers. TCP 22029 (IPC) and TCP 28000-28999 (share numbers and visitor mappings) bind only to

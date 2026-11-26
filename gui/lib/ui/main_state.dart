@@ -34,6 +34,7 @@ import '../term/term_id.dart';
 import '../term/term_session_port.dart';
 import '../term/term_wire.dart' show TermPane, noSuchTextTerminal;
 import 'app_profile_store.dart';
+import 'device_os.dart';
 import 'lamp.dart';
 import 'term_status.dart' show programLamp, programWord, termAskWord;
 import 'lifecycle.dart';
@@ -48,6 +49,7 @@ import '../llm_api.dart';
 import 'projects.dart';
 import 'resources_state.dart';
 import '../embed/tidy_mode.dart';
+import '../labels.dart';
 import 'session_model.dart';
 import 'terms_entry.dart';
 import 'tokens.dart';
@@ -161,7 +163,9 @@ class MainState extends ChangeNotifier {
     void Function(String line)? log,
     VoiceInput? voice,
     LlmApi? llmApi,
-  })  : _builtinStateRules = builtinStateRules,
+    DeviceOs? localOs,
+  })  : localOs = localOs ?? localDeviceOs(),
+        _builtinStateRules = builtinStateRules,
         stateRules = stateRules ?? StateRulesLibrary.parse(builtinStateRules, const {}),
         resources = ResourcesState(clock: clock),
         voice = voice ??
@@ -337,6 +341,9 @@ class MainState extends ChangeNotifier {
 
   /// Terminal sessions' port; null where the GUI has no native port (no terminals there).
   final TermSessionPort? termPort;
+
+  /// What system this device is, for its own column on the overview.
+  final DeviceOs localOs;
 
   /// Where calls for session [sid] go: the terminal port for its own sessions, else the native one.
   SessionPort? portOf(Object sid) => termPort?.owns(sid) == true ? termPort : port;
@@ -607,6 +614,12 @@ class MainState extends ChangeNotifier {
       return;
     }
     _queue(HintRecord(v, _now()));
+  }
+
+  /// Puts [words] on the hint line now.
+  void say(String words) {
+    hint = words;
+    notifyListeners();
   }
 
   void _queue(HintRecord r) {
@@ -1210,7 +1223,113 @@ class MainState extends ChangeNotifier {
   }
 
   // ---- sessions ----
-  List<SessionGroup> get groups => groupSessions(_entries, grouping, projects: projects, first: currentProject);
+  /// What every session list shows: the open sessions, then the labelled ones that are not open ([standbyEntries]),
+  /// each at the end of its group.
+  List<SessionGroup> get groups => standLast(groupSessions(listed, grouping, projects: projects, first: currentProject));
+
+  /// The open sessions, then [standbyEntries]: what the overview's columns and the top bar's list show.
+  List<SessionEntry> get listed => [..._entries, ...standbyEntries];
+
+  /// The groups [step] walks: open sessions only.
+  List<SessionGroup> get _openGroups => groupSessions(_entries, grouping, projects: projects, first: currentProject);
+
+  // ---- labels (spec 2026-11-26-rapp-session-labels-design.md) ----
+
+  /// The label of [app] on [device], as its table last came; null for none, or before the table has come.
+  SessionLabel? labelFor(String device, String app) => hub?.labels[device]?.labels[app];
+
+  /// The card menu's 改标题和备注… / 还原 show for [device]: its table has come (so it knows labels).
+  bool labelsReady(String device) => hub?.labels.containsKey(device) == true;
+
+  /// What [app] on [device] is called wherever it is listed: its label's title, else [fallback] (spec §7.6).
+  String titleOf(String device, String app, String fallback) {
+    final t = labelFor(device, app)?.title;
+    return t == null || t.isEmpty ? fallback : t;
+  }
+
+  /// Labels [app] on [device]; both empty clears it. The device's refusal is thrown with its words.
+  Future<void> setLabel(String device, String app, {required String title, required String note}) async {
+    final h = hub;
+    if (h == null || !hubUsable) throw StateError('rapp-hub 没有在运行');
+    await h.setLabel(device, app, title: title, note: note);
+  }
+
+  Future<void> resetLabel(String device, String app) async {
+    final h = hub;
+    if (h == null || !hubUsable) throw StateError('rapp-hub 没有在运行');
+    await h.resetLabel(device, app);
+  }
+
+  /// A card for every labelled session that is not open in this window, on each device that is on line and whose
+  /// table has come (spec §7.3): 「打开」 for one that runs (an app, or a terminal still listed), 「已停止」 for a
+  /// terminal that is gone. A terminal waits for its device's list, which says which it is.
+  List<SessionEntry> get standbyEntries {
+    final h = hub;
+    if (h == null) return const [];
+    final open = {for (final e in _entries) e.key};
+    final out = <SessionEntry>[];
+    final seen = <String>{};
+    for (final host in h.hosts) {
+      final id = host.id;
+      final table = h.labels[id];
+      if (table == null || !seen.add(id) || deviceOffline(id)) continue;
+      for (final MapEntry(key: app, value: label) in table.labels.entries) {
+        if (open.contains('$id/$app')) continue;
+        if (app == termsEntry || isDesktopScreen(app)) continue;
+        var standby = Standby.open;
+        var name = appName(id, app);
+        if (isTermApp(app)) {
+          final list = h.termLists[id];
+          if (list == null) continue;
+          final row = list.terms.where((r) => r.id == app).firstOrNull;
+          if (row == null || row.dead) {
+            standby = Standby.stopped;
+            if (row == null && name == app) name = parseTermId(app)?.name ?? app;
+          } else {
+            name = termDisplayName(row.shown, row.host);
+          }
+        }
+        out.add(SessionEntry(
+          sid: null,
+          id: id,
+          app: app,
+          appName: name,
+          device: deviceName(id),
+          path: '',
+          lamp: Lamp.notOpened,
+          ps: standby == Standby.open ? _termPs(id, app) : null,
+          fg: standby == Standby.open ? termFg(id, app) : null,
+          label: label,
+          standby: standby,
+        ));
+      }
+    }
+    return out;
+  }
+
+  /// A tap on a card in [standby]: 「打开」 opens the session; 「启动」 opens a new terminal on its device that takes the
+  /// gone one's label (in the device's home: where it was is not kept yet), then goes to it.
+  Future<void> openStandby(SessionEntry e) async {
+    if (e.standby != Standby.stopped) return openOrSwitch(e.id, e.app, e.appName);
+    if (!hubUsable) return;
+    try {
+      final launchers = hub?.termLists[e.id]?.hosts.where((h) => h.host == null).firstOrNull?.launchers ?? const <String>[];
+      if (launchers.isEmpty) throw StateError('这台设备没有可用的终端窗口');
+      final term = await hub!.openTerm(e.id, app: prefs.termAppFor(e.id, launchers), labelFrom: e.app);
+      try {
+        await hub?.terms(e.id);
+      } catch (_) {}
+      hint = '原来的目录没有记下，已在家目录新开';
+      notifyListeners();
+      final row = hub?.termLists[e.id]?.terms.where((r) => r.id == term).firstOrNull;
+      // Quiet: 已打开 … would cover why it starts in the home directory (a failed open still says so).
+      unawaited(_open(e.id, term, row == null ? e.appName : termDisplayName(row.shown, row.host), quiet: true));
+    } catch (err) {
+      if (_disposed) return;
+      hint = newTermWords(err);
+      notifyListeners();
+    }
+  }
 
   int get sessionCount => _entries.length;
 
@@ -1260,7 +1379,7 @@ class MainState extends ChangeNotifier {
   }
 
   void step(int delta) {
-    final k = stepKey(groups, currentKey, delta, within: _stepWithin);
+    final k = stepKey(_openGroups, currentKey, delta, within: _stepWithin);
     if (k == null) return;
     currentKey = k;
     notifyListeners();
@@ -1294,8 +1413,8 @@ class MainState extends ChangeNotifier {
 
   /// What a favourite or project member is called: `<program> · <name>` for a text terminal ([termTitle]), whose
   /// name is the list's current one, else the one stored with it.
-  String labelOf(AppRef a) =>
-      isTermApp(a.bundle) ? termTitle(termName(a.device, a.bundle) ?? a.name, fg: termFg(a.device, a.bundle)) : a.name;
+  String labelOf(AppRef a) => titleOf(a.device, a.bundle,
+      isTermApp(a.bundle) ? termTitle(termName(a.device, a.bundle) ?? a.name, fg: termFg(a.device, a.bundle)) : a.name);
 
   /// A text terminal's program status from its live row on [device]; null when the app is no terminal, the row is
   /// gone or dead, or the device dropped (its last list is stale).
@@ -1329,6 +1448,7 @@ class MainState extends ChangeNotifier {
       ps: r.phase == Phase.disconnected ? null : (_termPs(r.id, r.app) ?? inferredPs),
       inferred: inferredPs != null && !isTermApp(r.app),
       fg: termFg(r.id, r.app),
+      label: labelFor(r.id, r.app),
     );
   }
 
@@ -1350,6 +1470,7 @@ class MainState extends ChangeNotifier {
           lamp: _termBlocked(s.id, s.app) ? Lamp.waiting : Lamp.active,
           ps: _termPs(s.id, s.app),
           fg: termFg(s.id, s.app),
+          label: labelFor(s.id, s.app),
         );
         if (seen.add(e.key)) out.add(e);
       }
@@ -1389,7 +1510,8 @@ class MainState extends ChangeNotifier {
     }
     // Sessions run by rapp-client (no port) are not moved: their next reconnect takes the new link.
     final old = _entries;
-    final oldGroups = groups;
+    // Only open sessions: a standby card is never the one to move to.
+    final oldGroups = _openGroups;
     _entries = _mapEntries();
     final newKeys = {for (final e in _entries) e.key};
 
@@ -2156,7 +2278,8 @@ class MainState extends ChangeNotifier {
     _rerouteEnd(r, false);
     _batchEnded.remove(r.key);
     _stopRetry(r);
-    final oldGroups = groups;
+    // Only open sessions: a standby card is never the one to move to.
+    final oldGroups = _openGroups;
     final old = r.lastSid;
     if (old != null) portOf(old)?.close(old); // reconnected but not swapped yet: the old session is still open
     // Before a swap the old session is the one on show, the one written in. A waiting tidy's
@@ -3125,6 +3248,7 @@ class MainState extends ChangeNotifier {
       path: '',
       lamp: Lamp.connecting,
       fg: termFg(id, app),
+      label: labelFor(id, app),
     );
     _entries = _mapEntries();
     final before = currentKey;
@@ -4201,7 +4325,8 @@ class MainState extends ChangeNotifier {
 
   /// Favourites with no session (pending or open), in favourite order.
   List<AppRef> get idleFavorites {
-    final open = {for (final e in _entries) e.key};
+    // A labelled one that is not open already has its card (standing at the end of its group): not twice.
+    final open = {for (final e in _entries) e.key, for (final e in standbyEntries) e.key};
     return [
       for (final f in workspace.favorites)
         if (!open.contains(f.key)) f,

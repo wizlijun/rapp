@@ -5,6 +5,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import 'labels.dart';
 import 'shares.dart';
 import 'update.dart';
 
@@ -202,6 +203,12 @@ class ServiceConnection {
   /// The key text; the only place the service returns it.
   Future<String> showKey() async => '${(await request({'cmd': 'show_key'}))['key'] ?? ''}';
   Future<void> kick(Object sid) => request({'cmd': 'kick', 'sid': sid});
+
+  /// This device's session labels.
+  Future<LabelTable> labels() async => LabelTable.fromJson(await request({'cmd': 'labels'}));
+  Future<void> setLabel(String app, {required String title, required String note}) =>
+      request({'cmd': 'set_label', 'app': app, 'title': title, 'note': note});
+  Future<void> resetLabel(String app) => request({'cmd': 'reset_label', 'app': app});
   Future<void> subscribe() => request({'cmd': 'subscribe'});
 
   /// 访问记录, newest first (observability spec §6).
@@ -223,6 +230,9 @@ class ServiceConnection {
   Future<Map<String, Object?>> setUpdate({bool? autoUpdate, bool? checkUpdates}) =>
       request({'cmd': 'set_update', 'auto_update': ?autoUpdate, 'check_updates': ?checkUpdates});
   Future<Map<String, Object?>> setAutoLock(bool on) => request({'cmd': 'set_auto_lock', 'on': on});
+
+  /// How many remote windows other than text terminals this GUI has open (cli-update §5.1).
+  Future<Map<String, Object?>> guiWindows(int n) => request({'cmd': 'gui_windows', 'count': n});
 
   /// Clears rApp's own screen recording and accessibility records; the reply says which took.
   Future<Map<String, Object?>> permissionsReset() => request({'cmd': 'permissions_reset'});
@@ -282,12 +292,25 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi {
   String? error;
   bool get running => status != null;
 
+  /// This device's session labels; null until read, or when the service predates them ([labelsUnsupported]).
+  LabelTable? labels;
+  var labelsUnsupported = false;
+
   ServiceConnection? _cmd;
   ServiceConnection? _sub;
   ServiceConnection? _remote;
   Timer? _timer;
   var _disposed = false;
   var _connecting = false;
+  int? _guiWindows;
+
+  /// Tells the service how many windows would be lost; it counts per connection, so this is sent
+  /// again on every reconnect.
+  void setGuiWindows(int n) {
+    if (_guiWindows == n) return;
+    _guiWindows = n;
+    _cmd?.guiWindows(n).catchError((_) => <String, Object?>{});
+  }
 
   void start() => _connect();
 
@@ -308,6 +331,10 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi {
       cmd.done.then((_) => _lost());
       sub.done.then((_) => _lost());
       status = await cmd.status();
+      await _readLabels(cmd);
+      final w = _guiWindows;
+      // An older service does not know the command: that is no reason to stay disconnected.
+      if (w != null) await cmd.guiWindows(w).catchError((_) => <String, Object?>{});
       error = null;
       if (_disposed) return _closeAll();
       notifyListeners();
@@ -329,16 +356,39 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi {
     if (c == null) return;
     try {
       status = await c.status();
+      await _readLabels(c);
       if (!_disposed) notifyListeners();
     } catch (_) {
       // _lost handles a dead connection.
     }
   }
 
+  Future<void> _readLabels(ServiceConnection c) async {
+    if (labelsUnsupported) return;
+    try {
+      labels = await c.labels();
+    } on ServiceException catch (e) {
+      // An older service: no labels on this device.
+      if ('$e'.contains('unknown')) labelsUnsupported = true;
+    }
+  }
+
+  Future<void> setLabel(String app, {required String title, required String note}) async {
+    await _need().setLabel(app, title: title, note: note);
+    await refresh();
+  }
+
+  Future<void> resetLabel(String app) async {
+    await _need().resetLabel(app);
+    await refresh();
+  }
+
   void _lost() {
     if (_disposed || (_cmd == null && _sub == null)) return;
     _closeAll();
     status = null;
+    // The next service may be a newer one (an upgrade restarts it): ask it about labels afresh.
+    labelsUnsupported = false;
     error = 'service not running';
     notifyListeners();
     _schedule();

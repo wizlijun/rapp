@@ -9,7 +9,9 @@ import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/term/term_session_port.dart';
 import 'package:rapp/embed/traffic_label.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/ui/device_os.dart';
 import 'package:rapp/ui/lamp.dart';
+import 'package:rapp/ui/os_mark.dart';
 import 'package:rapp/ui/workspace_store.dart';
 import 'package:rapp/ui/main_window.dart';
 import 'package:rapp/ui/fullscreen.dart';
@@ -59,7 +61,7 @@ void main() {
 
   /// Builds the state, opens [apps] (`id/app`) in order and shows the overview.
   Future<void> boot(WidgetTester tester,
-      {List<String> apps = const [], bool embed = true, TermSessionPort? termPort, String? stateRules}) async {
+      {List<String> apps = const [], bool embed = true, TermSessionPort? termPort, String? stateRules, DeviceOs? localOs}) async {
     tester.view.physicalSize = const Size(1194, 834);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -90,6 +92,7 @@ void main() {
       termPort: termPort,
       clock: () => epoch,
       builtinStateRules: stateRules,
+      localOs: localOs,
     );
     await tester.runAsync(() async {
       for (var i = 0; i < 8; i++) {
@@ -487,6 +490,22 @@ void main() {
     final title = tester.widget<Text>(inside('column-m2', find.text('air')));
     expect(title.style!.color, tokens(tester).muted);
     expect(inside('column-m2', find.text('离线')), findsOneWidget);
+  });
+
+  testWidgets('each column shows its system mark left of the lamp, offline too', (tester) async {
+    hosts = [
+      {'id': 'm1', 'name': 'A', 'os': 'windows'},
+    ];
+    offline = {'m1'};
+    await boot(tester, localOs: DeviceOs.macos);
+    await show(tester);
+    OsMark mark(String k) => tester.widget<OsMark>(find.byKey(Key(k)));
+    expect(mark('os-mark-local').os, DeviceOs.macos);
+    expect(mark('os-mark-m1').os, DeviceOs.windows);
+    final lamp = find.descendant(of: find.byKey(const Key('column-m1')), matching: find.byType(StatusLamp));
+    expect(tester.getTopLeft(find.byKey(const Key('os-mark-m1'))).dx, lessThan(tester.getTopLeft(lamp.first).dx));
+    expect(find.descendant(of: find.byKey(const Key('column-m1')), matching: find.byKey(const Key('os-mark-m1'))),
+        findsOneWidget);
   });
 
   testWidgets('each column shows its version at the bottom in muted text; none when unknown', (tester) async {
@@ -966,6 +985,67 @@ void main() {
     if (!s.overview) s.toggleOverview();
     await tester.pump();
     expect(find.descendant(of: find.byKey(fav), matching: find.text('新建')), findsOneWidget);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
+  testWidgets('Linux: terminal block shows fg program title with CLI subtitle and 新建 runs one at a time',
+      (tester) async {
+    capsOf = {
+      'm1': {'graphical': true, 'desktop': true, 'applications': false, 'terminal': true, 'ports': true},
+    };
+    final term = FakeTermSessionPort();
+    await boot(tester, apps: ['m1/term:pty:a'], termPort: term);
+    term.play(const ReadyEvent(1, 'x'));
+    final inner = t.onSend!;
+    int? pendingReq;
+    t.onSend = (m) {
+      if (m['cmd'] == 'open_term') {
+        pendingReq = m['req'] as int?;
+      } else {
+        inner(m);
+      }
+    };
+    await tester.runAsync(() async {
+      t.emit({
+        'event': 'terms',
+        'id': 'm1',
+        'terms': [
+          {
+            'id': 'term:pty:a',
+            'name': 'zsh',
+            'title': '~/git/rapp · 2',
+            'fg': 'claude',
+            'shell': false,
+            'command': 'zsh',
+            'activity': 1,
+            'dead': false,
+            'ps': {'state': 'blocked', 'kind': 'permission', 'msg': 'approve Bash: ls', 'seq': 2},
+          },
+        ],
+        'hosts': [
+          {
+            'host': null,
+            'launchers': ['ghostty'],
+            'shells': [{'name': 'zsh', 'path': '/bin/zsh', 'default': true}],
+          },
+        ],
+      });
+      for (var i = 0; i < 4; i++) {
+        await flush();
+      }
+    });
+    s.toggleFavorite('m1', termsEntry, termsEntryName);
+    await show(tester);
+    expect(inside('block-m1/term:pty:a', find.text('claude · ~/git/rapp · 2')), findsOneWidget);
+    expect(inside('block-m1/term:pty:a', find.text('CLI · 等确认 · approve Bash: ls')), findsOneWidget);
+    const fav = Key('ov-favorite-m1/terms:');
+    await tester.tap(find.byKey(fav));
+    await tester.pump();
+    await tester.tap(find.byKey(fav));
+    await tester.pump();
+    expect(t.sent.where((m) => m['cmd'] == 'open_term'), hasLength(1));
+    expect(s.hint, '正在新建终端，请稍候');
+    t.emit({'event': 'term_created', 'req': pendingReq, 'id': 'm1', 'term': 'term:pty:b'});
+    await settle(tester);
   }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 
   testWidgets('count taps', (tester) async {

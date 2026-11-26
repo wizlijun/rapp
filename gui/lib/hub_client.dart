@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'labels.dart';
 import 'log_view.dart';
 import 'term/term_id.dart';
 
@@ -69,7 +70,7 @@ class RestoreStopped extends HubException {
 }
 
 class HubHost {
-  const HubHost(this.id, this.name, {this.lan = const [], this.route});
+  const HubHost(this.id, this.name, {this.lan = const [], this.route, this.os});
   final String id;
   final String name;
 
@@ -80,6 +81,9 @@ class HubHost {
   final String? route;
 
   bool get forcedRelay => route == 'relay';
+
+  /// What system A last said it is (`macos`, `omarchy`, …), as the hub kept it; null when never heard.
+  final String? os;
 }
 
 /// One of A's screens, as the `desktop:` entry of its app list names them (main first).
@@ -109,15 +113,18 @@ class HubApp {
   final List<RemoteDisplay> displays;
 }
 
-/// A `version` field: a non-empty string, else none.
-String? _version(Object? v) => v is String && v.isNotEmpty ? v : null;
+/// A `version` or `os` field: a non-empty string, else none.
+String? _word(Object? v) => v is String && v.isNotEmpty ? v : null;
 
 class AppList {
-  const AppList(this.id, this.path, this.apps, {this.permissions, this.capabilities, this.version});
+  const AppList(this.id, this.path, this.apps, {this.permissions, this.capabilities, this.version, this.os});
   final Map<String, dynamic>? capabilities;
 
   /// A's rApp version; null from a host older than version labels.
   final String? version;
+
+  /// What system A is; null from a host older than system marks.
+  final String? os;
   final String id;
   final String path;
   final List<HubApp> apps;
@@ -425,7 +432,8 @@ class HubClient extends ChangeNotifier {
     return AppList('${m['id'] ?? id}', '${m['path'] ?? ''}', list,
         permissions: perms is Map ? Map<String, dynamic>.from(perms) : null,
         capabilities: m['capabilities'] is Map ? Map<String, dynamic>.from(m['capabilities']) : null,
-        version: _version(m['version']));
+        version: _word(m['version']),
+        os: _word(m['os']));
   }
 
   /// The 日志 screen's query, on this machine or on host [id]. An old peer answers `unknown op`.
@@ -442,10 +450,51 @@ class HubClient extends ChangeNotifier {
 
   /// Opens a text terminal window on device [id] running [shell] (the device's default when null, and an old device
   /// is sent none) in terminal app [app]; answers the new term id. [from]: the terminal it is opened beside (its
-  /// directory and shell, its window); an old device ignores it.
-  Future<String> openTerm(String id, {String? shell, required String app, String? from}) async {
-    final m = await _request({'cmd': 'open_term', 'id': id, 'shell': ?shell, 'app': app, 'from': ?from}, 'term_created');
+  /// directory and shell, its window); an old device ignores it. [labelFrom]: a terminal that is gone, whose label
+  /// the new one takes over.
+  Future<String> openTerm(String id, {String? shell, required String app, String? from, String? labelFrom}) async {
+    final m = await _request(
+        {'cmd': 'open_term', 'id': id, 'shell': ?shell, 'app': app, 'from': ?from, 'label_from': ?labelFrom},
+        'term_created');
     return '${m['term']}';
+  }
+
+  /// Each device's session labels, as its watch last pushed them; none yet for a device whose table has not come.
+  final labels = <String, LabelTable>{};
+
+  /// Devices that predate labels: no label can be shown or changed there.
+  final labelsUnsupported = <String>{};
+
+  /// Devices whose next table is taken whatever its rev (their watch ended: the device may have started over).
+  final _labelsAfresh = <String>{};
+
+  /// Labels session [app] of device [id]; both empty clears it. The device's refusal is thrown with its words.
+  Future<void> setLabel(String id, String app, {required String title, required String note}) =>
+      _request({'cmd': 'set_label', 'id': id, 'app': app, 'title': title, 'note': note}, 'label_set');
+
+  /// Clears session [app]'s label on device [id].
+  Future<void> resetLabel(String id, String app) => _request({'cmd': 'reset_label', 'id': id, 'app': app}, 'label_reset');
+
+  void _onLabels(Map<String, dynamic> m) {
+    final id = m['id'];
+    if (id is! String) return;
+    if (m['unsupported'] == true) {
+      labelsUnsupported.add(id);
+      labels.remove(id);
+      return;
+    }
+    if (m['labels'] == null) {
+      // The watch ended (it is retried): what was shown stays until the next table.
+      _labelsAfresh.add(id);
+      return;
+    }
+    final t = LabelTable.fromJson(m);
+    final had = labels[id];
+    // An older table is a late one, unless the watch started over (`first`: the device may have a fresh file).
+    if (had != null && t.rev < had.rev && m['first'] != true && !_labelsAfresh.contains(id)) return;
+    _labelsAfresh.remove(id);
+    labelsUnsupported.remove(id);
+    labels[id] = t;
   }
 
   /// Ends text terminal [term] of device [id] for good (its program too); the refusal is thrown with its words.
@@ -571,12 +620,13 @@ class HubClient extends ChangeNotifier {
     final event = m['event'];
     switch (event) {
       case 'hosts':
-        version = _version(m['version']);
+        version = _word(m['version']);
         hosts = (m['hosts'] as List? ?? const [])
             .whereType<Map>()
             .map((h) => HubHost('${h['id']}', '${h['name'] ?? ''}',
                 lan: [for (final a in (h['lan'] as List? ?? const [])) '$a'],
-                route: h['route'] is String ? h['route'] as String : null))
+                route: h['route'] is String ? h['route'] as String : null,
+                os: _word(h['os'])))
             .toList();
         // A removed host's link is gone with it.
         final ids = {for (final h in hosts) h.id};
@@ -584,11 +634,11 @@ class HubClient extends ChangeNotifier {
         _paths.removeWhere((p) => !ids.contains(p.id));
       case 'host_added':
         final id = '${m['id']}';
-        // Added again: its route and LAN addresses stay until the next hosts list says otherwise.
+        // Added again: its route, LAN addresses and system stay until the next hosts list says otherwise.
         final was = hosts.where((h) => h.id == id).firstOrNull;
         hosts = [
           ...hosts.where((h) => h.id != id),
-          HubHost(id, '${m['name'] ?? ''}', lan: was?.lan ?? const [], route: was?.route),
+          HubHost(id, '${m['name'] ?? ''}', lan: was?.lan ?? const [], route: was?.route, os: was?.os),
         ];
       case 'opened':
         if (m['sid'] != null) _sessions[m['sid'] as Object] = _session(m);
@@ -621,13 +671,15 @@ class HubClient extends ChangeNotifier {
         _paths.clear();
       case 'terms':
         if (m['id'] != null) termLists['${m['id']}'] = _termList(m, '${m['id']}');
+      case 'labels':
+        _onLabels(m);
       case 'closed':
         _sessions.remove(m['sid']);
         if (m['sid'] != null && m['reason'] != null) closeReasons[m['sid'] as Object] = '${m['reason']}';
     }
 
     // A watch event has no `req`: it answers no one (`_take` would give it to another device's `terms`).
-    final p = event == 'terms' && m['req'] is! int ? null : _take(m, event);
+    final p = (event == 'terms' || event == 'labels') && m['req'] is! int ? null : _take(m, event);
     if (p != null) {
       if (event == 'error') {
         p.completer.completeError(HubException('${m['error'] ?? 'unknown error'}'));

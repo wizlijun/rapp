@@ -7,7 +7,7 @@ use crate::state::{Peer, State};
 use anyhow::Result;
 use rapp_conn::Pipe;
 use rapp_net::line::{err, ok, write_json};
-use rapp_net::quic::{splice_metered, Meter};
+use rapp_net::quic::{splice_watched, Meter, TRAFFIC_TICK};
 use rapp_wire::Fp;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -187,7 +187,7 @@ pub async fn serve_forward(state: &Arc<State>, mut s: Pipe, port: u16, peer: Pee
     if write_json(&mut s, &ok(json!({}))).await.is_ok() {
         tokio::select! {
             // However it ends (closed, reset), the line below records what moved.
-            _ = splice_metered(&mut s, &mut tcp, &meter) => {}
+            _ = splice_watched(&mut s, &mut tcp, &meter, TRAFFIC_TICK, || state.activity.touch()) => {}
             _ = cut_of(&mut cuts, port) => {}
         }
     }

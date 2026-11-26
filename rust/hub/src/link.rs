@@ -616,6 +616,7 @@ impl Hub {
                         lan: vec![addr],
                         fp: Some(accepted.fp),
                         route,
+                        os: saved.as_ref().and_then(|h| h.os.clone()),
                     };
                     return self.save_host(host);
                 }
@@ -634,7 +635,7 @@ impl Hub {
             bail!("{addr} is ID {}, not {id}", r["id"].as_str().unwrap_or("?"));
         }
         let name = r["name"].as_str().unwrap_or(&id).to_string();
-        self.save_host(Host { id, name, password: password.into(), lan: vec![addr], fp: None, route })
+        self.save_host(Host { id, name, password: password.into(), lan: vec![addr], fp: None, route, os: saved.and_then(|h| h.os) })
     }
 
     /// `add_host` by bare ID: found through the relay, reached on the addresses it reports or else
@@ -649,8 +650,9 @@ impl Hub {
             password: String::new(),
             lan: found.lan,
             fp: saved.as_ref().and_then(|h| h.fp),
-            // Added again, a host forced onto the relay stays forced.
-            route: saved.and_then(|h| h.route),
+            // Added again, a host forced onto the relay stays forced; its system is still known.
+            route: saved.as_ref().and_then(|h| h.route.clone()),
+            os: saved.and_then(|h| h.os),
         };
         let accepted = match self.first_v2(&host, &dial_order(&host.lan), Some(key.clone())).await? {
             Some((link, accepted)) => {
@@ -980,7 +982,7 @@ mod tests {
     /// One tap on 新建 opened two windows: the hub sent `open_term` again on a new link after a slow answer.
     #[test]
     fn opening_and_ending_a_terminal_are_never_sent_twice() {
-        assert!(!repeatable(&Op::OpenTerm { shell: None, from: None, app: "Terminal".into() }));
+        assert!(!repeatable(&Op::OpenTerm { shell: None, from: None, app: "Terminal".into(), label_from: None }));
         assert!(!repeatable(&Op::EndTerm { term: "term:pty:k".into() }));
         assert!(!repeatable(&Op::RestoreTerms { keys: vec![], app: None }));
         assert!(repeatable(&Op::ForgetTerms { keys: vec!["k".into()] }));
@@ -1009,8 +1011,8 @@ mod tests {
     /// The host's service waits 30 s for its terminal worker: B waits longer than that for `open_term`.
     #[test]
     fn open_term_outwaits_the_hosts_own_wait() {
-        assert!(reply_wait(&Op::OpenTerm { shell: None, from: None, app: "Terminal".into() }) > std::time::Duration::from_secs(30));
-        assert_eq!(reply_wait(&Op::OpenTerm { shell: None, from: None, app: "x".into() }), OPEN_TERM_WAIT);
+        assert!(reply_wait(&Op::OpenTerm { shell: None, from: None, app: "Terminal".into(), label_from: None }) > std::time::Duration::from_secs(30));
+        assert_eq!(reply_wait(&Op::OpenTerm { shell: None, from: None, app: "x".into(), label_from: None }), OPEN_TERM_WAIT);
         assert_eq!(reply_wait(&Op::ListTerms), REPLY_WAIT);
     }
     use crate::hosts::Host;
@@ -1018,7 +1020,7 @@ mod tests {
 
     fn host(password: &str, lan: &[&str]) -> Host {
         let lan = lan.iter().map(|a| a.to_string()).collect();
-        Host { id: "100000001".into(), name: "n".into(), password: password.into(), lan, fp: None, route: None }
+        Host { id: "100000001".into(), name: "n".into(), password: password.into(), lan, fp: None, route: None, os: None }
     }
 
     /// An old peer's `{"ok":false,"error":"unknown op"}` reaches the GUI as the text `unknown op`.

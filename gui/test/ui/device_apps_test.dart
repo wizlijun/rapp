@@ -51,5 +51,8 @@ void main() {
     expect(ids(f[0]), ['com.apple.Safari']);
     expect(filterAppGroups(g, ''), same(g));
     expect(filterAppGroups(g, 'zzz'), isEmpty);
+    // A labelled row is found by the title it shows, too.
+    final byLabel = filterAppGroups(g, '查文档', shownAs: (a) => a.app == 'com.apple.Notes' ? '查文档' : a.name);
+    expect(ids(byLabel[0]), ['com.apple.Notes']);
   });
 }

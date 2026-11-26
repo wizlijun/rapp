@@ -7,6 +7,7 @@ import 'package:rapp/paths.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/controls.dart' show RappButton;
 import 'package:rapp/ui/prefs.dart';
+import 'package:rapp/ui/sessions_tab.dart';
 import 'package:rapp/ui/terms_entry.dart';
 import 'package:rapp/ui/workspace_store.dart' show AppRef;
 import 'package:rapp/ui/term_restore_dialog.dart';
@@ -292,5 +293,20 @@ void main() {
     expect(t.sent.where((m) => m['cmd'] == 'restore_terms'), isEmpty);
     expect(t.sent.firstWhere((m) => m['cmd'] == 'open_term'),
         {'cmd': 'open_term', 'id': '111', 'app': 'Terminal', 'from': 'last', 'req': anything});
+  });
+
+  testWidgets('sessions_tab_favorite_says_restore_and_opens_dialog', (tester) async {
+    s.prefs.termOpen['111'] = 'text';
+    savedRows = [saved('a', 'rapp', prog: 'claude', boot: true)];
+    await tester.runAsync(listed);
+    s.toggleFavorite('111', termsEntry, termsEntryName);
+    await tester.pumpWidget(wrap(SizedBox(width: 330, height: 400, child: SessionsTab(state: s))));
+    await tester.pump();
+    final fav = find.byKey(const Key('favorite-111/$termsEntry'));
+    expect(find.descendant(of: fav, matching: find.text('恢复')), findsOneWidget);
+    await tester.tap(fav);
+    await tester.pumpAndSettle();
+    expect(find.text('恢复上次的终端 · mini'), findsOneWidget);
+    expect(t.sent.where((m) => m['cmd'] == 'restore_terms' || m['cmd'] == 'open_term'), isEmpty);
   });
 }

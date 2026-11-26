@@ -12,6 +12,8 @@ pub const TCCUTIL: &str = "/usr/bin/tccutil";
 pub const OPEN: &str = "/usr/bin/open";
 pub const PS: &str = "/bin/ps";
 pub const DF: &str = "/bin/df";
+/// `ioreg -c IOHIDSystem -d 4 -k HIDIdleTime`: how long since the last keyboard or mouse input.
+pub const IOREG: &str = "/usr/sbin/ioreg";
 pub const LSREGISTER: &str =
     "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 

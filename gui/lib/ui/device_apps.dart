@@ -29,13 +29,15 @@ List<DeviceAppGroup> deviceAppGroups(AppList? apps, TermList? terms) {
   ];
 }
 
-/// The rows whose name holds [query] (trimmed, any case); empty groups go, titles stay as they were.
-List<DeviceAppGroup> filterAppGroups(List<DeviceAppGroup> groups, String query) {
+/// The rows whose name, or the title it is shown with ([shownAs], a label's), holds [query] (trimmed, any case);
+/// empty groups go, titles stay as they were.
+List<DeviceAppGroup> filterAppGroups(List<DeviceAppGroup> groups, String query, {String Function(HubApp)? shownAs}) {
   final q = query.trim().toLowerCase();
   if (q.isEmpty) return groups;
+  bool hits(HubApp a) => a.name.toLowerCase().contains(q) || (shownAs?.call(a).toLowerCase().contains(q) ?? false);
   return [
     for (final g in groups)
-      if (g.apps.where((a) => a.name.toLowerCase().contains(q)).toList() case final hit when hit.isNotEmpty)
+      if (g.apps.where(hits).toList() case final hit when hit.isNotEmpty)
         DeviceAppGroup(g.title, hit),
   ];
 }

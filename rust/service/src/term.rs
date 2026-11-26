@@ -99,8 +99,10 @@ pub async fn request<S: AsyncRead + AsyncWrite + Unpin + Send>(
         Ok(_) => match op {
             Op::WatchTerms => return watch(state, s, peer, what).await,
             Op::ListTerms => answer(ask(state, &json!({"op": "list"})).await),
-            Op::OpenTerm { shell, from, app } => {
-                answer(ask(state, &json!({"op": "open", "shell": shell, "from": from, "app": app})).await)
+            Op::OpenTerm { shell, from, app, label_from } => {
+                let r = answer(ask(state, &json!({"op": "open", "shell": shell, "from": from, "app": app})).await);
+                carry_label(state, label_from.as_deref(), &r);
+                r
             }
             Op::RestoreTerms { keys, app } => {
                 let wait = restore_wait(&keys);
@@ -114,6 +116,15 @@ pub async fn request<S: AsyncRead + AsyncWrite + Unpin + Send>(
     };
     log_request(state, peer, what, &r);
     finish(s, &r).await
+}
+
+/// A terminal opened in place of `from` (one that is gone) takes over its label, in one step; nothing to do when the
+/// open failed or there is no `from`.
+fn carry_label(state: &State, from: Option<&str>, opened: &Value) {
+    let (Some(from), Some(to)) = (from, opened["id"].as_str().filter(|_| opened["ok"] == true)) else { return };
+    if rapp_term::id::is_term(from) && state.labels.rename(from, to).is_ok() {
+        state.notify();
+    }
 }
 
 /// The `request` line's fields: never a name, a term id or anything from `term.json`.
@@ -284,11 +295,11 @@ pub async fn open<S: AsyncRead + AsyncWrite + Unpin + Send>(
     let ready = async {
         allowed(state)?;
         // Counts as "in use" for the updater from now until the session ends.
-        let opening = crate::update::begin_open(state).map_err(str::to_string)?;
+        crate::update::begin_open(state).map_err(str::to_string)?;
         let (port, token, counted) = start(state).await.map_err(|e| format!("{e:#}"))?;
-        Ok::<_, String>((opening, port, token, counted))
+        Ok::<_, String>((port, token, counted))
     };
-    let (_opening, port, token, _counted) = match ready.await {
+    let (port, token, _counted) = match ready.await {
         Ok(r) => r,
         Err(e) => return refuse(state, s, &peer, what, &e).await,
     };
@@ -479,15 +490,15 @@ mod tests {
 
     #[test]
     fn open_term_logs_only_the_app() {
-        let op = Op::OpenTerm { shell: Some("zsh".into()), from: None, app: "iTerm".into() };
+        let op = Op::OpenTerm { shell: Some("zsh".into()), from: None, app: "iTerm".into(), label_from: None };
         assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm"}));
     }
 
     #[test]
     fn open_term_logs_from_kind() {
-        let op = Op::OpenTerm { shell: None, from: Some("last".into()), app: "iTerm".into() };
+        let op = Op::OpenTerm { shell: None, from: Some("last".into()), app: "iTerm".into(), label_from: None };
         assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm","from":"last"}));
-        let op = Op::OpenTerm { shell: None, from: Some("term:pty:secret".into()), app: "iTerm".into() };
+        let op = Op::OpenTerm { shell: None, from: Some("term:pty:secret".into()), app: "iTerm".into(), label_from: None };
         let f = log_fields(&op);
         assert_eq!(f, json!({"op":"open_term","app":"iTerm","from":"term"}));
         assert!(!f.to_string().contains("secret"));

@@ -1,5 +1,6 @@
 // Overview (全景) model: counts, device columns, window word and resource sentences. Pure Dart.
 import '../hub_client.dart';
+import 'device_os.dart';
 import 'lamp.dart';
 import 'main_state.dart';
 import 'resources_state.dart';
@@ -29,6 +30,7 @@ class DeviceColumn {
     required this.word,
     required this.path,
     required this.entries,
+    required this.os,
     this.version,
   });
 
@@ -45,6 +47,9 @@ class DeviceColumn {
   /// The device's rApp version, shown under the column; null when unknown.
   final String? version;
 
+  /// What system the device is, marked beside its lamp.
+  final DeviceOs os;
+
   bool get offline => lamp == Lamp.offline;
 }
 
@@ -55,6 +60,7 @@ List<DeviceColumn> deviceColumns({
   required List<SessionEntry> entries,
   required String Function(String id) name,
   String? localVersion,
+  DeviceOs localOs = DeviceOs.unknown,
 }) {
   String pathOf(List<SessionEntry> es) {
     for (final e in es) {
@@ -67,7 +73,8 @@ List<DeviceColumn> deviceColumns({
   List<SessionEntry> of(String id) => [for (final e in entries) if (e.id == id) e];
 
   final cols = <DeviceColumn>[
-    DeviceColumn(id: null, name: '本机', lamp: Lamp.active, word: '在线', path: '', entries: const [], version: localVersion),
+    DeviceColumn(id: null, name: '本机', lamp: Lamp.active, word: '在线', path: '', entries: const [], version: localVersion,
+        os: localOs),
   ];
   final known = <String>{};
   for (final h in hosts) {
@@ -82,6 +89,8 @@ List<DeviceColumn> deviceColumns({
       path: pathOf(es),
       entries: es,
       version: p?.apps?.version,
+      // A fresh app list first; a downgraded host that no longer says keeps what the hub saved.
+      os: parseOs(p?.apps?.os ?? h.os),
     ));
   }
   for (final e in entries) {
@@ -95,6 +104,7 @@ List<DeviceColumn> deviceColumns({
       word: p?.word ?? '离线',
       path: pathOf(es),
       entries: es,
+      os: DeviceOs.unknown,
     ));
   }
   return cols;
