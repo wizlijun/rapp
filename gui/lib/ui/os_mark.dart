@@ -18,6 +18,7 @@ class OsMark extends StatelessWidget {
     final word = osWord(os);
     return Tooltip(
       message: word,
+      excludeFromSemantics: true, // the Semantics below says it; once is enough
       child: Semantics(
         label: word,
         excludeSemantics: true,
@@ -51,20 +52,12 @@ class OsMarkPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = line;
     switch (os) {
-      case DeviceOs.macos:
-        canvas.drawPath(_apple(), fill);
-      case DeviceOs.windows:
-        canvas.drawPath(_panes(), fill);
       case DeviceOs.omarchy:
-        canvas.drawPath(_omarchy(), stroke);
-      case DeviceOs.linux:
-        canvas.drawPath(_penguin(), fill);
-      case DeviceOs.ipad || DeviceOs.androidTablet:
-        canvas.drawPath(_device(const Rect.fromLTWH(3, 1, 18, 22), 3, .62, os == DeviceOs.ipad ? _apple() : _robot()), fill);
-      case DeviceOs.iphone || DeviceOs.androidPhone:
-        canvas.drawPath(_device(const Rect.fromLTWH(6, 0.5, 12, 23), 3.2, .7, os == DeviceOs.iphone ? _apple() : _robot()), fill);
+        canvas.drawPath(_paths[os]!, stroke);
       case DeviceOs.unknown:
         _unknown(canvas, fill, stroke);
+      default:
+        canvas.drawPath(_paths[os]!, fill);
     }
     canvas.restore();
   }
@@ -99,6 +92,18 @@ class OsMarkPainter extends CustomPainter {
   @override
   bool shouldRepaint(OsMarkPainter old) => old.os != os || old.color != color || old.size != size;
 }
+
+/// Built once: a spinning lamp beside the mark repaints it every frame, and the path ops are not free.
+final Map<DeviceOs, Path> _paths = {
+  DeviceOs.macos: _apple(),
+  DeviceOs.windows: _panes(),
+  DeviceOs.omarchy: _omarchy(),
+  DeviceOs.linux: _penguin(),
+  DeviceOs.ipad: _device(const Rect.fromLTWH(3, 1, 18, 22), 3, .62, _apple()),
+  DeviceOs.androidTablet: _device(const Rect.fromLTWH(3, 1, 18, 22), 3, .62, _robot()),
+  DeviceOs.iphone: _device(const Rect.fromLTWH(6, 0.5, 12, 23), 3.2, .7, _apple()),
+  DeviceOs.androidPhone: _device(const Rect.fromLTWH(6, 0.5, 12, 23), 3.2, .7, _robot()),
+};
 
 /// An apple with a bite and a leaf.
 Path _apple() {

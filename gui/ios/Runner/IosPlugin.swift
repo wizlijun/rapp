@@ -49,7 +49,11 @@ final class IosPlugin: NSObject, FlutterPlugin {
     case "deviceName":
       result(UIDevice.current.name)
     case "idiom":
-      result(UIDevice.current.userInterfaceIdiom == .pad ? "pad" : "phone")
+      switch UIDevice.current.userInterfaceIdiom {
+      case .pad: result("pad")
+      case .phone: result("phone")
+      default: result("")  // anything else reads as unknown, not as a phone
+      }
     case "version":
       result(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")
     case "net":

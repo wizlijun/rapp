@@ -109,7 +109,6 @@ impl Hosts {
         Ok(true)
     }
 
-    /// Sets the `route` of a host that is still saved; true when that changed the file.
     /// Saves what system a saved host said it is; written only when it changed. False for a host not saved.
     pub fn set_os(&self, id: &str, os: &str) -> Result<bool> {
         let mut state = self.state.lock().unwrap();
@@ -121,6 +120,7 @@ impl Hosts {
         rapp_net::config::write_json(path, &*list)?;
         Ok(true)
     }
+    /// Sets the `route` of a host that is still saved; true when that changed the file.
     pub fn set_route(&self, id: &str, route: Option<String>) -> Result<bool> {
         let mut state = self.state.lock().unwrap();
         let (path, list) = &mut *state;

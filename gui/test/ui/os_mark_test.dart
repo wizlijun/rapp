@@ -26,6 +26,24 @@ void main() {
     }
   });
 
+  testWidgets('screen readers hear the system once', (tester) async {
+    final h = tester.ensureSemantics();
+    await tester.pumpWidget(wrap(const OsMark(DeviceOs.macos)));
+    var said = 0;
+    void walk(SemanticsNode n) {
+      said += [n.label, n.tooltip].where((w) => w.contains('macOS')).length;
+      n.visitChildren((c) {
+        walk(c);
+        return true;
+      });
+    }
+
+    walk(tester.binding.rootPipelineOwner.semanticsOwner?.rootSemanticsNode ??
+        tester.getSemantics(find.byType(MaterialApp)));
+    expect(said, 1);
+    h.dispose();
+  });
+
   // A look at the marks for the user: RAPP_OS_SHEET=<dir> writes os-marks.png (big) and os-marks-actual.png.
   final sheet = Platform.environment['RAPP_OS_SHEET'];
   testWidgets('sheet', skip: sheet == null, (tester) async {
