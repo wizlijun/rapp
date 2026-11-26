@@ -48,7 +48,7 @@ SIGN=(codesign --force $(runtime_flags "$KIND") --sign "$SIGN_ID")
 if [ "$KIND" != adhoc ]; then
     "${SIGN[@]}" "$APP"/Contents/Frameworks/*.framework
 fi
-# Identifiers: -i com.rapp.service / com.rapp.hub / com.rapp.term / com.rapp.cli / com.rapp.host / com.rapp.client (EXPECTED_IDS).
+# Identifiers: -i com.rapp.service / com.rapp.hub / com.rapp.term / com.rapp.state / com.rapp.cli / com.rapp.host / com.rapp.client (EXPECTED_IDS).
 for pair in $EXPECTED_IDS; do
     "${SIGN[@]}" -i "${pair#*:}" "$APP/Contents/MacOS/${pair%%:*}"
 done

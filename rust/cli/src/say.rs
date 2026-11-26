@@ -209,13 +209,15 @@ pub fn state(r: &Value) -> String {
 
 fn state_at(r: &Value, now: u64) -> String {
     let mut out = String::new();
-    let port = &r["port"];
+    // A missing number is said in words, never as `null`.
+    let port = r["port"].as_u64().map_or("端口不明".to_string(), |p| format!("端口 {p}"));
     if r["on"] != true {
         out.push_str("状态服务：没开\n");
     } else if r["running"] == true {
-        out.push_str(&format!("状态服务：开着，端口 {port}，分享号 {}\n", r["share"]));
+        let share = r["share"].as_u64().map_or("没有分享".to_string(), |n| format!("分享号 {n}"));
+        out.push_str(&format!("状态服务：开着，{port}，{share}\n"));
     } else {
-        out.push_str(&format!("状态服务：开着，端口 {port}，没有起来：{}\n", plain(r["error"].as_str().unwrap_or("原因不明"))));
+        out.push_str(&format!("状态服务：开着，{port}，没有起来：{}\n", plain(r["error"].as_str().unwrap_or("原因不明"))));
     }
     let st = &r["stored"];
     if st.is_object() {
@@ -447,6 +449,12 @@ mod tests {
         let off = json!({"on": false, "port": 8102, "share": null, "running": false, "error": null, "stored": null, "sinks": [],
             "outbox": {"active": false, "cached": 0, "sent": 0, "up": false, "dest": null}});
         assert_eq!(state_at(&off, now), "状态服务：没开\n发件箱：没在发（网里没有状态服务）\n");
+        let unshared = json!({"on": true, "port": 8102, "share": null, "running": true, "error": null, "stored": null, "sinks": [],
+            "outbox": {"active": false, "cached": 0, "sent": 0, "up": false, "dest": null}});
+        assert_eq!(state_at(&unshared, now), "状态服务：开着，端口 8102，没有分享\n发件箱：没在发（网里没有状态服务）\n");
+        let no_port = json!({"on": true, "port": null, "share": null, "running": false, "error": null, "stored": null, "sinks": [],
+            "outbox": {"dest": null}});
+        assert_eq!(state_at(&no_port, now), "状态服务：开着，端口不明，没有起来：原因不明\n发件箱：没在发（网里没有状态服务）\n");
         assert_eq!([ago(10), ago(7200), ago(172800)], ["刚才", "2 小时前", "2 天前"]);
     }
 }
