@@ -1,5 +1,12 @@
 // 本机 › 版本与升级: the service's `update` object and what the GUI says about it (K26, K27).
 
+import 'hub_client.dart';
+import 'term/term_id.dart';
+
+/// The remote windows that keep the auto-update out (cli-update §5.1): text-terminal tabs come
+/// back after the restart, the rest do not.
+int remoteWindows(Iterable<HubSession> s) => s.where((x) => !isTermApp(x.app)).length;
+
 class UpdateInfo {
   const UpdateInfo({
     required this.current,
@@ -17,6 +24,7 @@ class UpdateInfo {
     this.canRollback = false,
     this.needsReinstall = false,
     this.reinstallPage,
+    this.quitGui = false,
   });
 
   /// The running bundle version ('' when the service could not read it).
@@ -35,6 +43,9 @@ class UpdateInfo {
 
   /// Where to get that pkg.
   final String? reinstallPage;
+
+  /// The service is about to install or roll back and asks every GUI to quit, without asking.
+  final bool quitGui;
 
   /// Null unless [j] is a map (an older service sends no `update`).
   static UpdateInfo? fromJson(Object? j) {
@@ -57,6 +68,7 @@ class UpdateInfo {
       canRollback: j['can_rollback'] == true,
       needsReinstall: j['needs_reinstall'] == true,
       reinstallPage: s('reinstall_page'),
+      quitGui: j['quit_gui'] == true,
     );
   }
 }
@@ -94,7 +106,7 @@ enum UpdateAction { check, apply, applyAnyway, dismiss, openPage, reinstall }
       );
     }
     return (
-      line: u.autoUpdate ? '$v 已下载，没人在用时会自动装好' : '$v 已下载',
+      line: u.autoUpdate ? '$v 已下载，10 分钟没人操作时会自动装好' : '$v 已下载',
       actions: const [UpdateAction.apply, UpdateAction.dismiss],
     );
   }

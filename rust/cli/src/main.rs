@@ -1,45 +1,19 @@
-//! `rapp-cli share|unshare|hosts|pipe` — talks to the local service's IPC only.
+//! `rapp-cli share|unshare|hosts|pipe|update` — talks to the local service's IPC only.
 //! The service's `local/` directory is found the way the service finds it (`$RAPP_HOME`, the
 //! `data-root` pointer, `~/rapp`); `$RAPP_LOCAL` names it directly (for tests).
 
 mod args;
+mod ipc;
+mod out;
 mod say;
+mod update;
 
 use args::Cmd;
 use serde_json::{json, Value};
-use std::path::PathBuf;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::TcpStream;
+use tokio::io::{AsyncWriteExt, BufReader};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 
-const DEFAULT_IPC_PORT: u16 = 22029;
 const NOT_RUNNING: &str = "本机的 rApp 服务没有在运行";
-
-fn local_dir() -> PathBuf {
-    match std::env::var_os("RAPP_LOCAL").filter(|v| !v.is_empty()) {
-        Some(dir) => dir.into(),
-        None => rapp_net::config::local(&rapp_net::config::home()),
-    }
-}
-
-fn ipc_port(local: &std::path::Path) -> u16 {
-    std::fs::read(local.join("service.json"))
-        .ok()
-        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-        .and_then(|v| v["ipc_port"].as_u64())
-        .and_then(|p| u16::try_from(p).ok())
-        .filter(|&p| p != 0)
-        .unwrap_or(DEFAULT_IPC_PORT)
-}
-
-/// A connection to the service's IPC with the token line already sent; `None` when the service
-/// cannot be reached.
-async fn connect() -> Option<TcpStream> {
-    let local = local_dir();
-    let token = std::fs::read_to_string(local.join("ipc.token")).ok()?;
-    let mut tcp = TcpStream::connect(("127.0.0.1", ipc_port(&local))).await.ok()?;
-    tcp.write_all(format!("{}\n", json!({"token": token.trim()})).as_bytes()).await.ok()?;
-    Some(tcp)
-}
 
 fn fail(line: &str) -> ! {
     eprintln!("{line}");
@@ -47,22 +21,14 @@ fn fail(line: &str) -> ! {
 }
 
 /// Sends `cmd` and reads its one reply line; the reader is returned for `pipe`, whose stream
-/// follows the reply.
-async fn call(cmd: Value) -> (Value, BufReader<tokio::net::tcp::OwnedReadHalf>, tokio::net::tcp::OwnedWriteHalf) {
-    let Some(tcp) = connect().await else { fail(NOT_RUNNING) };
-    let (r, mut w) = tcp.into_split();
-    if w.write_all(format!("{cmd}\n").as_bytes()).await.is_err() {
-        fail(NOT_RUNNING);
-    }
-    let mut r = BufReader::new(r);
-    let mut line = String::new();
-    match r.read_line(&mut line).await {
-        Ok(n) if n > 0 => {}
-        _ => fail(NOT_RUNNING),
-    }
-    match serde_json::from_str(&line) {
-        Ok(v) => (v, r, w),
-        Err(_) => fail(NOT_RUNNING),
+/// follows the reply. The service not answering exits 3.
+async fn call(cmd: Value) -> (Value, BufReader<OwnedReadHalf>, OwnedWriteHalf) {
+    match ipc::open(cmd).await {
+        Ok(r) => r,
+        Err(ipc::Gone) => {
+            eprintln!("{NOT_RUNNING}");
+            std::process::exit(out::exit_code("not_running"))
+        }
     }
 }
 
@@ -84,6 +50,10 @@ async fn main() {
     let cmd = match args::parse(&argv) {
         Ok(c) => c,
         Err(line) => {
+            // An agent asking for JSON gets its usage error as JSON too.
+            if argv.first().map(String::as_str) == Some("update") && argv.iter().any(|a| a == "--json") {
+                out::Out { json: true }.fail("usage", &line, None);
+            }
             eprintln!("{line}\n{}", args::USAGE);
             std::process::exit(2);
         }
@@ -136,6 +106,7 @@ async fn main() {
             print!("{}", say::hosts(&r));
         }
         Cmd::Pipe { to, port } => pipe(to, port).await,
+        Cmd::Update { what, yes, timeout, json } => update::run(what, yes, timeout, out::Out { json }).await,
     }
 }
 

@@ -39,7 +39,7 @@ void main() {
   testWidgets('ready shows apply and dismiss', (tester) async {
     await tester.pumpWidget(section(ready));
     expect(find.text('版本与升级'), findsOneWidget);
-    expect(find.text('0.5.0 已下载，没人在用时会自动装好'), findsOneWidget);
+    expect(find.text('0.5.0 已下载，10 分钟没人操作时会自动装好'), findsOneWidget);
     for (final label in ['立即升级', '这一版先不装']) {
       expect(tester.getSize(find.widgetWithText(OutlinedButton, label)).height, greaterThanOrEqualTo(48));
     }

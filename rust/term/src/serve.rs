@@ -41,6 +41,8 @@ const BAD_ID: &str = "invalid term id";
 const NO_TEXT_TERMINAL: &str = "no such text terminal";
 /// The session's holder is there but did not answer in time: worth trying again, unlike [`NO_TEXT_TERMINAL`].
 const TERM_BUSY: &str = "text terminal busy";
+/// At most one `{"event":"activity"}` per view this often (the service only needs "used lately").
+const ACTIVITY_EVERY: Duration = Duration::from_secs(5);
 const OLD_RUN_END: &str = "this window was opened by an older version and cannot be ended";
 const OLD_RUN: &str = "this window was opened by an older version and cannot be renamed";
 const INVALID_NAME: &str = "invalid name";
@@ -572,7 +574,7 @@ impl Worker {
         let unread = self.unread.clone();
         // Either direction ending ends the view.
         tokio::select! {
-            res = to_run(r, &mut run_w, &inputs) => res,
+            res = to_run(r, &mut run_w, &inputs, &self.events) => res,
             res = from_run(BufReader::new(run_r), w, &unread, &key) => res,
         }
     }
@@ -580,13 +582,14 @@ impl Worker {
 
 /// The lines the viewer sends, on to `run`; a line too long for a message goes on as one `run` calls a bad message,
 /// which it answers with a bad message of its own. `inputs` counts a `Keys`, a `Type` and the last chunk of a
-/// paste.
-async fn to_run<R, S>(r: R, run: &mut S, inputs: &AtomicU64) -> std::io::Result<()>
+/// paste, and tells the service someone is using this device, at most every `ACTIVITY_EVERY`.
+async fn to_run<R, S>(r: R, run: &mut S, inputs: &AtomicU64, events: &UnboundedSender<Value>) -> std::io::Result<()>
 where
     R: AsyncBufRead + Unpin,
     S: AsyncWrite + Unpin,
 {
     let mut lines = Lines::new(r, MAX_IN_LINE);
+    let mut told: Option<std::time::Instant> = None;
     loop {
         match lines.next().await? {
             Got::Eof => return Ok(()),
@@ -598,6 +601,10 @@ where
                         proto::In::Keys { .. } | proto::In::Type { .. } | proto::In::Text { more: false, .. }
                     ) {
                         inputs.fetch_add(1, Ordering::Relaxed);
+                        if told.is_none_or(|t| t.elapsed() >= ACTIVITY_EVERY) {
+                            told = Some(std::time::Instant::now());
+                            let _ = events.send(json!({"event": "activity"}));
+                        }
                     }
                 }
                 l.push(b'\n');
@@ -949,6 +956,18 @@ mod tests {
         assert!(same(b"abc", b"abc"));
         assert!(!same(b"abc", b"abd") && !same(b"abc", b"ab") && !same(b"ab", b"abc") && !same(b"", b"a"));
         assert!(!same(b"ab\0", b"ab"));
+    }
+
+    #[tokio::test]
+    async fn inputs_send_activity_throttled() {
+        let input = b"{\"t\":\"keys\",\"pane\":\"0\",\"keys\":[\"a\"]}\n{\"t\":\"keys\",\"pane\":\"0\",\"keys\":[\"b\"]}\n";
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let inputs = AtomicU64::new(0);
+        let mut sink = Vec::new();
+        to_run(&input[..], &mut sink, &inputs, &tx).await.unwrap();
+        assert_eq!(inputs.load(Ordering::Relaxed), 2);
+        assert_eq!(rx.try_recv().unwrap(), json!({"event": "activity"}));
+        assert!(rx.try_recv().is_err(), "one activity event for two keys in a row");
     }
 
     #[tokio::test]
