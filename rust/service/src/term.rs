@@ -45,7 +45,7 @@ pub fn config(state: &State) -> Result<TermConfig, String> {
 }
 
 /// `term.json`, when terminal sessions are on.
-fn allowed(state: &State) -> Result<TermConfig, String> {
+pub(crate) fn allowed(state: &State) -> Result<TermConfig, String> {
     let c = config(state)?;
     if !c.allow {
         return Err(OFF.into());

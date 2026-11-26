@@ -7,6 +7,7 @@ pub(crate) mod mac;
 pub mod disks;
 pub mod rules;
 pub mod sample;
+pub mod serve;
 pub mod task;
 
 pub use rules::{History, Level, Warning, KEEP};

@@ -217,6 +217,16 @@ pub async fn serve_value(state: &Arc<State>, mut s: Pipe, v: Value, peer: Peer) 
         }
         // Presence probe: no access-log line (A's 访问记录 must not fill with probes).
         Ok(Op::Ping) => reply_and_finish(&mut s, ok(json!({}))).await,
+        // Device load (device-load spec §10): whoever may `list_apps` may ask. Polled like `ping`: a success writes
+        // nothing. With sampling off it is an unknown op, as on an older device.
+        Ok(Op::Load { history, top }) if state.load.is_some() => {
+            let r = crate::load::serve::reply(state, history, top);
+            if r["ok"] != true {
+                log_request(state, &peer, json!({"op": "load"}), &r);
+            }
+            reply_and_finish(&mut s, r).await
+        }
+        Ok(Op::WatchLoad) if state.load.is_some() => crate::load::serve::follow(state, &mut s).await,
         Ok(
             op @ (Op::ListTerms
             | Op::WatchTerms

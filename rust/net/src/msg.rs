@@ -69,6 +69,15 @@ pub enum Op {
         #[serde(default)]
         port: Value,
     },
+    /// This device's load (device-load spec §10), once: `history` adds the last hour, `top` the busiest processes.
+    Load {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        history: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        top: bool,
+    },
+    /// This device's load with its history, then one line per sample, until the stream closes.
+    WatchLoad,
 }
 
 #[cfg(test)]
@@ -148,6 +157,16 @@ mod tests {
         let rename = Op::RenameTerm { term: "term:pty:k".into(), name: "n".into() };
         assert_eq!(serde_json::to_value(&rename).unwrap(), json!({"op":"rename_term","term":"term:pty:k","name":"n"}));
         assert_eq!(serde_json::from_value::<Op>(serde_json::to_value(&rename).unwrap()).unwrap(), rename);
+    }
+
+    #[test]
+    fn load_requests() {
+        assert_eq!(serde_json::to_value(Op::Load { history: false, top: false }).unwrap(), json!({"op":"load"}));
+        assert_eq!(serde_json::to_value(Op::Load { history: true, top: false }).unwrap(), json!({"op":"load","history":true}));
+        assert_eq!(serde_json::to_value(Op::Load { history: false, top: true }).unwrap(), json!({"op":"load","top":true}));
+        assert_eq!(serde_json::from_value::<Op>(json!({"op":"load"})).unwrap(), Op::Load { history: false, top: false });
+        assert_eq!(serde_json::to_value(Op::WatchLoad).unwrap(), json!({"op":"watch_load"}));
+        assert_eq!(serde_json::from_value::<Op>(json!({"op":"watch_load"})).unwrap(), Op::WatchLoad);
     }
 
     #[test]
