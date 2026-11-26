@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'labels.dart';
 import 'log_view.dart';
 import 'term/term_id.dart';
 
@@ -424,10 +425,51 @@ class HubClient extends ChangeNotifier {
 
   /// Opens a text terminal window on device [id] running [shell] (the device's default when null, and an old device
   /// is sent none) in terminal app [app]; answers the new term id. [from]: the terminal it is opened beside (its
-  /// directory and shell, its window); an old device ignores it.
-  Future<String> openTerm(String id, {String? shell, required String app, String? from}) async {
-    final m = await _request({'cmd': 'open_term', 'id': id, 'shell': ?shell, 'app': app, 'from': ?from}, 'term_created');
+  /// directory and shell, its window); an old device ignores it. [labelFrom]: a terminal that is gone, whose label
+  /// the new one takes over.
+  Future<String> openTerm(String id, {String? shell, required String app, String? from, String? labelFrom}) async {
+    final m = await _request(
+        {'cmd': 'open_term', 'id': id, 'shell': ?shell, 'app': app, 'from': ?from, 'label_from': ?labelFrom},
+        'term_created');
     return '${m['term']}';
+  }
+
+  /// Each device's session labels, as its watch last pushed them; none yet for a device whose table has not come.
+  final labels = <String, LabelTable>{};
+
+  /// Devices that predate labels: no label can be shown or changed there.
+  final labelsUnsupported = <String>{};
+
+  /// Devices whose next table is taken whatever its rev (their watch ended: the device may have started over).
+  final _labelsAfresh = <String>{};
+
+  /// Labels session [app] of device [id]; both empty clears it. The device's refusal is thrown with its words.
+  Future<void> setLabel(String id, String app, {required String title, required String note}) =>
+      _request({'cmd': 'set_label', 'id': id, 'app': app, 'title': title, 'note': note}, 'label_set');
+
+  /// Clears session [app]'s label on device [id].
+  Future<void> resetLabel(String id, String app) => _request({'cmd': 'reset_label', 'id': id, 'app': app}, 'label_reset');
+
+  void _onLabels(Map<String, dynamic> m) {
+    final id = m['id'];
+    if (id is! String) return;
+    if (m['unsupported'] == true) {
+      labelsUnsupported.add(id);
+      labels.remove(id);
+      return;
+    }
+    if (m['labels'] == null) {
+      // The watch ended (it is retried): what was shown stays until the next table.
+      _labelsAfresh.add(id);
+      return;
+    }
+    final t = LabelTable.fromJson(m);
+    final had = labels[id];
+    // An older table is a late one, unless the watch started over (`first`: the device may have a fresh file).
+    if (had != null && t.rev < had.rev && m['first'] != true && !_labelsAfresh.contains(id)) return;
+    _labelsAfresh.remove(id);
+    labelsUnsupported.remove(id);
+    labels[id] = t;
   }
 
   /// Ends text terminal [term] of device [id] for good (its program too); the refusal is thrown with its words.
@@ -580,13 +622,15 @@ class HubClient extends ChangeNotifier {
         _paths.clear();
       case 'terms':
         if (m['id'] != null) termLists['${m['id']}'] = _termList(m, '${m['id']}');
+      case 'labels':
+        _onLabels(m);
       case 'closed':
         _sessions.remove(m['sid']);
         if (m['sid'] != null && m['reason'] != null) closeReasons[m['sid'] as Object] = '${m['reason']}';
     }
 
     // A watch event has no `req`: it answers no one (`_take` would give it to another device's `terms`).
-    final p = event == 'terms' && m['req'] is! int ? null : _take(m, event);
+    final p = (event == 'terms' || event == 'labels') && m['req'] is! int ? null : _take(m, event);
     if (p != null) {
       if (event == 'error') {
         p.completer.completeError(HubException('${m['error'] ?? 'unknown error'}'));

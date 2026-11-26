@@ -954,7 +954,7 @@ mod tests {
     /// One tap on 新建 opened two windows: the hub sent `open_term` again on a new link after a slow answer.
     #[test]
     fn opening_and_ending_a_terminal_are_never_sent_twice() {
-        assert!(!repeatable(&Op::OpenTerm { shell: None, from: None, app: "Terminal".into() }));
+        assert!(!repeatable(&Op::OpenTerm { shell: None, from: None, app: "Terminal".into(), label_from: None }));
         assert!(!repeatable(&Op::EndTerm { term: "term:pty:k".into() }));
         assert!(repeatable(&Op::ListTerms));
         assert!(repeatable(&Op::Ping));
@@ -971,8 +971,8 @@ mod tests {
     /// The host's service waits 30 s for its terminal worker: B waits longer than that for `open_term`.
     #[test]
     fn open_term_outwaits_the_hosts_own_wait() {
-        assert!(reply_wait(&Op::OpenTerm { shell: None, from: None, app: "Terminal".into() }) > std::time::Duration::from_secs(30));
-        assert_eq!(reply_wait(&Op::OpenTerm { shell: None, from: None, app: "x".into() }), OPEN_TERM_WAIT);
+        assert!(reply_wait(&Op::OpenTerm { shell: None, from: None, app: "Terminal".into(), label_from: None }) > std::time::Duration::from_secs(30));
+        assert_eq!(reply_wait(&Op::OpenTerm { shell: None, from: None, app: "x".into(), label_from: None }), OPEN_TERM_WAIT);
         assert_eq!(reply_wait(&Op::ListTerms), REPLY_WAIT);
     }
     use crate::hosts::Host;

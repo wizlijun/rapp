@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/labels.dart';
 import 'package:rapp/service_client.dart';
 
 /// A tiny fake of rapp-service's IPC (§3), bound to an ephemeral port.
@@ -11,6 +12,10 @@ class FakeService {
   final String token;
   late ServerSocket server;
   final received = <Map<String, dynamic>>[];
+
+  /// The labels table it keeps (app → {title, note}); null: an older service that does not know labels.
+  Map<String, Map<String, String>>? labels = {};
+  var labelsRev = 0;
   final firstLines = <Map<String, dynamic>>[];
   final _subscribers = <Socket>[];
   final _all = <Socket>[];
@@ -89,6 +94,15 @@ class FakeService {
           } else {
             s.write(reply);
           }
+        case 'labels' || 'set_label' || 'reset_label' when labels != null:
+          final l = labels!;
+          if (m['cmd'] == 'set_label') {
+            l[m['app'] as String] = {'title': m['title'] as String, 'note': m['note'] as String};
+            labelsRev++;
+          } else if (m['cmd'] == 'reset_label' && l.remove(m['app']) != null) {
+            labelsRev++;
+          }
+          s.write('${jsonEncode({'ok': true, 'rev': labelsRev, if (m['cmd'] == 'labels') 'labels': l})}\n');
         default:
           s.write('{"ok":false,"error":"unknown cmd"}\n');
       }
@@ -379,6 +393,40 @@ void main() {
       await svc.stop();
     });
 
+    test('labels: read on connect, changed by setLabel / resetLabel, none from an older service', () async {
+      final svc = FakeService('tok-lb')..labels = {'term:pty:k': {'title': '后端', 'note': ''}};
+      await svc.start();
+      final m = ServiceMonitor(readToken: () async => 'tok-lb', port: svc.port, retry: const Duration(milliseconds: 50));
+      m.start();
+      await until(() => m.labels != null);
+      expect(m.labels!.labels['term:pty:k'], const SessionLabel(title: '后端'));
+      await m.setLabel('com.apple.Safari', title: '', note: '查文档');
+      expect(svc.received.where((r) => r['cmd'] == 'set_label').last,
+          {'cmd': 'set_label', 'app': 'com.apple.Safari', 'title': '', 'note': '查文档'});
+      expect(m.labels!.labels['com.apple.Safari'], const SessionLabel(note: '查文档'));
+      await m.resetLabel('term:pty:k');
+      expect(m.labels!.labels.containsKey('term:pty:k'), isFalse);
+      expect(m.labels!.rev, 2);
+      await svc.stop();
+      m.dispose();
+
+      final old = FakeService('tok-lb2')..labels = null;
+      await old.start();
+      final m2 = ServiceMonitor(readToken: () async => 'tok-lb2', port: old.port, retry: const Duration(milliseconds: 50));
+      m2.start();
+      await until(() => m2.status != null);
+      expect((m2.labels, m2.labelsUnsupported), (null, true));
+      await m2.refresh();
+      expect(old.received.where((r) => r['cmd'] == 'labels'), hasLength(1));
+      // Upgraded in place: the restarted service knows labels, and the monitor asks it again.
+      old.labels = {'a': {'title': '新', 'note': ''}};
+      old.dropAll();
+      await until(() => m2.labels != null);
+      expect((m2.labels!.labels['a'], m2.labelsUnsupported), (const SessionLabel(title: '新'), false));
+      await old.stop();
+      m2.dispose();
+    });
+
     test('update wrappers ask the service and refresh the status', () async {
       final svc = FakeService('tok-4');
       await svc.start();
@@ -393,7 +441,7 @@ void main() {
       await m.updateDismiss('0.5.0');
       await m.updateRollback();
       await m.permissionsReset();
-      expect(svc.received.map((r) => r['cmd']).where((c) => c != 'status' && c != 'subscribe'),
+      expect(svc.received.map((r) => r['cmd']).where((c) => c != 'status' && c != 'subscribe' && c != 'labels'),
           ['set_update', 'update_check', 'update_apply', 'update_dismiss', 'update_rollback', 'permissions_reset']);
       await svc.stop();
       m.dispose();

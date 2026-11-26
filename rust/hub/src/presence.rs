@@ -43,6 +43,7 @@ pub(crate) async fn run(hub: Arc<Hub>, every: Duration) {
         }
         let hosts = hub.hosts.all();
         terms::stop_gone(&hub, &hosts);
+        crate::labels::stop_gone(&hub, &hosts);
         for host in hosts {
             // A host a session waits for is asked by its watch, on its own cadence.
             if hub.probe_halt.lock().unwrap().contains(&host.id) || hub.watches.has(&host.id) {
@@ -56,8 +57,10 @@ pub(crate) async fn run(hub: Arc<Hub>, every: Duration) {
             let online = online(&r);
             if online {
                 terms::ensure_watch(&hub, &host);
+                crate::labels::ensure_watch(&hub, &host);
             } else {
                 terms::stop_watch(&hub, &host.id);
+                crate::labels::stop_watch(&hub, &host.id);
             }
             if last.insert(host.id.clone(), online) != Some(online) {
                 hub.log.event(Lvl::Info, "presence", json!({"id":host.id,"online":online}));
