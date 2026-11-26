@@ -1,22 +1,26 @@
 //! `rapp-service` — no arguments. Data root: `$RAPP_HOME`, the `data-root` pointer file, or `~/rapp`.
 //! Env: `RAPP_BIN_DIR` (where rapp-host lives), `RAPP_GUI` (the `rapp` GUI for `--cm`),
 //! `RAPP_LOG_DIR` (where `service.log` goes; see `rapp_net::log::log_dir`).
+//! Windows only: `--supervised` (started by `rapp-svc`): stdin is the supervisor's pipe; its end stops the service.
 
 use rapp_service::{autolock, DataOpts, LoadOpts, Opts, Service, SystemRunner, UpdateOpts, WORKER_IDLE};
 use std::sync::Arc;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 mod instance;
 
 #[tokio::main]
 async fn main() {
-    if std::env::args().len() > 1 {
-        eprintln!("usage: rapp-service   (data root: $RAPP_HOME, data-root pointer or ~/rapp)");
-        std::process::exit(2);
-    }
+    let args = match rapp_service::supervise::parse_args(&std::env::args().skip(1).collect::<Vec<_>>(), cfg!(windows)) {
+        Ok(args) => args,
+        Err(usage) => {
+            eprintln!("{usage}");
+            std::process::exit(2);
+        }
+    };
     // Claim ownership before migration, identity/token writes, or worker startup.
     // Keep it until process exit, including service shutdown and child cleanup.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     let _instance = match instance::acquire() {
         Ok(Some(guard)) => guard,
         Ok(None) => {
@@ -53,13 +57,17 @@ async fn main() {
         map_ports: rapp_service::MAP_PORTS,
         own_ports: true,
         load: Some(LoadOpts::system()),
+        #[cfg(unix)]
         update: std::env::current_exe().ok().and_then(|e| rapp_update::bundle_of(&e)).map(UpdateOpts::system),
+        // phase G turns this on (spec §12.3)
+        #[cfg(windows)]
+        update: None::<UpdateOpts>,
     };
     match Service::start(opts).await {
         Ok(svc) => {
             // Ports and id are in service.log (`service_start`).
             let restart = tokio::select! {
-                _ = stopped() => false,
+                _ = stopped(args.supervised) => false,
                 _ = svc.restart_wanted() => true,
             };
             svc.stop();
@@ -76,7 +84,9 @@ async fn main() {
 }
 
 /// ^C, or SIGTERM (launchd/systemd stopping the service).
-async fn stopped() {
+/// Windows: ^C, or — only when `supervised` — the end of stdin (`rapp-svc` went away). Without
+/// the flag stdin is never read: a service started by hand may have a closed stdin (Review Focus 5).
+async fn stopped(supervised: bool) {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{signal, SignalKind};
@@ -88,5 +98,14 @@ async fn stopped() {
             return;
         }
     }
+    #[cfg(windows)]
+    if supervised {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = rapp_service::supervise::closed(tokio::io::stdin()) => {}
+        }
+        return;
+    }
+    let _ = supervised;
     let _ = tokio::signal::ctrl_c().await;
 }
