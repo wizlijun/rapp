@@ -1235,3 +1235,7 @@ macOS、Linux、Duo、iPad 各一遍。
 跟进：
 
 - [ ] `rust/term/src/pty/resume.rs` 改写表的三处问题（终审第 3 条，只影响预填，不会执行）：`claude -p hi` 被改成 `claude -p --continue`（一次性打印，不是交互会话）；表里没有的带值选项（如 `--system-prompt`、`--output-format`）会把 `--continue` 吞成自己的值，或把自己的值当提示词丢掉；子命令也被改写（`claude doctor` → `claude --continue`，`codex exec x` → `codex resume --last`）。做法：claude 的 `-p/--print` 和已知子命令原样不动。
+- [ ] 恢复时快照恰好读不出来（极少见）：终端窗口里写了原因，但 rApp / `rapp term restore` 只说「10 秒内没打开」。做法：holder 读不出来时先把原因交回 serve，再退出。
+- [ ] 快照存命令时，双引号里的 `\"` 没跳过：`TOKEN="abc\" def" claude` 会存成 `def" claude`，漏出值的一部分。做法：`strip_assignments` 在双引号里也认 `\`。
+- [ ] 规格的密钥规则表补上 `docker/podman login -p`（代码已拦）。
+- [ ] `rust/term/tests/shell_hook.rs`：`strip_osc` 插进了 `home()` 和它的注释之间，把注释挪回 `home()` 上。
