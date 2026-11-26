@@ -121,10 +121,17 @@ impl Sh {
         }
     }
 
+    /// The output without its OSC sequences: what the user sees. Counting in it is safe, where the raw output's
+    /// `cwd=<base64>` could hold the very text counted (a home path that encodes to `…U1…`).
+    fn visible(&self) -> String {
+        strip_osc(&self.output())
+    }
+
+    /// Waits until the visible output shows `text`; that output.
     fn wait_output(&self, text: &str) -> String {
         let end = Instant::now() + WAIT;
         loop {
-            let o = self.output();
+            let o = self.visible();
             if o.contains(text) {
                 return o;
             }
@@ -179,6 +186,27 @@ fn runs(ev: &[Ev]) -> Vec<String> {
 }
 
 /// A home with these files in it.
+/// `s` without its OSC sequences (`ESC ]` up to a BEL or `ESC \\`); an unfinished one is dropped to the end.
+fn strip_osc(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(at) = rest.find("\x1b]") {
+        out.push_str(&rest[..at]);
+        let body = &rest[at + 2..];
+        let end = [body.find('\x07').map(|i| i + 1), body.find("\x1b\\").map(|i| i + 2)].into_iter().flatten().min();
+        rest = end.map_or("", |e| &body[e..]);
+    }
+    out.push_str(rest);
+    out
+}
+
+#[test]
+fn strip_osc_keeps_only_what_shows() {
+    let raw = "a\x1b]7502;state;cwd=xU1x\x07b\x1b]7;file://h/U1\x1b\\c\x1b]133;A";
+    assert_eq!(strip_osc(raw), "abc");
+    assert_eq!(strip_osc("plain U1"), "plain U1");
+}
+
 fn home(files: &[(&str, &str)]) -> tempfile::TempDir {
     let d = tempfile::tempdir().unwrap();
     for (name, body) in files {
@@ -258,8 +286,17 @@ fn zsh_keeps_user_precmd_and_status() {
     sh.wait_output("H1");
     sh.wait_output("S1");
     sh.run("false");
-    let out = sh.output();
-    assert_eq!((out.matches("U1").count(), out.matches("H1").count()), (2, 2), "{out:?}");
+    // Counted in what shows (a cwd's base64 may hold "U1"), once both hooks of the second prompt printed: ours may
+    // mark the prompt before theirs runs.
+    let counts = |o: &str| (o.matches("U1").count(), o.matches("H1").count());
+    let end = Instant::now() + WAIT;
+    while counts(&sh.visible()) < (2, 2) {
+        assert!(Instant::now() < end, "{:?}", sh.output());
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    let out = sh.visible();
+    assert_eq!(counts(&out), (2, 2), "{out:?}");
     // Ours is still there beside theirs, on later prompts too.
     sh.run("cd /");
     let ev = sh.wait("state for /", |ev| states(ev).iter().any(|(c, _)| c.as_deref() == Some("/")));
