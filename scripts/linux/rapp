@@ -4,7 +4,7 @@
 self=$(readlink -f -- "$0") || exit 1
 bundle=${self%/*}
 case "${1-}" in
-  share|unshare|hosts|pipe|-h|--help|--version)
+  share|unshare|hosts|pipe|update|-h|--help|--version)
     exec "$bundle/rapp-cli" "$@"
     ;;
   *)

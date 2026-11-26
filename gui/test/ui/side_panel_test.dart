@@ -840,6 +840,95 @@ void main() {
     expect(panelWidth(1194), 597);
     expect(panelWidth(744), 372);
   });
+
+  testWidgets('Linux: side panel 会话 tab renders unified SessionBlock and FavoriteBlock for terminals', (tester) async {
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await onPlatform(TargetPlatform.linux, () async {
+      final term = FakeTermSessionPort();
+      var nextSid = 0;
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') {
+          final sid = ++nextSid;
+          Future.microtask(() => t.emit({
+                'event': 'opened',
+                'sid': sid,
+                'id': m['id'],
+                'app': m['app'],
+                'path': 'lan',
+                'port': 5000 + sid,
+                'token': 'tk',
+                'req': m['req'],
+              }));
+        }
+      };
+      final ls = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: FakeSessionPort(), termPort: term);
+      addTearDown(ls.dispose);
+      ls.prefs.termOpen['111'] = 'text';
+      await tester.runAsync(() async {
+        t.emit({
+          'event': 'terms',
+          'id': '111',
+          'terms': [
+            {
+              'id': 'term:pty:a',
+              'name': 'zsh',
+              'title': '~/git/rapp',
+              'fg': 'claude',
+              'shell': false,
+              'command': 'zsh',
+              'activity': 1,
+              'dead': false,
+              'ps': {'state': 'blocked', 'kind': 'permission', 'msg': 'approve Bash: ls', 'seq': 2},
+            },
+          ],
+          'hosts': [
+            {
+              'host': null,
+              'launchers': ['ghostty'],
+              'shells': [
+                {'name': 'zsh', 'path': '/bin/zsh', 'default': true},
+              ],
+            },
+          ],
+        });
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      ls.toggleFavorite('111', 'terms:', '终端');
+      await tester.pumpWidget(wrap(SidePanel(state: ls, devicesTab: const Text('devices-body'))));
+      await tester.pump();
+
+      final fav = find.byKey(const Key('favorite-111/terms:'));
+      expect(fav, findsOneWidget);
+      expect(find.descendant(of: fav, matching: find.text('mini')), findsOneWidget);
+      expect(find.descendant(of: fav, matching: find.text('打开')), findsOneWidget);
+
+      await tester.tap(fav);
+      await tester.runAsync(() async {
+        for (var i = 0; i < 6; i++) {
+          await flush();
+        }
+      });
+      term.play(const ReadyEvent(1, 'x'));
+      await tester.runAsync(flush);
+      ls.togglePanel(PanelTab.sessions);
+      await tester.pump();
+      expect(ls.entries.map((e) => e.app), ['term:pty:a']);
+
+      final card = find.byKey(const Key('session-111/term:pty:a'));
+      expect(card, findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text('claude · ~/git/rapp')), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text('CLI · 等确认 · approve Bash: ls')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('group-app')));
+      await tester.pump();
+      expect(find.descendant(of: card, matching: find.text('CLI · mini · 等确认 · approve Bash: ls')), findsOneWidget);
+      expect(find.descendant(of: fav, matching: find.text('新建')), findsOneWidget);
+    });
+  });
 }
 
 class _FakeLlm extends LlmApi {

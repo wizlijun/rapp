@@ -62,6 +62,17 @@ fn page_of(u: &Value) -> Option<&str> {
     u["page"].as_str().or(u["reinstall_page"].as_str())
 }
 
+/// On Linux, `/releases/latest` points to the macOS auto-updater release; Linux packages live on `/releases`.
+fn linux_page_of(u: &Value) -> Option<&str> {
+    page_of(u).map(|p| {
+        if p == "https://github.com/wizlijun/rapp/releases/latest" {
+            "https://github.com/wizlijun/rapp/releases"
+        } else {
+            p
+        }
+    })
+}
+
 pub async fn run(what: Upd, yes: bool, timeout: Option<u64>, out: Out) -> ! {
     let secs = timeout.unwrap_or(match what {
         Upd::Install => 900,
@@ -132,7 +143,7 @@ fn preflight(u: &Value, out: Out) {
     if u["state"] == "off" {
         // Spec §2: Linux has no launchd to restart the service after a swap.
         if cfg!(target_os = "linux") {
-            out.fail("not_launchd", "Linux 上还不能在线升级，请从页面下载安装包", page_of(u));
+            out.fail("not_launchd", "Linux 上还不能在线升级，请从页面下载安装包", linux_page_of(u));
         }
         out.fail("failed", NOT_BUNDLED, None);
     }
@@ -240,12 +251,18 @@ async fn wait_restart(c: &Clock, done: impl Fn(&Value) -> bool) -> Value {
 
 /// `rapp update status`: one look, nothing else.
 fn status(u: &Value, out: Out) -> ! {
+    let current = if cfg!(target_os = "linux") && u["current"].is_null() {
+        json!(env!("CARGO_PKG_VERSION"))
+    } else {
+        u["current"].clone()
+    };
     let v = json!({
-        "state": u["state"], "current": u["current"], "latest": u["latest"], "progress": u["progress"],
+        "state": u["state"], "current": current, "latest": u["latest"], "progress": u["progress"],
         "auto_update": u["auto_update"], "can_rollback": u["can_rollback"],
         "error": u["error"], "error_code": u["error_code"],
     });
     let state = match text(&u["state"]) {
+        "off" if cfg!(target_os = "linux") => "Linux 上还不能在线升级（请从发布页面下载安装包）".to_string(),
         "off" => "不能在线升级（不是从安装包装的）".to_string(),
         "idle" => "没有新版本".into(),
         "checking" => "检查中".into(),
@@ -261,7 +278,7 @@ fn status(u: &Value, out: Out) -> ! {
     };
     let or_dash = |v: &Value| v.as_str().unwrap_or("—").to_string();
     let mut lines = vec![
-        format!("当前版本：{}", or_dash(&u["current"])),
+        format!("当前版本：{}", or_dash(&current)),
         format!("最新版本：{}", or_dash(&u["latest"])),
         format!("状态：{state}"),
         format!("自动升级：{}", if u["auto_update"] == true { "开" } else { "关" }),
