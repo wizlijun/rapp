@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["wire", "conn", "relay", "net", "service", "ports", "hub", "hub-ffi", "testkit", "update", "term", "client-core", "client-gtk", "cli", "host-linux", "speech-linux", "host-windows", "svc-windows", "../services/state"]
+members = ["wire", "conn", "relay", "net", "service", "ports", "hub", "hub-ffi", "testkit", "update", "term", "client-core", "client-gtk", "cli", "host-linux", "speech-linux", "../services/state"]
 
 [workspace.package]
 version = "0.15.55"
@@ -25,17 +25,6 @@ tempfile = "3"
 ring = "0.17"
 x509-parser = "0.18"
 data-encoding = "2"
-# Windows only (spec §8): the system calls of `rapp-net`'s `win` module, and its dual-stack socket.
-windows-sys = { version = "0.61", features = [
-    "Win32_Foundation",
-    "Win32_Security",
-    "Win32_Security_Authorization",
-    "Win32_Storage_FileSystem",
-    "Win32_System_Threading",
-    "Win32_System_RemoteDesktop",
-    "Win32_System_Console",
-] }
-socket2 = "0.6"
 rapp-wire = { path = "wire" }
 rapp-net = { path = "net" }
 rapp-conn = { path = "conn" }

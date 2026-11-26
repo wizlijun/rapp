@@ -1,11 +1,9 @@
 use std::time::Duration;
 
 use rapp_conn::relay::{
-    is_bad_key, is_key_changed, refused_key, Pushed, RelayConn, BAD_KEY, CLOSE_BAD_KEY, KEY_CHANGED, FORWARD_PRIORITY,
+    is_bad_key, is_key_changed, refused_key, Pushed, RelayConn, BAD_KEY, CLOSE_BAD_KEY, CLOSE_KEY_CHANGED, KEY_CHANGED,
+    FORWARD_PRIORITY,
 };
-// Only the key-change tests use it, and they need the relay's admin socket (unix only).
-#[cfg(unix)]
-use rapp_conn::relay::CLOSE_KEY_CHANGED;
 use rapp_conn::{e2e_accept, e2e_connect};
 use rapp_net::log::Log;
 use rapp_relay::config::Config;
@@ -19,8 +17,6 @@ const A_ID: &str = "123456789";
 
 struct Rig {
     relay: Relay,
-    // Read only by the key-change tests (unix only); everywhere it keeps the data dir alive.
-    #[cfg_attr(not(unix), allow(dead_code))]
     data: TempDir,
     key: Key,
     addr: String,
@@ -201,8 +197,6 @@ async fn relay_to_unknown_id_fails_on_first_read() {
     assert_eq!(err.to_string(), "unknown id");
 }
 
-// Rotates the key through the relay's admin socket, which exists only on unix.
-#[cfg(unix)]
 #[tokio::test]
 async fn rotate_key_closes_every_device_with_code_4() {
     let r = start().await;
@@ -221,8 +215,6 @@ async fn rotate_key_closes_every_device_with_code_4() {
     }
 }
 
-// Rotates the key through the relay's admin socket, which exists only on unix.
-#[cfg(unix)]
 #[tokio::test]
 async fn requests_after_a_key_change_say_key_changed() {
     let r = start().await;
@@ -257,8 +249,6 @@ async fn a_refused_key_is_told_by_its_exact_text_only() {
     assert_eq!(refused_key(&anyhow::anyhow!("unknown id")), None);
 }
 
-// Rotates the key through the relay's admin socket, which exists only on unix.
-#[cfg(unix)]
 #[tokio::test]
 async fn an_open_relayed_stream_says_key_changed_after_a_rotate() {
     let r = start().await;

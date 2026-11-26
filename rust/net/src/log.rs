@@ -217,8 +217,6 @@ fn open_private(path: &Path) -> Option<std::fs::File> {
         #[cfg(unix)]
         std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
         b.create(dir).ok()?;
-        #[cfg(windows)]
-        let _ = crate::private::dir(dir);
         // An existing folder (e.g. made by a GUI at 0755) is tightened too.
         #[cfg(unix)]
         {
@@ -274,7 +272,6 @@ pub fn log_dir() -> PathBuf {
 }
 
 /// `log_dir` with the environment passed in, so tests need not touch the real one.
-#[cfg(not(windows))]
 fn log_dir_from(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> PathBuf {
     let env = |k| var(k).filter(|v| !v.is_empty()).map(PathBuf::from);
     if let Some(d) = env("RAPP_LOG_DIR") {
@@ -291,24 +288,6 @@ fn log_dir_from(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> PathBuf {
     } else {
         env("XDG_STATE_HOME").unwrap_or_else(|| user.join(".local/state")).join("rapp")
     }
-}
-
-/// `log_dir_from` on Windows: the same first two rules, then `%LOCALAPPDATA%\rapp\logs`, else
-/// `%USERPROFILE%\AppData\Local\rapp\logs`, else `.\rapp\logs`. (`HOME` is not set on Windows.)
-#[cfg(windows)]
-fn log_dir_from(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> PathBuf {
-    let env = |k| var(k).filter(|v| !v.is_empty()).map(PathBuf::from);
-    if let Some(d) = env("RAPP_LOG_DIR") {
-        return d;
-    }
-    if let Some(h) = env("RAPP_HOME") {
-        return h.join("local").join("logs");
-    }
-    env("LOCALAPPDATA")
-        .or_else(|| env("USERPROFILE").map(|u| u.join("AppData").join("Local")))
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("rapp")
-        .join("logs")
 }
 
 /// Up to `limit` matching events from `<name>` and `<name>.1`, newest first; bad lines are skipped.
@@ -522,33 +501,6 @@ mod tests {
         assert_eq!(log_dir_from(env(&[("RAPP_LOG_DIR", ""), ("RAPP_HOME", "/h")])), PathBuf::from("/h/local/logs"));
         #[cfg(target_os = "macos")]
         assert_eq!(log_dir_from(env(&[("HOME", "/u")])), PathBuf::from("/u/Library/Logs/rapp"));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn log_dir_on_windows() {
-        let env = |vars: &'static [(&'static str, &'static str)]| {
-            move |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| std::ffi::OsString::from(v))
-        };
-        let logs = |base: &str| PathBuf::from(base).join("rapp").join("logs");
-        assert_eq!(log_dir_from(env(&[("LOCALAPPDATA", r"C:\L"), ("USERPROFILE", r"C:\U")])), logs(r"C:\L"));
-        assert_eq!(
-            log_dir_from(env(&[("USERPROFILE", r"C:\Users\张 三")])),
-            PathBuf::from(r"C:\Users\张 三").join("AppData").join("Local").join("rapp").join("logs")
-        );
-        assert_eq!(log_dir_from(env(&[("LOCALAPPDATA", ""), ("USERPROFILE", r"C:\U")])), PathBuf::from(r"C:\U").join("AppData").join("Local").join("rapp").join("logs"));
-        assert_eq!(log_dir_from(env(&[])), logs("."));
-        assert_eq!(log_dir_from(env(&[("RAPP_HOME", r"D:\r"), ("LOCALAPPDATA", r"C:\L")])), PathBuf::from(r"D:\r").join("local").join("logs"));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn a_log_dir_is_made_private() {
-        let t = tempfile::tempdir().unwrap();
-        let dir = t.path().join("张 三").join("logs");
-        Log::file(&dir, "x.log").msg(Lvl::Info, "x");
-        assert_eq!(crate::private::acl(&dir).unwrap(), crate::private::expected_acl());
-        assert_eq!(crate::private::acl(&dir.join("x.log")).unwrap().sids, crate::private::expected_acl().sids);
     }
 
     #[test]

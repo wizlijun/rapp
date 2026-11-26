@@ -1,4 +1,0 @@
-# Windows: Rust programs carry the C runtime inside them (spec 12.6), so a machine without the
-# Visual C++ redistributable runs them. Other targets are not affected.
-[target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]

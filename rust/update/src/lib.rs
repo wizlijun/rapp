@@ -351,6 +351,7 @@ mod tests {
 
     #[test]
     fn cache_save_load_roundtrip() {
+        use std::os::unix::fs::PermissionsExt;
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("update.json");
         let c = Cache {
@@ -360,13 +361,7 @@ mod tests {
         };
         save_cache(&p, &c).unwrap();
         assert_eq!(load_cache(&p), c);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
-        }
-        #[cfg(windows)]
-        assert_eq!(rapp_net::private::acl(&p).unwrap(), rapp_net::private::private_acl().unwrap());
+        assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
     }
 
     #[test]

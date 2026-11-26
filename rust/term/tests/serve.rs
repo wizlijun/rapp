@@ -1,4 +1,3 @@
-#![cfg(unix)]
 #[path = "common/pty.rs"]
 mod pty;
 

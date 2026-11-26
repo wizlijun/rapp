@@ -83,10 +83,6 @@ async fn first_start_generates_id_and_password() {
             assert_eq!(mode & 0o777, 0o600, "{f}");
         }
     }
-    #[cfg(windows)]
-    for f in ["service.json", "ipc.token"] {
-        assert_eq!(rapp_net::private::acl(&home.path().join(f)).unwrap(), rapp_net::private::private_acl().unwrap(), "{f}");
-    }
     let st = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await;
     // B reaches A by `id@ip`: one per local IPv4, port shown as it is not 22028.
     let want_tail = format!(":{}", svc.port);
@@ -162,7 +158,7 @@ async fn open_splices_bytes_to_worker_and_kick_ends_it() {
 #[tokio::test]
 async fn open_unknown_worker_binary_is_an_error() {
     let a = service().await;
-    std::fs::remove_file(a.bins.path().join(format!("rapp-host{}", std::env::consts::EXE_SUFFIX))).unwrap();
+    std::fs::remove_file(a.bins.path().join("rapp-host")).unwrap();
     let ep = b_endpoint();
     let (conn, _) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
     let r = req(&conn, json!({"op":"open","app":"com.example.echo"})).await;
@@ -287,13 +283,13 @@ fn tccutil_calls(r: &rapp_update::fake::FakeRunner) -> Vec<Vec<String>> {
     r.calls().into_iter().filter(|(p, _)| p == rapp_update::runner::TCCUTIL).map(|(_, a)| a).collect()
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(target_os = "linux"))]
 fn strs(v: &[&str]) -> Vec<String> {
     v.iter().map(|s| s.to_string()).collect()
 }
 
 #[tokio::test]
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(target_os = "linux"))]
 async fn permissions_reset_runs_tccutil_for_rapp_only() {
     let bins = bins();
     set_perms(bins.path(), &perms(true, true));
@@ -325,7 +321,7 @@ async fn permissions_reset_runs_tccutil_for_rapp_only() {
 }
 
 #[tokio::test]
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(target_os = "linux"))]
 async fn accessibility_reset_failure_is_reported() {
     let bins = bins();
     set_perms(bins.path(), &perms(true, true));
@@ -353,27 +349,12 @@ async fn tccutil_missing_reports_false() {
     let r = ipc_once(&svc, home.path(), json!({"cmd":"permissions_reset"})).await;
     assert_eq!(r["ok"], true, "{r}");
     assert_eq!((&r["screen_recording_reset"], &r["accessibility_reset"]), (&json!(false), &json!(false)), "{r}");
-    if cfg!(any(target_os = "linux", windows)) {
+    if cfg!(target_os = "linux") {
         assert!(tccutil_calls(&runner).is_empty());
         assert!(!host_log(bins.path()).contains("check --prompt"));
     } else {
         assert!(host_log(bins.path()).contains("check --prompt"));
     }
-}
-
-/// Windows has no tccutil: even one the runner would answer is never called.
-#[tokio::test]
-#[cfg(windows)]
-async fn permissions_reset_never_runs_tccutil_on_windows() {
-    let bins = bins();
-    set_perms(bins.path(), &perms(true, true));
-    let (svc, home, runner) =
-        with_tccutil(Some(Box::new(|_| rapp_update::runner::Out::ok(""))), bins.path()).await;
-    let r = ipc_once(&svc, home.path(), json!({"cmd":"permissions_reset"})).await;
-    assert_eq!(r["ok"], true, "{r}");
-    assert_eq!((&r["screen_recording_reset"], &r["accessibility_reset"]), (&json!(false), &json!(false)), "{r}");
-    assert!(tccutil_calls(&runner).is_empty());
-    assert!(!host_log(bins.path()).contains("check --prompt"));
 }
 
 #[tokio::test]
@@ -1234,7 +1215,7 @@ async fn lock_failure_is_recorded() {
 async fn linux_without_graphical_host_lists_capabilities_and_still_serves_terms_and_ports() {
     let home = tempfile::tempdir().unwrap();
     let bins = bins();
-    std::fs::remove_file(bins.path().join(format!("rapp-host{}", std::env::consts::EXE_SUFFIX))).unwrap();
+    std::fs::remove_file(bins.path().join("rapp-host")).unwrap();
     service_json(home.path());
     let svc = start_service(home.path(), bins.path(), Duration::from_secs(60)).await;
     let st = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await;

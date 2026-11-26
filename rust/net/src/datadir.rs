@@ -25,8 +25,6 @@ pub fn prepare(root: &Path, legacy: &Path) -> Result<bool> {
         std::fs::set_permissions(&loc, std::fs::Permissions::from_mode(0o700))
             .with_context(|| format!("chmod {}", loc.display()))?;
     }
-    #[cfg(windows)]
-    crate::private::dir(&loc).with_context(|| format!("make private {}", loc.display()))?;
     for (path, text) in [
         (root.join("README.md"), README),
         (root.join(".gitignore"), GITIGNORE),
@@ -143,17 +141,6 @@ mod tests {
         assert_eq!(read(&root.join("agent/README.md")), AGENT_README);
         #[cfg(unix)]
         assert_eq!(mode(&root.join("local")), 0o700);
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn local_is_private_on_windows() {
-        // Review Focus 1 and 2: a user name with a space and Chinese characters.
-        let t = tempfile::tempdir().unwrap();
-        let (root, legacy) = (t.path().join("张 三").join("rapp"), t.path().join("legacy"));
-        std::fs::create_dir_all(&legacy).unwrap();
-        prepare(&root, &legacy).unwrap();
-        assert_eq!(crate::private::acl(&root.join("local")).unwrap(), crate::private::expected_acl());
     }
 
     #[test]

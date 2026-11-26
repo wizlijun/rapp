@@ -1,4 +1,3 @@
-#![cfg(unix)]
 //! The shell hook in real shells: zsh, bash and fish started the way the holder starts them (`shell::install` +
 //! `shell::launch`) in a pty of the test's own, with `HOME` a temporary directory holding known startup files. The
 //! output is read back with the holder's own scanner. A shell that is not installed skips its tests with a note.

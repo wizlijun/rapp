@@ -26,7 +26,6 @@ mod sharing;
 mod shares;
 mod sink;
 mod state;
-pub mod supervise;
 mod term;
 mod update;
 mod workers;
@@ -119,7 +118,6 @@ pub struct UpdateOpts {
 }
 
 impl UpdateOpts {
-    #[cfg(unix)]
     pub fn system(bundle: PathBuf) -> Self {
         let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
         UpdateOpts {
@@ -132,26 +130,6 @@ impl UpdateOpts {
             healthy_after: Duration::from_secs(30),
             gui_wait: Duration::from_secs(10),
             install_level: Some(PathBuf::from(rapp_update::INSTALL_LEVEL_FILE)),
-            quiet: Duration::from_secs(600),
-            auto_backoff: Duration::from_secs(30 * 60),
-        }
-    }
-
-    /// Windows: `version_dir` is the `app-<version>` directory this service runs from; `supervised`
-    /// (started by `rapp-svc`) plays launchd's part; `system_mode` puts the cache under
-    /// `%ProgramData%` (spec §5.1, §12.3). Not used before phase G.
-    #[cfg(windows)]
-    pub fn windows(version_dir: PathBuf, supervised: bool, system_mode: bool) -> Self {
-        UpdateOpts {
-            bundle: version_dir,
-            launchd: supervised,
-            cache_dir: supervise::update_cache_dir_from(&|k: &str| std::env::var_os(k).map(PathBuf::from), system_mode),
-            first_check: Duration::from_secs(30),
-            tick: Duration::from_secs(3600),
-            idle_poll: Duration::from_secs(60),
-            healthy_after: Duration::from_secs(30),
-            gui_wait: Duration::from_secs(10),
-            install_level: None,
             quiet: Duration::from_secs(600),
             auto_backoff: Duration::from_secs(30 * 60),
         }

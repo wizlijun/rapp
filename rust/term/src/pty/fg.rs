@@ -222,8 +222,6 @@ mod tests {
         }
     }
 
-    // Windows: no reader of another process yet (the fallbacks above answer None).
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn launch_info_reads_argv_and_only_the_kept_env() {
         // This test binary, not /bin/sleep: macOS keeps the environment of its own (platform) programs unreadable.
@@ -267,8 +265,6 @@ mod tests {
         assert_eq!(prog_name("/usr/local/bin/claude"), "claude");
     }
 
-    // Windows: no reader of another process yet (the fallbacks above answer None).
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn probe_self_reads_cwd() {
         let got = probe(std::process::id() as i32).1.unwrap();
@@ -276,15 +272,11 @@ mod tests {
         assert_eq!(got.canonicalize().unwrap(), want.canonicalize().unwrap());
     }
 
-    // Windows: no reader of another process yet (the fallbacks above answer None).
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn probe_self_reads_prog() {
         assert!(probe(std::process::id() as i32).0.is_some_and(|n| !n.is_empty()));
     }
 
-    // Windows: no reader of another process yet (the fallbacks above answer None).
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn update_keeps_last_on_failure() {
         let mut fg = Fg::default();
@@ -297,7 +289,6 @@ mod tests {
         assert!(!fg.shell);
     }
 
-    #[cfg(unix)]
     #[test]
     fn status_roundtrips_without_new_fields() {
         let old = r#"{"v":1,"name":"a","command":"sh","cols":80,"rows":24,"activity":1,"viewers":0,"pid":2}"#;

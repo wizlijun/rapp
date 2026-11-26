@@ -76,8 +76,6 @@ async fn access_reports_unset_then_set() {
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
     }
-    #[cfg(windows)]
-    assert_eq!(rapp_net::private::acl(&file).unwrap(), rapp_net::private::private_acl().unwrap());
     let ev = h.ask(json!({"cmd":"access"})).await;
     assert_eq!(ev["relay"], "r.example:7000");
     assert_eq!(ev["has_key"], true);

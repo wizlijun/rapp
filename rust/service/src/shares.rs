@@ -376,13 +376,8 @@ mod tests {
         assert!(why.is_none());
         assert_eq!(again.list().iter().map(|s| s.port).collect::<Vec<_>>(), [22, 11434]);
         assert_eq!(again.get(11434).unwrap().note, "模型");
-        #[cfg(unix)]
-        {
-            let mode = std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(d.path().join("shares.json")).unwrap().permissions());
-            assert_eq!(mode & 0o777, 0o600);
-        }
-        #[cfg(windows)]
-        assert_eq!(rapp_net::private::acl(&d.path().join("shares.json")).unwrap(), rapp_net::private::private_acl().unwrap());
+        let mode = std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(d.path().join("shares.json")).unwrap().permissions());
+        assert_eq!(mode & 0o777, 0o600);
     }
 
     #[test]

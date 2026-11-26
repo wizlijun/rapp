@@ -3,9 +3,6 @@
 //! `data-root` pointer, `~/rapp`); `$RAPP_LOCAL` names it directly (for tests).
 
 mod args;
-// Called on Windows only; its tests run everywhere.
-#[cfg_attr(not(windows), allow(dead_code))]
-mod gui;
 mod ipc;
 mod load;
 mod out;
@@ -43,30 +40,6 @@ fn error_of(reply: &Value) -> &str {
 #[tokio::main]
 async fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
-    // Windows: UTF-8 on the console, and no subcommand starts the interface (spec §5.1).
-    #[cfg(windows)]
-    {
-        rapp_net::win::console_utf8();
-        if let Some(gui_args) = gui::launch_args(&argv) {
-            let own = std::env::current_exe().unwrap_or_default();
-            match gui::gui_exe(&own, &|p| p.is_file(), &|p| std::fs::read_to_string(p).ok()) {
-                Ok(p) => {
-                    use std::process::Stdio;
-                    let started = std::process::Command::new(&p)
-                        .args(&gui_args)
-                        .stdin(Stdio::null())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .spawn();
-                    if let Err(e) = started {
-                        fail(&format!("rApp 的界面程序没有启动（{}：{e}）", p.display()));
-                    }
-                    std::process::exit(0);
-                }
-                Err(p) => fail(&format!("找不到 rApp 的界面程序（{}）", p.display())),
-            }
-        }
-    }
     if argv == ["--version"] {
         println!("rapp {}", env!("CARGO_PKG_VERSION"));
         return;

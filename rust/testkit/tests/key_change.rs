@@ -7,9 +7,7 @@ use common::*;
 use serde_json::{json, Value};
 use std::time::Duration;
 
-/// `rotate-key` the way the subcommand does it; the new key. Through the relay's admin socket,
-/// which exists only on unix.
-#[cfg(unix)]
+/// `rotate-key` the way the subcommand does it; the new key.
 async fn rotate(rig: &RelayRig) -> rapp_wire::Key {
     let rotated = tokio::time::timeout(WAIT, rapp_relay::admin::issue_key(rig.data.path(), true)).await;
     rotated.expect("rotated in time").unwrap().expect("a new key")
@@ -36,19 +34,16 @@ async fn wait_relay_error(ipc: &mut Ipc, error: &str, within: Duration) -> Value
 }
 
 /// The relay's audit lines of event `ev`.
-#[cfg(unix)]
 fn audit_events(rig: &RelayRig, ev: &str) -> Vec<Value> {
     rig.relay.as_ref().expect("relay running").audit().flush();
     let lines = rapp_relay::audit::read(rig.data.path(), None, None, None).unwrap_or_default();
     lines.into_iter().filter(|v| v["ev"] == ev).collect()
 }
 
-#[cfg(unix)]
 fn hex(b: [u8; 32]) -> String {
     b.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn service_stops_and_says_key_changed_after_rotate() {
     let rig = RelayRig::start().await;
@@ -72,7 +67,6 @@ async fn service_stops_and_says_key_changed_after_rotate() {
     }
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn a_new_key_reconnects_with_the_same_id() {
     let rig = RelayRig::start().await;
@@ -98,7 +92,6 @@ async fn a_new_key_reconnects_with_the_same_id() {
     wait_relay_error(&mut ipc, "key changed", WAIT).await;
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn a_wrong_new_key_says_bad_key() {
     let rig = RelayRig::start().await;
@@ -139,7 +132,6 @@ async fn a_wrong_key_stops_the_service_with_bad_key() {
     wait_status(&mut ipc, |s| s["relay"] == "connected").await;
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn hub_presence_says_key_changed_and_stops_dialing() {
     let every = Duration::from_millis(300);
@@ -173,7 +165,6 @@ async fn hub_presence_says_key_changed_and_stops_dialing() {
     hub.finish().await;
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn hub_reports_key_changed() {
     let rig = RelayRig::start().await;

@@ -1,4 +1,3 @@
-#![cfg(unix)]
 use std::process::{Command, Stdio};
 
 const BIN: &str = env!("CARGO_BIN_EXE_rapp-term");

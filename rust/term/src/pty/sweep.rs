@@ -53,7 +53,6 @@ pub fn sweep_once(dir: &Path, running: &AtomicBool, close: impl Fn(&[String])) {
 }
 
 /// Closes the Terminal tabs on these ttys that have nothing running in them any more. Blocks up to 5 s.
-#[cfg(unix)]
 const CLOSE_TABS: &str = r#"on run argv
 	if not (application "Terminal" is running) then return
 	tell application "Terminal"
@@ -70,7 +69,6 @@ end run
 "#;
 
 /// The real `close` of `sweep`: one osascript run. macOS only.
-#[cfg(unix)]
 pub fn close_tabs(ttys: &[String]) {
     if !cfg!(target_os = "macos") {
         return;

@@ -19,9 +19,5 @@ log = { version = "0.4", features = ["std"] }
 # quinn reports what it swallows only through `tracing`; `log` makes those reach `forward_lib_warnings`.
 tracing = { version = "0.1", default-features = false, features = ["std", "log"] }
 
-[target.'cfg(windows)'.dependencies]
-windows-sys.workspace = true
-socket2.workspace = true
-
 [dev-dependencies]
 tempfile.workspace = true

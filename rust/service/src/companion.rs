@@ -24,7 +24,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
-use tokio::process::Child;
+use tokio::process::{Child, Command};
 use tokio::sync::{watch, Notify};
 use tokio::task::JoinHandle;
 
@@ -327,7 +327,7 @@ async fn run_once(state: &Arc<State>, c: &'static Companion, cfg: &ServiceCfg, c
     let port = cfg.port.unwrap_or(c.port);
     let not_found = || Outcome::Failed("not found", format!("找不到 {}", c.program));
     let Some(bin) = rapp_net::bins::find(c.program, state.bin_dir.as_deref()) else { return not_found() };
-    let mut cmd = rapp_net::proc::tokio_command(bin);
+    let mut cmd = Command::new(bin);
     cmd.args(args(cfg, &state.home))
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())

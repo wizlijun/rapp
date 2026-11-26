@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::process::Child;
+use tokio::process::{Child, Command};
 use tokio::task::JoinSet;
 
 const ACCEPT_WAIT: Duration = Duration::from_secs(10);
@@ -55,7 +55,7 @@ impl Hub {
         let port = listener.local_addr()?.port();
         // Taken before the client starts so its stderr lines carry it (a failed start leaves a gap).
         let sid = self.next_sid.fetch_add(1, Ordering::Relaxed) + 1;
-        let mut child = rapp_net::proc::tokio_command(&client)
+        let mut child = Command::new(&client)
             .arg(format!("rapp://127.0.0.1:{port}/?mode=color16"))
             .args(["--token-env", "RAPP_TOKEN", "--json"])
             .env("RAPP_TOKEN", token)

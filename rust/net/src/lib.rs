@@ -9,9 +9,5 @@ pub mod line;
 pub mod log;
 pub mod logq;
 pub mod msg;
-pub mod private;
-pub mod proc;
 pub mod quic;
 pub mod udp;
-#[cfg(windows)]
-pub mod win;
