@@ -1683,3 +1683,89 @@ fn disconnect_while_typing_frees_the_lock() {
     assert!(rx.recv_timeout(host_time(10.0)).is_ok(), "the unlock lock was still held 10 s after the session ended");
     assert_eq!(typing_calls(&platform.log()).len(), typed_at_end, "typed after the session ended");
 }
+
+// MARK: - Task 18 (audit pass): PORTING.md rows that had no session test
+
+use rapp_testkit::fake_platform::{CHINESE_SOURCE, ENGLISH_SOURCE, FAKE_COMPUTER};
+
+/// `Server.swift:812-862`: a desktop session opens the main display, names it after the
+/// computer and the screen number, and shows one fixed window that cannot be closed.
+#[test]
+fn desktop_session_shows_the_main_display() {
+    let platform = FakePlatform::new();
+    let host = Host::start(platform.clone(), "desktop:", TOKEN);
+    let mut c = Controller::connect(host.port());
+    c.hello(TOKEN, "desktop:", "B", 0, 15);
+    let title = format!("{FAKE_COMPUTER} · 屏幕 1");
+    match c.wait_for(|m| matches!(m, Incoming::Ready(..))) {
+        Incoming::Ready(name, w, h) => {
+            assert_eq!(name, title);
+            assert_eq!((w, h), (1280, 800));
+        }
+        _ => unreachable!(),
+    }
+    let id = match c.wait_for(|m| matches!(m, Incoming::Windows(l) if !l.is_empty())) {
+        Incoming::Windows(l) => {
+            assert_eq!(l.len(), 1, "{l:?}");
+            assert_eq!(l[0].title, title);
+            l[0].id
+        }
+        _ => unreachable!(),
+    };
+    c.wait_for(is_frame);
+    assert!(platform.log().iter().any(|l| l == "open desktop main"), "{:?}", platform.log());
+    // Window commands do nothing on a desktop (`Server.swift:470-487`, `resize` 1189).
+    c.send(&client::packet(15, id.to_le_bytes().to_vec()));
+    let mut resize = id.to_le_bytes().to_vec();
+    resize.extend(640u16.to_le_bytes());
+    resize.extend(400u16.to_le_bytes());
+    c.send(&client::packet(9, resize));
+    c.send(&client::ping(11));
+    c.wait_for(|m| matches!(m, Incoming::Pong(11)));
+    let log = platform.log();
+    assert!(!log.iter().any(|l| l.starts_with("close ") || l.starts_with("resize ")), "{log:?}");
+}
+
+/// `Server.swift:1113-1148`, `InputSourceWatcher.swift`: A's input source is announced after
+/// ready, `selectInput` switches it (an id, or "" for plain English) and B hears the result.
+#[test]
+fn input_source_is_reported_and_selected() {
+    let (platform, host) = serve();
+    let mut c = ready(&host, 0);
+    c.wait_for(|m| matches!(m, Incoming::InputSource { id, ascii: true, .. } if id == ENGLISH_SOURCE));
+    c.send(&client::select_input(CHINESE_SOURCE));
+    c.wait_for(|m| matches!(m, Incoming::InputSource { id, ascii: false, .. } if id == CHINESE_SOURCE));
+    c.send(&client::select_input(""));
+    c.wait_for(|m| matches!(m, Incoming::InputSource { id, ascii: true, .. } if id == ENGLISH_SOURCE));
+    let log = platform.log();
+    assert!(log.iter().any(|l| *l == format!("select_input {CHINESE_SOURCE}")), "{log:?}");
+    assert!(log.iter().any(|l| l == "select_english"), "{log:?}");
+}
+
+/// `Server.swift:470-487` and `resize` (1189), `WindowResizer.swift`: focus raises, close
+/// closes, move and resize reach the platform for a decorated window of the target.
+#[test]
+fn window_commands_reach_the_platform() {
+    let (platform, host) = serve();
+    let (mut c, id) = with_window(&host);
+    let mut resize = id.to_le_bytes().to_vec();
+    resize.extend(640u16.to_le_bytes());
+    resize.extend(400u16.to_le_bytes());
+    c.send(&client::packet(9, resize));
+    let mut moved = id.to_le_bytes().to_vec();
+    moved.extend(100f32.to_le_bytes());
+    moved.extend(50f32.to_le_bytes());
+    c.send(&client::packet(16, moved));
+    c.send(&client::packet(14, id.to_le_bytes().to_vec()));
+    c.send(&client::packet(15, id.to_le_bytes().to_vec()));
+    let close = format!("close {id}");
+    let log = wait_log(&platform, |l| l.iter().any(|x| *x == close));
+    // The content size B asked for plus the 28 pt title row.
+    assert!(log.iter().any(|x| x.starts_with(&format!("resize {id} to 640x"))), "{log:?}");
+    assert!(log.iter().any(|x| x.starts_with(&format!("move {id} to "))), "{log:?}");
+    assert!(log.iter().any(|x| *x == format!("raise {id}")), "{log:?}");
+    // Raise came after activate (`Server.swift:470-474`).
+    let activate = log.iter().position(|x| x == "activate");
+    let raise = log.iter().position(|x| *x == format!("raise {id}"));
+    assert!(activate.is_some() && activate < raise, "{log:?}");
+}
