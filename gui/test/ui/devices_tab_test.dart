@@ -887,6 +887,37 @@ void main() {
     expect(t.sent.lastWhere((m) => m['cmd'] == 'open')['app'], 'term:pty:c');
   });
 
+  testWidgets('devices_row_shows_count_and_opens_dialog', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    await emitTerms(tester, [], hosts: [
+      {
+        'host': null,
+        'launchers': ['Terminal'],
+        'saved': [
+          {'key': 'a', 'name': 'rapp', 'prog': 'claude', 'saved': now() - 7200, 'boot': true},
+          {'key': 'b', 'name': 'train', 'saved': now() - 60, 'boot': false},
+        ],
+      }
+    ]);
+    expect(find.text('上次没关的 2 个终端'), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const Key('saved-terms-restore')));
+    await tester.tap(find.byKey(const Key('saved-terms-restore')));
+    await tester.pumpAndSettle();
+    expect(find.text('恢复上次的终端 · mini'), findsOneWidget);
+    expect(find.text('rapp  claude  2 小时前'), findsOneWidget);
+    expect(find.text('train  —  1 分钟前'), findsOneWidget);
+  });
+
+  testWidgets('no_saved_no_row', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    await showHost(tester, ['Terminal']);
+    expect(find.byKey(const Key('saved-terms-label')), findsNothing);
+    expect(find.byKey(const Key('saved-terms-restore')), findsNothing);
+    expect(find.textContaining('上次没关的'), findsNothing);
+  });
+
   testWidgets('the 终端 app row shows only with two launchers', (tester) async {
     await pumpTab(tester);
     await selectMini(tester);
