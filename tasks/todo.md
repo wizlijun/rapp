@@ -1446,6 +1446,8 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] `services/state/src/disk.rs::tests::files_are_private`、`loose_modes_are_made_private` —— rapp-state 在 Windows 上自己设私有时打开（现在靠继承 `<数据根>\local` 的访问列表；哪一段做还没定，最晚 G 段打包 rapp-state 之前）
 - [ ] `rust/service/src/load/disks.rs::tests::hung_disk_is_unreadable_and_others_still_come` —— 不跟某一段走：要两块文件系统，等有两块盘的 Windows 测试机再写 Windows 版
 - [ ] `rust/service/src/load/disks.rs::tests::a_symlink_across_file_systems_is_the_target`、`a_symlink_does_not_change_the_mount` —— 不跟某一段走：Windows 上建符号链接要管理员或开发者模式；要测就改用目录联接（junction）
+- [ ] `rust/conn/tests/relay.rs::rotate_key_closes_every_device_with_code_4`、`requests_after_a_key_change_say_key_changed`、`an_open_relayed_stream_says_key_changed_after_a_rotate` —— 不跟某一段走：中继的管理接口只在 unix 上有（这三个靠 `rapp_relay::admin::issue_key` 换钥匙；中继本身不在 Windows 上跑，Windows 上的 `admin` 只有同名的空壳）
+- [ ] `rust/testkit/tests/key_change.rs::service_stops_and_says_key_changed_after_rotate`、`a_new_key_reconnects_with_the_same_id`、`a_wrong_new_key_says_bad_key`、`hub_presence_says_key_changed_and_stops_dialing`、`hub_reports_key_changed`（连同只给它们用的 `rotate`、`audit_events`、`hex`）—— 不跟某一段走：中继的管理接口只在 unix 上有（同上）。要在 Windows 上测换钥匙，得先给测试一个不经管理接口换钥匙的办法
 
 ## Windows 版 A 段（地基）（计划 `docs/superpowers/plans/2026-11-26-rapp-windows-a-foundation.md`，分支 `feat/windows-foundation`）
 
