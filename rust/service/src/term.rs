@@ -77,6 +77,7 @@ pub(crate) async fn local(state: &Arc<State>, req: &Value, wait: Duration) -> Va
         Ok(mut v) => match v["error"].as_str().map(String::from) {
             Some(e) => {
                 v["error"] = json!(e);
+                v["ok"] = json!(false);
                 v
             }
             None => ok(v),

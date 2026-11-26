@@ -171,9 +171,11 @@ fn conn(mut s: TcpStream, token: &str, config_path: &str) {
         Some(verb @ ("restore" | "forget")) => {
             let v = match cfg {
                 Err(e) => json!({"error":e}),
-                Ok(_) => {
+                Ok(c) => {
                     log(&format!("{verb} {req}"));
-                    if verb == "restore" {
+                    if verb == "restore" && c["fake_restore_error"].is_string() {
+                        json!({"error":c["fake_restore_error"],"ids":["term:pty:r1"]})
+                    } else if verb == "restore" {
                         json!({"ok":true,"ids":["term:pty:r1","term:pty:r2"]})
                     } else {
                         json!({"ok":true,"forgot":req["keys"].as_array().map_or(0, Vec::len)})
@@ -184,7 +186,7 @@ fn conn(mut s: TcpStream, token: &str, config_path: &str) {
         }
         Some("saved") => {
             log("saved");
-            send(&mut s, &json!({"ok":true,"saved":[]}));
+            send(&mut s, &json!({"ok":true,"saved":[{"key":"k1","name":"train","saved":1,"boot":1,"cwd":"/tmp/p"}]}));
         }
         Some("view") => view(s, r, &req, cfg.err()),
         _ => {
