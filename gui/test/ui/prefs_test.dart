@@ -77,6 +77,19 @@ void main() {
     expect([back.rimeEnabled, back.rimeDictionary], [false, 'user']);
   });
 
+  test('ime_intent and chinese_ime: on and none when missing or bad, saved and read back', () {
+    expect([UiPrefs().imeIntent, UiPrefs().chineseIme], [true, null]);
+    File('${tmp.path}/gui.json').writeAsStringSync('{"ime_intent":"x","chinese_ime":3}');
+    final bad = UiPrefs.load(tmp.path);
+    expect([bad.imeIntent, bad.chineseIme], [true, null]);
+    UiPrefs(imeIntent: false, chineseIme: 'im.rime.inputmethod.Squirrel.Hans').save(tmp.path);
+    final back = UiPrefs.load(tmp.path);
+    expect([back.imeIntent, back.chineseIme], [false, 'im.rime.inputmethod.Squirrel.Hans']);
+    UiPrefs().save(tmp.path);
+    expect(File('${tmp.path}/gui.json').readAsStringSync(), isNot(contains('chinese_ime')));
+    expect(UiPrefs.load(tmp.path).imeIntent, isTrue);
+  });
+
   test('keep_awake: on when missing or bad, saved when off', () {
     File('${tmp.path}/gui.json').writeAsStringSync('{"keep_awake":"x"}');
     expect(UiPrefs.load(tmp.path).keepAwake, isTrue);

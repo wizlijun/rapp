@@ -305,6 +305,20 @@ void main() {
     expect(UiPrefs.load('${tmp.path}/devices/dev1').inputHistory, false);
   });
 
+  testWidgets('IME intent switch is on by default, flips and saves', (tester) async {
+    await tester.pumpWidget(wrap(panel()));
+    expect(find.text('打开写作版时切到中文，回到画面时切回英文'), findsOneWidget);
+    expect(s.prefs.imeIntent, true);
+    await tester.ensureVisible(find.byKey(const Key('ime-intent-switch')));
+    await tester.tap(find.byKey(const Key('ime-intent-switch')));
+    await tester.pump();
+    expect(s.prefs.imeIntent, false);
+    expect(UiPrefs.load('${tmp.path}/devices/dev1').imeIntent, false);
+    await tester.tap(find.byKey(const Key('ime-intent-switch')));
+    await tester.pump();
+    expect(s.prefs.imeIntent, true);
+  });
+
   testWidgets('legend shows all seven words', (tester) async {
     await tester.pumpWidget(wrap(panel()));
     for (final l in Lamp.values) {

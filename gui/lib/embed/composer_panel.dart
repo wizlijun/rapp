@@ -210,14 +210,18 @@ class _ComposerPanelState extends State<ComposerPanel> {
     if (_m.takeReplay()) {
       // The held compose letter goes back to the window only after the editor is the text input
       // client (focus attaches it in a microtask), so B's input method composes it: next frame.
+      // And only after the switch to Chinese the caret's arrival asked for has ended (ImeIntent).
       final sid = _s.sid;
       final ed = _ed;
+      final state = widget.state;
       if (ed is NativeEditor) {
-        ed.readyForInput.then((_) {
+        ed.readyForInput.then((_) async {
+          await state.imeSettled;
           if (mounted && _m.editorFocused && !_blocked) widget.port.composeReplay(sid);
         });
       } else {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          await state.imeSettled;
           if (mounted && !_blocked) widget.port.composeReplay(sid);
         });
         WidgetsBinding.instance.scheduleFrame();

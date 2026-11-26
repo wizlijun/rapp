@@ -23,6 +23,21 @@ void main() {
 
   Widget app(Widget child) => MaterialApp(home: Scaffold(body: Column(children: [child])));
 
+  test('active counts begin and end', () {
+    expect(SecureInput.active, isFalse);
+    SecureInput.begin();
+    SecureInput.begin();
+    SecureInput.end();
+    expect(SecureInput.active, isTrue);
+    SecureInput.end();
+    expect(SecureInput.active, isFalse);
+    SecureInput.end(); // an extra end does not go below zero
+    SecureInput.begin();
+    expect(SecureInput.active, isTrue);
+    SecureInput.end();
+    expect(SecureInput.active, isFalse);
+  });
+
   testWidgets('focus begins, blur ends, refocus begins again', (tester) async {
     final other = FocusNode();
     addTearDown(other.dispose);
