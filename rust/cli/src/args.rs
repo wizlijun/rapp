@@ -4,7 +4,11 @@ pub const USAGE: &str = "\
 rapp share [端口…] [--allow 设备,设备] [--raw] [--note 备注] [--proto http|https|tcp|ssh]
 rapp unshare <端口>
 rapp hosts
-rapp pipe <名字> <端口>";
+rapp pipe <名字> <端口>
+rapp term restore [名字或序号…]
+rapp term restore --list
+rapp term restore --forget
+（序号是 --list 里的；几个终端同名时，写名字就是全恢复）";
 
 #[derive(Debug, PartialEq)]
 pub enum Cmd {
@@ -13,6 +17,8 @@ pub enum Cmd {
     Unshare { port: u16 },
     Hosts,
     Pipe { to: String, port: u16 },
+    /// `rapp term restore`: no picks = all; `list` and `forget` stand alone.
+    TermRestore { list: bool, forget: bool, picks: Vec<String> },
 }
 
 /// The one line for a `--proto` that is missing or not a protocol the service knows: the
@@ -42,8 +48,33 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
             [to, p] => Ok(Cmd::Pipe { to: to.clone(), port: port(p)? }),
             [_, _, extra, ..] => Err(format!("多写了：{extra}")),
         },
+        "term" => match rest.split_first() {
+            None => Err("要写 restore".into()),
+            Some((c, rest)) if c == "restore" => term_restore(rest),
+            Some((c, _)) => Err(format!("不认识的命令：term {c}")),
+        },
         other => Err(format!("不认识的命令：{other}")),
     }
+}
+
+fn term_restore(args: &[String]) -> Result<Cmd, String> {
+    let (mut list, mut forget, mut picks) = (false, false, Vec::new());
+    for a in args {
+        match a.as_str() {
+            "--list" => list = true,
+            "--forget" => forget = true,
+            flag if flag.starts_with("--") => return Err(format!("不认识的选项：{flag}")),
+            p => picks.push(p.to_string()),
+        }
+    }
+    if list && forget {
+        return Err("--list 和 --forget 不能一起写".into());
+    }
+    // `--list` and `--forget` take no picks (forget clears all): the extra word is said, not dropped.
+    if (list || forget) && !picks.is_empty() {
+        return Err(format!("多写了：{}", picks[0]));
+    }
+    Ok(Cmd::TermRestore { list, forget, picks })
 }
 
 fn share(args: &[String]) -> Result<Cmd, String> {
@@ -108,6 +139,21 @@ mod tests {
         assert_eq!(p("unshare 8000"), Ok(Cmd::Unshare { port: 8000 }));
         assert_eq!(p("hosts"), Ok(Cmd::Hosts));
         assert_eq!(p("pipe 123456789.rapp 22"), Ok(Cmd::Pipe { to: "123456789.rapp".into(), port: 22 }));
+    }
+
+    #[test]
+    fn term_restore_forms() {
+        let r = |list, forget, picks: &[&str]| Ok(Cmd::TermRestore { list, forget, picks: picks.iter().map(|s| s.to_string()).collect() });
+        assert_eq!(p("term restore"), r(false, false, &[]));
+        assert_eq!(p("term restore --list"), r(true, false, &[]));
+        assert_eq!(p("term restore --forget"), r(false, true, &[]));
+        assert_eq!(p("term restore train 2"), r(false, false, &["train", "2"]));
+        assert_eq!(p("term restore --list x").unwrap_err(), "多写了：x");
+        assert_eq!(p("term restore --forget x").unwrap_err(), "多写了：x");
+        assert_eq!(p("term").unwrap_err(), "要写 restore");
+        assert!(p("term restore --list --forget").is_err());
+        assert_eq!(p("term restore --bogus").unwrap_err(), "不认识的选项：--bogus");
+        assert_eq!(p("term frob").unwrap_err(), "不认识的命令：term frob");
     }
 
     #[test]

@@ -76,6 +76,16 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
                     "share" => crate::share_cmds::share(state, &cmd).await,
                     "unshare" => crate::share_cmds::unshare(state, &cmd).await,
                     "hosts" => hosts(state).await,
+                    "term_saved" => crate::term::local(state, &json!({"op": "saved"}), Duration::from_secs(30)).await,
+                    "term_restore" => {
+                        let keys: Vec<String> = cmd["keys"]
+                            .as_array()
+                            .map(|a| a.iter().filter_map(|k| k.as_str().map(String::from)).collect())
+                            .unwrap_or_default();
+                        let wait = crate::term::restore_wait(&keys);
+                        crate::term::local(state, &json!({"op": "restore", "keys": keys}), wait).await
+                    }
+                    "term_forget" => crate::term::local(state, &json!({"op": "forget", "keys": []}), Duration::from_secs(30)).await,
                     "pipe" => match pipe(state, &cmd).await {
                         Ok((p, path)) => {
                             piped = Some(p);

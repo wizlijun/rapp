@@ -33,7 +33,7 @@ const RESTORE_WAIT_PER_KEY: Duration = Duration::from_secs(45);
 const RESTORE_ALL_KEYS: u32 = 50;
 
 /// How long a `restore` of `keys` waits for serve: per key, never less than for one, bounded for "all".
-fn restore_wait(keys: &[String]) -> Duration {
+pub(crate) fn restore_wait(keys: &[String]) -> Duration {
     if keys.is_empty() {
         return RESTORE_WAIT_PER_KEY * RESTORE_ALL_KEYS;
     }
@@ -65,6 +65,24 @@ fn allowed(state: &State) -> Result<TermConfig, String> {
         return Err(OFF.into());
     }
     Ok(c)
+}
+
+/// A request from the local CLI (IPC only: `saved` carries cwd and cmd, which never go to a peer or the log).
+/// Like [`answer`] but an error keeps the other fields (`restore`'s `ids` opened so far).
+pub(crate) async fn local(state: &Arc<State>, req: &Value, wait: Duration) -> Value {
+    if let Err(e) = allowed(state) {
+        return err(&e);
+    }
+    match ask_for(state, req, wait).await {
+        Ok(mut v) => match v["error"].as_str().map(String::from) {
+            Some(e) => {
+                v["error"] = json!(e);
+                v
+            }
+            None => ok(v),
+        },
+        Err(e) => err(&format!("{e:#}")),
+    }
 }
 
 /// One terminal-session request from B, logged as one `request` line.
