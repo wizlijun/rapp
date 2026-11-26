@@ -15,7 +15,7 @@
 - **Needs probe G1** (plan P, Task 3) to have passed, except Task 1, which needs nothing and is done first (plan P needs it).
 - **“unix 那一支一个字不动”** (spec §8): a seam adds a `#[cfg(windows)]` arm, or widens a `cfg` attribute to include Windows. It does not rewrite, move or reformat the code macOS and Linux run. Where this plan replaces `Command::new(x)` by `rapp_net::proc::command(x)`, the function is the identity on unix; that is the only kind of edit to unix lines allowed here.
 - macOS, Linux and iOS behaviour is unchanged. The Mac gate commands are unchanged: `swift test`, `cargo test --workspace --no-fail-fast`, `cargo clippy` `-D warnings`, `flutter analyze`, `flutter test`.
-- **Not touched:** `Sources/` (U10), `rust/host-linux/` (U9), `rust/client-gtk/`, `rust/hub-ffi/`. `rust/relay/` only the three `#[cfg(unix)]` attributes of Task 7 Step 1, which the user approved on 2026-11-26 (the relay is the only gate; anything more needs a new OK).
+- **Not touched:** `Sources/` (U10), `rust/host-linux/` (U9), `rust/client-gtk/`, `rust/hub-ffi/`. `rust/relay/` only what Task 7 Step 1 names — the three `#[cfg(unix)]` attributes in `src/audit.rs` and the unix-only gating of `src/admin.rs` — both approved by the user on 2026-11-26 (the relay is the only gate; anything more needs a new OK).
 - **Not in this phase** (do not start them here): `resident` / `prelogin` fields and `--prelogin` (phase F); Windows `permissions` / `capabilities` arm (§6.1, phase D); job objects and “detach from the job” (phases C, E, F); `rapp-update` on Windows (phase G); terminals on Windows (phase E); the runner rename to `rapp-gui.exe` and the Dart “设成私有” choice (§10.3, §13.2, phase C).
 - Four rules for every Windows process (spec §8.2): no console window; die with the parent (terminals excepted); sibling programs by full path with `.exe`, never through `PATH`; paths through path APIs, never a hand-written `/`.
 - `unsafe` added by this plan appears only in `rust/net/src/win.rs`.
@@ -425,7 +425,7 @@ fn main() {
 
   Keep the module doc comment of the old `main.rs` at the top of `unix_main.rs`.
 
-- [ ] **Step 4: Run.** Windows: `cargo test -p rapp-term` → `unsupported` passes, the library's unit tests of the listed modules pass. Mac: `cargo test -p rapp-term` → the same tests and count as on `main` (`git diff main --stat -- rust/term/src/unix_main.rs` shows the rename with one changed line).
+- [ ] **Step 4: Run.** Windows: `cargo test -p rapp-term` → `unsupported` passes, the library's unit tests of the listed modules pass. Mac: `cargo test -p rapp-term` → the same tests and count as on `main` (`main.rs` stays as the dispatcher, so git shows `unix_main.rs` as a new file, not a rename; compare the contents instead: `git diff main:rust/term/src/main.rs HEAD:rust/term/src/unix_main.rs` → the only difference is `fn main` → `pub fn main`).
 
 - [ ] **Step 5: Commit** by path: `feat(term): unix 专用的部分包起来，Windows 上先报不支持`.
 
@@ -498,6 +498,8 @@ Windows machine only.
 **Files:**
 - Modify: `rust/testkit/tests/common/mod.rs:33-41` (`bins()`)
 - Modify: `rust/relay/src/audit.rs:11`, `:74`, `:123` — three `#[cfg(unix)]` attributes, approved by the user (Step 1)
+- Modify: `rust/relay/src/admin.rs` — the unix code behind `#[cfg(unix)]`, a stand-in elsewhere, approved by the user (Step 1); `rust/conn/tests/relay.rs:208`, `:225`, `:267` — `#[cfg(unix)]` on the three tests that use the admin interface
+- Modify: `services/state/src/disk.rs`, `rust/service/src/load/disks.rs` — unix-only code that entered `main` after this plan was first written (Step 2)
 - Modify: tests that fail on Windows, per the rule in Step 4. Known candidates: `rust/testkit/tests/term.rs:337`, `service.rs:286,292,324,573-576`; `rust/update/src/lib.rs:354`, `apply.rs:533`; `rust/service/src/shares.rs:361`, `data.rs:403,543,613,798,817,822`; `rust/net/src/bins.rs:35`; `rust/net/src/datadir.rs:267`; `rust/testkit/tests/hub_terms.rs:121`
 - Modify: `tasks/todo.md`
 
@@ -505,9 +507,9 @@ Windows machine only.
 - Consumes: everything from Tasks 2–6.
 - Produces: `cargo test --workspace --no-fail-fast --exclude rapp-relay --exclude rapp-host-linux --exclude rapp-client-gtk --exclude rapp-hub-ffi` green on Windows; the list of tests switched off there, each with the phase that switches it back on.
 
-- [ ] **Step 1: The relay library compiles on Windows.** `--exclude rapp-relay` only skips that package's own tests. `rapp-conn` and `rapp-testkit` have it as a dev-dependency (`rust/conn/Cargo.toml:25`, `rust/testkit/Cargo.toml:52`) and start a relay inside their tests, so its *library* is compiled on Windows whatever is excluded, and `rust/relay/src/audit.rs` uses `std::os::unix` without a `cfg` in three places. **The user approved this on 2026-11-26** (the relay is the only gate, so it was asked): put `#[cfg(unix)]` on the import at `:11` and on the two `.mode(…)` calls at `:74` and `:123` (split the builder chains into statements to do it). Nothing else in `rust/relay/` changes; `src/main.rs` is not touched; the relay is still never built for or shipped on Windows. Verify on Linux or the Mac: `cargo test -p rapp-relay` → the same tests pass as on `main`, and the audit file a test writes still has mode `0600` (the existing audit tests assert it; if none does, add that assertion under `#[cfg(unix)]`). Anything beyond these three attributes needs a new question to the user.
+- [ ] **Step 1: The relay library compiles on Windows.** `--exclude rapp-relay` only skips that package's own tests. `rapp-conn` and `rapp-testkit` have it as a dev-dependency (`rust/conn/Cargo.toml:25`, `rust/testkit/Cargo.toml:52`) and start a relay inside their tests, so its *library* is compiled on Windows whatever is excluded, and `rust/relay/src/audit.rs` uses `std::os::unix` without a `cfg` in three places. **The user approved this on 2026-11-26** (the relay is the only gate, so it was asked): put `#[cfg(unix)]` on the import at `:11` and on the two `.mode(…)` calls at `:74` and `:123` (split the builder chains into statements to do it). **Second file, approved by the user on 2026-11-26** after the code draft showed the three attributes are not enough: `rust/relay/src/admin.rs` is built on Unix sockets throughout (`:12` `PermissionsExt`, `:25` `tokio::net::{UnixListener, UnixStream}`, used at `:69`, `:157`–`:200`, permission bits at `:174`, `:373`, `:384`), and `server.rs` binds it at every start. Its unix code goes behind `#[cfg(unix)]` unchanged — no reordering, no rewriting; on other systems the module offers a stand-in with the same public names and signatures (`Server::bind` opens nothing, `serve` does nothing, `call` and `issue_key` return an error): there is no admin interface on Windows. The tests that call `rapp_relay::admin::` (`rust/conn/tests/relay.rs:208`, `:225`, `:267`) get `#[cfg(unix)]` and go on the list of Step 4 with the reason “中继的管理接口只在 unix 上有”. Nothing else in `rust/relay/` changes — not `server.rs`, not `store.rs`; if the library still does not compile on Windows, stop and ask the user; `src/main.rs` is not touched (the binary is not built on Windows: a dev-dependency builds only the library); the relay is still never built for or shipped on Windows. Verify on Linux or the Mac: `cargo test -p rapp-relay` → the same tests pass as on `main`, and the audit file a test writes still has mode `0600` (the existing audit tests assert it; if none does, add that assertion under `#[cfg(unix)]`). Anything beyond these three attributes needs a new question to the user.
 
-- [ ] **Step 2: `bins()` on Windows.** The unix arm (symlinks) stays. Windows arm: copy `CARGO_BIN_EXE_fake-rapp-host`, `…-fake-rapp-client`, `…-fake-rapp-term` into the temporary `RAPP_BIN_DIR` as `rapp-host.exe`, `rapp-client.exe`, `rapp-term.exe`.
+- [ ] **Step 2: `bins()` on Windows.** The unix arm (symlinks) stays. Windows arm: copy `CARGO_BIN_EXE_fake-rapp-host`, `…-fake-rapp-client`, `…-fake-rapp-term` and `CARGO_BIN_EXE_test-rapp-state` into the temporary `RAPP_BIN_DIR` as `rapp-host.exe`, `rapp-client.exe`, `rapp-term.exe`, `rapp-state.exe` (four programs since 0.15.48). In the same step, the two places that became unix-only after this plan was first written, without which `rapp-service` and `rapp-testkit` do not compile on Windows: `services/state/src/disk.rs` (permission bits only under `cfg(unix)`; on Windows the private-file call of Task 3) and `rust/service/src/load/disks.rs` (the working disk read by drive letter with `GetDiskFreeSpaceExW`, behind `cfg(windows)`; the unix arm unchanged).
 
 - [ ] **Step 3: First full run.** In `rust/`: the command under Produces. Save the output to `.build-logs/windows-sweep-1.log`. Expected: failures; that list is the work of this task.
 
@@ -541,7 +543,7 @@ Windows machine only.
   - `scripts/check-windows.ps1 [-Build]` — the Windows gate, steps 1–3 of spec §14.3; with `-Build` also `flutter build windows --release` and `stage-windows.ps1 -Release -Gui`. Runs every step even after a failure, prints one line per step (`ok` / `FAILED`), writes everything to `.build-logs/check-windows.log` whose last line is `EXIT=<0|1>`, and exits with that status.
   - `scripts/stage-windows.ps1 [-Release] [-Gui] [-Out <dir>]` — builds and lays out `<Out>\` (default `.build\windows-stage`) as spec §5.1: `current` (one line, `app-<workspace version>`), `bin\rapp.exe`, `app-<version>\…`. Phase G's packaging starts from this script.
 
-- [ ] **Step 1: Static C runtime** (spec §12.6: Rust programs carry the C runtime inside them). `rust/.cargo/config.toml`:
+- [ ] **Step 1: Static C runtime** (spec §12.6: Rust programs carry the C runtime inside them). cargo looks for this file from the current directory upward and ignores `--manifest-path`, so every Windows script must `cd rust` before it calls cargo (the two scripts of this task do; the packaging script of phase G must too). `rust/.cargo/config.toml`:
 
 ```toml
 [target.x86_64-pc-windows-msvc]
@@ -608,7 +610,7 @@ Either machine; docs only except the merge.
 - [ ] **Step 3: Done line** (spec §17.2 row A) — check each and paste the evidence into the merge commit message:
   - Windows: `scripts\check-windows.ps1` → `EXIT=0` (§14.3 steps 1–3); with `-Build`, `flutter build windows` passes.
   - Mac: `swift test`; `cargo test --workspace --no-fail-fast`; clippy `-D warnings`; `flutter analyze`; `flutter test` → green on the commit being merged.
-  - `git diff main --stat -- Sources rust/host-linux rust/client-gtk rust/hub-ffi` → empty. `rust/relay` → only `src/audit.rs`, three attributes.
+  - `git diff main --stat -- Sources rust/host-linux rust/client-gtk rust/hub-ffi` → empty. `rust/relay` → only `src/audit.rs` (three attributes) and `src/admin.rs` (unix code gated, stand-in added); on the Mac `cargo test -p rapp-relay` passes with the same count as on `main`.
   - `/usr/bin/grep -rn "unsafe" rust --include='*.rs'` shows no new `unsafe` outside `rust/net/src/win.rs` compared with `main`.
 
 - [ ] **Step 4: Merge** per `CLAUDE.md`: `git merge main` into `feat/windows-foundation`, re-run the gate of the machine you are on, then on that machine's `main`: `git merge --no-ff feat/windows-foundation` with message `merge: Windows 版地基（feat/windows-foundation）`. The integration session pushes. Tell the user that plans C, D and E can now be written as soon as their probes (G2; H1, H3, H5; T1, T5) have results.

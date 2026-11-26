@@ -25,7 +25,7 @@
 | 段 | 计划 | 代码 | 在哪 | 状态 |
 |---|---|---|---|---|
 | P 探针 | 有 | 没有 | —— | 没跑。要一台 Windows 11 和一台 Server 2022（实机或虚拟机） |
-| A 地基 | 有 | **草稿** | 分支 `feat/windows-foundation`，worktree `.worktrees/windows-foundation` | 没编译、没测试、没在 Windows 上碰过 |
+| A 地基 | 有 | **草稿，写完了** | 分支 `feat/windows-foundation`，worktree `.worktrees/windows-foundation` | 没编译、没测试、没在 Windows 上碰过。任务 2–7 的代码都写了；任务 1、8、9 里要上机器的步骤没做（见 3.1） |
 | B 主机核心 | 有 | **草稿**，分两个分支 | `feat/windows-host-core`（任务 1–6，之后接 13–19）；`feat/windows-host-core-rules`（任务 7–12） | 同上；Swift 样本文件一个都还没生成 |
 | C–H | 有 | 没有 | —— | 等接手的人按计划做 |
 
@@ -39,6 +39,20 @@
 - **不能信的**：编不编得过；和 Swift 的输出是不是一个字节不差；Windows 系统调用的参数对不对；`Cargo.lock`（**没有重新生成**，新加的依赖还没进去）；样本文件（`rust/host-core/tests/fixtures/` 是空的，要跑 Swift 生成）。
 - **每个分支上的说明文件是准的那一份**：写了哪些、哪个算法完整、哪里是猜的、哪里和计划对不上。接手先读它。
 
+### 3.1 A 段草稿的实际情况
+
+说明文件：分支上的 `docs/superpowers/plans/notes/2026-11-26-windows-a-draft-notes.md`（六节：写了什么、没写什么、和计划不同的地方、计划的错、编译风险、先验什么）。
+
+- **写了的**：两个空壳 crate 进 workspace；`rapp-net` 的 Windows 部分（`rust/net/src/win.rs`，新增的 `unsafe` 只在这一个文件）；`rapp-service` 的单实例和 `--supervised`；`rapp-term` 的 unix 部分包起来；`rapp-cli` 在 Windows 上的入口；测试在 Windows 上的写法（七处权限断言、testkit 复制四个假程序）；`.gitattributes`；`rust/.cargo/config.toml`；`scripts/stage-windows.ps1`、`scripts/check-windows.ps1`；规格 §19.2 列的旧文档句子；`tasks/todo.md` 末尾两个新标题。
+- **没做的**：`CLAUDE.md` 没动（四条文字在说明文件第 2 节，要先给用户看）；所有要 Windows 机器的步骤；Flutter 的 Windows 构建；§17.2 的完成标记；合并。
+- **计划里错的，已经改回计划 A**：中继只改 `audit.rs` 不够（见 4.2，用户已同意再改 `admin.rs`）；`rapp-state` 和余力的 `disks.rs` 是计划之后才进 main 的 unix 代码；testkit 的假程序是四个不是三个；`rapp-term` 的“改名检查”要改成比内容；`rust/.cargo/config.toml` 只在当前目录是 `rust\` 时生效。
+- **最先会撞上的**：
+  1. `Cargo.lock` 没重新生成。第一次跑 cargo 会改它，这是加依赖的正常结果，和功能一起提交（只是不许动里面的版本号行，那归发版 session）。
+  2. `rust/net/src/win.rs` 里 `windows-sys` 0.61 的签名和特性开关（`SetNamedSecurityInfoW`、`EXPLICIT_ACCESS_W`/`TRUSTEE_W`、`GetAce`、`GetDiskFreeSpaceExW`）是凭记忆写的。
+  3. `rust/service/src/lib.rs` 里 `UpdateOpts::windows` 的闭包类型可能推不出来。
+  4. 两个 PowerShell 脚本没跑过；`Step` 靠脚本块返回一个布尔值，命令往管道里多吐东西就会被判成失败。
+- **先在 Mac 上做的**：`cargo check --workspace`（确认没碰坏 macOS），再 `cargo check --target x86_64-pc-windows-msvc`（只查类型，不链接），然后才上 Windows 机器。
+
 ## 4. 边界
 
 ### 4.1 三条模块边界（规格 §5.3，改这些要回来问用户）
@@ -50,7 +64,7 @@
 ### 4.2 不许动的
 
 - `Sources/`（Swift）、`rust/host-linux/`、`rust/client-gtk/`、`rust/hub-ffi/`：不改。Swift 是对照的基准，草稿和它不一致时**以 Swift 为准，改 Rust**。
-- 中继（`rust/relay/`）：只批准了 `audit.rs` 里三处 `#[cfg(unix)]`。再多要问用户。登录 VPS 也要用户同意。
+- 中继（`rust/relay/`）：只批准了两处，都只为让中继的库在 Windows 上编得过：`audit.rs` 里三处 `#[cfg(unix)]`；`admin.rs` 的 unix 代码原样放到 `#[cfg(unix)]` 后面、别的系统给同名替身（用户 2026-11-26 两次同意）。再多要问用户。登录 VPS 也要用户同意。
 - 协议：不为 Windows 加消息，不升协议号。控制面只加可选字段，而且只在 Windows 上出现。
 - macOS、Linux、iOS 的行为：不变。每条缝都是“加一支”，unix 那一支的代码差异为零；Mac 门禁的命令一个字不改。
 - `docs/archives/`：不读不搜。
