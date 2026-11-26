@@ -69,13 +69,20 @@ pub fn current_user_sid() -> std::io::Result<String> {
     crate::win::current_user_sid()
 }
 
-/// What `dir` and `file` leave behind, for tests here and in `config`.
-#[cfg(all(test, windows))]
-pub(crate) fn expected_acl() -> Acl {
-    let mut sids = vec![current_user_sid().unwrap(), SID_SYSTEM.to_string(), SID_ADMINS.to_string()];
+/// What `dir` and `file` leave behind: protected, and only this user, SYSTEM and Administrators.
+/// Public so the tests of other crates can check a file their code made private.
+#[cfg(windows)]
+pub fn private_acl() -> std::io::Result<Acl> {
+    let mut sids = vec![current_user_sid()?, SID_SYSTEM.to_string(), SID_ADMINS.to_string()];
     sids.sort();
     sids.dedup();
-    Acl { protected: true, sids }
+    Ok(Acl { protected: true, sids })
+}
+
+/// `private_acl`, for tests here and in `config`.
+#[cfg(all(test, windows))]
+pub(crate) fn expected_acl() -> Acl {
+    private_acl().unwrap()
 }
 
 #[cfg(test)]
