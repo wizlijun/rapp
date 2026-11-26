@@ -38,6 +38,9 @@ class IosChannel {
 
   Future<String> deviceName() async => await _channel.invokeMethod<String>('deviceName') ?? '';
 
+  /// `pad` on an iPad, `phone` on an iPhone; '' when the channel says nothing.
+  Future<String> idiom() async => await _channel.invokeMethod<String>('idiom') ?? '';
+
   /// CFBundleShortVersionString.
   Future<String> version() async => await _channel.invokeMethod<String>('version') ?? '';
 

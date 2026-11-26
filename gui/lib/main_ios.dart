@@ -19,6 +19,7 @@ import 'term/term_session_port.dart';
 import 'ui/access_setup.dart';
 import 'ui/app_profile_store.dart';
 import 'ui/background.dart';
+import 'ui/device_os.dart';
 import 'ui/fullscreen.dart';
 import 'ui/main_state.dart';
 import 'ui/main_window.dart';
@@ -52,6 +53,11 @@ Future<void> mainIos() async {
   var name = '';
   try {
     name = await iosChannel.deviceName();
+  } catch (_) {}
+  // iPad or iPhone, for this device's own system mark on the overview.
+  var idiom = '';
+  try {
+    idiom = await iosChannel.idiom();
   } catch (_) {}
   // No service picks this device's id here: input records and gui.json wait on it. Before the prefs are read.
   try {
@@ -96,6 +102,7 @@ Future<void> mainIos() async {
       profiles: AppProfileStore.load(data.sharedDir, builtin),
       stateRules: await StateRulesLibrary.load(data, builtinRules),
       builtinStateRules: builtinRules,
+      localOs: localDeviceOs(iosIdiom: idiom),
       log: _log);
   state.overview = true;
   // The built-in input method follows 全局设置 and the session on the stage. Lives as long as the app.

@@ -63,7 +63,7 @@ class HubException implements Exception {
 }
 
 class HubHost {
-  const HubHost(this.id, this.name, {this.lan = const [], this.route});
+  const HubHost(this.id, this.name, {this.lan = const [], this.route, this.os});
   final String id;
   final String name;
 
@@ -74,6 +74,9 @@ class HubHost {
   final String? route;
 
   bool get forcedRelay => route == 'relay';
+
+  /// What system A last said it is (`macos`, `omarchy`, …), as the hub kept it; null when never heard.
+  final String? os;
 }
 
 /// One of A's screens, as the `desktop:` entry of its app list names them (main first).
@@ -103,15 +106,18 @@ class HubApp {
   final List<RemoteDisplay> displays;
 }
 
-/// A `version` field: a non-empty string, else none.
-String? _version(Object? v) => v is String && v.isNotEmpty ? v : null;
+/// A `version` or `os` field: a non-empty string, else none.
+String? _word(Object? v) => v is String && v.isNotEmpty ? v : null;
 
 class AppList {
-  const AppList(this.id, this.path, this.apps, {this.permissions, this.capabilities, this.version});
+  const AppList(this.id, this.path, this.apps, {this.permissions, this.capabilities, this.version, this.os});
   final Map<String, dynamic>? capabilities;
 
   /// A's rApp version; null from a host older than version labels.
   final String? version;
+
+  /// What system A is; null from a host older than system marks.
+  final String? os;
   final String id;
   final String path;
   final List<HubApp> apps;
@@ -400,7 +406,8 @@ class HubClient extends ChangeNotifier {
     return AppList('${m['id'] ?? id}', '${m['path'] ?? ''}', list,
         permissions: perms is Map ? Map<String, dynamic>.from(perms) : null,
         capabilities: m['capabilities'] is Map ? Map<String, dynamic>.from(m['capabilities']) : null,
-        version: _version(m['version']));
+        version: _word(m['version']),
+        os: _word(m['os']));
   }
 
   /// The 日志 screen's query, on this machine or on host [id]. An old peer answers `unknown op`.
@@ -522,12 +529,13 @@ class HubClient extends ChangeNotifier {
     final event = m['event'];
     switch (event) {
       case 'hosts':
-        version = _version(m['version']);
+        version = _word(m['version']);
         hosts = (m['hosts'] as List? ?? const [])
             .whereType<Map>()
             .map((h) => HubHost('${h['id']}', '${h['name'] ?? ''}',
                 lan: [for (final a in (h['lan'] as List? ?? const [])) '$a'],
-                route: h['route'] is String ? h['route'] as String : null))
+                route: h['route'] is String ? h['route'] as String : null,
+                os: _word(h['os'])))
             .toList();
         // A removed host's link is gone with it.
         final ids = {for (final h in hosts) h.id};
@@ -535,11 +543,11 @@ class HubClient extends ChangeNotifier {
         _paths.removeWhere((p) => !ids.contains(p.id));
       case 'host_added':
         final id = '${m['id']}';
-        // Added again: its route and LAN addresses stay until the next hosts list says otherwise.
+        // Added again: its route, LAN addresses and system stay until the next hosts list says otherwise.
         final was = hosts.where((h) => h.id == id).firstOrNull;
         hosts = [
           ...hosts.where((h) => h.id != id),
-          HubHost(id, '${m['name'] ?? ''}', lan: was?.lan ?? const [], route: was?.route),
+          HubHost(id, '${m['name'] ?? ''}', lan: was?.lan ?? const [], route: was?.route, os: was?.os),
         ];
       case 'opened':
         if (m['sid'] != null) _sessions[m['sid'] as Object] = _session(m);

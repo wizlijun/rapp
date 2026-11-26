@@ -1227,3 +1227,8 @@ macOS、Linux、Duo、iPad 各一遍。
 - 审查留下的两条小问题（没修）：
   - [ ] ps 的 `comm` 分不出 `--cm` 小窗和主窗口：上次服务留下的孤儿 `--cm` 会被当成「主窗口开着」，升级后多开一次主窗口（要改读 `args=`）
   - [ ] 安装中途 panic 会让 `quit_gui` 一直是 true，GUI 一打开就退，直到服务重启（可用 drop guard 清掉）
+
+## 设备系统图标（2026-11-26，规格 `docs/superpowers/specs/2026-11-26-rapp-device-os-marks-design.md`，计划 `docs/superpowers/plans/2026-11-26-device-os-marks.md`）
+
+- [x] service 的 `list_apps` 回报 `os`（macos / windows / linux / omarchy）；hub 记进 hosts.json 并转给 GUI；总览每个设备列在状态灯左边画单色系统图标（9 种，含「未知」），悬停显示系统名。分支 `feat/device-os-marks`。
+- [ ] 实机检查：① Mac 本机列显示苹果；② 已升级的另一台 Mac / Omarchy / Linux 列显示对的图标；③ 未升级的设备显示「未知」，升级后变对；④ 设备离线后图标还在；⑤ iPad、iPhone 本机列是平板 / 手机外形加苹果；⑥ 三套主题下都看得清；⑦ 悬停显示系统名。

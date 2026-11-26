@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/ui/device_os.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/overview_model.dart';
@@ -128,5 +129,20 @@ void main() {
       localVersion: '0.14.7',
     );
     expect(cols.map((c) => c.version), ['0.14.7', '0.14.8', null, null, null]);
+  });
+
+  test('os: fresh probe first, then what the hub kept, else unknown', () {
+    final cols = deviceColumns(
+      hosts: const [HubHost('m1', 'A', os: 'macos'), HubHost('m2', 'B', os: 'linux'), HubHost('m3', 'C')],
+      probes: {
+        'm1': DeviceProbe(Lamp.active, '在线', apps: const AppList('m1', 'lan', [], os: 'omarchy')),
+        'm2': DeviceProbe(Lamp.active, '在线', apps: const AppList('m2', 'lan', [])), // downgraded: no os
+      },
+      entries: [se('gone', Lamp.disconnected)],
+      name: (id) => id,
+      localOs: DeviceOs.ipad,
+    );
+    expect(cols.map((c) => c.os),
+        [DeviceOs.ipad, DeviceOs.omarchy, DeviceOs.linux, DeviceOs.unknown, DeviceOs.unknown]);
   });
 }

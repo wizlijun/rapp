@@ -327,6 +327,7 @@ mod tests {
             lan: vec!["192.168.1.5:22028".into()],
             fp: Some(Fp([7; 32])),
             route: None,
+            os: None,
         };
         assert!(worth_trying(Some(&host), Some("relay")));
         assert!(worth_trying(Some(&host), Some("direct")));

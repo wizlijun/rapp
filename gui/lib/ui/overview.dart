@@ -8,6 +8,7 @@ import '../embed/traffic_label.dart';
 import '../service_client.dart';
 import 'inbound.dart';
 import 'lamp.dart';
+import 'os_mark.dart';
 import 'main_state.dart';
 import 'open_apps_menu.dart';
 import 'overview_model.dart';
@@ -48,6 +49,7 @@ class Overview extends StatelessWidget {
           entries: entries,
           name: state.deviceName,
           localVersion: state.hub?.version,
+          localOs: state.localOs,
         );
         final projectsFirst = state.prefs.first == FirstLayer.project;
         return Stack(children: [
@@ -302,6 +304,8 @@ class _Column extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             Row(children: [
+              OsMark(col.os, key: Key('os-mark-${id ?? 'local'}')),
+              const SizedBox(width: 6),
               StatusLamp(col.lamp),
               const SizedBox(width: 6),
               Flexible(

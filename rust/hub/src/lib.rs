@@ -338,6 +338,12 @@ impl Hub {
             Some("apps") => {
                 let id = s("id")?;
                 let (_, r, path) = self.request(&self.host(id)?, &Op::ListApps).await?;
+                // Kept for the host's mark while it is offline; failing to save it never fails the list.
+                if let Some(os) = valid_os(&r["os"]) {
+                    if let Err(e) = self.hosts.set_os(id, os) {
+                        self.log.msg(Lvl::Warn, format_args!("{id}: cannot save host os: {e:#}"));
+                    }
+                }
                 apps_event(id, path, &r)
             }
             Some("logs") => {
@@ -469,7 +475,15 @@ fn apps_event(id: &str, path: &str, r: &Value) -> Value {
     if r["version"].as_str().is_some_and(|v| !v.is_empty()) {
         ev["version"] = r["version"].clone();
     }
+    if let Some(os) = valid_os(&r["os"]) {
+        ev["os"] = os.into();
+    }
     ev
+}
+
+/// A host's `os` worth keeping: a short non-empty string. Which values mean what is the GUI's business.
+fn valid_os(v: &Value) -> Option<&str> {
+    v.as_str().filter(|s| !s.is_empty() && s.len() <= 32)
 }
 
 #[cfg(test)]
@@ -506,7 +520,7 @@ mod sid_tests {
 
 #[cfg(test)]
 mod apps_event_tests {
-    use super::apps_event;
+    use super::{apps_event, valid_os};
     use serde_json::json;
 
     #[test]
@@ -520,5 +534,17 @@ mod apps_event_tests {
         assert!(ev.get("capabilities").is_none());
         let ev = apps_event("m1", "lan", &json!({"apps": [], "version": ""}));
         assert!(ev.get("version").is_none());
+    }
+
+    #[test]
+    fn apps_event_copies_a_sane_os_only() {
+        let ev = apps_event("m1", "lan", &json!({"apps": [], "os": "omarchy"}));
+        assert_eq!(ev["os"], "omarchy");
+        assert!(apps_event("m1", "lan", &json!({"apps": []})).get("os").is_none());
+        for bad in [json!(""), json!(7), json!({"x": 1}), json!("x".repeat(33))] {
+            let ev = apps_event("m1", "lan", &json!({"apps": [], "os": bad}));
+            assert!(ev.get("os").is_none(), "{bad}");
+        }
+        assert_eq!(valid_os(&json!("x".repeat(32))), Some("x".repeat(32).as_str()));
     }
 }

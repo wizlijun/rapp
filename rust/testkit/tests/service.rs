@@ -375,7 +375,10 @@ async fn list_apps_reports_and_stores_permissions() {
     let ep = b_endpoint();
     let (conn, _) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
     let r = req(&conn, json!({"op":"list_apps"})).await;
-    assert_eq!(r, json!({"ok":true,"apps":apps(),"permissions":perms(true, false),"capabilities":{"graphical":true,"terminal":true,"ports":true},"version":env!("CARGO_PKG_VERSION")}));
+    // What this machine is: a dev box may be Omarchy, so any of the four a service reports.
+    let os = r["os"].as_str().unwrap_or_default().to_owned();
+    assert!(["macos", "windows", "linux", "omarchy"].contains(&os.as_str()), "{r}");
+    assert_eq!(r, json!({"ok":true,"apps":apps(),"permissions":perms(true, false),"capabilities":{"graphical":true,"terminal":true,"ports":true},"os":os,"version":env!("CARGO_PKG_VERSION")}));
     assert_eq!(ipc_once(&a.svc, a.home.path(), json!({"cmd":"status"})).await["permissions"], perms(true, false));
 }
 

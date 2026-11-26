@@ -181,9 +181,9 @@ pub async fn serve_request(state: &Arc<State>, mut s: Pipe, peer: Peer) -> Resul
 }
 
 /// The `list_apps` reply: the apps, A's missing permissions (newer macOS hosts only), what this
-/// device can serve, and its rApp version (shown under its column in B's overview).
+/// device can serve, what system it is and its rApp version (both shown on its column in B's overview).
 fn list_apps_reply(apps: Value, perms: Option<Value>, caps: Value) -> Value {
-    let mut r = json!({"apps": apps, "capabilities": caps, "version": env!("CARGO_PKG_VERSION")});
+    let mut r = json!({"apps": apps, "capabilities": caps, "os": workers::os_name(), "version": env!("CARGO_PKG_VERSION")});
     if let Some(perms) = perms {
         r["permissions"] = perms;
     }
@@ -369,6 +369,7 @@ mod list_apps_tests {
         assert_eq!(r["version"], env!("CARGO_PKG_VERSION"));
         assert!(r.get("permissions").is_none());
         assert_eq!(r["capabilities"]["graphical"], true);
+        assert_eq!(r["os"], crate::workers::os_name());
         let r = list_apps_reply(json!([]), Some(json!({"accessibility": true})), json!({}));
         assert_eq!(r["permissions"]["accessibility"], true);
         assert_eq!(r["version"], env!("CARGO_PKG_VERSION"));

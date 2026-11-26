@@ -68,7 +68,13 @@ async fn add_host_hosts_apps_open_close_remove() {
     assert!(h.get("password").is_none(), "{r}");
     let r = hub.call(json!({"cmd":"apps","id":a.id,"req":"x"})).await;
     let perms = json!({"screen_recording":true,"accessibility":true});
-    assert_eq!(r, json!({"event":"apps","id":a.id,"path":"lan","apps":apps(),"permissions":perms,"capabilities":{"graphical":true,"terminal":true,"ports":true},"req":"x","version":env!("CARGO_PKG_VERSION")}));
+    // What A is: a dev box may be Omarchy, so any of the four a service reports.
+    let os = r["os"].as_str().unwrap_or_default().to_owned();
+    assert!(["macos", "windows", "linux", "omarchy"].contains(&os.as_str()), "{r}");
+    assert_eq!(r, json!({"event":"apps","id":a.id,"path":"lan","apps":apps(),"permissions":perms,"capabilities":{"graphical":true,"terminal":true,"ports":true},"os":os,"req":"x","version":env!("CARGO_PKG_VERSION")}));
+    // The hub keeps it, for A's mark while A is offline.
+    let r = hub.call(json!({"cmd":"hosts"})).await;
+    assert_eq!(r["hosts"][0]["os"], json!(os), "{r}");
 
     open_and_close(&mut hub, &a.id, "lan").await;
     // A's side of the session ends too.

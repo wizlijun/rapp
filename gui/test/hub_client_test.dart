@@ -182,6 +182,32 @@ void main() {
       expect((await f).version, isNull);
     });
 
+    test('the hosts event carries each host os; a missing or bad one is none', () async {
+      t.emit({
+        'event': 'hosts',
+        'hosts': [
+          {'id': 'm1', 'name': 'A', 'os': 'macos'},
+          {'id': 'm2', 'name': 'B'},
+          {'id': 'm3', 'name': 'C', 'os': 7},
+        ],
+      });
+      await Future<void>.delayed(Duration.zero);
+      expect(hub.hosts.map((h) => h.os), ['macos', null, null]);
+      final f = hub.addHost('m1', '');
+      t.emit({'event': 'host_added', 'req': t.sent.last['req'], 'id': 'm1', 'name': 'A'});
+      await f;
+      expect(hub.hosts.firstWhere((h) => h.id == 'm1').os, 'macos');
+    });
+
+    test('an apps reply fills AppList.os; an old host leaves it null', () async {
+      var f = hub.apps('111');
+      t.emit({'event': 'apps', 'id': '111', 'path': 'lan', 'apps': [], 'os': 'windows', 'req': t.sent.last['req']});
+      expect((await f).os, 'windows');
+      f = hub.apps('111');
+      t.emit({'event': 'apps', 'id': '111', 'path': 'lan', 'apps': [], 'req': t.sent.last['req']});
+      expect((await f).os, isNull);
+    });
+
     test('presence is queued and drained', () async {
       final f = hub.apps('111');
       final req = t.sent.last['req'];
