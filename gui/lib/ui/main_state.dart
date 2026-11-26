@@ -25,6 +25,8 @@ import '../embed/traffic_label.dart' show segments;
 import '../history/input_history.dart';
 import '../history/input_recorder.dart';
 import '../hub_client.dart';
+import '../load_model.dart';
+import '../service_client.dart' show ServiceMonitor;
 import '../permissions.dart';
 import '../embed/app_profile.dart';
 import '../embed/app_state.dart';
@@ -83,12 +85,13 @@ class HintRecord {
   bool get goes => device != null && app != null;
 }
 
-enum NeedKind { session, device, terminal, app }
+enum NeedKind { session, device, terminal, app, resource }
 
 /// One thing waiting for the person: a disconnected session ([target] its record key) or a
 /// device that dropped ([target] its id), or a text terminal blocked on the person ([target] its session id,
 /// [device] its device, [title] its shown name), or an app session whose screen shows a sure block ([target] its
-/// record key). Newer [seq] first.
+/// record key), or a load warning (device-load §8: [target] `<device>\n<item>`, [device] its device, [title] the
+/// item). Newer [seq] first.
 class NeedItem {
   const NeedItem(this.kind, this.target, this.text, this.seq, {this.reconnectWord = '重连', this.device, this.title});
   final String reconnectWord;
@@ -147,6 +150,18 @@ String openedText(String name) => 'A 上打开了「$name」';
 const desktopLockText = '远程电脑已锁屏；输入系统密码解锁';
 const childLockText = '远程电脑已锁屏；请在主窗口输入系统密码解锁';
 
+/// A load whose last line came longer ago than this is left out, as if there were none (device-load §7: no stale
+/// numbers). Timed by this GUI's clock when the line arrived, never by the snapshot's `at` (the device's clock).
+const loadStaleAfter = Duration(seconds: 20);
+
+/// How [columnLoad]'s device is asked once (the detail's process list).
+LoadNow? columnLoadNow(HubClient? hub, ServiceMonitor? local, String? id) => id != null
+    ? (hub == null ? null : ({bool top = false}) => hub.loadNow(id, top: top))
+    : local?.loadNow;
+
+/// How long 「1小时内不再提醒」 keeps a load warning quiet.
+const loadSnoozeFor = Duration(hours: 1);
+
 /// A screen was plugged into A while its desktop is open: it is not opened by itself.
 const screenAddedHint = 'A 多了一块屏，在顶栏的屏幕菜单里切过去';
 
@@ -169,6 +184,7 @@ class MainState extends ChangeNotifier {
     LlmApi? llmApi,
     DeviceOs? localOs,
     LocalIme? localIme,
+    this.monitor,
   })  : localOs = localOs ?? localDeviceOs(),
         _builtinStateRules = builtinStateRules,
         stateRules = stateRules ?? StateRulesLibrary.parse(builtinStateRules, const {}),
@@ -199,6 +215,7 @@ class MainState extends ChangeNotifier {
     _termSub = termPort?.events.listen(_onPortEvent);
     if (defaultTargetPlatform == TargetPlatform.macOS || defaultTargetPlatform == TargetPlatform.linux) port?.setVoiceHotkey(prefs.voiceHotkey);
     hub?.addListener(_onHub);
+    monitor?.addListener(_onMonitor);
     hub?.askNet();
     _lastError = hub?.lastError;
     _netLevel = hub?.net?.level;
@@ -727,7 +744,187 @@ class MainState extends ChangeNotifier {
         select(n.target);
       case NeedKind.device:
         showDevice(n.target);
+      case NeedKind.resource:
+        // This machine has no device panel: its column on 全景 is where its 余力 is.
+        if (n.device == localLoadId) {
+          corner = null;
+          overview = true;
+          logs = false;
+          _blur();
+          notifyListeners();
+        } else {
+          showDevice(n.device!);
+        }
     }
+  }
+
+  // ---- load (device-load §8) ----
+  /// This machine's service (null on iOS and in tests that do not give one): its load and its id.
+  final ServiceMonitor? monitor;
+
+  /// This machine's device id while its service gives a load; null on iOS.
+  String? get localLoadId => defaultTargetPlatform == TargetPlatform.iOS ? null : monitor?.status?.id;
+
+  /// A device column's load (device-load §7): a remote one's ([id]) from the hub's watch while it is online; this
+  /// machine's (no [id]) from its service ([local], else [monitor]), which iOS does not have. Every reader goes
+  /// through here (the overview's columns, 需要你, the hint, 到 X 上新建终端), so none shows a load whose last line
+  /// is more than [loadStaleAfter] old.
+  DeviceLoad? columnLoad(String? id, {ServiceMonitor? local, bool offline = false}) {
+    final l = id != null
+        ? (offline ? null : hub?.loads[id])
+        : (defaultTargetPlatform == TargetPlatform.iOS ? null : (local ?? monitor)?.load);
+    return l == null || _now().difference(_loadArrived(l)) > loadStaleAfter ? null : l;
+  }
+
+  /// When each load (one per line: a new line is a new object) was first seen here, which is when it arrived:
+  /// [_onHub] and [_onMonitor] look at every one as it comes.
+  final _loadAt = Expando<DateTime>();
+  DateTime _loadArrived(DeviceLoad l) => _loadAt[l] ??= _now();
+
+  /// Wakes once when the first shown load turns stale, so the rows go without a new line to say so.
+  Timer? _loadStale;
+
+  void _stampLoads() {
+    for (final l in hub?.loads.values ?? const <DeviceLoad>[]) {
+      _loadArrived(l);
+    }
+    final l = monitor?.load;
+    if (l != null) _loadArrived(l);
+  }
+
+  /// Every online device's load, as the overview's columns show it; this machine's under its own id.
+  Map<String, DeviceLoad> get deviceLoads {
+    final out = <String, DeviceLoad>{};
+    for (final h in hub?.hosts ?? const <HubHost>[]) {
+      final l = columnLoad(h.id, offline: probes[h.id]?.lamp == Lamp.offline);
+      if (l != null) out[h.id] = l;
+    }
+    final me = localLoadId, l = columnLoad(null);
+    if (me != null && l != null) out.putIfAbsent(me, () => l);
+    return out;
+  }
+
+  /// The name a load row says: this machine's own, else the device's.
+  String loadDeviceName(String id) {
+    if (id != localLoadId) return deviceName(id);
+    final n = monitor?.status?.name ?? '';
+    return n.isEmpty ? '本机' : n;
+  }
+
+  /// How [id] is asked for its load once (the detail's 「看占用最多的进程」).
+  LoadNow? loadNowOf(String id) => columnLoadNow(hub, monitor, id == localLoadId ? null : id);
+
+  /// Whether [device]'s [item] at [level] was snoozed: until the hour is up, at that level or under it.
+  bool loadSnoozed(String device, String item, LoadLevel level) {
+    final v = prefs.loadSnooze['$device\n$item']?.split(' ');
+    if (v == null || v.length != 2) return false;
+    final until = int.tryParse(v[0]);
+    return until != null && _now().millisecondsSinceEpoch < until && level.index <= loadLevelOf(v[1]).index;
+  }
+
+  /// 「1小时内不再提醒」: [device]'s [item] stays out of 需要你 and the hint for an hour, unless it rises past [level].
+  /// Kept in this GUI's prefs, never sent to the device.
+  void snoozeLoad(String device, String item, LoadLevel level) {
+    final now = _now().millisecondsSinceEpoch;
+    prefs.loadSnooze.removeWhere((_, v) => (int.tryParse(v.split(' ').first) ?? 0) <= now);
+    prefs.loadSnooze['$device\n$item'] = '${now + loadSnoozeFor.inMilliseconds} ${level.name}';
+    _save();
+  }
+
+  /// [snoozeLoad] for a resource row, at the level it shows now.
+  void snoozeNeed(NeedItem n) {
+    final item = n.title!;
+    final w = deviceLoads[n.device]?.warnings.where((w) => w.item == item).firstOrNull;
+    snoozeLoad(n.device!, item, w?.level ?? LoadLevel.danger);
+  }
+
+  /// The text terminals whose directory is on [device]'s disk [mount] (「看在这块盘上的终端」): id and shown name.
+  /// Only a device the hub reaches: this machine's own terminals are not opened from here.
+  List<(String, String)> termsOnDisk(String device, String mount) {
+    if (!(hub?.hosts.any((h) => h.id == device) ?? false)) return const [];
+    final disk = deviceLoads[device]?.disks.where((d) => d['mount'] == mount).firstOrNull;
+    final out = <(String, String)>[];
+    final seen = <String>{};
+    for (final p in (disk?['paths'] is List ? disk!['paths'] as List : const [])) {
+      if (p is! Map || p['kind'] != 'term' || p['term'] is! String || !seen.add(p['term'] as String)) continue;
+      final id = p['term'] as String;
+      final row = hub?.termLists[device]?.terms.where((r) => r.id == id).firstOrNull;
+      out.add((id, row == null ? '${p['path'] ?? id}' : termDisplayName(row.shown, row.host)));
+    }
+    return out;
+  }
+
+  /// Where 「到 `<name>` 上新建终端」 goes from [device]'s row: the device `rapp load pick` would pick, leaving out
+  /// [device] and this machine (its terminals are not opened through the hub); null when there is none.
+  String? newTermElsewhere(String device) {
+    final cands = deviceLoads..remove(device)..remove(localLoadId);
+    return pickDevice(cands, cands.keys.toSet());
+  }
+
+  /// 「到 `<name>` 上新建终端」: the way 「新建」 opens one (`open_term` without `from`), its failure in the hint.
+  void newTermOn(String id) {
+    corner = null;
+    notifyListeners();
+    unawaited(_openTerms(id, target: const NewText(null)));
+  }
+
+  /// Each item's level per device at the last look, and when that load arrived; a device not here has not given a
+  /// load since it appeared, or since its last one went stale.
+  final Map<String, ({Map<String, LoadLevel> levels, DateTime at})> _loadLevels = {};
+
+  /// The hint says an item that rose (正常 → 注意 / 危险, 注意 → 危险) since the device's last load; not the first
+  /// load after a device appears or after its last one went stale, and not a snoozed item.
+  void _trackLoads() {
+    final loads = deviceLoads;
+    _loadLevels.removeWhere((id, _) => !loads.containsKey(id));
+    for (final MapEntry(key: id, value: l) in loads.entries) {
+      final now = <String, LoadLevel>{};
+      for (final w in l.warnings) {
+        if (w.level.index > (now[w.item] ?? LoadLevel.normal).index) now[w.item] = w.level;
+      }
+      final at = _loadArrived(l);
+      final last = _loadLevels[id];
+      _loadLevels[id] = (levels: now, at: at);
+      // A gap longer than the stale line is a fresh start, even if no look fell inside it.
+      if (last == null || at.difference(last.at) > loadStaleAfter) continue;
+      for (final w in l.warnings) {
+        if (w.level.index <= (last.levels[w.item] ?? LoadLevel.normal).index || loadSnoozed(id, w.item, w.level)) {
+          continue;
+        }
+        hint = '${loadDeviceName(id)} ${w.text}';
+      }
+    }
+    _planLoadStale(loads.values);
+  }
+
+  /// One timer for every shown load: it fires when the oldest turns stale, looks again, and plans the next.
+  void _planLoadStale(Iterable<DeviceLoad> shown) {
+    _loadStale?.cancel();
+    _loadStale = null;
+    if (_disposed || shown.isEmpty) return;
+    final now = _now();
+    final left = [for (final l in shown) loadStaleAfter - now.difference(_loadArrived(l))]
+        .reduce((a, b) => a < b ? a : b);
+    // Just past the line (every shown load is inside it, so [left] is never below zero).
+    _loadStale = Timer(left + const Duration(milliseconds: 10), () {
+      _loadStale = null;
+      _trackLoads();
+      notifyListeners();
+    });
+  }
+
+  DeviceLoad? _localLoadSeen;
+  String? _localIdSeen;
+
+  /// This machine's service changed: only a new load or id is news here.
+  void _onMonitor() {
+    final m = monitor!;
+    _stampLoads();
+    if (identical(m.load, _localLoadSeen) && m.status?.id == _localIdSeen) return;
+    _localLoadSeen = m.load;
+    _localIdSeen = m.status?.id;
+    _trackLoads();
+    notifyListeners();
   }
   final Map<String, DeviceProbe> probes = {};
   String? deviceTab;
@@ -1234,6 +1431,17 @@ class MainState extends ChangeNotifier {
                 '${r.appName} @ ${deviceName(r.id)}：${termAskWord(remote[r.sid]!.inferredPs!)}',
                 _termNeedSeq.putIfAbsent(key, () => ++_seq));
           }(),
+      // A load warning on an online device (device-load §8), unless snoozed; a rise comes first again.
+      for (final MapEntry(key: id, value: l) in deviceLoads.entries)
+        for (final w in l.warnings)
+          if (w.level != LoadLevel.normal && !loadSnoozed(id, w.item, w.level))
+            () {
+              final key = 'load\n$id\n${w.item}\n${w.level.name}';
+              seen.add(key);
+              return NeedItem(NeedKind.resource, '$id\n${w.item}', '${loadDeviceName(id)} ${w.text}',
+                  _termNeedSeq.putIfAbsent(key, () => ++_seq),
+                  device: id, title: w.item);
+            }(),
     ];
     _termNeedSeq.removeWhere((k, _) => !seen.contains(k));
     out.sort((a, b) => b.seq.compareTo(a.seq));
@@ -1534,6 +1742,7 @@ class MainState extends ChangeNotifier {
   }
 
   void _onHub() {
+    _stampLoads();
     final back = <String>{};
     for (final p in hub!.takePresence()) {
       if (p.online) back.add(p.id);
@@ -1541,6 +1750,7 @@ class MainState extends ChangeNotifier {
       _setOnline(p.id, p.online, error: p.error);
     }
     _trackPrograms();
+    _trackLoads();
     if (!hub!.alive) _watching.clear();
     final level = hub!.net?.level;
     final netBack = _netLevel == NetLevel.down && level != NetLevel.down;
@@ -4944,6 +5154,7 @@ class MainState extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _loadStale?.cancel();
     for (final t in _tidies.values) {
       t.dispose();
     }
@@ -4959,6 +5170,7 @@ class MainState extends ChangeNotifier {
     resources.removeListener(notifyListeners);
     resources.dispose();
     hub?.removeListener(_onHub);
+    monitor?.removeListener(_onMonitor);
     profiles.removeListener(_onProfiles);
     _portSub?.cancel();
     _termSub?.cancel();

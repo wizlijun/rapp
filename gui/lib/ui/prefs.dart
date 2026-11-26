@@ -52,10 +52,12 @@ class UiPrefs {
     Map<String, String>? termOpen,
     Map<String, TidyMode>? voiceTidyMode,
     Map<String, String>? termApp,
+    Map<String, String>? loadSnooze,
   })  : phrases = phrases ?? defaultStripItems,
         termOpen = termOpen ?? {},
         voiceTidyMode = voiceTidyMode ?? {},
-        termApp = termApp ?? {};
+        termApp = termApp ?? {},
+        loadSnooze = loadSnooze ?? {};
 
   RappTheme theme;
   bool startFullscreen;
@@ -152,6 +154,10 @@ class UiPrefs {
   /// dropped on load.
   final Map<String, String> termApp;
 
+  /// 1小时内不再提醒 (`load_snooze`, device-load §8): `<device>\n<item>` to `<untilMs> <level>`, this GUI's own and never
+  /// sent to the device. A value that is not a number and `warn` or `danger` is dropped on load.
+  final Map<String, String> loadSnooze;
+
   /// The stored app when [launchers] still has it, else the first launcher.
   String termAppFor(String device, List<String> launchers) {
     final a = termApp[device];
@@ -194,6 +200,7 @@ class UiPrefs {
       final qt = j['quick_hidden_term'];
       final qa = j['quick_hidden_app'];
       final qh = j['quick_auto_hide'];
+      final ls = j['load_snooze'];
       return UiPrefs(
         theme: RappTheme.values.firstWhere(
           (t) => t.name == name,
@@ -243,6 +250,12 @@ class UiPrefs {
             for (final e in ta.entries)
               if (e.key is String && e.value is String) e.key as String: e.value as String,
         },
+        loadSnooze: {
+          if (ls is Map)
+            for (final e in ls.entries)
+              if (e.key is String && e.value is String && RegExp(r'^\d+ (warn|danger)$').hasMatch(e.value as String))
+                e.key as String: e.value as String,
+        },
       );
     } catch (_) {
       return UiPrefs();
@@ -283,6 +296,7 @@ class UiPrefs {
         'voice_tidy_mode': {for (final e in voiceTidyMode.entries) e.key: e.value.json},
         'term_open': termOpen,
         'term_app': termApp,
+        'load_snooze': loadSnooze,
       }),
     );
   }

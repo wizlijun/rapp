@@ -4,14 +4,17 @@ mod activity;
 pub mod autolock;
 mod channel;
 mod cm;
+mod companion;
 pub mod config;
 mod data;
 mod forward;
 pub mod forward_log;
 mod ipc;
 mod labels;
+pub mod load;
 mod maps;
 mod numbers;
+mod outbox;
 mod own;
 mod pace;
 mod peer;
@@ -21,6 +24,7 @@ mod relay_link;
 mod share_cmds;
 mod sharing;
 mod shares;
+mod sink;
 mod state;
 mod term;
 mod update;
@@ -40,6 +44,7 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 
 pub use data::{DataOpts, SyncStatus};
+pub use load::LoadOpts;
 pub use rapp_update::{Runner, SystemRunner};
 
 pub const WORKER_IDLE: Duration = Duration::from_secs(60);
@@ -83,6 +88,8 @@ pub struct Opts {
     /// service). A test whose devices share one machine turns it off on a sharer, so that a
     /// visitor can take a number only when the sharer is not listening on it.
     pub own_ports: bool,
+    /// None: no load sampling (`LoadOpts::system()` in the real service).
+    pub load: Option<LoadOpts>,
 }
 
 /// Where the running app is and the updater's timings (online-update plan Task 4).
@@ -166,6 +173,10 @@ impl Service {
         if let Some(why) = unreadable {
             log.event(Lvl::Warn, "maps_unreadable", json!({"err": why}));
         }
+        let (sinks, unreadable) = sink::Sinks::load(&opts.home);
+        if let Some(why) = unreadable {
+            log.event(Lvl::Warn, "state_sinks_unreadable", json!({"err": why}));
+        }
         let server = device_server_config(&identity, &[ALPN_DEVICE, ALPN_PEER])?;
         let endpoint = quinn::Endpoint::server(server, ([0, 0, 0, 0], port).into()).with_context(|| format!("bind udp port {port}"))?;
         let port = endpoint.local_addr()?.port();
@@ -204,6 +215,9 @@ impl Service {
             labels,
             maps,
             numbers: numbers::Numbers::new(),
+            sinks,
+            outbox: outbox::Outbox::new(),
+            companions: companion::Companions::new(),
             own: own::Own::new(opts.own_ports),
             probed: probe::Probed::default(),
             forwards: forward::Forwards::new(),
@@ -212,6 +226,7 @@ impl Service {
             pacer: pace::Pacer::new(opts.pacing),
             outbound: rapp_conn::dial::Outbound::new(client_ep, identity.clone(), name),
             activity: Default::default(),
+            load: opts.load.is_some().then(|| Arc::new(load::Load::new())),
         };
         let id = state.cfg.lock().unwrap().id.clone();
         let version = env!("CARGO_PKG_VERSION");
@@ -239,6 +254,9 @@ impl Service {
             autolock::spawn(state.clone(), opts.lock_grace),
             relay_link::spawn(state.clone(), opts.advertise_lan),
             spawn_forward_sums(state.clone(), opts.forward_sum_every),
+            sink::spawn(state.clone()),
+            outbox::spawn(state.clone()),
+            companion::spawn(state.clone()),
         ];
         if let Some(data) = opts.data {
             let name = state.cfg.lock().unwrap().name.clone();
@@ -248,6 +266,9 @@ impl Service {
                 }
             }
             tasks.push(data::spawn(data, name, state.log.clone()));
+        }
+        if let Some(load) = opts.load {
+            tasks.push(tokio::spawn(load::task::run(state.clone(), load)));
         }
         Ok(Service { port, ipc_port, state, tasks, stopped: Default::default() })
     }
@@ -279,6 +300,9 @@ impl Service {
         for t in &self.tasks {
             t.abort();
         }
+        self.state.companions.stop_all();
+        // Its own state service is gone with it (in memory only: the tell loop is stopped).
+        crate::sink::set_local(&self.state, None);
         self.state.maps.stop();
         self.state.own.stop();
         self.state.outbound.close();

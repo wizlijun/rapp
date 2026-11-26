@@ -59,10 +59,26 @@ pub fn config(state: &State) -> Result<TermConfig, String> {
 }
 
 /// `term.json`, when terminal sessions are on.
-fn allowed(state: &State) -> Result<TermConfig, String> {
-    let c = config(state)?;
+pub(crate) fn allowed(state: &State) -> Result<TermConfig, String> {
+    allowed_quiet(state).map_err(|(text, why)| {
+        if let Some(why) = why {
+            state.log.msg(Lvl::Warn, why);
+        }
+        text.to_string()
+    })
+}
+
+/// Whether terminal sessions can be used now, without a log line: the load reply polls it (a broken `term.json`
+/// is logged by the terminal requests themselves).
+pub(crate) fn usable(state: &State) -> bool {
+    allowed_quiet(state).is_ok()
+}
+
+/// `allowed` with nothing logged: `Err((reply text, why it is invalid))`.
+fn allowed_quiet(state: &State) -> Result<TermConfig, (&'static str, Option<String>)> {
+    let c = rapp_term::config::load(&path(state)).map_err(|e| (INVALID, Some(e)))?;
     if !c.allow {
-        return Err(OFF.into());
+        return Err((OFF, None));
     }
     Ok(c)
 }
@@ -223,6 +239,39 @@ pub(crate) async fn ask(state: &Arc<State>, req: &Value) -> Result<Value> {
 pub(crate) async fn ask_for(state: &Arc<State>, req: &Value, wait: Duration) -> Result<Value> {
     let (port, token, _counted) = start(state).await?;
     first(port, &token, req, wait).await.map(|(_, v)| v)
+}
+
+/// The outbox's own watch on the worker (spec §7.3): the worker's session count stays up, and the
+/// connection open, until this is dropped.
+pub(crate) struct LocalWatch<'a> {
+    conn: WorkerConn,
+    /// The first list, until `next` gives it.
+    first: Option<Value>,
+    _counted: Counted<'a>,
+}
+
+/// Opens a watch on the worker (started if need be) for this device's own use. Refused, starting
+/// nothing, while terminal sessions are off.
+pub(crate) async fn watch_local(state: &Arc<State>) -> Result<LocalWatch<'_>> {
+    allowed(state).map_err(|e| anyhow!(e))?;
+    let (port, token, counted) = start(state).await?;
+    let (conn, first) = first(port, &token, &json!({"op": "watch"}), ASK_WAIT).await?;
+    Ok(LocalWatch { conn, first: Some(first), _counted: counted })
+}
+
+impl LocalWatch<'_> {
+    /// The next session list, the first one included; None when the worker closed. A line
+    /// carrying `error` (terminal sessions turned off, say) is `Err`.
+    pub async fn next(&mut self) -> Result<Option<Value>> {
+        let line = match self.first.take() {
+            Some(v) => Some(v),
+            None => next(&mut self.conn).await?,
+        };
+        match line {
+            Some(v) if v.get("error").is_some() => Err(anyhow!("the terminal worker refused the watch")),
+            line => Ok(line),
+        }
+    }
 }
 
 /// The worker's watch, passed on to B. The worker's session count stays up until the watch ends, so it is not
@@ -422,6 +471,7 @@ pub fn set(state: &State, cmd: &Value) -> Value {
             if !allow {
                 workers::stop(state, TERM);
             }
+            state.outbox.poke();
             state.notify();
             ok(json!({}))
         }

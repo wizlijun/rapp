@@ -105,12 +105,16 @@ pub struct Share {
     /// false: the sharer chose it and it stays.
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub proto_auto: bool,
+    /// What kind of service this is, when it is one other devices look for ("state": a
+    /// `rapp-state` service). None for an ordinary share.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
 }
 
 impl Share {
     /// A share of `port` with no note, every trusted device, not raw, no number and no protocol chosen.
     pub fn new(port: u16) -> Share {
-        Share { port, note: String::new(), allow: Vec::new(), raw: false, open_web: false, local: None, proto: None, proto_auto: true }
+        Share { port, note: String::new(), allow: Vec::new(), raw: false, open_web: false, local: None, proto: None, proto_auto: true, kind: None }
     }
 
     /// The protocol to tell visitors: the one stored, or the guess from the port.
@@ -219,6 +223,20 @@ impl Shares {
         }
         self.put(&mut items, done.iter().map(|d| d.share.clone()).collect())?;
         Ok(done)
+    }
+
+    /// Sets (or clears) the `kind` of the share of `port`. True when it changed (and is saved);
+    /// false when there is no such share or it already has that kind.
+    pub fn set_kind(&self, port: u16, kind: Option<&str>) -> Result<bool> {
+        let mut items = self.items.lock().unwrap();
+        let mut next = items.0.clone();
+        let Some(share) = next.iter_mut().find(|s| s.port == port) else { return Ok(false) };
+        if share.kind.as_deref() == kind {
+            return Ok(false);
+        }
+        share.kind = kind.map(str::to_string);
+        self.save(&mut items, next)?;
+        Ok(true)
     }
 
     /// Gives a number to every share that has none, saved as one write (none when every share
@@ -401,6 +419,23 @@ mod tests {
         // the same port twice counts once
         s.add_all(vec![share(300), Share { note: "y".into(), ..share(300) }]).unwrap();
         assert_eq!(s.get(300).unwrap().note, "y");
+    }
+
+    #[test]
+    fn kind_is_kept_and_written_only_when_set() {
+        let d = tempfile::tempdir().unwrap();
+        let (s, _) = Shares::load(d.path());
+        s.add_all(vec![share(8102), share(8103)]).unwrap();
+        assert!(!s.set_kind(9, Some("state")).unwrap());
+        assert!(s.set_kind(8102, Some("state")).unwrap());
+        assert!(!s.set_kind(8102, Some("state")).unwrap());
+        let (s, _) = Shares::load(d.path());
+        assert_eq!(s.get(8102).unwrap().kind.as_deref(), Some("state"));
+        let text: serde_json::Value = serde_json::from_slice(&std::fs::read(d.path().join("shares.json")).unwrap()).unwrap();
+        assert_eq!(text[0]["kind"], "state");
+        assert!(text[1].get("kind").is_none(), "{text}");
+        s.share_all(&[8102], &Patch { note: Some("x".into()), ..Patch::default() }, &|_| None).unwrap();
+        assert_eq!(s.get(8102).unwrap().kind.as_deref(), Some("state"));
     }
 
     #[test]

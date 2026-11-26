@@ -229,4 +229,15 @@ void main() {
     expect(d.voiceHotkey, VoiceHotkey.standard);
     expect(d.voiceLanguageHintShown, isFalse);
   });
+  test('snooze_survives_restart: load_snooze round-trips and drops bad values', () {
+    final p = UiPrefs()..loadSnooze['111\ndisk:/'] = '1764103600000 warn';
+    p.save(tmp.path);
+    expect(File('${tmp.path}/gui.json').readAsStringSync(), contains('"load_snooze":{"111\\ndisk:/":"1764103600000 warn"}'));
+    expect(UiPrefs.load(tmp.path).loadSnooze, {'111\ndisk:/': '1764103600000 warn'});
+    File('${tmp.path}/gui.json').writeAsStringSync('{"load_snooze":{"a":"x y","b":4,"c":"1764103600000 danger"}}');
+    expect(UiPrefs.load(tmp.path).loadSnooze, {'c': '1764103600000 danger'});
+    File('${tmp.path}/gui.json').writeAsStringSync('{"load_snooze":"nope"}');
+    expect(UiPrefs.load(tmp.path).loadSnooze, isEmpty);
+    expect(UiPrefs().loadSnooze, isEmpty);
+  });
 }

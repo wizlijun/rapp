@@ -15,7 +15,7 @@ fn width(s: &str) -> usize {
 
 /// Pads every cell but the last of each row to its column's widest cell plus two spaces. A
 /// row's last cell is not padded, so it does not widen its column either.
-fn columns(rows: &[Vec<String>]) -> String {
+pub(crate) fn columns(rows: &[Vec<String>]) -> String {
     let n = rows.iter().map(Vec::len).max().unwrap_or(0);
     let padded = |r: &Vec<String>, i: usize| (i + 1 < r.len()).then(|| width(&r[i]));
     let widths: Vec<usize> = (0..n).map(|i| rows.iter().filter_map(|r| padded(r, i)).max().unwrap_or(0)).collect();
@@ -255,6 +255,73 @@ pub fn pipe_error(to: &str, port: u16, error: &str) -> String {
     }
 }
 
+fn ago(secs: u64) -> String {
+    match secs {
+        0..=59 => "刚才".into(),
+        60..=3599 => format!("{} 分钟前", secs / 60),
+        3600..=86399 => format!("{} 小时前", secs / 3600),
+        _ => format!("{} 天前", secs / 86400),
+    }
+}
+
+/// The reply of the IPC `state` command, one line per thing that is there to say.
+pub fn state(r: &Value) -> String {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    state_at(r, now)
+}
+
+fn state_at(r: &Value, now: u64) -> String {
+    let mut out = String::new();
+    // A missing number is said in words, never as `null`.
+    let port = r["port"].as_u64().map_or("端口不明".to_string(), |p| format!("端口 {p}"));
+    if r["on"] != true {
+        out.push_str("状态服务：没开\n");
+    } else if r["running"] == true {
+        let share = r["share"].as_u64().map_or("没有分享".to_string(), |n| format!("分享号 {n}"));
+        out.push_str(&format!("状态服务：开着，{port}，{share}\n"));
+    } else {
+        out.push_str(&format!("状态服务：开着，{port}，没有起来：{}\n", plain(r["error"].as_str().unwrap_or("原因不明"))));
+    }
+    let st = &r["stored"];
+    if st.is_object() {
+        let mut line = format!("  存着 {} 台设备、{} 个会话、{} 条队列", st["devices"], st["sessions"], st["queued"]);
+        if let Some(at) = st["last"]["at"].as_u64() {
+            let who = st["last"]["device"].as_str().map(plain).filter(|w| !w.is_empty());
+            line.push_str(&format!("；最近一次收到{}的，{}", who.map(|w| format!(" {w} ")).unwrap_or_default(), ago(now.saturating_sub(at))));
+        }
+        out.push_str(&line);
+        out.push('\n');
+    }
+    let sinks: Vec<String> = r["sinks"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|s| {
+                    let who = if s["local"] == true { "本机的".to_string() } else { format!("{} 的", plain(s["id"].as_str().unwrap_or(""))) };
+                    let mark = if s["chosen"] == true { "（在用）" } else { "" };
+                    format!("{who} {}{mark}", s["port"])
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if !sinks.is_empty() {
+        out.push_str(&format!("网里的状态服务：{}\n", sinks.join("，")));
+    }
+    let o = &r["outbox"];
+    let cached = &o["cached"];
+    if o["dest"].is_null() {
+        out.push_str("发件箱：没在发（网里没有状态服务）\n");
+    } else if o["active"] == true && o["up"] == true {
+        out.push_str(&format!("发件箱：在发，缓存 {cached} 条，已发 {} 条\n", o["sent"]));
+    } else if o["active"] == true {
+        out.push_str(&format!("发件箱：连不上，缓存 {cached} 条\n"));
+    } else {
+        // A service is known but the pump is not running yet.
+        out.push_str(&format!("发件箱：还没开始发，缓存 {cached} 条\n"));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -469,5 +536,31 @@ mod tests {
              mini  987654321  不在线\n\
              书房  111111111  （没有分享）\n"
         );
+    }
+
+    #[test]
+    fn state_says_what_runs() {
+        let now = 1_000_000;
+        let base = json!({"ok": true, "on": true, "port": 8102, "share": 28003, "running": true, "error": null,
+            "stored": {"devices": 3, "sessions": 5, "queued": 120, "last": {"device": "mac", "at": now - 150}},
+            "sinks": [{"id": "123456789", "port": 8102, "local": false, "chosen": true}, {"id": "me", "port": 8102, "local": true, "chosen": false}],
+            "outbox": {"active": true, "cached": 0, "sent": 42, "dropped": 0, "refused": 0, "last_ok": 1, "up": true, "dest": {"id": "123456789", "port": 8102}}});
+        assert_eq!(
+            state_at(&base, now),
+            "状态服务：开着，端口 8102，分享号 28003\n  存着 3 台设备、5 个会话、120 条队列；最近一次收到 mac 的，2 分钟前\n网里的状态服务：123456789 的 8102（在用），本机的 8102\n发件箱：在发，缓存 0 条，已发 42 条\n"
+        );
+        let down = json!({"on": true, "port": 8102, "share": null, "running": false, "error": "端口 8102 被占用", "stored": null, "sinks": [],
+            "outbox": {"active": true, "cached": 17, "sent": 0, "up": false, "dest": {"local": 8102}}});
+        assert_eq!(state_at(&down, now), "状态服务：开着，端口 8102，没有起来：端口 8102 被占用\n发件箱：连不上，缓存 17 条\n");
+        let off = json!({"on": false, "port": 8102, "share": null, "running": false, "error": null, "stored": null, "sinks": [],
+            "outbox": {"active": false, "cached": 0, "sent": 0, "up": false, "dest": null}});
+        assert_eq!(state_at(&off, now), "状态服务：没开\n发件箱：没在发（网里没有状态服务）\n");
+        let unshared = json!({"on": true, "port": 8102, "share": null, "running": true, "error": null, "stored": null, "sinks": [],
+            "outbox": {"active": false, "cached": 0, "sent": 0, "up": false, "dest": null}});
+        assert_eq!(state_at(&unshared, now), "状态服务：开着，端口 8102，没有分享\n发件箱：没在发（网里没有状态服务）\n");
+        let no_port = json!({"on": true, "port": null, "share": null, "running": false, "error": null, "stored": null, "sinks": [],
+            "outbox": {"dest": null}});
+        assert_eq!(state_at(&no_port, now), "状态服务：开着，端口不明，没有起来：原因不明\n发件箱：没在发（网里没有状态服务）\n");
+        assert_eq!([ago(10), ago(7200), ago(172800)], ["刚才", "2 小时前", "2 天前"]);
     }
 }

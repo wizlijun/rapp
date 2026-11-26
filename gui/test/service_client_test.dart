@@ -35,6 +35,10 @@ class FakeService {
   /// How long a command carrying `to` is held before its reply.
   Duration? holdRemote;
 
+  /// What `watch_load` writes, line by line, keeping the connection open; null: `unknown cmd` and close, as an old
+  /// service does.
+  List<Map<String, dynamic>>? loadLines;
+
   int get port => server.port;
 
   Future<void> start() async {
@@ -94,6 +98,13 @@ class FakeService {
           } else {
             s.write(reply);
           }
+        case 'watch_load' when loadLines != null:
+          for (final l in loadLines!) {
+            s.write('${jsonEncode(l)}\n');
+          }
+        case 'watch_load':
+          s.write('{"ok":false,"error":"unknown cmd"}\n');
+          s.destroy();
         case 'labels' || 'set_label' || 'reset_label' when labels != null:
           final l = labels!;
           if (m['cmd'] == 'set_label') {
@@ -441,8 +452,47 @@ void main() {
       await m.updateDismiss('0.5.0');
       await m.updateRollback();
       await m.permissionsReset();
-      expect(svc.received.map((r) => r['cmd']).where((c) => c != 'status' && c != 'subscribe' && c != 'labels'),
+      expect(svc.received.map((r) => r['cmd']).where((c) => c != 'status' && c != 'subscribe' && c != 'labels' && c != 'watch_load'),
           ['set_update', 'update_check', 'update_apply', 'update_dismiss', 'update_rollback', 'permissions_reset']);
+      await svc.stop();
+      m.dispose();
+    });
+
+    test('watch_load fills load from its own connection, and follows each line', () async {
+      final svc = FakeService('tok-wl')
+        ..loadLines = [
+          {'ok': true, 'at': 10, 'headroom': 80, 'tightest': 'cpu', 'term': true, 'items': {}, 'disks': [], 'warnings': [],
+           'history': [{'at': 10, 'cpu': 20.0}]},
+          {'ok': true, 'at': 15, 'headroom': 75, 'tightest': 'cpu', 'term': true, 'items': {}, 'disks': [], 'warnings': [],
+           'point': {'at': 15, 'cpu': 25.0}},
+        ];
+      await svc.start();
+      final m = ServiceMonitor(readToken: () async => 'tok-wl', port: svc.port, retry: const Duration(milliseconds: 50));
+      m.start();
+      await until(() => m.load?.at == 15);
+      expect((m.load!.headroom, m.load!.history.length), (75, 2));
+      expect(svc.received.where((r) => r['cmd'] == 'watch_load').single, {'cmd': 'watch_load'});
+      // The service restarts: the load is dropped with the rest and asked for again.
+      svc.dropAll();
+      await until(() => !m.running);
+      expect(m.load, isNull);
+      await until(() => m.load != null);
+      expect(svc.received.where((r) => r['cmd'] == 'watch_load').length, 2);
+      await svc.stop();
+      m.dispose();
+    });
+
+    test('an old service that does not know watch_load: no load, and it is not asked again until a reconnect', () async {
+      final svc = FakeService('tok-old');
+      await svc.start();
+      final m = ServiceMonitor(readToken: () async => 'tok-old', port: svc.port, retry: const Duration(milliseconds: 50));
+      m.start();
+      await until(() => m.status != null);
+      await until(() => svc.received.any((r) => r['cmd'] == 'watch_load'));
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(m.load, isNull);
+      expect(m.running, isTrue);
+      expect(svc.received.where((r) => r['cmd'] == 'watch_load').length, 1);
       await svc.stop();
       m.dispose();
     });

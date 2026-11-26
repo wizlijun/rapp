@@ -34,6 +34,8 @@ class RappTokens extends ThemeExtension<RappTokens> {
     required this.accent,
     required this.accentInk,
     required this.tint,
+    required this.warn,
+    required this.danger,
     required this.r,
     required this.glow,
     required this.textGlow,
@@ -48,6 +50,9 @@ class RappTokens extends ThemeExtension<RappTokens> {
   }) : float = float ?? panel;
 
   final Color bg, line, text, muted, on, accent, accentInk, tint;
+
+  /// A device's 注意 (orange) and 危险 (red) warning level (device-load spec §6), readable on [bg].
+  final Color warn, danger;
 
   /// One colour = solid fill; two = top-to-bottom gradient.
   final List<Color> panel, raise;
@@ -118,6 +123,8 @@ class RappTokens extends ThemeExtension<RappTokens> {
     accent: accent,
     accentInk: accentInk,
     tint: tint,
+    warn: warn,
+    danger: danger,
     r: r,
     glow: glow,
     textGlow: textGlow,
@@ -196,6 +203,8 @@ RappTokens tokensFor(RappTheme theme) {
         accent: const Color(0xFFF2FFF5),
         accentInk: const Color(0xFF02240C),
         tint: const Color.fromRGBO(125, 255, 158, .17),
+        warn: const Color(0xFFFFB347),
+        danger: const Color(0xFFFF5C5C),
         r: 0,
         glow: _lampGlow(on),
         textGlow: const [
@@ -231,6 +240,8 @@ RappTokens tokensFor(RappTheme theme) {
         accent: const Color(0xFFFF9A3D),
         accentInk: const Color(0xFF2A1400),
         tint: const Color.fromRGBO(255, 154, 61, .13),
+        warn: const Color(0xFFFFB45C),
+        danger: const Color(0xFFFF6B6B),
         r: 4,
         glow: _lampGlow(on),
         textGlow: const [],
@@ -255,6 +266,8 @@ RappTokens tokensFor(RappTheme theme) {
         accent: const Color(0xFFFF3B30),
         accentInk: const Color(0xFF1A0000),
         tint: const Color.fromRGBO(255, 59, 48, .14),
+        warn: const Color(0xFFFF9F0A),
+        danger: const Color(0xFFFF453A),
         r: 2,
         glow: _lampGlow(on),
         textGlow: const [],
