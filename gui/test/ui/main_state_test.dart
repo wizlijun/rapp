@@ -184,21 +184,26 @@ void main() {
     final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: FakeSessionPort(), termPort: FakeTermSessionPort());
     addTearDown(st.dispose);
     t.onSend = (m) {
-      if (m['cmd'] == 'open') t.emit({...opened(m['app'] == 'term:pty:w' ? 1 : 2, '111', m['app'] as String), 'port': 5011, 'token': 'tk', 'req': m['req']});
+      if (m['cmd'] == 'open') t.emit({...opened(m['app'] == 'term:pty:w' ? 1 : m['app'] == 'term:tmux:x' ? 3 : 2, '111', m['app'] as String), 'port': 5011, 'token': 'tk', 'req': m['req']});
     };
     await st.openOrSwitch('111', 'term:pty:w', 'w');
     await st.openOrSwitch('111', 'com.apple.Safari', 'Safari');
+    await st.openOrSwitch('111', 'term:tmux:x', 'x');
     await pump();
     final tsid = st.recordFor('111/term:pty:w')!.sid!, asid = st.recordFor('111/com.apple.Safari')!.sid!;
     TermRow row({required bool shell}) =>
         TermRow('term:pty:w', 'w', 'zsh', null, 1, 1, 0, false, false, fg: 'claude', shell: shell);
-    hub.termLists['111'] = TermList('111', terms: [row(shell: false)]);
+    final tmux = TermRow('term:tmux:x', 'x', 'zsh', null, 1, 1, 0, false, false, fg: 'claude', shell: false);
+    hub.termLists['111'] = TermList('111', terms: [row(shell: false), tmux]);
     expect(st.termRowOfSid(tsid)?.id, 'term:pty:w');
     expect(st.stripToolOf(RemoteSession(tsid, 'w'))?.id, 'claude-code');
     hub.termLists['111'] = TermList('111', terms: [row(shell: true)]);
     expect(st.stripToolOf(RemoteSession(tsid, 'w')), isNull);
     expect(st.termRowOfSid(asid), isNull);
     expect(st.stripToolOf(RemoteSession(asid, 'Safari')), isNull);
+    hub.termLists['111'] = TermList('111', terms: [row(shell: false), tmux]);
+    final xsid = st.recordFor('111/term:tmux:x')!.sid!;
+    expect(st.stripToolOf(RemoteSession(xsid, 'x')), isNull, reason: 'tmux gets no strip commands');
     expect(st.termRowOfSid(99), isNull);
   });
 

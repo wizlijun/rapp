@@ -1411,10 +1411,10 @@ class MainState extends ChangeNotifier {
     return fg == null || fg.isEmpty ? null : fg;
   }
 
-  /// The terminals-list row of the text terminal behind [sid]; null for other apps or an unlisted terminal.
+  /// The terminals-list row of the pty text terminal behind [sid] (tmux gets none); null for other apps or an unlisted terminal.
   TermRow? termRowOfSid(Object sid) {
     final r = _recordOfSid(sid);
-    if (r == null || !isTermApp(r.app)) return null;
+    if (r == null || !isPtyTerm(r.app)) return null;
     return hub?.termLists[r.id]?.terms.where((t) => t.id == r.app).firstOrNull;
   }
 
