@@ -179,36 +179,48 @@ pub async fn serve(cfg: Config, listener: TcpListener) -> anyhow::Result<()> {
 pub async fn serve_with_log(cfg: Config, listener: TcpListener, log: Log) -> anyhow::Result<()> {
     let store: Shared = Arc::new(Mutex::new(make_store(&cfg, &log)));
     let dirty: Dirty = cfg.data.as_ref().map(|_| Arc::new(Notify::new()));
-    let saver_task = match (&cfg.data, &dirty) {
+    // Every task this spawns ends with it, also when the caller drops (aborts) it: a stopped
+    // service must not go on answering, sweeping or saving its old store over a newer one's.
+    let _saver = match (&cfg.data, &dirty) {
         (Some(dir), Some(n)) => {
             mark(&dirty); // the load may have expired rows
-            Some(tokio::spawn(saver(store.clone(), dir.clone(), n.clone(), log.clone())))
+            Some(Ends(tokio::spawn(saver(store.clone(), dir.clone(), n.clone(), log.clone()))))
         }
         _ => None,
     };
     let sweeper = store.clone();
     let sweep_dirty = dirty.clone();
-    let task = tokio::spawn(async move {
+    let _sweeper = Ends(tokio::spawn(async move {
         let mut tick = tokio::time::interval(EXPIRE_EVERY);
         loop {
             tick.tick().await;
             lock(&sweeper).expire(now());
             mark(&sweep_dirty);
         }
-    });
-    let result = accept_loop(store, dirty, log, listener).await;
-    task.abort();
-    if let Some(t) = saver_task {
-        t.abort();
+    }));
+    accept_loop(store, dirty, log, listener).await
+}
+
+/// A spawned task that is aborted when this is dropped.
+struct Ends(tokio::task::JoinHandle<()>);
+
+impl Drop for Ends {
+    fn drop(&mut self) {
+        self.0.abort();
     }
-    result
 }
 
 async fn accept_loop(store: Shared, dirty: Dirty, log: Log, listener: TcpListener) -> anyhow::Result<()> {
+    // Dropped with the loop: every open connection is then aborted.
+    let mut conns = tokio::task::JoinSet::new();
     loop {
-        let (stream, _) = listener.accept().await?;
+        let (stream, _) = tokio::select! {
+            accepted = listener.accept() => accepted?,
+            // Reap the finished ones so the set does not grow.
+            Some(_) = conns.join_next(), if !conns.is_empty() => continue,
+        };
         let (store, dirty, log) = (store.clone(), dirty.clone(), log.clone());
-        tokio::spawn(async move {
+        conns.spawn(async move {
             let svc = service_fn(move |req| {
                 let (store, dirty, log) = (store.clone(), dirty.clone(), log.clone());
                 async move { Ok::<_, Infallible>(route(&store, &dirty, &log, req).await) }

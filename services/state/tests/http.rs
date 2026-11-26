@@ -133,3 +133,26 @@ async fn a_restart_keeps_the_queue() {
     let (c, st) = get(addr, "/v1/state").await;
     assert_eq!((c, st["queued"].as_u64()), (200, Some(4)));
 }
+
+/// One request on an open keep-alive connection: the status, or None when the server is gone.
+async fn on_conn(s: &mut TcpStream, path: &str) -> Option<u16> {
+    let req = format!("GET {path} HTTP/1.1\r\nHost: x\r\n\r\n");
+    s.write_all(req.as_bytes()).await.ok()?;
+    let mut buf = vec![0u8; 4096];
+    let n = tokio::time::timeout(std::time::Duration::from_secs(2), s.read(&mut buf)).await.ok()?.ok()?;
+    let text = String::from_utf8_lossy(&buf[..n]).to_string();
+    text.split_whitespace().nth(1)?.parse().ok()
+}
+
+#[tokio::test]
+async fn a_stopped_serve_closes_its_connections() {
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    let task = tokio::spawn(serve(old_ok(), l));
+    let mut s = TcpStream::connect(addr).await.unwrap();
+    assert_eq!(on_conn(&mut s, "/v1/health").await, Some(200));
+    task.abort();
+    let _ = task.await;
+    // The connection open before the stop must not keep serving the old store.
+    assert_eq!(on_conn(&mut s, "/v1/state").await, None);
+}
