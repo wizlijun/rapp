@@ -465,6 +465,17 @@ impl Hub {
         self.next().await
     }
 
+    /// Sends `v` to a host whose fingerprint the hub saves on this connect: the hub first says so with a
+    /// `hosts` event (no `req`), then answers. Returns the fingerprint `id` has in that event, and the answer.
+    pub async fn call_learning_fp(&mut self, v: Value, id: &str) -> (Value, Value) {
+        self.send(v).await;
+        let hosts = self.next().await;
+        assert_eq!((&hosts["event"], &hosts["req"]), (&json!("hosts"), &Value::Null), "{hosts}");
+        let row = hosts["hosts"].as_array().into_iter().flatten().find(|h| h["id"] == id);
+        let fp = row.map(|h| h["fp"].clone()).unwrap_or(Value::Null);
+        (fp, self.next().await)
+    }
+
     /// Closes stdin and waits for the hub to exit; returns remaining events (`path` and `net` events left out).
     pub async fn finish(mut self) -> Vec<Value> {
         self.w.shutdown().await.unwrap();
@@ -670,6 +681,14 @@ pub async fn a_on_relay_ports(rig: &RelayRig, lan: Option<Vec<String>>, map_port
 /// The hub's `hosts.json` as saved.
 pub fn saved_hosts(home: &Path) -> Value {
     serde_json::from_slice(&std::fs::read(home.join("hosts.json")).unwrap()).unwrap()
+}
+
+/// A `hosts` event without this app's own `me` (fingerprint) and `name`, which differ per run; both must be there.
+pub fn hosts_rest(mut v: Value) -> Value {
+    let o = v.as_object_mut().unwrap();
+    assert!(o.remove("me").is_some_and(|m| m.as_str().is_some_and(|m| m.len() == 64)), "{o:?}");
+    assert!(o.remove("name").is_some_and(|n| n.is_string()), "{o:?}");
+    v
 }
 
 /// The next hub event that is not a presence line (nor a `path` event).

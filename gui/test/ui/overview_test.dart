@@ -303,6 +303,9 @@ void main() {
     await tap();
     expect(t.sent.where((m) => m['cmd'] == 'open_term').length, 1);
     expect(s.hint, '正在新建终端，请稍候');
+    // new_terms_from_overview_shows_wait: the one being made is on the wait card.
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(s.waits.shown.single.what, '正在新建终端…');
     await tester.runAsync(() async {
       gate.complete();
       for (var j = 0; j < 6; j++) {
@@ -330,7 +333,7 @@ void main() {
     expect(MainState.newTermWords(HubException(asking)), contains('点「允许」'));
   });
 
-  Future<void> newTermAsked(WidgetTester tester) async {
+  Future<void> newTermAsked(WidgetTester tester, {Future<void> Function()? go}) async {
     s.prefs.termOpen['m1'] = 'text';
     s.hub!.termLists['m1'] = TermList('m1', hosts: [TermHost(null, launchers: const ['Terminal'])]);
     final inner = t.onSend!;
@@ -344,7 +347,7 @@ void main() {
       }
     };
     await tester.runAsync(() async {
-      final done = s.newTermFromRestore('m1');
+      final done = go?.call() ?? s.newTermFromRestore('m1');
       for (var j = 0; j < 6; j++) {
         await flush();
       }
@@ -359,6 +362,17 @@ void main() {
   testWidgets('a permission prompt on the host brings up its desktop to answer it', (tester) async {
     await boot(tester);
     await newTermAsked(tester);
+    expect(s.hint, contains('授权框'));
+    expect(s.hint, endsWith('已切到它的桌面'));
+    expect(t.sent.where((m) => m['cmd'] == 'open').map((m) => m['app']), ['desktop:']);
+  });
+
+  testWidgets('new_term_from_consent_shows_desktop: ⌘T into a permission prompt says so on the card and shows the desktop',
+      (tester) async {
+    await boot(tester);
+    await newTermAsked(tester, go: () => s.newTermFrom('m1', 'last'));
+    expect(s.waits.outcome!.asks, isTrue);
+    expect(s.waits.outcome!.text, startsWith('被控 Mac 上弹出了授权框'));
     expect(s.hint, contains('授权框'));
     expect(s.hint, endsWith('已切到它的桌面'));
     expect(t.sent.where((m) => m['cmd'] == 'open').map((m) => m['app']), ['desktop:']);
@@ -1117,6 +1131,8 @@ void main() {
     expect(s.hint, '正在新建终端，请稍候');
     t.emit({'event': 'term_created', 'req': pendingReq, 'id': 'm1', 'term': 'term:pty:b'});
     await settle(tester);
+    // Past the wait card's timers.
+    await tester.pump(const Duration(seconds: 9));
   }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 
   testWidgets('count taps', (tester) async {

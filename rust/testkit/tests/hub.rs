@@ -90,7 +90,7 @@ async fn add_host_hosts_apps_open_close_remove() {
 
     let r = hub.call(json!({"cmd":"close","sid":999,"req":2})).await;
     assert_eq!(r, json!({"event":"error","req":2,"error":"unknown sid"}));
-    assert_eq!(hub.call(json!({"cmd":"remove_host","id":a.id})).await, json!({"event":"hosts","hosts":[],"version":env!("CARGO_PKG_VERSION")}));
+    assert_eq!(hosts_rest(hub.call(json!({"cmd":"remove_host","id":a.id})).await), json!({"event":"hosts","hosts":[],"version":env!("CARGO_PKG_VERSION")}));
     let r = hub.call(json!({"cmd":"apps","id":a.id})).await;
     assert_eq!(r, json!({"event":"error","error":"unknown host"}));
     assert_eq!(hub.finish().await, Vec::<Value>::new());
@@ -139,7 +139,7 @@ async fn add_host_errors_are_reported_and_nothing_saved() {
     let mut hub = Hub::start(home.path(), a.bins.path());
     let r = hub.call(json!({"cmd":"add_host","id":at(&a),"password":"wrong","req":7})).await;
     assert_eq!(r, json!({"event":"error","req":7,"error":format!("{}: bad password", a_addr(&a.svc))}));
-    assert_eq!(hub.call(json!({"cmd":"hosts"})).await, json!({"event":"hosts","hosts":[],"version":env!("CARGO_PKG_VERSION")}));
+    assert_eq!(hosts_rest(hub.call(json!({"cmd":"hosts"})).await), json!({"event":"hosts","hosts":[],"version":env!("CARGO_PKG_VERSION")}));
     assert!(!home.path().join("hosts.json").exists());
     assert_eq!(hub.call(json!({"cmd":"nope","req":1})).await, json!({"event":"error","req":1,"error":"unknown cmd"}));
     hub.send(json!("garbage")).await;
@@ -599,7 +599,7 @@ async fn removing_a_host_during_a_probe_keeps_it_removed() {
     let saved: Value = serde_json::from_slice(&std::fs::read(home.path().join("hosts.json")).unwrap()).unwrap();
     assert_eq!(saved, json!([]));
     let r = hub.call(json!({"cmd":"hosts"})).await;
-    assert_eq!(r, json!({"event":"hosts","hosts":[],"version":env!("CARGO_PKG_VERSION")}));
+    assert_eq!(hosts_rest(r), json!({"event":"hosts","hosts":[],"version":env!("CARGO_PKG_VERSION")}));
 }
 
 #[tokio::test]
@@ -925,9 +925,10 @@ async fn old_host_upgrades_to_rapp2() {
     hub_key(home.path(), &key);
     rapp_net::config::write_json(&home.path().join("hosts.json"), &old_host(&a)).unwrap();
     let mut hub = Hub::start(home.path(), a.bins.path());
-    let r = hub.call(json!({"cmd":"apps","id":a.id})).await;
+    let (fp, r) = hub.call_learning_fp(json!({"cmd":"apps","id":a.id}), &a.id).await;
     assert_eq!((&r["path"], &r["apps"]), (&json!("lan"), &apps()), "{r}");
-    assert_eq!(saved_hosts(home.path())[0]["fp"], json!(a_fp(&a).await));
+    assert_eq!(fp, json!(a_fp(&a).await), "the app hears the first fingerprint");
+    assert_eq!(saved_hosts(home.path())[0]["fp"], fp);
     wait_log(a.home.path(), "trust", |v| v["result"] == "paired").await;
     hub.finish().await;
 }
@@ -985,9 +986,10 @@ async fn changed_host_key_relearned_with_key() {
     let old = "ab".repeat(32);
     rapp_net::config::write_json(&home.path().join("hosts.json"), &host_with_fp(&a, &old)).unwrap();
     let mut hub = Hub::start(home.path(), a.bins.path());
-    let r = hub.call(json!({"cmd":"apps","id":a.id})).await;
+    let (heard, r) = hub.call_learning_fp(json!({"cmd":"apps","id":a.id}), &a.id).await;
     assert_eq!((&r["path"], &r["apps"]), (&json!("lan"), &apps()), "{r}");
     let fp = a_fp(&a).await;
+    assert_eq!(heard, json!(fp), "the app hears the new fingerprint, not the old one");
     assert_eq!(saved_hosts(home.path())[0]["fp"], json!(fp));
     hub.finish().await;
     let ev = read_log(home.path(), "hub.log").into_iter().find(|v| v["ev"] == "host_key_changed").expect("logged");
@@ -1342,9 +1344,10 @@ async fn re_adding_a_host_with_a_new_key_logs_host_key_changed() {
     let old = "ab".repeat(32);
     rapp_net::config::write_json(&home.path().join("hosts.json"), &host_with_fp(&a, &old)).unwrap();
     let mut hub = Hub::start(home.path(), a.bins.path());
-    let r = hub.call(json!({"cmd":"add_host","id":at(&a),"req":1})).await;
+    let (heard, r) = hub.call_learning_fp(json!({"cmd":"add_host","id":at(&a),"req":1}), &a.id).await;
     assert_eq!(r, json!({"event":"host_added","id":a.id,"name":"test-a","req":1}));
     let fp = a_fp(&a).await;
+    assert_eq!(heard, json!(fp));
     assert_eq!(saved_hosts(home.path())[0]["fp"], json!(fp));
     hub.finish().await;
     let ev = read_log(home.path(), "hub.log").into_iter().find(|v| v["ev"] == "host_key_changed").expect("logged");

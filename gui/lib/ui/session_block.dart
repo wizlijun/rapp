@@ -333,6 +333,10 @@ class SessionBlock extends StatelessWidget {
 
   String _led(String line) => _lead == null ? line : '$_lead · $line';
 
+  /// The second line of a 别处开着 card: the terminal's kind, the device it runs on, then [SessionEntry.openOn] where
+  /// the status goes, with what its program says it is doing.
+  String get _openOnLine => [?_kind, entry.device, entry.openOn!, ?_program].join(' · ');
+
   /// What a terminal's program says it is doing, while the session itself is up; it takes the traffic's place.
   String? get _program {
     final ps = entry.ps;
@@ -420,7 +424,8 @@ class SessionBlock extends StatelessWidget {
         ],
       );
     } else {
-      second = Text(_led(_status), maxLines: 1, overflow: TextOverflow.ellipsis, style: small);
+      final line = entry.openOn == null ? _led(_status) : _openOnLine;
+      second = Text(line, maxLines: 1, overflow: TextOverflow.ellipsis, style: small);
     }
     return KeyedSubtree(
       key: Key('$keyPrefix-${entry.key}'),
@@ -444,8 +449,7 @@ class SessionBlock extends StatelessWidget {
               ),
         spoken: [
           entry.title,
-          ?_lead,
-          _status,
+          if (entry.openOn != null) _openOnLine else ...[?_lead, _status],
           if (_program != null && entry.inferred) '推断',
           ?windows,
           if (verb != null && canAct) '点按$verb',

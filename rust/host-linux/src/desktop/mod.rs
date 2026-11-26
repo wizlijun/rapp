@@ -525,12 +525,77 @@ impl Desktop {
             Self::X11(d) => d.text(text),
         }
     }
+    pub fn paste_modifiers(&self) -> u64 {
+        let terminal = match self {
+            Self::Wayland(_) => hyprland::active_window_is_terminal(),
+            Self::X11(d) => d
+                .native_windows()
+                .ok()
+                .and_then(|windows| windows.into_iter().find(|w| w.window.flags & 2 != 0))
+                .is_some_and(|w| is_terminal_class(&w.name)),
+        };
+        if terminal {
+            (1 << 20) | (1 << 17)
+        } else {
+            1 << 20
+        }
+    }
     pub fn release(&mut self) {
         match self {
             Self::Wayland(d) => d.release(),
             Self::X11(d) => d.release(),
         }
     }
+}
+
+pub(crate) fn is_terminal_class(class: &str) -> bool {
+    let lower = class.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        return false;
+    }
+    matches!(
+        lower.as_str(),
+        "foot"
+            | "footclient"
+            | "org.codeberg.dnkl.foot"
+            | "alacritty"
+            | "kitty"
+            | "ghostty"
+            | "com.mitchellh.ghostty"
+            | "wezterm"
+            | "org.wezfurlong.wezterm"
+            | "gnome-terminal"
+            | "gnome-terminal-server"
+            | "org.gnome.console"
+            | "kgx"
+            | "konsole"
+            | "org.kde.konsole"
+            | "xfce4-terminal"
+            | "tilix"
+            | "terminator"
+            | "urxvt"
+            | "rxvt"
+            | "rxvt-unicode"
+            | "xterm"
+            | "uxterm"
+            | "st"
+            | "st-256color"
+            | "rio"
+            | "contour"
+            | "blackbox"
+            | "ptyxis"
+            | "org.gnome.ptyxis"
+            | "sakura"
+            | "lxterminal"
+            | "mate-terminal"
+            | "qterminal"
+            | "deepin-terminal"
+            | "warp"
+            | "dev.warp.warp"
+            | "tabby"
+            | "hyper"
+    ) || lower.starts_with("org.omarchy.")
+        || lower.starts_with("tui.")
 }
 
 #[cfg(test)]

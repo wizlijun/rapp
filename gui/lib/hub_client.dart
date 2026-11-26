@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'labels.dart';
 import 'load_model.dart';
 import 'log_view.dart';
+import 'state/service_switch.dart';
 import 'term/term_id.dart';
 
 /// One JSON object per line, `\n`-terminated.
@@ -71,7 +72,7 @@ class RestoreStopped extends HubException {
 }
 
 class HubHost {
-  const HubHost(this.id, this.name, {this.lan = const [], this.route, this.os});
+  const HubHost(this.id, this.name, {this.lan = const [], this.route, this.os, this.fp});
   final String id;
   final String name;
 
@@ -85,6 +86,9 @@ class HubHost {
 
   /// What system A last said it is (`macos`, `omarchy`, …), as the hub kept it; null when never heard.
   final String? os;
+
+  /// The host's fingerprint, as the hub knows it; null when never heard.
+  final String? fp;
 }
 
 /// One of A's screens, as the `desktop:` entry of its app list names them (main first).
@@ -344,15 +348,21 @@ typedef PortMap = ({String id, int port, int local, String? kind});
 /// Where this device reaches the rapp-state service through a share: the one with the smallest device id (the ids are
 /// fixed-width). Null when no share is of that kind.
 String? stateUrlFromPorts(List<PortMap> maps) {
+  final best = stateMapOf(maps);
+  return best == null ? null : 'http://localhost:${best.local}';
+}
+
+/// The share of the rapp-state service this device uses: the `state` one with the smallest device id; null if none.
+PortMap? stateMapOf(List<PortMap> maps) {
   PortMap? best;
   for (final p in maps) {
     if (p.kind != 'state') continue;
     if (best == null || p.id.compareTo(best.id) < 0) best = p;
   }
-  return best == null ? null : 'http://localhost:${best.local}';
+  return best;
 }
 
-class HubClient extends ChangeNotifier {
+class HubClient extends ChangeNotifier implements ServiceSwitchApi {
   HubClient(this._t) {
     _sub = _t.lines.listen(_onLine, onDone: _onDone);
   }
@@ -364,6 +374,10 @@ class HubClient extends ChangeNotifier {
   var _nextReq = 1;
 
   List<HubHost> hosts = const [];
+
+  /// This app's own fingerprint and device name, from the last `hosts` event that carried them.
+  String? meFp;
+  String? meName;
 
   /// The share maps of the last `ports` event (the whole list each time); `kind` is `state` for the rapp-state service.
   List<PortMap> portMaps = const [];
@@ -566,6 +580,19 @@ class HubClient extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// Turns the state service of device [to] on or off (without [on]: asks its status); answers the device's reply.
+  /// iOS has no service of its own, so [to] is required. The device's refusal is thrown with its words.
+  @override
+  Future<Map<String, Object?>> stateService({String? to, bool? on}) async {
+    if (to == null) throw ArgumentError.notNull('to');
+    final m = await _request({'cmd': 'set_service', 'id': to, 'name': 'state', 'on': ?on}, 'service');
+    final r = m['reply'];
+    return r is Map ? Map<String, Object?>.from(r) : <String, Object?>{};
+  }
+
+  @override
+  Future<String?> stateHost() async => stateMapOf(portMaps)?.id;
+
   Future<HubSession> open(String id, String app, {bool embed = false, bool reconnect = false}) async {
     final m = await _request(
         {'cmd': 'open', 'id': id, 'app': app, if (embed) 'embed': true, if (reconnect) 'reconnect': true}, 'opened');
@@ -648,12 +675,15 @@ class HubClient extends ChangeNotifier {
     switch (event) {
       case 'hosts':
         version = _word(m['version']);
+        meFp = _word(m['me']) ?? meFp;
+        meName = _word(m['name']) ?? meName;
         hosts = (m['hosts'] as List? ?? const [])
             .whereType<Map>()
             .map((h) => HubHost('${h['id']}', '${h['name'] ?? ''}',
                 lan: [for (final a in (h['lan'] as List? ?? const [])) '$a'],
                 route: h['route'] is String ? h['route'] as String : null,
-                os: _word(h['os'])))
+                os: _word(h['os']),
+                fp: _word(h['fp'])))
             .toList();
         // A removed host's link is gone with it.
         final ids = {for (final h in hosts) h.id};
@@ -671,7 +701,7 @@ class HubClient extends ChangeNotifier {
         final was = hosts.where((h) => h.id == id).firstOrNull;
         hosts = [
           ...hosts.where((h) => h.id != id),
-          HubHost(id, '${m['name'] ?? ''}', lan: was?.lan ?? const [], route: was?.route, os: was?.os),
+          HubHost(id, '${m['name'] ?? ''}', lan: was?.lan ?? const [], route: was?.route, os: was?.os, fp: was?.fp),
         ];
       case 'opened':
         if (m['sid'] != null) _sessions[m['sid'] as Object] = _session(m);
