@@ -3324,7 +3324,14 @@ class MainState extends ChangeNotifier {
   void _showConsentPrompt(String id, Object e) {
     if (e is! HubException || !isConsentAsk(e.message)) return;
     if (id == localLoadId || !_hasGraphicalApps(id)) return;
-    hint = '$hint；已切到它的桌面';
+    // The prompt comes up on whichever of its screens is active: one of them already on the stage stays there.
+    final r = currentRecord;
+    if (r != null && r.id == id && isDesktopApp(r.app)) {
+      hint = '$hint；不在这块屏上就换一块屏看看';
+      select(r.key);
+      return;
+    }
+    hint = desktopScreens(id).length > 1 ? '$hint；已切到它的桌面，不在这块屏上就换一块屏看看' : '$hint；已切到它的桌面';
     unawaited(_open(id, 'desktop:', _desktopName(id), quiet: true));
   }
 
