@@ -90,14 +90,16 @@ multi-terminal Ctrl+Shift+T / Ctrl+Shift+W / End Terminal / clean exit /
 host `<dir> · <prog>` window titles, foreground-program terminal titles with
 CLI subtitle, single-flight New Terminal, unified SessionBlock / FavoriteBlock
 cards across the overview, top-bar session list and side-panel Sessions tab,
-overview device OS marks (detecting Omarchy via `/usr/share/omarchy/shell` vs
-Linux), and favorite Terminal restore/creation share the macOS 0.15.41 layout
-and rules.
+host-persisted session labels (custom title and note on session cards, standby
+and stopped-terminal cards with one-tap restart carrying the label, and Local
+column label management), overview device OS marks using official brand shapes
+(detecting Omarchy via `/usr/share/omarchy/shell` vs Linux), and favorite
+Terminal restore/creation share the macOS 0.15.43 layout and rules.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and
 reattach without reconnecting. This release uses protocol v16 (compatible with
-macOS 0.15.35–0.15.41); update both peers when coming from protocol v15. Incoming GUI
+macOS 0.15.35–0.15.43); update both peers when coming from protocol v15. Incoming GUI
 state rules are forwarded by the Linux client to compatible hosts (such as
 macOS 0.15.35+) and safely ignored by the Linux desktop/app host. Off-stage and
 hidden/minimized embedded or detached sessions pause pictures but keep activity
