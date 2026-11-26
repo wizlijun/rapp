@@ -118,6 +118,11 @@ final class ChannelTests: XCTestCase {
         XCTAssertThrowsError(try channelCommand("composer_drop_block", ["sid": 1]))
     }
 
+    func testParsesAutoEnglish() throws {
+        XCTAssertEqual(try channelCommand("auto_english", ["sid": 7, "on": false]), .autoEnglish(sid: 7, on: false))
+        XCTAssertEqual(try channelCommand("auto_english", ["sid": 7, "on": true]), .autoEnglish(sid: 7, on: true))
+    }
+
     func testCloseWindowAndSelectInputRejectBadArgs() {
         XCTAssertThrowsError(try channelCommand("close_window", ["sid": 1])) { XCTAssertEqual($0 as? ChannelError, .bad("close_window")) }
         XCTAssertThrowsError(try channelCommand("close_window", ["sid": 1, "window": -1]))

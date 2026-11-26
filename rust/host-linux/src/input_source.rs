@@ -85,13 +85,13 @@ pub struct Source {
     pub keyboard: Option<Keyboard>,
 }
 pub struct InputSources {
-    commands: mpsc::SyncSender<String>,
+    commands: mpsc::SyncSender<(String, mpsc::Sender<()>)>,
     events: mpsc::Receiver<Result<Source>>,
     stop: Arc<AtomicBool>,
 }
 impl InputSources {
     pub fn start() -> Self {
-        let (commands, rx) = mpsc::sync_channel::<String>(8);
+        let (commands, rx) = mpsc::sync_channel::<(String, mpsc::Sender<()>)>(8);
         let (tx, events) = mpsc::sync_channel(8);
         let stop = Arc::new(AtomicBool::new(false));
         let cancelled = stop.clone();
@@ -108,12 +108,13 @@ impl InputSources {
                     }
                 }
                 match rx.recv_timeout(Duration::from_millis(750)) {
-                    Ok(id) if !cancelled.load(Ordering::Relaxed) => {
+                    Ok((id, done)) if !cancelled.load(Ordering::Relaxed) => {
                         let result = select(&id).and_then(|_| current());
                         if let Ok(source) = &result {
                             previous = Some(source.clone());
                         }
                         let _ = tx.try_send(result);
+                        let _ = done.send(());
                     }
                     Err(mpsc::RecvTimeoutError::Timeout) => {}
                     _ => break,
@@ -127,9 +128,14 @@ impl InputSources {
         }
     }
     pub fn select(&self, id: String) -> Result<()> {
-        self.commands
-            .try_send(id)
-            .map_err(|_| anyhow::anyhow!("input source helper busy"))
+        let (done_tx, done_rx) = mpsc::channel();
+        crate::select_wait::send_queued(&self.commands, (id, done_tx), Duration::from_millis(300))?;
+        crate::select_wait::wait_done(
+            &done_rx,
+            Duration::from_millis(300),
+            Duration::from_millis(50),
+        );
+        Ok(())
     }
     pub fn next(&self) -> Option<Result<Source>> {
         self.events.try_recv().ok()

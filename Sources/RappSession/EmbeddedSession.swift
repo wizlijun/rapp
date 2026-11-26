@@ -100,9 +100,24 @@ public final class EmbeddedSession {
         transfers.onBytes = { [weak self] n in self?.run { self?.bytes += n } }
     }
 
+    /// A's last reported input source was English (session queue); nil until A reports one.
+    private var remoteAscii: Bool?
+    /// Switch A to English before a key (session queue); the panel pauses it while the user composes.
+    private var autoEnglish = true
+
+    /// Pauses (`false`) or resumes switching A to English before the next key.
+    public func setAutoEnglish(_ on: Bool) {
+        run { self.autoEnglish = on }
+    }
+
     public func send(_ m: Message) {
         run {
             guard !self.linkDown else { return }
+            if case let .key(code, mods, true) = m, self.autoEnglish, self.remoteAscii == false,
+               !(54...63).contains(code), mods & (1 << 20) == 0 {
+                self.link.send(.selectInput(id: ""))
+                self.remoteAscii = true
+            }
             if m.isUserInput { self.probe.input(now: self.now()) }
             self.link.send(m)
         }
@@ -307,6 +322,7 @@ public final class EmbeddedSession {
         case let .pong(seq):
             if let ms = probe.pong(seq: seq, now: t) { onEvent?(.rtt(ms: ms)) }
         case let .inputSource(id, name, ascii):
+            remoteAscii = ascii
             onEvent?(.inputSource(id: id, name: name, ascii: ascii))
         case let .screenLocked(locked):
             onEvent?(.screenLocked(locked))

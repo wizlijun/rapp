@@ -23,6 +23,9 @@ abstract class RimeLink implements Listenable {
   Future<bool> flush();
   Future<void> clear();
   void toggleBuiltin();
+
+  /// Sets the engine's ascii_mode (iOS only; a no-op elsewhere).
+  Future<void> setAscii(bool on);
 }
 
 class RappRime extends ChangeNotifier implements RimeLink {
@@ -207,6 +210,9 @@ class RappRime extends ChangeNotifier implements RimeLink {
 
   @override
   Future<void> clear() => _invoke<void>('clear');
+
+  @override
+  Future<void> setAscii(bool on) => _invoke<void>('ascii', {'on': on});
 
   @override
   void toggleBuiltin() {

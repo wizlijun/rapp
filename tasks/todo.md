@@ -1326,6 +1326,28 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 12. macOS、Linux 的 PC 按键区上同样能用
 - [ ] 13. Claude Code 被 `kill -9` 后在同一终端开 vim / ssh：常用语条不显示命令
 
+## 输入法跟着意图走（feat/ime-intent，2026-11-26）实机检查（规格 `docs/superpowers/specs/2026-11-26-rapp-ime-intent-design.md`）
+
+- 终端（终端、iTerm2、Ghostty、Warp）默认不再因字母开写作版；用户自己改过开关的以用户的为准
+- [ ] 1. 本机停在 ABC 时开写作版，直接打出中文
+- [ ] 2. 按字母开写作版，第一个字母进拼音（`nihao` → 你好）
+- [ ] 3. 鼠须管、搜狗下同上；切不过去时第一个字母照现状上屏，不丢字
+- [ ] 4. 回到画面后本机是英文；在写作版里自己按 ⌃空格 切成英文后不会被切回中文
+- [ ] 5. A 在拼音时直接打 `ls`，得到 `ls`；打 `y` 回答 Claude Code，不弹写作版
+- [ ] 6. 点「切回 拼音」后在 A 上直接打中文；打开写作版后恢复自动切英文
+- [ ] 7. Linux 被控端：开头几个字不丢（并在 Linux 机器上编译、跑 clippy `host-linux`）
+- [ ] 8. iOS「内」模式下开写作版回到「中」
+- [ ] 9. Linux 客户端（fcitx5 / ibus）进出写作版能切换
+- [ ] 10. 设置开关关掉后回到老行为
+- [ ] 11. 重连时光标从旧写作版交给新写作版（冻结舞台重连），本机不出现先英文再中文的来回切换
+- [ ] 12. Linux 客户端：光标在写作版里时切到别的应用（Alt-Tab），别的应用的输入法不被改；切回 rApp 只切一次中文
+- [ ] 13. 离开写作版后约 200 ms 才切回英文，期间点进另一个写作版不切
+- [ ] 14. 密码框（解锁对话框）从写作版拿走光标、再回到画面时，本机输入法是否回到英文（已知可能停在中文）
+- [ ] 15. Mac：按字母开写作版时，原生编辑器拿到焦点的顺序是否让第一个字母进中文（focus 事件早于 readyForInput）
+- [ ] 16. Linux 客户端：按字母开写作版，第一个字母不被拆开（输入法保持原样）
+
+开发侧遗留：Linux 被控端 `rust/host-linux/src/input_source.rs` 只在 Mac 上写过、没在 Linux 上编译过，需要在 Linux 机器上 `cargo build`、`cargo clippy -p host-linux -- -D warnings`、`cargo test -p host-linux`。另外 `select` 排队等满 300 ms 仍忙时，`server.rs:714` 的 `?` 会结束会话；应改成记一行日志、丢掉这次 select（规格 §3.2 实现偏差），同样要在 Linux 上改和验证。
+
 ## 设备负载（规格 `docs/superpowers/specs/2026-11-26-rapp-device-load-design.md`，计划 `docs/superpowers/plans/2026-11-26-rapp-device-load.md`，分支 `feat/device-load`）
 
 - [x] 服务采样 CPU / GPU / 内存 / 磁盘 / 温度 / 电池，算余力和警告；hub 每台在线设备一条 `watch_load`；`rapp load` / `rapp load pick`；总览设备列的余力行和明细；资源警告进「需要你」，带建议动作和「1小时内不再提醒」。

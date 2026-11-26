@@ -101,6 +101,9 @@ public final class RappRimePlugin: NSObject, FlutterPlugin {
       // Dart saw a click while Shift or Control was held (`ChordPolicy`).
       if active, engine.ready { interruptChord() }
       result(nil)
+    case "ascii":
+      if engine.ready { engine.setAscii(args["on"] as? Bool ?? false); push() }
+      result(nil)
     case "clear":
       engine.clear()
       push()

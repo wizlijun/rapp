@@ -40,6 +40,8 @@ class UiPrefs {
     this.voiceAiThink = false,
     this.keepAwake = true,
     this.rimeEnabled = true,
+    this.imeIntent = true,
+    this.chineseIme,
     this.rimeDictionary = 'bundled',
     this.first = FirstLayer.device,
     this.composerZoom = 0,
@@ -111,6 +113,14 @@ class UiPrefs {
   /// off for that app (`rime`). Missing or bad means on.
   bool rimeEnabled;
 
+  /// 打开写作版时切到中文，回到画面时切回英文 (`ime_intent`): the writing panel switches this device's input method.
+  /// Missing or bad means on.
+  bool imeIntent;
+
+  /// The Chinese input method last left when the caret came out of the writing panel (`chinese_ime`): the next
+  /// switch asks for it. Null (missing or bad) lets the device pick.
+  String? chineseIme;
+
   /// 词库 (`rime_dictionary`, iOS): `'bundled'` (自带雾凇) or `'user'` (我的目录). Anything else means `'bundled'`.
   String rimeDictionary;
 
@@ -175,6 +185,8 @@ class UiPrefs {
       final vk = j['voice_ai_think'];
       final ka = j['keep_awake'];
       final re = j['rime_enabled'];
+      final ii = j['ime_intent'];
+      final ci = j['chinese_ime'];
       final rd = j['rime_dictionary'];
       final fl = j['first'];
       final cz = j['composer_zoom'];
@@ -211,6 +223,8 @@ class UiPrefs {
         voiceAiThink: vk is bool ? vk : false,
         keepAwake: ka is bool ? ka : true,
         rimeEnabled: re is bool ? re : true,
+        imeIntent: ii is bool ? ii : true,
+        chineseIme: ci is String && ci.isNotEmpty ? ci : null,
         rimeDictionary: rd == 'user' ? 'user' : 'bundled',
         composerZoom: cz is int ? cz.clamp(0, composerZoomMax) : 0,
         stageButtonsSide: sb == 'left' ? StageSide.left : StageSide.right,
@@ -270,6 +284,8 @@ class UiPrefs {
         'voice_ai_think': voiceAiThink,
         'keep_awake': keepAwake,
         'rime_enabled': rimeEnabled,
+        'ime_intent': imeIntent,
+        if (chineseIme != null) 'chinese_ime': chineseIme,
         'rime_dictionary': rimeDictionary,
         'first': first.name,
         'composer_zoom': composerZoom,

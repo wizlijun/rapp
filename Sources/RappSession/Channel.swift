@@ -58,6 +58,8 @@ public enum ChannelCommand: Equatable {
     case voiceEnd(Int64)
     /// Re-dispatch the key events held for `sid`'s compose letter into rApp's own window.
     case composeReplay(sid: Int64)
+    /// Pause (`on` false) or resume switching A to English before a key.
+    case autoEnglish(sid: Int64, on: Bool)
     /// Take A's clipboard entry `clip` onto B's clipboard, or (insert) into the composer.
     case clipPick(sid: Int64, clip: UInt32, insert: Bool)
     /// Press the A menu item at `path` (indices into the last menu, separators counted).
@@ -103,7 +105,7 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
                               "cancel_transfer", "picture_focus", "compose_replay", "clip_pick", "menu_pick", "move_top_left",
                               "composer_paste", "composer_attach", "composer_send", "composer_drop_block",
                               "detach", "attach", "raise_detached", "fetch_clip", "copy_local", "drop_copy", "reveal",
-                              "pin_save", "pin_load", "set_hidden", "close_window", "select_input",
+                              "pin_save", "pin_load", "set_hidden", "close_window", "select_input", "auto_english",
                               "unlock", "set_banner", "dismiss_cover", "drop_textures", "state_rules", "set_voice_hotkey", "voice_end"]
     guard known.contains(method) else { throw ChannelError.unknown(method) }
     guard let map = args as? [String: Any] else { throw ChannelError.bad(method) }
@@ -173,6 +175,8 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
                         zoom: try a.float("zoom"))
     case "close_window":
         return .closeWindow(sid: sid, window: try a.window())
+    case "auto_english":
+        return .autoEnglish(sid: sid, on: try a.bool("on"))
     case "select_input":
         let id = try a.string("id")
         guard id.utf8.count <= maxInputSourceID else { throw ChannelError.bad(method) }

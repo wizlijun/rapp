@@ -20,4 +20,7 @@ mod pacing;
 pub mod server;
 #[cfg(target_os = "linux")]
 pub mod transfers;
+// Shared so its tests run everywhere; only the Linux input source uses it.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+mod select_wait;
 pub mod wire;
