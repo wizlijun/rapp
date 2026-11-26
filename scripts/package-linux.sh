@@ -93,13 +93,17 @@ cards across the overview, top-bar session list and side-panel Sessions tab,
 host-persisted session labels (custom title and note on session cards, standby
 and stopped-terminal cards with one-tap restart carrying the label, and Local
 column label management), overview device OS marks using official brand shapes
-(detecting Omarchy via `/usr/share/omarchy/shell` vs Linux), and favorite
-Terminal restore/creation share the macOS 0.15.43 layout and rules.
+(detecting Omarchy via `/usr/share/omarchy/shell` vs Linux), favorite
+Terminal restore/creation, and text terminal restore (pre-boot 常用 · 终端 恢复,
+Devices-tab saved-terminal recovery, zsh/bash/fish OSC 7502 shell hooks with
+venv/conda reactivation and non-executing command prefill, secret-line filtering,
+and 新建 / Ctrl+Shift+T starting in the current or last terminal's directory)
+share the macOS 0.15.45 layout and rules.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and
 reattach without reconnecting. This release uses protocol v16 (compatible with
-macOS 0.15.35–0.15.43); update both peers when coming from protocol v15. Incoming GUI
+macOS 0.15.35–0.15.45); update both peers when coming from protocol v15. Incoming GUI
 state rules are forwarded by the Linux client to compatible hosts (such as
 macOS 0.15.35+) and safely ignored by the Linux desktop/app host. Off-stage and
 hidden/minimized embedded or detached sessions pause pictures but keep activity
@@ -129,7 +133,8 @@ the input method. Composition and commits remain owned by the local input method
 Linux can share ports and text terminals. New terminal windows require a graphical
 session, a supported terminal app, and a working systemd user manager.
 They run in separate transient user services and survive a rapp-service restart.
-Run `rapp share`, `rapp unshare`, `rapp hosts`, `rapp pipe`, or `rapp update`
+Run `rapp share`, `rapp unshare`, `rapp hosts`, `rapp pipe`, `rapp term restore`
+(`--list` / `--forget` / `<number|name>...`), or `rapp update`
 (`status` / `check` / `rollback`, with `--json`) for CLI access; on Linux
 online self-replacement is disabled (`not_launchd`, exit 7) and directs to the
 release packages, while `rapp update status` reports the installed version.

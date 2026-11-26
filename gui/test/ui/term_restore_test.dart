@@ -309,4 +309,66 @@ void main() {
     expect(find.text('恢复上次的终端 · mini'), findsOneWidget);
     expect(t.sent.where((m) => m['cmd'] == 'restore_terms' || m['cmd'] == 'open_term'), isEmpty);
   });
+
+  testWidgets('linux_omarchy_launcher_restores_and_creates_from_last', (tester) async {
+    Future<void> emitLinuxTerms([Object? req]) async {
+      t.emit({
+        'event': 'terms',
+        'req': ?req,
+        'id': '111',
+        'path': 'lan',
+        'terms': liveRows,
+        'hosts': [
+          {
+            'host': null,
+            'launchers': ['ghostty', 'kitty'],
+            'shells': [
+              {'name': 'bash', 'path': '/usr/bin/bash', 'default': true},
+            ],
+            'saved': savedRows,
+          },
+        ],
+      });
+      await pump();
+    }
+
+    final prevOnSend = t.onSend;
+    t.onSend = (m) {
+      if (m['cmd'] == 'terms') {
+        emitLinuxTerms(m['req']);
+        return;
+      }
+      prevOnSend?.call(m);
+    };
+    savedRows = [saved('a', 'rapp', prog: 'claude', boot: true), saved('b', 'shell')];
+    await tester.runAsync(emitLinuxTerms);
+    s.toggleFavorite('111', termsEntry, termsEntryName);
+    await tester.pumpWidget(Theme(
+      data: ThemeData(platform: TargetPlatform.linux),
+      child: wrap(SizedBox(width: 330, height: 400, child: SessionsTab(state: s))),
+    ));
+    await tester.pump();
+    final fav = find.byKey(const Key('favorite-111/$termsEntry'));
+    expect(find.descendant(of: fav, matching: find.text('恢复')), findsOneWidget);
+    await tester.tap(fav);
+    await tester.pumpAndSettle();
+    expect(find.text('恢复上次的终端 · mini'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('restore-ok')));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      for (var i = 0; i < 6; i++) {
+        await pump();
+      }
+    });
+    expect(
+      t.sent.firstWhere((m) => m['cmd'] == 'restore_terms'),
+      {'cmd': 'restore_terms', 'id': '111', 'keys': ['a'], 'app': 'ghostty', 'req': anything},
+    );
+    expect(s.newTermSource('111'), 'term:pty:a');
+    await tester.runAsync(() => s.openText('111', from: s.newTermSource('111')));
+    expect(
+      t.sent.firstWhere((m) => m['cmd'] == 'open_term'),
+      {'cmd': 'open_term', 'id': '111', 'app': 'ghostty', 'from': 'term:pty:a', 'req': anything},
+    );
+  });
 }
