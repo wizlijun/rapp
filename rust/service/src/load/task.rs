@@ -94,6 +94,7 @@ pub(crate) async fn covered(state: &State, cache: &TermCache) -> Vec<Covered> {
 }
 
 /// Reads the sockets on disk only; never starts the terminal worker.
+#[cfg(unix)]
 async fn scan_terms(term_dir: &std::path::Path) -> Vec<Covered> {
     use rapp_term::pty::local;
     let Ok(token) = local::token(term_dir) else { return vec![] };
@@ -105,6 +106,12 @@ async fn scan_terms(term_dir: &std::path::Path) -> Vec<Covered> {
             Some(Covered { kind: CoverKind::Term, path: cwd, term: Some(rapp_term::serve::pty_id(&s)) })
         })
         .collect()
+}
+
+/// Windows: no text terminals before phase E, so nothing they cover.
+#[cfg(not(unix))]
+async fn scan_terms(_term_dir: &std::path::Path) -> Vec<Covered> {
+    Vec::new()
 }
 
 #[cfg(test)]

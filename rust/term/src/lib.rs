@@ -6,6 +6,7 @@ pub mod proto;
 pub mod pty;
 pub mod screen;
 pub mod sender;
+#[cfg(unix)]
 pub mod serve;
 pub mod shells;
 pub mod unread;

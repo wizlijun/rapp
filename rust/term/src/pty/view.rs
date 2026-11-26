@@ -570,6 +570,7 @@ mod tests {
         assert_eq!(c.next().await["error"], "session ended");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn viewers_are_counted() {
         let (sh, _input) = shared(20, 5);

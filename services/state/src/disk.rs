@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::io::{ErrorKind, Write};
+#[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
@@ -34,12 +35,25 @@ pub fn save(dir: &Path, store: &Store) -> std::io::Result<u64> {
 
 /// Writes already-serialized store JSON; lets the saver serialize under the lock and write after.
 pub fn write_bytes(dir: &Path, json: &[u8]) -> std::io::Result<u64> {
-    fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+    // On Windows there are no mode bits: the directory sits under the service's home
+    // (`<data root>\local`), whose private access list (only the user, SYSTEM and
+    // Administrators) new files inherit.
+    let mut b = fs::DirBuilder::new();
+    b.recursive(true);
+    #[cfg(unix)]
+    b.mode(0o700);
+    b.create(dir)?;
     // `mode` above and below only applies to what is created now: a directory or a left-over
     // tmp file that is already there keeps its mode unless it is set (spec §8.2).
+    #[cfg(unix)]
     private(dir, 0o700)?;
     let tmp = dir.join(format!("{FILE}.tmp"));
-    let mut f = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    opts.mode(0o600);
+    let mut f = opts.open(&tmp)?;
+    #[cfg(unix)]
     if f.metadata()?.permissions().mode() & 0o777 != 0o600 {
         f.set_permissions(fs::Permissions::from_mode(0o600))?;
     }
@@ -51,6 +65,7 @@ pub fn write_bytes(dir: &Path, json: &[u8]) -> std::io::Result<u64> {
 }
 
 /// Sets `path` to `mode` when it has another.
+#[cfg(unix)]
 fn private(path: &Path, mode: u32) -> std::io::Result<()> {
     if fs::metadata(path)?.permissions().mode() & 0o777 != mode {
         fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
@@ -101,6 +116,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn files_are_private() {
         let d = tempfile::tempdir().unwrap();
         let dir = d.path().join("data");
@@ -112,6 +128,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn loose_modes_are_made_private() {
         let d = tempfile::tempdir().unwrap();
         let dir = d.path().join("data");

@@ -1,3 +1,4 @@
+#![cfg(unix)]
 //! `rapp-term run` in a terminal window of its own (a pty the test holds), seen through its local socket.
 
 #[path = "common/pty.rs"]

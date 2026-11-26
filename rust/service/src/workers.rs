@@ -126,7 +126,7 @@ fn client_only_linux(state: &State) -> bool {
 
 /// Runs `rapp-host <args> --json` and returns its first non-event JSON line.
 async fn run_json(state: &State, args: &[&str]) -> Result<Value> {
-    let mut command = Command::new(host_bin(state)?);
+    let mut command = rapp_net::proc::tokio_command(host_bin(state)?);
     desktop_environment(&mut command).await;
     let out = command.args(args).arg("--json").stdin(Stdio::null()).kill_on_drop(true).output();
     let out = tokio::time::timeout(RUN_WAIT, out).await.map_err(|_| anyhow!("rapp-host {} timed out", args[0]))??;
@@ -181,7 +181,8 @@ pub async fn refresh_permissions(state: &State, prompt: bool) -> Value {
 /// prompt so rApp shows up in System Settings. A `_reset` is true only if tccutil exited 0 and the
 /// permission really reads as missing afterwards.
 pub async fn reset_permissions(state: &State) -> Value {
-    if cfg!(target_os = "linux") {
+    // tccutil is macOS only; Windows has no such records to reset and answers as Linux does.
+    if cfg!(any(target_os = "linux", windows)) {
         let perms = refresh_permissions(state, false).await;
         return json!({"screen_recording_reset": false, "accessibility_reset": false, "permissions": perms});
     }
@@ -285,7 +286,7 @@ async fn spawn(state: &Arc<State>, app: &str, gen: u64) -> Result<(u16, String, 
     let token = random_hex(16);
     let (name, args, tag) = worker_cmd(state, app);
     let bin = rapp_net::bins::find(name, state.bin_dir.as_deref()).ok_or_else(|| anyhow!("{name} not found"))?;
-    let mut command = Command::new(bin);
+    let mut command = rapp_net::proc::tokio_command(bin);
     desktop_environment(&mut command).await;
     let mut child = command.args(args)
         .env("RAPP_TOKEN", &token)

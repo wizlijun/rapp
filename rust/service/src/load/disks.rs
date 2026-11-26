@@ -3,6 +3,7 @@
 
 use super::sample::{Covered, Disk};
 use std::collections::{HashMap, HashSet};
+#[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -13,6 +14,7 @@ pub type Stat = (u64, u64, Option<(u64, u64)>);
 
 /// The device id of `path` and the top directory of that file system. The path is resolved first (a symlink
 /// must not become the mount), then walked up while `st_dev` stays the same.
+#[cfg(unix)]
 pub fn mount_of(path: &Path) -> Option<(u64, PathBuf)> {
     let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let dev = std::fs::metadata(&path).ok()?.dev();
@@ -26,6 +28,36 @@ pub fn mount_of(path: &Path) -> Option<(u64, PathBuf)> {
     Some((dev, top))
 }
 
+/// Windows: the volume is the path's drive or share (`C:\`, `\\server\share\`), its id a hash of that name
+/// (top bit clear, apart from `synthetic_dev`). A volume mounted on a folder counts as the drive holding the
+/// folder; rApp's data and terminals do not live on one.
+#[cfg(windows)]
+pub fn mount_of(path: &Path) -> Option<(u64, PathBuf)> {
+    use std::hash::{Hash, Hasher};
+    use std::path::{Component, Prefix};
+    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    std::fs::metadata(&path).ok()?;
+    let Some(Component::Prefix(p)) = path.components().next() else { return None };
+    let top = match p.kind() {
+        Prefix::Disk(d) | Prefix::VerbatimDisk(d) => format!("{}:\\", (d as char).to_ascii_uppercase()),
+        Prefix::UNC(server, share) | Prefix::VerbatimUNC(server, share) => {
+            format!("\\\\{}\\{}\\", server.to_string_lossy(), share.to_string_lossy())
+        }
+        _ => format!("{}\\", p.as_os_str().to_string_lossy()),
+    };
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    top.to_lowercase().hash(&mut h);
+    Some((h.finish() & !(1 << 63), PathBuf::from(top)))
+}
+
+/// Windows: total and free-to-this-user bytes; NTFS has no file-count limit to report.
+#[cfg(windows)]
+pub fn statvfs(path: &Path) -> Option<Stat> {
+    let (total, avail) = rapp_net::win::disk_space(path).ok()?;
+    Some((total, avail, None))
+}
+
+#[cfg(unix)]
 #[allow(clippy::unnecessary_cast)]
 pub fn statvfs(path: &Path) -> Option<Stat> {
     use std::os::unix::ffi::OsStrExt;
@@ -220,6 +252,7 @@ mod tests {
         assert!(!disks[0].unreadable && disks[0].total > 0);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn hung_disk_is_unreadable_and_others_still_come() {
         // "/" and "/dev" are different file systems on macOS and Linux.
@@ -253,7 +286,9 @@ mod tests {
 
     #[tokio::test]
     async fn a_stuck_disk_gets_one_thread_not_one_per_read() {
-        let dev = Path::new("/dev");
+        // Any disk will do; a temp dir is on one on every OS.
+        let dir = tempfile::tempdir().unwrap();
+        let dev = dir.path();
         let hang = mount_of(dev).unwrap().1;
         let gate: Gate = Default::default();
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -316,6 +351,7 @@ mod tests {
         assert_eq!(disks[0].paths.len(), 2);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_symlink_across_file_systems_is_the_target() {
         let dir = tempfile::tempdir().unwrap();
@@ -327,6 +363,7 @@ mod tests {
         assert_eq!(via[0].dev, alone[0].dev);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_symlink_does_not_change_the_mount() {
         let dir = tempfile::tempdir().unwrap();

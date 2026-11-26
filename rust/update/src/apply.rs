@@ -528,6 +528,9 @@ mod tests {
         assert!(!e.staging().exists());
     }
 
+    // A read-only directory does not stop deleting what is inside it on Windows; applying an
+    // update there is phase G.
+    #[cfg(unix)]
     #[test]
     fn exdev_copy_with_failed_delete_keeps_bundle_whole() {
         use std::os::unix::fs::PermissionsExt;

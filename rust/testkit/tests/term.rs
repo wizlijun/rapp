@@ -363,8 +363,13 @@ async fn turning_terminals_off_ends_terminal_sessions_only() {
     let path = home.join("term.json");
     let file: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     assert_eq!(file["allow"], false, "{file}");
-    use std::os::unix::fs::PermissionsExt;
-    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+    #[cfg(windows)]
+    assert_eq!(rapp_net::private::acl(&path).unwrap(), rapp_net::private::private_acl().unwrap());
     assert_eq!(ipc.call(json!({"cmd":"term"})).await, json!({"ok":true,"allow":false}));
 
     assert_eq!(ipc.call(json!({"cmd":"set_term","allow":true})).await, json!({"ok":true}));

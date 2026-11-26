@@ -127,6 +127,9 @@ impl DataGit {
         }
         if !self.root.join(".git").exists() {
             self.run(&["init", "-b", "main"]).await.ok_or("init")?;
+            // Files are committed byte for byte, as on the other systems (spec §8.1).
+            #[cfg(windows)]
+            self.run(&["config", "core.autocrlf", "false"]).await.ok_or("init")?;
         }
         if self.rebase_in_progress() {
             return Err(Fail("rebase in progress", Some("有一个没做完的 rebase，等它结束".into())));
@@ -247,7 +250,7 @@ impl DataGit {
     }
 
     async fn exec_with(&self, args: &[&str], ssh: Option<(&str, &str)>) -> Out {
-        let mut cmd = tokio::process::Command::new(&self.git);
+        let mut cmd = rapp_net::proc::tokio_command(&self.git);
         cmd.current_dir(&self.root).args(["-c", "core.hooksPath=/dev/null"]).args(args);
         for (k, _) in std::env::vars_os() {
             if k.to_string_lossy().starts_with("GIT_") {
@@ -459,6 +462,19 @@ mod tests {
         assert_eq!(saved.git, "local");
         let logged = std::fs::read_to_string(t.path().join("logs/service.log")).unwrap();
         assert!(logged.contains(r#""ev":"data_commit""#) && logged.contains(r#""files":5"#), "{logged}");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_new_sync_repository_does_not_convert_line_endings() {
+        if !have_git() {
+            eprintln!("git not available; skipping");
+            return;
+        }
+        let (t, root) = prepared();
+        DataGit::new(&opts(&root), "test-a", log(&t)).tick().await;
+        assert!(root.join(".git").exists());
+        assert_eq!(git(&root, &["config", "--local", "--get", "core.autocrlf"]).trim(), "false");
     }
 
     #[tokio::test]

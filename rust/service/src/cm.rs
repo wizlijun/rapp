@@ -7,7 +7,11 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 fn gui_path(state: &State) -> Option<PathBuf> {
+    #[cfg(not(windows))]
     let own = || std::env::current_exe().ok()?.parent().map(|d| d.join(format!("rapp{}", std::env::consts::EXE_SUFFIX)));
+    // Windows: the interface is `rapp-gui.exe` beside the service in its version directory (spec §5.1).
+    #[cfg(windows)]
+    let own = || std::env::current_exe().ok()?.parent().map(|d| d.join("rapp-gui.exe"));
     state.gui.clone().or_else(own).filter(|p| p.is_file())
 }
 

@@ -2,7 +2,7 @@
 
 use std::io;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 pub const CURL: &str = "/usr/bin/curl";
 pub const DITTO: &str = "/usr/bin/ditto";
@@ -47,7 +47,7 @@ pub struct SystemRunner;
 
 impl Runner for SystemRunner {
     fn run(&self, prog: &str, args: &[String]) -> io::Result<Out> {
-        let o = Command::new(prog).args(args).stdin(Stdio::null()).output()?;
+        let o = rapp_net::proc::command(prog).args(args).stdin(Stdio::null()).output()?;
         Ok(Out {
             code: o.status.code().unwrap_or(-1),
             stdout: String::from_utf8_lossy(&o.stdout).into_owned(),
