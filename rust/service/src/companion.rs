@@ -563,6 +563,15 @@ pub async fn set(state: &Arc<State>, name: &str, on: bool) -> Value {
     status(state, c.name).await
 }
 
+/// The address apps reach the chosen sink at: its own port here, or the localhost map of a
+/// remote one (`local_of` finds it by device and port).
+pub(crate) fn sink_url(chosen: Option<&sink::Dest>, local_of: impl Fn(&str, u16) -> Option<u16>) -> Option<String> {
+    match chosen? {
+        sink::Dest::Local(p) => Some(format!("http://127.0.0.1:{p}")),
+        sink::Dest::Remote { id, port } => local_of(id, *port).map(|n| format!("http://localhost:{n}")),
+    }
+}
+
 /// The IPC `state` reply of `name`: on, port, share number, running, why not, what it holds,
 /// the sinks known and the outbox.
 pub async fn status(state: &Arc<State>, name: &str) -> Value {
@@ -570,8 +579,15 @@ pub async fn status(state: &Arc<State>, name: &str) -> Value {
     let (on, port, running, error) = state.companions.with(c.name, |s| (s.on, s.cfg.port.unwrap_or(c.port), s.phase == Phase::Running, s.error.clone()));
     let share = state.shares.get(port).filter(|s| s.kind.as_deref() == Some(c.kind)).and_then(|s| s.local);
     let stored = if running { stored(port).await } else { None };
+    let url = match sink::chosen(state) {
+        Some(sink::Dest::Remote { id, port }) => {
+            let got = crate::maps::ensure_all(state, &id, &[(port, None)]).await;
+            sink_url(Some(&sink::Dest::Remote { id: id.clone(), port }), |_, _| got.first().copied().flatten())
+        }
+        other => sink_url(other.as_ref(), |_, _| None),
+    };
     let mut r = sink::ipc(state);
-    let extra = json!({"on": on, "port": port, "share": share, "running": running, "error": error, "stored": stored, "outbox": crate::outbox::status(state)});
+    let extra = json!({"url": url, "on": on, "port": port, "share": share, "running": running, "error": error, "stored": stored, "outbox": crate::outbox::status(state)});
     if let (Some(m), Value::Object(e)) = (r.as_object_mut(), extra) {
         m.extend(e);
     }
@@ -591,6 +607,16 @@ pub async fn ipc(state: &Arc<State>, cmd: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sink_url_points_at_the_local_port_or_the_map() {
+        use sink::Dest;
+        assert_eq!(sink_url(Some(&Dest::Local(8102)), |_, _| None).as_deref(), Some("http://127.0.0.1:8102"));
+        let r = Dest::Remote { id: "222".into(), port: 8102 };
+        assert_eq!(sink_url(Some(&r), |id, p| (id == "222" && p == 8102).then_some(28003)).as_deref(), Some("http://localhost:28003"));
+        assert_eq!(sink_url(Some(&r), |_, _| None), None);
+        assert_eq!(sink_url(None, |_, _| Some(1)), None);
+    }
 
     #[test]
     fn args_follow_the_file() {

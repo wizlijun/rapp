@@ -253,6 +253,12 @@ fn answer(state: &State, op: Op, peer: &Peer) -> Value {
     ok(json!({}))
 }
 
+/// The sink that is chosen: the first candidate.
+pub fn chosen(state: &State) -> Option<Dest> {
+    let own = own_id(state);
+    state.sinks.candidates(own.as_deref()).first().map(|(_, d)| d.clone())
+}
+
 /// The IPC `state` reply: every sink known here, and which one is chosen.
 pub fn ipc(state: &State) -> Value {
     let own = own_id(state);
