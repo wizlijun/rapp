@@ -65,6 +65,8 @@ struct State {
     typed: usize,
     typed_ok: bool,
     can_unlock: bool,
+    /// Why the next `lock` call cannot be made (`None`: it locks).
+    lock_error: Option<String>,
     awake: bool,
 
     clip: Option<ClipRead>,
@@ -217,6 +219,7 @@ impl FakePlatform {
             typed: 0,
             typed_ok: true,
             can_unlock: true,
+            lock_error: None,
             awake: false,
             clip: None,
             change: 0,
@@ -339,6 +342,11 @@ impl FakePlatform {
 
     pub fn set_can_unlock(&self, on: bool) {
         self.st().can_unlock = on;
+    }
+
+    /// Makes `lock` fail with `reason` (`None`: it locks again).
+    pub fn set_lock_error(&self, reason: Option<&str>) {
+        self.st().lock_error = reason.map(str::to_string);
     }
 
     /// Whether the session holds A awake.
@@ -866,6 +874,9 @@ impl LockOps for FakeLock {
     fn lock(&mut self) -> Option<String> {
         let mut s = lock_state(&self.0);
         s.log.push("lock".to_string());
+        if let Some(reason) = s.lock_error.clone() {
+            return Some(reason);
+        }
         s.locked = true;
         s.typed = 0;
         s.typed_ok = true;

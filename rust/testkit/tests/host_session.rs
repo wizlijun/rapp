@@ -1431,3 +1431,255 @@ fn hostile_names_stay_inside() {
         assert!(entry.unwrap().file_type().unwrap().is_file());
     }
 }
+
+// MARK: - Task 17: lock screen and unlock
+
+use rapp_host_core::lock::{unlock_lock_file, with_unlock_lock};
+use rapp_host_core::protocol::Password;
+
+fn send_unlock(c: &mut Controller, password: &str) {
+    c.send(&Message::Unlock { password: Password::new(password) }.encoded());
+}
+
+/// Everything the worker wrote so far (logs go to stderr in JSON mode).
+fn worker_text(host: &Host) -> String {
+    format!("{}{}", host.stdout_text(), host.stderr_text())
+}
+
+fn count_text(host: &Host, needle: &str) -> usize {
+    worker_text(host).matches(needle).count()
+}
+
+/// Waits (15 s real time at most) until the worker wrote `needle` at least `n` times.
+fn wait_text(host: &Host, needle: &str, n: usize) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while count_text(host, needle) < n {
+        assert!(Instant::now() < deadline, "`{needle}` x{n} not written:\n{}", worker_text(host));
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+/// The lock-screen calls in the fake's log.
+fn typing_calls(log: &[String]) -> Vec<String> {
+    log.iter().filter(|l| *l == "wake" || l.starts_with("type_units") || *l == "press_return").cloned().collect()
+}
+
+/// A session whose A locked after it started: B has heard `screenLocked(true)`.
+fn locked_session(platform: &FakePlatform, host: &Host, password: &str) -> Controller {
+    platform.set_password(password);
+    let mut c = clip_ready(host);
+    platform.set_locked(true);
+    c.wait_for(|m| matches!(m, Incoming::ScreenLocked(true)));
+    c
+}
+
+#[test]
+fn unlock_with_the_right_password() {
+    let (platform, host) = serve();
+    // 42 units: chunks of 20, 20 and 2.
+    let password = "fixture-unlock-0123456789-0123456789-abcde";
+    let mut c = locked_session(&platform, &host, password);
+    platform.clear_log();
+    send_unlock(&mut c, password);
+    c.wait_for(|m| matches!(m, Incoming::ScreenLocked(false)));
+    assert!(!platform.locked());
+    let log = wait_log(&platform, |l| l.iter().any(|x| x == "press_return"));
+    assert_eq!(typing_calls(&log), ["wake", "type_units 20", "type_units 20", "type_units 2", "press_return"]);
+    host.wait_event("unlock");
+    wait_text(&host, "typing the unlock password", 1);
+    assert_eq!(host.events().iter().filter(|e| e["event"] == "unlock").count(), 1);
+}
+
+#[test]
+fn unlock_with_a_wrong_password() {
+    let (platform, host) = serve();
+    let mut c = locked_session(&platform, &host, "fixture-right");
+    send_unlock(&mut c, "fixture-wrong");
+    wait_log(&platform, |l| l.iter().any(|x| x == "press_return"));
+    let typed = Instant::now();
+    // A second unlock while the first one settles is dropped.
+    send_unlock(&mut c, "fixture-wrong");
+    wait_text(&host, "unlock dropped: already typing", 1);
+    // Every unlock is dropped until the 8 s settle wait is over; the first after it is typed.
+    while count_text(&host, "typing the unlock password") < 2 {
+        assert!(typed.elapsed() < host_time(12.0), "the settle wait never ended:\n{}", worker_text(&host));
+        send_unlock(&mut c, "fixture-wrong");
+        std::thread::sleep(host_time(0.25));
+    }
+    let waited = typed.elapsed();
+    assert!(waited >= host_time(8.0), "typing again after {waited:?}");
+    assert!(waited < host_time(10.0), "typing again after {waited:?}");
+    assert!(platform.locked());
+    // A stayed locked and B already knows: Swift sends `screenLocked` only on a change.
+    assert!(c.quiet_for(host_time(0.5), |m| !matches!(m, Incoming::ScreenLocked(false))).is_ok());
+}
+
+#[test]
+fn unlock_when_not_locked() {
+    let (platform, host) = serve();
+    let mut c = clip_ready(&host);
+    platform.clear_log();
+    send_unlock(&mut c, "fixture-any");
+    c.wait_for(|m| matches!(m, Incoming::ScreenLocked(false)));
+    wait_text(&host, "unlock dropped: A is not locked", 1);
+    assert!(typing_calls(&platform.log()).is_empty());
+    assert!(!host.saw(|e| e["event"] == "unlock"));
+}
+
+#[test]
+fn unlock_not_available_answers_locked() {
+    let (platform, host) = serve();
+    let mut c = locked_session(&platform, &host, "fixture-any");
+    platform.set_can_unlock(false);
+    platform.clear_log();
+    send_unlock(&mut c, "fixture-any");
+    c.wait_for(|m| matches!(m, Incoming::ScreenLocked(true)));
+    wait_text(&host, "unlock not available", 1);
+    assert!(typing_calls(&platform.log()).is_empty());
+    assert!(platform.locked());
+    assert!(!host.saw(|e| e["event"] == "unlock"));
+}
+
+#[test]
+fn app_session_started_locked_waits_then_shows() {
+    let platform = FakePlatform::new();
+    platform.set_locked(true);
+    platform.set_password("fixture-start");
+    let host = Host::start(platform.clone(), FAKE_APP, TOKEN);
+    let mut c = Controller::connect(host.port());
+    c.hello(TOKEN, FAKE_APP, "B", 0, 15);
+    match c.wait_for(|m| matches!(m, Incoming::Ready(..))) {
+        // The main display (plan B notes §4: Swift's largest-window display is not known while locked).
+        Incoming::Ready(_, w, h) => assert_eq!((w, h), (1280, 800)),
+        _ => unreachable!(),
+    }
+    c.wait_for(|m| matches!(m, Incoming::ScreenLocked(true)));
+    // Nothing opens or is captured while A is locked.
+    assert!(c.quiet_for(host_time(2.5), |m| !is_frame(m)).is_ok());
+    let open = format!("open app {FAKE_APP}");
+    assert!(!platform.log().iter().any(|l| *l == open));
+    send_unlock(&mut c, "fixture-start");
+    c.wait_for(|m| matches!(m, Incoming::ScreenLocked(false)));
+    c.wait_for(is_frame);
+    assert!(platform.log().iter().any(|l| *l == open));
+    // The size did not change, so no second `ready` and no error.
+    assert!(c.quiet_for(host_time(1.0), |m| !matches!(m, Incoming::Ready(..) | Incoming::Error(_))).is_ok());
+}
+
+#[test]
+fn lock_command_reports_ok_already_failed() {
+    let json_run = |platform: &FakePlatform| -> (i32, Value) {
+        let (code, stdout, stderr) = Host::run_once(platform.clone(), &["lock", "--json"]);
+        let line = stdout.lines().find(|l| !l.contains("\"event\"")).unwrap_or_else(|| panic!("{stdout}{stderr}"));
+        (code, serde_json::from_str(line).expect("JSON"))
+    };
+    let text_run = |platform: &FakePlatform| -> (i32, String) {
+        let (code, stdout, stderr) = Host::run_once(platform.clone(), &["lock"]);
+        (code, format!("{stdout}{stderr}"))
+    };
+    let reason = "fixture: the lock call is refused";
+
+    let platform = FakePlatform::new();
+    assert_eq!(json_run(&platform), (0, json!({ "ok": true })));
+    assert!(platform.locked());
+    assert_eq!(json_run(&platform), (0, json!({ "ok": true, "already": true })));
+    let platform = FakePlatform::new();
+    platform.set_lock_error(Some(reason));
+    assert_eq!(json_run(&platform), (1, json!({ "ok": false, "error": reason })));
+    assert!(!platform.locked());
+
+    let platform = FakePlatform::new();
+    let (code, out) = text_run(&platform);
+    assert_eq!(code, 0);
+    assert!(out.lines().any(|l| l == "locked"), "{out}");
+    let (code, out) = text_run(&platform);
+    assert_eq!(code, 0);
+    assert!(out.lines().any(|l| l == "already locked"), "{out}");
+    let platform = FakePlatform::new();
+    platform.set_lock_error(Some(reason));
+    let (code, out) = text_run(&platform);
+    assert_eq!(code, 1);
+    assert!(out.lines().any(|l| l == format!("lock failed: {reason}")), "{out}");
+}
+
+/// Every file under `dir`, with its bytes.
+fn files_under(dir: &std::path::Path, out: &mut Vec<(std::path::PathBuf, Vec<u8>)>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            files_under(&path, out);
+        } else if let Ok(bytes) = std::fs::read(&path) {
+            out.push((path, bytes));
+        }
+    }
+}
+
+fn holds(haystack: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty() && haystack.windows(needle.len()).any(|w| w == needle)
+}
+
+#[test]
+fn password_never_leaves() {
+    const CANARY: &str = "Zq7!canary-ünlock-密码";
+    let (platform, host) = serve();
+    // The right password.
+    let mut c = locked_session(&platform, &host, CANARY);
+    send_unlock(&mut c, CANARY);
+    c.wait_for(|m| matches!(m, Incoming::ScreenLocked(false)));
+    // A wrong one: A now expects another password.
+    platform.set_password("fixture-other");
+    platform.set_locked(true);
+    c.wait_for(|m| matches!(m, Incoming::ScreenLocked(true)));
+    send_unlock(&mut c, CANARY);
+    wait_log(&platform, |l| l.iter().filter(|x| *x == "press_return").count() >= 2);
+    c.close();
+    ended_event(&host);
+
+    let chars: Vec<char> = CANARY.chars().collect();
+    let mut needles: Vec<String> = vec![CANARY.to_string()];
+    needles.extend(chars.windows(6).map(|w| w.iter().collect::<String>()));
+    let mut byte_needles: Vec<Vec<u8>> = Vec::new();
+    for n in &needles {
+        byte_needles.push(n.as_bytes().to_vec());
+        byte_needles.push(n.encode_utf16().flat_map(u16::to_le_bytes).collect());
+        byte_needles.push(n.encode_utf16().flat_map(u16::to_be_bytes).collect());
+    }
+    // The messages name where it leaked, never what.
+    for (what, text) in [("stdout", host.stdout_text()), ("stderr", host.stderr_text()), ("the fake's log", platform.log().join("\n"))] {
+        for (i, n) in byte_needles.iter().enumerate() {
+            assert!(!holds(text.as_bytes(), n), "{what} holds part of the password (needle {i})");
+        }
+    }
+    let mut files = Vec::new();
+    files_under(&platform.data_root(), &mut files);
+    assert!(files.iter().any(|(p, _)| p.ends_with("unlock.lock")), "the unlock lock file was used");
+    for (path, bytes) in &files {
+        for (i, n) in byte_needles.iter().enumerate() {
+            assert!(!holds(bytes, n), "{} holds part of the password (needle {i})", path.display());
+        }
+    }
+}
+
+#[test]
+fn disconnect_while_typing_frees_the_lock() {
+    let (platform, host) = serve();
+    let password = "fixture-typing-".repeat(4);
+    let mut c = locked_session(&platform, &host, &password);
+    platform.clear_log();
+    send_unlock(&mut c, &password);
+    // B goes away during the 1 s wake wait.
+    wait_log(&platform, |l| l.iter().any(|x| x == "wake"));
+    c.close();
+    ended_event(&host);
+    let typed_at_end = typing_calls(&platform.log()).len();
+    let file = unlock_lock_file(&platform.data_root());
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        with_unlock_lock(&file, &mut |_: &str| {}, || {
+            let _ = tx.send(());
+        });
+    });
+    assert!(rx.recv_timeout(host_time(10.0)).is_ok(), "the unlock lock was still held 10 s after the session ended");
+    assert_eq!(typing_calls(&platform.log()).len(), typed_at_end, "typed after the session ended");
+}

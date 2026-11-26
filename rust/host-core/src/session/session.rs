@@ -134,6 +134,8 @@ pub struct Session {
     /// Set when the app session was opened while A is locked: `ready` already went out with this size.
     pub(crate) announced: Option<(u16, u16)>,
     pub(crate) sent_locked: Option<bool>,
+    /// The unlock password is being typed (`session/unlock.rs`).
+    pub(crate) unlocking: bool,
     pub(crate) input_source_on: bool,
     pub(crate) sent_input_source: Option<InputSource>,
 
@@ -235,6 +237,7 @@ impl Session {
             view: None,
             announced: None,
             sent_locked: None,
+            unlocking: false,
             input_source_on: false,
             sent_input_source: None,
             timers: BTreeMap::new(),
