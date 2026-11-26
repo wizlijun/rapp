@@ -214,7 +214,7 @@ pub fn write(term_dir: &Path, s: &Snapshot) -> std::io::Result<()> {
 /// What reading `saved/<key>.json` found.
 #[derive(Debug, PartialEq)]
 pub enum Loaded {
-    Snap(Snapshot),
+    Snap(Box<Snapshot>),
     /// No such file (or a key that names none).
     Missing,
     /// A file that never will be a snapshot of this key: too big, not one, or another key's. Safe to delete.
@@ -242,7 +242,7 @@ pub fn load(term_dir: &Path, key: &str) -> Loaded {
         return Loaded::Bad;
     }
     match serde_json::from_slice::<Snapshot>(&buf) {
-        Ok(s) if s.key == key => Loaded::Snap(s),
+        Ok(s) if s.key == key => Loaded::Snap(Box::new(s)),
         _ => Loaded::Bad,
     }
 }
@@ -250,7 +250,7 @@ pub fn load(term_dir: &Path, key: &str) -> Loaded {
 /// The snapshot of `key`; None for a missing, bad or unreadable file.
 pub fn read(term_dir: &Path, key: &str) -> Option<Snapshot> {
     match load(term_dir, key) {
-        Loaded::Snap(s) => Some(s),
+        Loaded::Snap(s) => Some(*s),
         _ => None,
     }
 }
@@ -261,7 +261,7 @@ pub fn read(term_dir: &Path, key: &str) -> Option<Snapshot> {
 pub fn to_restore(term_dir: &Path, key: &str, tries: u32, gap: std::time::Duration) -> anyhow::Result<Option<Snapshot>> {
     for n in 1..=tries.max(1) {
         match load(term_dir, key) {
-            Loaded::Snap(s) => return Ok(Some(s)),
+            Loaded::Snap(s) => return Ok(Some(*s)),
             Loaded::Missing | Loaded::Bad => return Ok(None),
             Loaded::Unreadable if n < tries => std::thread::sleep(gap),
             Loaded::Unreadable => {}
@@ -322,7 +322,7 @@ pub fn restorable(term_dir: &Path, live: &HashSet<String>, boot: Option<u64>, no
         match load(term_dir, key) {
             // Alive though it did not answer: not this list's, and not to be pruned.
             Loaded::Snap(s) if held(term_dir, &s, boot) => {}
-            Loaded::Snap(s) if now.saturating_sub(s.saved) <= MAX_AGE => out.push(s),
+            Loaded::Snap(s) if now.saturating_sub(s.saved) <= MAX_AGE => out.push(*s),
             // Not readable just now: perhaps a good one, so neither deleted nor offered this time.
             Loaded::Unreadable | Loaded::Missing => {}
             Loaded::Snap(_) | Loaded::Bad => {
