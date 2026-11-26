@@ -33,6 +33,16 @@ struct Device {
     sessions: BTreeMap<String, Row>,
 }
 
+/// What one app says it has open, replaced whole by `PUT /v1/desk/<fp>`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Desk {
+    device: Option<String>,
+    at: u64,
+    sessions: Vec<Value>,
+}
+
+const DESK_MAX: usize = 200;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Queued {
     at: u64,
@@ -58,6 +68,9 @@ pub struct Store {
     /// sender -> (epoch, highest n seen), most recently used first.
     seen: BTreeMap<String, Vec<(String, u64)>>,
     devices: BTreeMap<String, Device>,
+    /// app fp -> what that app has open. Old files have none.
+    #[serde(default)]
+    desks: BTreeMap<String, Desk>,
     /// Oldest first, sorted by (at, arr).
     queue: Vec<Queued>,
     /// What moved since the last `take_changes`, in the shapes `GET /v1/watch` pushes.
@@ -75,6 +88,7 @@ impl Store {
             arrivals: 0,
             seen: BTreeMap::new(),
             devices: BTreeMap::new(),
+            desks: BTreeMap::new(),
             queue: Vec::new(),
             changes: Vec::new(),
         }
@@ -110,12 +124,15 @@ impl Store {
         match ev.t {
             Kind::State => {
                 let session = ev.body["session"].as_str().unwrap_or_default().to_string();
-                put_row(dev, session.clone(), row_data(&ev.body, ev.at, &ev.sender));
+                put_row(dev, session.clone(), row_data(&ev.body, ev.at, &ev.sender, ev.body.get("src")));
                 self.changes.push(session_change(dev, &session, dev.sessions.get(&session)));
             }
             Kind::Gone => {
                 if let Some(s) = ev.body.get("session").and_then(Value::as_str) {
-                    if dev.sessions.remove(s).is_some() {
+                    // A proxy's gone (it names `via`) removes only the row that proxy reported.
+                    let own = ev.body.get("via").is_none()
+                        || dev.sessions.get(s).is_some_and(|r| r.data.get("by").and_then(Value::as_str) == Some(ev.sender.as_str()));
+                    if own && dev.sessions.remove(s).is_some() {
                         self.changes.push(session_change(dev, s, None));
                     }
                 }
@@ -133,7 +150,7 @@ impl Store {
                 for it in ev.body.get("sessions").and_then(Value::as_array).into_iter().flatten() {
                     if let Some(m) = it.as_object() {
                         if let Some(s) = m.get("session").and_then(Value::as_str) {
-                            put_row(dev, s.to_string(), row_data(m, ev.at, &ev.sender));
+                            put_row(dev, s.to_string(), row_data(m, ev.at, &ev.sender, ev.body.get("src")));
                             put.push(s.to_string());
                         }
                     }
@@ -216,6 +233,11 @@ impl Store {
         let q_min = now.saturating_sub(self.keep_days.saturating_mul(86400));
         self.queue.retain(|q| q.at >= q_min);
         let d_min = now.saturating_sub(DEVICE_DAYS.saturating_mul(86400));
+        let old: Vec<String> = self.desks.iter().filter(|(_, d)| d.at < d_min).map(|(k, _)| k.clone()).collect();
+        for fp in old {
+            self.desks.remove(&fp);
+            self.changes.push(json!({"what": "desk", "fp": fp, "desk": Value::Null}));
+        }
         if self.devices.values().all(|d| d.last >= d_min) {
             return;
         }
@@ -247,7 +269,7 @@ impl Store {
                 if let Some(v) = &d.device {
                     n["device"] = json!(v);
                 }
-                for k in ["kind", "app", "msg"] {
+                for k in ["kind", "app", "msg", "src"] {
                     if let Some(v) = r.data.get(k) {
                         n[k] = v.clone();
                     }
@@ -275,7 +297,57 @@ impl Store {
                 o
             })
             .collect();
-        json!({"devices": devices, "needs": self.needs(), "queued": self.queue.len()})
+        let desks: Vec<Value> = self.desks.iter().map(|(fp, d)| desk_json(fp, d)).collect();
+        json!({"devices": devices, "desks": desks, "needs": self.needs(), "queued": self.queue.len()})
+    }
+
+    /// Replaces the desk of app `fp`. An empty `sessions` removes it. A bad body is refused whole.
+    pub fn put_desk(&mut self, fp: &str, body: &Value, now: u64) -> Result<(), &'static str> {
+        const BAD: &str = "bad request";
+        let device = match body.get("device") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) => Some(s.clone()),
+            _ => return Err(BAD),
+        };
+        let items = body.get("sessions").and_then(Value::as_array).filter(|a| a.len() <= DESK_MAX).ok_or(BAD)?;
+        let mut sessions = Vec::with_capacity(items.len());
+        for it in items {
+            let m = it.as_object().ok_or(BAD)?;
+            if !matches!(m.get("app"), Some(Value::String(a)) if !a.is_empty()) {
+                return Err(BAD);
+            }
+            let mut o = Map::new();
+            for k in ["fp", "id", "name"] {
+                match m.get(k) {
+                    None => {}
+                    Some(Value::String(v)) if k == "name" => {
+                        o.insert(k.into(), Value::String(v.chars().take(TEXT_CHARS).collect()));
+                    }
+                    Some(Value::String(v)) => {
+                        o.insert(k.into(), Value::String(v.clone()));
+                    }
+                    Some(_) => return Err(BAD),
+                }
+            }
+            if !o.contains_key("fp") && !o.contains_key("id") {
+                return Err(BAD);
+            }
+            o.insert("app".into(), m["app"].clone());
+            sessions.push(Value::Object(o));
+        }
+        if sessions.is_empty() {
+            if self.desks.remove(fp).is_some() {
+                self.changes.push(json!({"what": "desk", "fp": fp, "desk": Value::Null}));
+            }
+            return Ok(());
+        }
+        let same = self.desks.get(fp).is_some_and(|d| d.device == device && d.sessions == sessions);
+        let desk = Desk { device, at: now, sessions };
+        if !same {
+            self.changes.push(json!({"what": "desk", "fp": fp, "desk": desk_json(fp, &desk)}));
+        }
+        self.desks.insert(fp.to_string(), desk);
+        Ok(())
     }
 
     /// Marks a session (by device and session id) or a queue row (by eid) as seen at `now`.
@@ -334,6 +406,14 @@ fn session_change(dev: &Device, session: &str, row: Option<&Row>) -> Value {
     c
 }
 
+fn desk_json(fp: &str, d: &Desk) -> Value {
+    let mut o = json!({"fp": fp, "at": d.at, "sessions": d.sessions});
+    if let Some(v) = &d.device {
+        o["device"] = json!(v);
+    }
+    o
+}
+
 fn queued_json(q: &Queued) -> Value {
     let mut v = q.row.clone();
     if let Some(t) = q.seen {
@@ -345,8 +425,8 @@ fn queued_json(q: &Queued) -> Value {
     v
 }
 
-/// A session row: the event body without the envelope, plus `at` and `by`.
-fn row_data(src: &Map<String, Value>, at: u64, by: &str) -> Map<String, Value> {
+/// A session row: the event body without the envelope, plus `at`, `by` and the envelope's `src` when it has one.
+fn row_data(src: &Map<String, Value>, at: u64, by: &str, envelope_src: Option<&Value>) -> Map<String, Value> {
     let mut m = src.clone();
     for k in ENVELOPE {
         m.remove(k);
@@ -355,6 +435,9 @@ fn row_data(src: &Map<String, Value>, at: u64, by: &str) -> Map<String, Value> {
     m.remove("gap");
     m.insert("at".into(), json!(at));
     m.insert("by".into(), json!(by));
+    if let Some(v) = envelope_src {
+        m.insert("src".into(), v.clone());
+    }
     m
 }
 
@@ -419,6 +502,69 @@ mod tests {
     fn feed_gone(s: &mut Store, fp: &str, sid: &str, at: u64) {
         let l = json!({"v":1,"fp":fp,"epoch":"e9","n":at,"at":at,"t":"gone","session":sid});
         s.apply(parse_line(&l.to_string()).unwrap(), at);
+    }
+
+    fn feed_line(s: &mut Store, l: Value) {
+        s.apply(parse_line(&l.to_string()).unwrap(), 1);
+    }
+
+    #[test]
+    fn a_desk_is_replaced_whole_and_an_empty_one_is_removed() {
+        let mut s = st();
+        s.put_desk("appA", &json!({"device":"iPad","sessions":[{"id":"111111111","app":"com.x","name":"X","junk":1}]}), 100).unwrap();
+        let d = &s.state()["desks"][0];
+        assert_eq!((d["fp"].as_str(), d["device"].as_str(), d["at"].as_u64()), (Some("appA"), Some("iPad"), Some(100)));
+        assert_eq!(d["sessions"], json!([{"id":"111111111","app":"com.x","name":"X"}]));
+        assert_eq!(s.take_changes().last().unwrap()["what"], "desk");
+        s.put_desk("appA", &json!({"device":"iPad","sessions":[{"id":"111111111","app":"com.x","name":"X"}]}), 200).unwrap();
+        assert!(s.take_changes().is_empty(), "same content: no push");
+        assert_eq!(s.state()["desks"][0]["at"], 200, "at still moves");
+        s.put_desk("appA", &json!({"sessions":[]}), 300).unwrap();
+        assert_eq!(s.state()["desks"], json!([]));
+        assert_eq!(s.take_changes().last().unwrap()["desk"], Value::Null);
+    }
+
+    #[test]
+    fn a_bad_desk_is_refused() {
+        let mut s = st();
+        for b in [json!({}), json!({"sessions":[{"app":"x"}]}), json!({"sessions":[{"id":"1"}]}), json!({"sessions":[{"id":1,"app":"x"}]}),
+                  json!({"device":3,"sessions":[]})] {
+            assert_eq!(s.put_desk("a", &b, 1), Err("bad request"), "{b}");
+        }
+        let many: Vec<Value> = (0..201).map(|i| json!({"id":"1","app":format!("a{i}")})).collect();
+        assert_eq!(s.put_desk("a", &json!({"sessions": many}), 1), Err("bad request"));
+    }
+
+    #[test]
+    fn an_old_desk_expires() {
+        let mut s = st();
+        s.put_desk("a", &json!({"sessions":[{"id":"1","app":"x"}]}), 1_000).unwrap();
+        s.take_changes();
+        s.expire(1_000 + 31 * 86_400);
+        assert_eq!(s.state()["desks"], json!([]));
+        assert!(s.take_changes().iter().any(|c| c["what"] == "desk" && c["desk"].is_null()));
+    }
+
+    #[test]
+    fn rows_and_needs_carry_src() {
+        let mut s = st();
+        feed_line(&mut s, json!({"v":1,"fp":"devA","id":"111111111","epoch":"e1","n":1,"at":10,"src":"app","via":"appA",
+                                 "t":"state","session":"com.x","name":"X","state":"blocked","kind":"permission"}));
+        assert_eq!(session_row(&s, "devA", "com.x")["src"], "app");
+        assert_eq!(s.state()["needs"][0]["src"], "app");
+        assert!(s.state()["devices"][0].get("device").is_none_or(Value::is_null), "a proxy event names no device");
+    }
+
+    #[test]
+    fn a_proxy_gone_removes_only_its_own_row() {
+        let mut s = st();
+        let ev = |via: &str, n: u64, t: &str| json!({"v":1,"fp":"devA","epoch":"e","n":n,"at":10,"src":"app","via":via,
+                                                     "t":t,"session":"com.x","name":"X","state":"blocked","kind":"permission"});
+        feed_line(&mut s, ev("appMac", 1, "state"));
+        feed_line(&mut s, ev("appPad", 1, "gone"));
+        assert_eq!(session_row(&s, "devA", "com.x")["by"], "appMac", "iPad's gone leaves the Mac's report");
+        feed_line(&mut s, ev("appMac", 2, "gone"));
+        assert!(s.state()["devices"][0]["sessions"].as_array().unwrap().is_empty());
     }
 
     #[test]
