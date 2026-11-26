@@ -3,16 +3,9 @@
 //! formats onto them. The client-only helpers (`pasteDecision`, `composerItems`, `formatSize`,
 //! …) are not ported: no host path uses them.
 
-/// Text is cut to this many UTF-8 bytes (`maxClipText`).
-pub const MAX_CLIP_TEXT: usize = 1 << 20;
-/// More files than this are announced as unsupported (`maxClipFiles`).
-pub const MAX_CLIP_FILES: usize = 100;
-/// A `paste` carries text inline only below this many UTF-8 bytes (`inlinePasteLimit`).
-pub const INLINE_PASTE_LIMIT: usize = 60_000;
-/// Side-connection chunk size (`chunkSize`).
-pub const CHUNK_SIZE: usize = 256 * 1024;
-/// Concurrent side connections per session (`maxSideConnections`).
-pub const MAX_SIDE_CONNECTIONS: usize = 4;
+// `maxClipText`, `maxClipFiles`, `inlinePasteLimit`, `chunkSize`, `maxSideConnections`
+// (Clipboard.swift:24-29). The protocol module owns them; one value, two paths.
+pub use crate::protocol::{CHUNK_SIZE, INLINE_PASTE_LIMIT, MAX_CLIP_FILES, MAX_CLIP_TEXT, MAX_SIDE_CONNECTIONS};
 /// Spec §6.7: an image is kept as PNG under 64 MiB, other data under 64 MiB too
 /// (`ClipboardWatcher.memoryLimit`, compared with `<`).
 pub const MAX_CLIP_IMAGE: usize = 64 << 20;

@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::regions::resolve_regions;
+use super::regions::resolve_region_table;
 use super::rule_image::{color_distance, hsl, Hsl, RuleImage, RuleRect, BLOB_CONTRAST};
 use super::rule_pack::{range_contains, ColorRange, Detect, RegionRef, RulePack, SignalSpec};
 use crate::geometry::{swift_max, swift_min};
@@ -599,7 +599,7 @@ impl SignalEvaluator {
                 }
             }
             if !keys.is_empty() {
-                for (k, v) in resolve_regions(&p_regions, image) {
+                for (k, v) in resolve_region_table(&p_regions, image) {
                     if k.starts_with(INLINE_PREFIX) {
                         regions.insert(k, v);
                     }

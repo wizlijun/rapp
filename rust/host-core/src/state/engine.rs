@@ -504,7 +504,7 @@ impl StateEngine {
             .filter(|&i| !has_key(&self.base_pack.variants[i], &region_keys) && self.applies(i, None, img, theme, newest))
             .collect();
         let (mut p, mut idx) = self.pack_for(&early);
-        let mut regions = resolve_regions(&p.regions, img);
+        let mut regions = resolve_regions(&p, img);
         if self.base_pack.variants.iter().any(|v| has_key(v, &region_keys)) {
             let names: BTreeSet<String> = regions.keys().cloned().collect();
             let all: Vec<usize> = (0..count)
@@ -516,7 +516,7 @@ impl StateEngine {
                 .collect();
             if all != early {
                 (p, idx) = self.pack_for(&all);
-                regions = resolve_regions(&p.regions, img);
+                regions = resolve_regions(&p, img);
             }
         }
         Selection { pack: p, idx, regions }

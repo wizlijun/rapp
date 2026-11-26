@@ -662,7 +662,7 @@ fn rule_regions() {
         let got = match func(i) {
             "resolve" => {
                 let p = known_pack(&s(&i["pack"]));
-                let r = resolve_regions(&p.regions, image(&i["image"]));
+                let r = resolve_regions(&p, image(&i["image"]));
                 obj(&r, |rs| Value::Array(rs.iter().map(rect).collect()))
             }
             "sample" => {
@@ -742,7 +742,7 @@ fn evaluate(i: &Value) -> Value {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.as_array().unwrap().iter().map(quad).collect()))
                 .collect(),
-            None => resolve_regions(&pack.regions, image(&st["regions"]["resolve"])),
+            None => resolve_regions(&pack, image(&st["regions"]["resolve"])),
         };
         let img = if st["image"].is_null() { None } else { Some(image(&st["image"])) };
         let r = ev.evaluate(&pack, &regions, img, num(&st["now"]));

@@ -6,12 +6,22 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use super::rule_image::{color_distance, RuleImage, RuleRect, BLOB_CONTRAST, REGION_CONTRAST};
-use super::rule_pack::{range_contains, BlobSpec, BoxSpec, EdgeSpec, Length, Pick, RegionRef, RegionSpec, Side, StripSpec};
+use super::rule_pack::{
+    range_contains, BlobSpec, BoxSpec, EdgeSpec, Length, Pick, RegionRef, RegionSpec, RulePack, Side, StripSpec,
+};
 use crate::geometry::{swift_max, swift_min};
 
 /// Every region the pack names, resolved; a missing region has no entry. Single regions have
-/// one rect.
-pub fn resolve_regions(
+/// one rect. Swift's signature: `resolveRegions(_ pack: RulePack, in image: RuleImage)`
+/// (Regions.swift:5).
+pub fn resolve_regions(pack: &RulePack, image: &RuleImage) -> BTreeMap<String, Vec<RuleRect>> {
+    resolve_region_table(&pack.regions, image)
+}
+
+/// The same walk over a bare region table. The resolver reads nothing of the pack but its
+/// regions; `SignalEvaluator::evaluate` uses this to add its inline regions without cloning the
+/// whole pack (Swift copies the pack, Detectors.swift:270-272).
+pub(crate) fn resolve_region_table(
     regions: &BTreeMap<String, RegionSpec>,
     image: &RuleImage,
 ) -> BTreeMap<String, Vec<RuleRect>> {

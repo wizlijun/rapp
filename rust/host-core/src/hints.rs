@@ -135,7 +135,7 @@ pub fn is_secure_field(_role: Option<&str>, subrole: Option<&str>) -> bool {
 /// `appOpened` starts from it. Hovering, dragging and scrolling never do (`Message.opensThings`).
 pub fn opens_things(message: &Message) -> bool {
     match message {
-        Message::Text { .. } => true,
+        Message::Text(_) => true,
         Message::Key { down, .. } => *down,
         Message::Mouse { kind, .. } => matches!(kind, MouseKind::Down | MouseKind::Up),
         _ => false,
