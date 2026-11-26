@@ -710,6 +710,7 @@ class MainState extends ChangeNotifier {
       markingInput = null;
       _followCurrentKey();
     }
+    _noteLastTerm();
     if (embeds) _entries = _mapEntries();
     // The session list has nothing to show once the last session is gone.
     if (corner == Corner.sessions && _entries.isEmpty) corner = null;
@@ -2894,10 +2895,69 @@ class MainState extends ChangeNotifier {
       _termsNewTargetOf(id) is NewText &&
       _unopenedTerms(id).isNotEmpty;
 
-  /// A 常用 tile for the 终端 entry creates a new terminal (the tile says 「新建」); before that, its first
-  /// tap after launch reopens the terminals still running (「打开」).
-  bool favoriteCreates(AppRef f) =>
-      f.bundle == termsEntry && !_restoresTerms(f.device) && _termsNewTargetOf(f.device) is NewText;
+  /// The saved text terminals of [id] (from its local host row); empty on an old device.
+  List<TermSaved> savedTerms(String id) =>
+      hub?.termLists[id]?.hosts.where((h) => h.host == null).firstOrNull?.saved ?? const [];
+
+  /// What a 常用 tile says: the 终端 entry says 「打开」 on its first tap after launch while text terminals are still
+  /// running; else 「恢复」 when the device has no live text terminal but some saved one from before it started; else
+  /// 「新建」 when it creates a new terminal; every other tile says 「打开」.
+  String favoriteVerb(AppRef f) {
+    if (f.bundle != termsEntry || _restoresTerms(f.device)) return '打开';
+    final live = (hub?.termLists[f.device]?.terms ?? const <TermRow>[]).any((r) => !r.dead && parseTermId(r.id)?.backend == 'pty');
+    if (!live && savedTerms(f.device).any((x) => x.boot)) return '恢复';
+    return _termsNewTargetOf(f.device) is NewText ? '新建' : '打开';
+  }
+
+  /// The terminal app a new or restored text terminal of [id] opens in; throws when the device has none.
+  String _launcherOf(String id) {
+    final launchers = hub?.termLists[id]?.hosts.where((h) => h.host == null).firstOrNull?.launchers ?? const <String>[];
+    if (launchers.isEmpty) throw StateError('这台设备没有可用的终端窗口');
+    return prefs.termAppFor(id, launchers);
+  }
+
+  /// 恢复所选: reopens the saved terminals [keys] of [id] (always explicit keys), the first one current. One hint with
+  /// the count; a failure is the hint and the list refreshes, so what was not restored stays listed.
+  Future<void> restoreSaved(String device, List<String> keys) async {
+    if (!hubUsable || keys.isEmpty) return;
+    // The terminals that came up are opened, the first one selected; also when the restore stopped part way.
+    void stage(List<String> ids) {
+      for (final (i, id) in ids.indexed) {
+        final row = hub?.termLists[device]?.terms.where((r) => r.id == id).firstOrNull;
+        unawaited(_open(device, id, row == null ? '已结束' : termDisplayName(row.shown, row.host), select: i == 0, quiet: true));
+      }
+    }
+
+    try {
+      final ids = await hub!.restoreTerms(device, keys, app: _launcherOf(device));
+      if (_disposed) return;
+      stage(ids);
+      hint = '已恢复 ${ids.length} 个终端';
+    } catch (e) {
+      if (_disposed) return;
+      hint = newTermWords(e);
+      try {
+        await hub?.terms(device);
+      } catch (_) {}
+      if (e is RestoreStopped && !_disposed) stage(e.ids);
+    }
+    if (!_disposed) notifyListeners();
+  }
+
+  /// 全部清掉: forgets the saved terminals [keys] of [device].
+  Future<void> forgetSaved(String device, List<String> keys) async {
+    if (!hubUsable || keys.isEmpty) return;
+    try {
+      await hub!.forgetTerms(device, keys);
+    } catch (e) {
+      if (_disposed) return;
+      hint = newTermWords(e);
+      notifyListeners();
+    }
+  }
+
+  /// 新建 from the restore list: the same new terminal the 常用 · 终端 tile makes.
+  Future<void> newTermFromRestore(String device) => _openTerms(device, target: _termsNewTargetOf(device));
 
   /// Taps a 常用 tile: the 终端 entry first reopens the running text terminals, then makes a new terminal
   /// each tap when it can; anything else opens or switches.
@@ -2964,7 +3024,7 @@ class MainState extends ChangeNotifier {
           return;
         }
         try {
-          await openText(id, shell: shell);
+          await openText(id, shell: shell, from: newTermSource(id));
         } catch (e) {
           if (_disposed) return;
           hint = newTermWords(e);
@@ -2994,9 +3054,7 @@ class MainState extends ChangeNotifier {
   /// refusal is thrown with the hub's words. [from]: the terminal it opens beside (its directory, shell and window).
   Future<void> openText(String id, {String? shell, String? from}) async {
     if (!hubUsable) return;
-    final launchers = hub?.termLists[id]?.hosts.where((h) => h.host == null).firstOrNull?.launchers ?? const <String>[];
-    if (launchers.isEmpty) throw StateError('这台设备没有可用的终端窗口');
-    final app = prefs.termAppFor(id, launchers);
+    final app = _launcherOf(id);
     final term = await hub!.openTerm(id, shell: shell, app: app, from: from);
     try {
       await hub?.terms(id);
@@ -3004,6 +3062,29 @@ class MainState extends ChangeNotifier {
     final row = hub?.termLists[id]?.terms.where((r) => r.id == term).firstOrNull;
     final shown = row == null ? '已结束' : termDisplayName(row.shown, row.host);
     unawaited(openOrSwitch(id, term, shown));
+  }
+
+  /// The last text terminal each device showed on the stage this run (device id to term id).
+  final Map<String, String> _lastTerm = {};
+
+  /// Every change of the current session ends in [notifyListeners], which calls this: a text terminal on the stage
+  /// becomes its device's last one.
+  void _noteLastTerm() {
+    final r = current;
+    if (r != null && isTermApp(r.app)) _lastTerm[r.id] = r.app;
+  }
+
+  bool _termListed(String device, String term) =>
+      hub?.termLists[device]?.terms.any((t) => t.id == term) ?? false;
+
+  /// Where a 新建 on [device] starts: the terminal on the stage when it is one of the device's listed text
+  /// terminals, else the last one this run showed there (still listed), else 'last' (serve's own pick).
+  String newTermSource(String device) {
+    final r = current;
+    if (r != null && r.id == device && isTermApp(r.app) && _termListed(device, r.app)) return r.app;
+    final last = _lastTerm[device];
+    if (last != null && _termListed(device, last)) return last;
+    return 'last';
   }
 
   Future<void> _newTerms = Future<void>.value();

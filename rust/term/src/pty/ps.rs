@@ -26,6 +26,7 @@ const BEL_LEN: usize = 1;
 const ST_LEN: usize = 2; // ESC \
 const MAX_BUFFER: usize = MAX_SEQUENCE - OSC_INTRO - BEL_LEN;
 const P7501: &[u8] = b"7501;";
+const P7502: &[u8] = b"7502;";
 const P133A: &[u8] = b"133;A";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +39,8 @@ pub enum Event {
     Prompt,
     /// `OSC 0|1|2 ; text`: slot is the OSC number.
     Title { slot: u8, text: String },
+    /// `OSC 7502`: a shell hook's report.
+    Shell(super::shell::Report),
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +59,7 @@ enum Kind {
     #[default]
     Pending,
     Is7501,
+    Is7502,
     Prompt,
     Title(u8),
     Skip,
@@ -123,7 +127,7 @@ impl Scanner {
     fn osc_byte(&mut self, c: u8) {
         match self.kind {
             Kind::Skip | Kind::Prompt => return,
-            Kind::Is7501 | Kind::Title(_) => {
+            Kind::Is7501 | Kind::Is7502 | Kind::Title(_) => {
                 if self.buf.len() >= MAX_BUFFER {
                     self.kind = Kind::Skip;
                     self.buf.clear();
@@ -138,12 +142,14 @@ impl Scanner {
         let b = self.buf.as_slice();
         if b == P7501 {
             self.kind = Kind::Is7501;
+        } else if b == P7502 {
+            self.kind = Kind::Is7502;
         } else if b == b"133;A;" {
             self.kind = Kind::Prompt;
         } else if matches!(b, b"0;" | b"1;" | b"2;") {
             self.kind = Kind::Title(b[0] - b'0');
             self.buf.clear();
-        } else if !(matches!(b, b"0" | b"1" | b"2") || P7501.starts_with(b) || P133A.starts_with(b)) {
+        } else if !(matches!(b, b"0" | b"1" | b"2") || P7501.starts_with(b) || P7502.starts_with(b) || P133A.starts_with(b)) {
             self.kind = Kind::Skip;
         }
     }
@@ -162,6 +168,14 @@ impl Scanner {
                     emit(Event::Probe);
                 } else {
                     emit(Event::Report(String::from_utf8_lossy(body).into_owned()));
+                }
+            }
+            Kind::Is7502 => {
+                if OSC_INTRO + self.buf.len() + term_len > MAX_SEQUENCE {
+                    return;
+                }
+                if let Some(r) = super::shell::parse_report(&self.buf[P7502.len()..]) {
+                    emit(Event::Shell(r));
                 }
             }
             Kind::Title(slot) => emit(Event::Title {
@@ -567,7 +581,7 @@ impl Tracker {
                 Event::Prompt => {
                     self.records.drop_transient();
                 }
-                Event::Title { .. } => {}
+                Event::Title { .. } | Event::Shell(_) => {}
             }
             let cur = self.records.deciding().map(|r| r.state);
             if matches!(prev, Some(State::Working | State::Blocked))
@@ -631,6 +645,29 @@ impl Tracker {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn report_split_across_chunks() {
+        use super::super::shell::Report;
+        let mut sc = Scanner::default();
+        let mut got = Vec::new();
+        sc.feed(b"\x1b]7502;run;Y2xh", |e| got.push(e));
+        sc.feed(b"dWRl\x07", |e| got.push(e));
+        assert_eq!(got, [Event::Shell(Report::Run("claude".into()))]);
+    }
+
+    #[test]
+    fn overlong_report_is_skipped() {
+        let mut sc = Scanner::default();
+        let mut got = Vec::new();
+        let mut big = b"\x1b]7502;run;".to_vec();
+        big.extend(std::iter::repeat_n(b'A', MAX_SEQUENCE + 10));
+        big.push(0x07);
+        sc.feed(&big, |e| got.push(e));
+        assert!(got.is_empty());
+        sc.feed(b"\x1b]133;A\x07", |e| got.push(e));
+        assert_eq!(got, [Event::Prompt]);
+    }
+
     use super::*;
 
     fn b64(s: &str) -> String {
@@ -732,6 +769,7 @@ mod tests {
                     Event::Prompt => "prompt".to_string(),
                     Event::Report(b) => format!("report:{b}"),
                     Event::Title { slot, text } => format!("title{slot}:{text}"),
+                    Event::Shell(_) => "shell".to_string(),
                 })
             });
         }
@@ -933,7 +971,7 @@ mod tests {
         for c in chunks(name) {
             sc.feed(&c, |e| match e {
                 Event::Probe => out.push("probe".to_string()),
-                Event::Title { .. } => {}
+                Event::Title { .. } | Event::Shell(_) => {}
                 Event::Prompt => {
                     recs.drop_transient();
                     out.push("prompt".to_string());
@@ -970,7 +1008,7 @@ mod tests {
                     recs.apply(m.clone());
                     f(&m, &recs);
                 }
-                Event::Probe | Event::Title { .. } => {}
+                Event::Probe | Event::Title { .. } | Event::Shell(_) => {}
             });
         }
         recs

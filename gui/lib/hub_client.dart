@@ -63,6 +63,12 @@ class HubException implements Exception {
   String toString() => message;
 }
 
+/// A restore that stopped part way: [ids] opened before [message] stopped it.
+class RestoreStopped extends HubException {
+  RestoreStopped(super.message, this.ids);
+  final List<String> ids;
+}
+
 class HubHost {
   const HubHost(this.id, this.name, {this.lan = const [], this.route, this.os});
   final String id;
@@ -188,14 +194,28 @@ TermPs? termPs(Object? v) {
 /// The place sessions are listed from: the device itself (`host` null). An old device may also list SSH hosts; those
 /// rows are dropped.
 class TermHost {
-  const TermHost(this.host, {this.launchers = const [], this.shells});
+  const TermHost(this.host, {this.launchers = const [], this.shells, this.saved = const []});
   final String? host;
+
+  /// The local host row only: text terminals saved from an earlier run that are not alive now, in the order the
+  /// device sent them. An old device sends none. No directory or command ever comes with them.
+  final List<TermSaved> saved;
 
   /// The local host row only: the terminal apps the device can open a text terminal in.
   final List<String> launchers;
 
   /// The shells the device can open, the default marked; null when the row has no `shells` (an old device).
   final List<TermShell>? shells;
+}
+
+/// A text terminal saved from an earlier run that can be restored; [saved] is Unix seconds, [boot] says it was saved
+/// before the device last started.
+class TermSaved {
+  const TermSaved(this.key, this.name, {this.prog, this.saved = 0, this.boot = false});
+  final String key, name;
+  final String? prog;
+  final int saved;
+  final bool boot;
 }
 
 /// A shell the device can open a text terminal with.
@@ -243,7 +263,12 @@ TermList _termList(Map<String, dynamic> m, String fallbackId) {
                       for (final x in (h['shells'] as List).whereType<Map>())
                         if (x['name'] is String && x['path'] is String) TermShell(x['name'], x['path'], x['default'] == true),
                     ]
-                  : null),
+                  : null,
+              saved: [
+                for (final x in (h['saved'] as List? ?? const []).whereType<Map>())
+                  if (x['key'] is String && x['name'] is String)
+                    TermSaved(x['key'], x['name'], prog: _str(x['prog']), saved: _int(x['saved']), boot: x['boot'] == true),
+              ]),
     ],
   );
 }
@@ -476,6 +501,30 @@ class HubClient extends ChangeNotifier {
   /// Refreshes the device's list afterwards.
   Future<void> endTerm(String id, String term) async {
     await _request({'cmd': 'end_term', 'id': id, 'term': term}, 'term_ended');
+    try {
+      await terms(id);
+    } catch (_) {}
+  }
+
+  /// Reopens the saved text terminals [keys] of device [id] in terminal app [app]; answers the new term ids, in the
+  /// order opened. [keys] must be explicit (an empty list would make the hub wait for one terminal only). The device's
+  /// refusal is thrown with its words. Refreshes the device's list afterwards.
+  Future<List<String>> restoreTerms(String id, List<String> keys, {required String app}) async {
+    try {
+      final m = await _request({'cmd': 'restore_terms', 'id': id, 'keys': keys, 'app': app}, 'terms_restored');
+      final ids = [for (final x in (m['terms'] as List? ?? const [])) '$x'];
+      if (m['error'] case final String e) throw RestoreStopped(e, ids);
+      return ids;
+    } finally {
+      try {
+        await terms(id);
+      } catch (_) {}
+    }
+  }
+
+  /// Forgets the saved text terminals [keys] of device [id] for good. Refreshes the device's list afterwards.
+  Future<void> forgetTerms(String id, List<String> keys) async {
+    await _request({'cmd': 'forget_terms', 'id': id, 'keys': keys}, 'terms_forgotten');
     try {
       await terms(id);
     } catch (_) {}

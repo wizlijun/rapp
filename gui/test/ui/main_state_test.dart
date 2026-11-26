@@ -5904,7 +5904,7 @@ void main() {
       await s.openOrSwitch('111', 'terms:', '终端');
       await pump();
       expect(t.sent.firstWhere((m) => m['cmd'] == 'open_term'),
-          {'cmd': 'open_term', 'id': '111', 'shell': '/bin/zsh', 'app': 'iTerm', 'req': anything});
+          {'cmd': 'open_term', 'id': '111', 'shell': '/bin/zsh', 'app': 'iTerm', 'from': 'last', 'req': anything});
     });
 
     test('opening terms: in text mode opens the latest text terminal', () async {

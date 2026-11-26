@@ -440,7 +440,7 @@ impl Hub {
                 self.net_changed();
                 return Ok(None);
             }
-            Some(c @ ("terms" | "open_term" | "rename_term" | "end_term")) => {
+            Some(c @ ("terms" | "open_term" | "rename_term" | "end_term" | "restore_terms" | "forget_terms")) => {
                 terms::command(self, c, v).await?
             }
             Some(c @ ("set_label" | "reset_label")) => labels::command(self, c, v).await?,

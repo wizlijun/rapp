@@ -882,9 +882,40 @@ void main() {
     await tester.tap(find.byKey(const Key('new-shell-bash')));
     await tester.pumpAndSettle();
     final m = t.sent.firstWhere((m) => m['cmd'] == 'open_term');
-    expect(m, {'cmd': 'open_term', 'id': '111', 'shell': '/bin/bash', 'app': 'iTerm', 'req': anything});
+    expect(m, {'cmd': 'open_term', 'id': '111', 'shell': '/bin/bash', 'app': 'iTerm', 'from': 'last', 'req': anything});
     expect(t.sent.map((m) => m['cmd']), containsAllInOrder(['open_term', 'terms', 'open']));
     expect(t.sent.lastWhere((m) => m['cmd'] == 'open')['app'], 'term:pty:c');
+  });
+
+  testWidgets('devices_row_shows_count_and_opens_dialog', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    await emitTerms(tester, [], hosts: [
+      {
+        'host': null,
+        'launchers': ['Terminal'],
+        'saved': [
+          {'key': 'a', 'name': 'rapp', 'prog': 'claude', 'saved': now() - 7200, 'boot': true},
+          {'key': 'b', 'name': 'train', 'saved': now() - 60, 'boot': false},
+        ],
+      }
+    ]);
+    expect(find.text('上次没关的 2 个终端'), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const Key('saved-terms-restore')));
+    await tester.tap(find.byKey(const Key('saved-terms-restore')));
+    await tester.pumpAndSettle();
+    expect(find.text('恢复上次的终端 · mini'), findsOneWidget);
+    expect(find.text('rapp  claude  2 小时前'), findsOneWidget);
+    expect(find.text('train  —  1 分钟前'), findsOneWidget);
+  });
+
+  testWidgets('no_saved_no_row', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    await showHost(tester, ['Terminal']);
+    expect(find.byKey(const Key('saved-terms-label')), findsNothing);
+    expect(find.byKey(const Key('saved-terms-restore')), findsNothing);
+    expect(find.textContaining('上次没关的'), findsNothing);
   });
 
   testWidgets('the 终端 app row shows only with two launchers', (tester) async {
@@ -899,6 +930,23 @@ void main() {
     expect(find.byKey(const Key('term-app-iTerm')), findsOneWidget);
   });
 
+  testWidgets('new_term_from_devices_tab_keeps_button_shell', (tester) async {
+    termRows = [{'id': 'term:pty:k', 'name': 'k', 'command': 'zsh', 'activity': 0}];
+    await pumpTab(tester);
+    await selectMini(tester);
+    await emitTerms(tester, termRows, hosts: [
+      {'host': null, 'launchers': ['Terminal'], 'shells': shellsZshBash}
+    ]);
+    await s.openOrSwitch('111', 'term:pty:k', 'k');
+    await tester.pump();
+    t.sent.clear();
+    await tester.ensureVisible(find.byKey(const Key('new-shell-bash')));
+    await tester.tap(find.byKey(const Key('new-shell-bash')));
+    await tester.pumpAndSettle();
+    final m = t.sent.firstWhere((m) => m['cmd'] == 'open_term');
+    expect(m, {'cmd': 'open_term', 'id': '111', 'shell': '/bin/bash', 'app': 'Terminal', 'from': 'term:pty:k', 'req': anything});
+  });
+
   testWidgets('an old device gets one 默认 shell button', (tester) async {
     await pumpTab(tester);
     await selectMini(tester);
@@ -908,7 +956,7 @@ void main() {
     await tester.tap(find.byKey(const Key('new-shell-default')));
     await tester.pumpAndSettle();
     final m = t.sent.firstWhere((m) => m['cmd'] == 'open_term');
-    expect(m, {'cmd': 'open_term', 'id': '111', 'app': 'Terminal', 'req': anything});
+    expect(m, {'cmd': 'open_term', 'id': '111', 'app': 'Terminal', 'from': 'last', 'req': anything});
   });
 
   testWidgets('no new row without launchers', (tester) async {

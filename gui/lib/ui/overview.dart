@@ -15,6 +15,7 @@ import 'overview_model.dart';
 import 'prefs.dart' show FirstLayer;
 import 'projects.dart' show orderedProjects;
 import 'session_block.dart';
+import 'term_restore_dialog.dart' show showTermRestore;
 import 'workspace_store.dart';
 import 'tokens.dart';
 
@@ -354,8 +355,10 @@ class _Column extends StatelessWidget {
               FavoriteBlock(
                 favorite: f,
                 label: state.labelOf(f),
-                verb: state.favoriteCreates(f) ? '新建' : '打开',
-                onTap: state.hubUsable && !col.offline ? () => state.openFavorite(f) : null,
+                verb: state.favoriteVerb(f),
+                onTap: state.hubUsable && !col.offline
+                    ? () => state.favoriteVerb(f) == '恢复' ? showTermRestore(context, state, f.device) : state.openFavorite(f)
+                    : null,
               ),
             ],
           ],
