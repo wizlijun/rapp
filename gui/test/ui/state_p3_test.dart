@@ -9,8 +9,10 @@ import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/state/state_sync.dart';
 import 'package:rapp/ui/app_profile_store.dart';
+import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
+import 'package:rapp/ui/session_model.dart';
 
 import '../fakes.dart';
 
@@ -280,6 +282,145 @@ void main() {
           ..push();
         expect(st.queueRows.where((r) => r.eid == null && r.inferred), hasLength(1));
       }, sync: sync);
+    });
+  });
+
+  group('rapp-state P3 desks', () {
+    test('the desk follows opens and closes', () {
+      final sync = FakeStateSync(tmp.path);
+      env((a, t, port, st, sid) {
+        final x = {'id': '111', 'fp': 'devA', 'app': codex, 'name': 'ChatGPT'};
+        final y = {'id': '111', 'fp': 'devA', 'app': 'com.y', 'name': 'Y'};
+        expect(sync.out.desksSet.first, isEmpty); // told once at start, empty too
+        expect(sync.out.desksSet.last, [x]);
+        st.openOrSwitch('111', 'com.y', 'Y');
+        a.flushMicrotasks();
+        expect(sync.out.desksSet.last, [x, y]);
+        final ySid = st.recordFor('111/com.y')!.sid!;
+        port.emit(ReadyEvent(ySid, 'Y'));
+        expect(st.endSession('111/com.y'), isTrue);
+        port.emit(ClosedEvent(ySid, 'closed'));
+        a.flushMicrotasks();
+        expect(sync.out.desksSet.last, [x]);
+        expect(st.endSession(key), isTrue);
+        port.emit(ClosedEvent(sid, 'closed'));
+        a.flushMicrotasks();
+        expect(sync.out.desksSet.last, isEmpty);
+        // the same list is never sent twice in a row
+        expect(sync.out.desksSet, [<Object?>[], [x], [x, y], [x], <Object?>[]]);
+      }, sync: sync);
+    });
+
+    test('a device whose fingerprint is unknown goes up with its id only', () {
+      final sync = FakeStateSync(tmp.path);
+      env((a, t, port, st, sid) {
+        expect(sync.out.desksSet.last, [
+          {'id': '111', 'app': codex, 'name': 'ChatGPT'},
+        ]);
+      }, sync: sync, fp: null);
+    });
+
+    test("elsewhere lists other desks' sessions not open here", () {
+      final sync = FakeStateSync(tmp.path)..ids['devA'] = '111';
+      env((a, t, port, st, sid) {
+        sync
+          ..status = StateStatus.connected
+          ..desks = [
+            {'fp': 'appA', 'device': 'Mac', 'at': 300, 'sessions': [
+              {'id': '111', 'app': 'com.z', 'name': 'Z'},
+            ]},
+            {'fp': 'appB', 'device': 'Mac', 'at': 200, 'sessions': [
+              {'id': '111', 'app': 'com.x', 'name': 'X'},
+              {'id': '999999999', 'app': 'com.y'},
+            ]},
+            {'fp': 'appC', 'device': 'iPad', 'at': 100, 'sessions': [
+              {'fp': 'devA', 'app': 'com.x', 'name': 'X'},
+            ]},
+          ]
+          ..push();
+        final e = st.elsewhereEntries.single;
+        expect((e.key, e.appName, e.device, e.openOn), ('111/com.x', 'X', 'mini', '在 Mac、iPad 上开着'));
+        expect((e.lamp, e.standby, e.sid), (Lamp.notOpened, Standby.open, null));
+        // nothing opened by listing it
+        expect(st.recordFor('111/com.x'), isNull);
+      }, sync: sync);
+    });
+
+    test('elsewhere skips what is open here and offline devices', () {
+      final sync = FakeStateSync(tmp.path);
+      env((a, t, port, st, sid) {
+        t.emit({
+          'event': 'hosts',
+          'me': 'appA',
+          'name': 'Mac',
+          'hosts': [
+            {'id': '111', 'name': 'mini', 'fp': 'devA'},
+            {'id': '222', 'name': 'far'},
+            {'id': '333', 'name': 'pi'},
+          ],
+        });
+        final reply = t.onSend;
+        t.onSend = (m) {
+          if (m['cmd'] == 'apps' && m['id'] == '222') {
+            t.emit({'event': 'error', 'req': m['req'], 'error': 'relay unreachable: timed out'});
+          } else {
+            reply?.call(m);
+          }
+        };
+        st.probe('222');
+        a.flushMicrotasks();
+        expect(st.deviceOffline('222'), isTrue);
+        st.hub!.termLists['111'] = TermList('111', terms: const [
+          TermRow('term:pty:live', 'live', 'zsh', null, 1, 0, 0, false, false),
+          TermRow('term:pty:dead', 'dead', 'zsh', null, 1, 0, 0, true, false),
+        ]);
+        sync
+          ..status = StateStatus.connected
+          ..desks = [
+            {'fp': 'appB', 'device': 'Mac', 'at': 200, 'sessions': [
+              {'id': '111', 'app': codex, 'name': 'ChatGPT'}, // open here
+              {'id': '222', 'app': 'com.x', 'name': 'X'}, // device offline
+              {'id': '111', 'app': 'term:pty:dead', 'name': 'dead'}, // ended
+              {'id': '111', 'app': 'term:pty:gone', 'name': 'gone'}, // not in the list that came
+              {'id': '111', 'app': 'term:pty:live', 'name': 'old name'},
+              {'id': '111', 'app': 'com.w'},
+              {'id': '333', 'app': 'term:pty:a', 'name': 'A'}, // its list has not come
+            ]},
+            {'fp': '0123456789abcdef', 'at': 400, 'sessions': [
+              {'id': '111', 'app': 'com.v', 'name': 'V'},
+            ]},
+          ]
+          ..push();
+        expect(st.elsewhereEntries.map((e) => (e.key, e.appName, e.openOn)), [
+          ('111/com.v', 'V', '在 01234567 上开着'),
+          ('111/term:pty:live', 'live', '在 Mac 上开着'),
+          ('111/com.w', 'com.w', '在 Mac 上开着'),
+          ('333/term:pty:a', 'A', '在 Mac 上开着'),
+        ]);
+      }, sync: sync);
+    });
+
+    test('elsewhere is empty without the service', () {
+      final desks = [
+        {'fp': 'appB', 'device': 'Mac', 'at': 200, 'sessions': [
+          {'id': '111', 'app': 'com.x', 'name': 'X'},
+        ]},
+      ];
+      final sync = FakeStateSync(tmp.path);
+      env((a, t, port, st, sid) {
+        sync
+          ..status = StateStatus.connected
+          ..desks = desks
+          ..push();
+        expect(st.elsewhereEntries, hasLength(1));
+        sync
+          ..status = StateStatus.unreachable
+          ..push();
+        expect(st.elsewhereEntries, isEmpty);
+      }, sync: sync);
+      env((a, t, port, st, sid) {
+        expect(st.elsewhereEntries, isEmpty);
+      }, noSync: true);
     });
   });
 }

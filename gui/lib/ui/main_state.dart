@@ -247,7 +247,7 @@ class MainState extends ChangeNotifier {
     this.profiles.addListener(_onProfiles);
     positions.dropExcept({for (final p in workspace.projects) p.id});
     if (prefs.first == FirstLayer.project) grouping = Grouping.project;
-    _entries = _mapEntries();
+    _remap();
     _trackAttention();
     refreshDevices();
     _restorePins();
@@ -345,7 +345,7 @@ class MainState extends ChangeNotifier {
       _syncHidden(rs);
     }
     _applyFps();
-    _entries = _mapEntries();
+    _remap();
     unawaited(history.refresh());
     final old = oldRoot.endsWith('/') ? oldRoot : '$oldRoot/';
     for (final e in resources.clips) {
@@ -1131,7 +1131,7 @@ class MainState extends ChangeNotifier {
     }
     _markCurrentSeen();
     _noteLastTerm();
-    if (embeds) _entries = _mapEntries();
+    if (embeds) _remap();
     // The session list has nothing to show once the last session is gone.
     if (corner == Corner.sessions && _entries.isEmpty) corner = null;
     _trackAttention();
@@ -1816,6 +1816,74 @@ class MainState extends ChangeNotifier {
     return out;
   }
 
+  /// The 别处开着 cards: sessions other apps' desks have open that this app lists nowhere, one card per session with
+  /// [SessionEntry.openOn] naming the apps' devices, newest desk first. Not a device this app does not know or that is
+  /// off line (it could not open there), nor a terminal its device's list says is gone. Only while the queue follows
+  /// the state service; nothing else.
+  List<SessionEntry> get elsewhereEntries {
+    final h = hub;
+    final sync = stateSync;
+    if (h == null || sync == null || !_fromService) return const [];
+    final me = h.meFp;
+    final listedKeys = {for (final e in listed) e.key};
+    final desks = [for (final d in sync.desks) if (d['fp'] is String && d['fp'] != me) d];
+    int at(Map<String, Object?> d) => d['at'] is num ? (d['at'] as num).toInt() : 0;
+    // Stable: desks of the same time stay in the service's order.
+    final order = [for (var i = 0; i < desks.length; i++) i]
+      ..sort((a, b) {
+        final c = at(desks[b]).compareTo(at(desks[a]));
+        return c != 0 ? c : a.compareTo(b);
+      });
+    final where = <String, List<String>>{};
+    final firsts = <String, ({String id, String app, String name})>{};
+    for (final i in order) {
+      final d = desks[i];
+      final fp = d['fp'] as String;
+      final device = _text(d['device']) ?? (fp.length > 8 ? fp.substring(0, 8) : fp);
+      final sessions = d['sessions'];
+      if (sessions is! List) continue;
+      for (final s in sessions) {
+        if (s is! Map) continue;
+        final app = s['app'];
+        if (app is! String || app.isEmpty || app == termsEntry || isDesktopScreen(app)) continue;
+        final sfp = s['fp'];
+        final id = _text(s['id']) ?? (sfp is String ? sync.idOf(sfp) : null);
+        if (id == null || !h.hosts.any((x) => x.id == id) || deviceOffline(id)) continue;
+        final key = '$id/$app';
+        if (listedKeys.contains(key)) continue;
+        var name = _text(s['name']) ?? appName(id, app);
+        if (isTermApp(app)) {
+          final list = h.termLists[id];
+          if (list != null) {
+            final row = list.terms.where((r) => r.id == app).firstOrNull;
+            if (row == null || row.dead) continue;
+            name = termDisplayName(row.shown, row.host);
+          }
+        }
+        final names = where.putIfAbsent(key, () => []);
+        if (!names.contains(device)) names.add(device);
+        firsts.putIfAbsent(key, () => (id: id, app: app, name: name));
+      }
+    }
+    return [
+      for (final MapEntry(:key, value: (:id, :app, :name)) in firsts.entries)
+        SessionEntry(
+          sid: null,
+          id: id,
+          app: app,
+          appName: name,
+          device: deviceName(id),
+          path: '',
+          lamp: Lamp.notOpened,
+          ps: _termPs(id, app),
+          fg: termFg(id, app),
+          label: labelFor(id, app),
+          standby: Standby.open,
+          openOn: '在 ${where[key]!.join('、')} 上开着',
+        ),
+    ];
+  }
+
   /// A tap on a card in [standby]: 「打开」 opens the session; 「启动」 opens a new terminal on its device that takes the
   /// gone one's label (in the device's home: where it was is not kept yet), then goes to it.
   Future<void> openStandby(SessionEntry e) async {
@@ -1972,6 +2040,34 @@ class MainState extends ChangeNotifier {
     );
   }
 
+  /// Maps the session rows again, and tells the state service this app's desk when it changed.
+  void _remap() {
+    _entries = _mapEntries();
+    _syncDesk();
+  }
+
+  /// The desk as last told to the state service (JSON); null before the first, so the first is always told.
+  String? _deskTold;
+
+  void _syncDesk() {
+    final out = stateSync?.out;
+    if (out == null) return;
+    final desk = deskSessions;
+    final said = jsonEncode(desk);
+    if (said == _deskTold) return;
+    _deskTold = said;
+    out.setDesk(desk);
+  }
+
+  /// The sessions this app has open, as its desk goes up to the state service: one per record in any phase (a
+  /// disconnected one too), not the terminal list; the device's fingerprint when known. By key.
+  List<Map<String, Object?>> get deskSessions {
+    final rs = [for (final r in _records.values) if (r.app != termsEntry) r]..sort((a, b) => a.key.compareTo(b.key));
+    return [
+      for (final r in rs) {'id': r.id, 'fp': ?_hostFp(r.id), 'app': r.app, 'name': r.appName},
+    ];
+  }
+
   List<SessionEntry> _mapEntries() {
     if (embeds) return [for (final r in _records.values) if (!isDesktopScreen(r.app)) _entryOf(r)];
     final h = hub;
@@ -2035,7 +2131,7 @@ class MainState extends ChangeNotifier {
     final old = _entries;
     // Only open sessions: a standby card is never the one to move to.
     final oldGroups = _openGroups;
-    _entries = _mapEntries();
+    _remap();
     final newKeys = {for (final e in _entries) e.key};
 
     final h = hub!;
@@ -2885,7 +2981,7 @@ class MainState extends ChangeNotifier {
         if (sid != null) ?_starts.remove(sid),
     });
     _records.remove(r.key);
-    _entries = _mapEntries();
+    _remap();
     if (currentKey == r.key) {
       currentKey = isDesktopScreen(r.app) && _records.containsKey('${r.id}/desktop:')
           ? '${r.id}/desktop:'
@@ -3863,7 +3959,7 @@ class MainState extends ChangeNotifier {
       fg: termFg(id, app),
       label: labelFor(id, app),
     );
-    _entries = _mapEntries();
+    _remap();
     final before = currentKey;
     if (select) {
       currentKey = key;
@@ -3882,14 +3978,14 @@ class MainState extends ChangeNotifier {
       _pending.remove(key);
       final missing = missingFromError('$e');
       hint = missing == null ? disconnectWord('$e') : remoteHint(deviceName(id), missing);
-      _entries = _mapEntries();
+      _remap();
       // Back to what was current before, if it is still open. Not selected by this open (全部打开
       // stopped on it): nothing to go back to that is known.
       if (currentKey == key) {
         currentKey = select && _entries.any((e) => e.key == before) ? before : null;
       }
     }
-    _entries = _mapEntries();
+    _remap();
     notifyListeners();
   }
 
@@ -4387,7 +4483,7 @@ class MainState extends ChangeNotifier {
         }
       }
       _desktopDisplays[r.id] = screens;
-      _entries = _mapEntries();
+      _remap();
       notifyListeners();
     } catch (_) {
       // A failed probe must not look like all displays were unplugged. Retry on the next tick.
@@ -4412,7 +4508,7 @@ class MainState extends ChangeNotifier {
     } catch (e) {
       _setOnline(id, false, error: '$e');
     }
-    _entries = _mapEntries();
+    _remap();
     notifyListeners();
   }
 
@@ -4424,7 +4520,7 @@ class MainState extends ChangeNotifier {
     } catch (e) {
       hint = disconnectWord('$e');
     }
-    _entries = _mapEntries();
+    _remap();
     notifyListeners();
     probeAll();
   }
@@ -4456,7 +4552,7 @@ class MainState extends ChangeNotifier {
     } catch (e) {
       hint = disconnectWord('$e');
     }
-    _entries = _mapEntries();
+    _remap();
     notifyListeners();
   }
 

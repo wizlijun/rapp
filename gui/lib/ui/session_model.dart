@@ -29,7 +29,11 @@ class SessionEntry {
     this.fg,
     this.label,
     this.standby,
+    this.openOn,
   });
+
+  /// Where other apps have it open, `在 <设备名> 上开着`: a 别处开着 card; null for every other card.
+  final String? openOn;
 
   /// The title and note the user gave this session on its device; null: none (or the device predates labels).
   final SessionLabel? label;
