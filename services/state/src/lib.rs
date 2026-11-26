@@ -1,6 +1,8 @@
 //! rapp-state: a headless state-queue service. Listens on 127.0.0.1 only.
 
 mod http;
+pub mod event;
+pub mod store;
 
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
