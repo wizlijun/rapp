@@ -1,6 +1,6 @@
 # Windows A 段（地基）草稿笔记
 
-分支 `feat/windows-foundation`（worktree `.worktrees/windows-foundation`），基于 main `7ed6c7e4`。计划：`docs/superpowers/plans/2026-11-26-rapp-windows-a-foundation.md`；规格：`docs/superpowers/specs/2026-11-26-rapp-windows-design.md`。
+分支 `feat/windows-foundation`（worktree `.worktrees/windows-foundation`），基于 main `7ed6c7e4`；2026-11-27 把 main `c1448855` 合了进来（`a8838b84`，见 §7）。计划：`docs/superpowers/plans/2026-11-26-rapp-windows-a-foundation.md`；规格：`docs/superpowers/specs/2026-11-26-rapp-windows-design.md`。
 
 **这里的代码一行都没编译过，一个测试都没跑过。** 写的人在 Mac 上，规定只写不编。每个提交标题都带“（草稿，未编译未验证）”。下一个人负责编译、验证、调试；先看 §6。
 
@@ -33,6 +33,8 @@
 - `Cargo.lock` 没重新生成（规定不碰）。`rapp-net` 新加了 `windows-sys`、`socket2` 两个 Windows 目标依赖，两个新 crate 进了 workspace，所以第一次 `cargo` 就会改它；`--locked` 会失败。
 
 ### `CLAUDE.md` 建议的四处改动（计划 Task 1 Step 1，原文照抄；要先问用户）
+
+**2026-11-27：这四处已经在 main 上了**（`7fdeb32d`，合并 `bf79f733`），合并后本分支的 `CLAUDE.md` 和 main 一样；第 2 条的 Windows 路径写成“等机器装好后填在这里”。下面留作记录。
 
 1. 第 30 行“也不发 macOS 版。”之后加：
    > 只影响 Windows 的改动（`rust/host-windows/`、`rust/svc-windows/`、`gui/windows/`、`scripts/` 里 Windows 的脚本、`cfg(windows)` 里的代码）也不发 macOS 版，但要过门禁并立刻推到 `origin/main`，Windows 机器等着用。只改文档的合并同样立刻推。改到共用代码（`rust/host-core/`、`rapp-service` 这些 crate 里不带 `cfg(windows)` 的部分、共用的 Dart）照常算 macOS 的改动。
@@ -82,6 +84,7 @@
 4. **计划 Task 7 Step 2 列了三个假程序**，`rust/testkit/tests/common/mod.rs` 的 `bins()` 现在有四个（多 `rapp-state`）。
 5. **探针结果页还不存在**（计划 Task 1 的 Files 说“由计划 P Task 1 建，不存在就照它的骨架建”）：这次照 P 的骨架建了。
 6. **`.cargo/config.toml` 放在 `rust/` 下，只在从 `rust\` 目录里跑 cargo 时生效**（计划 Task 8 Step 1）。cargo 按当前目录找配置，不按 `--manifest-path`；`scripts/build-linux.sh:27` 那种从仓库根用 `--manifest-path rust/Cargo.toml` 的写法会漏掉它。这次两个脚本都 `cd rust`；G 段打包脚本要照做，或者把配置放到仓库根的 `.cargo/`。
+7. **Task 4 的 `Command::new` 检查列得太少**（计划 Task 4 Step 4 “Every place in product code that starts a program” 那一条的最后一句）：grep 除了 `cm.rs` 和测试，还会列出 `data.rs` 的 `xcode-select`（只在 macOS 上跑）、`net/src/config.rs` 的 `hostname`（`cfg(not(windows))` 那一支；Windows 读 `COMPUTERNAME`）、`cli/src/main.rs` 启动界面那一行（在 `cfg(windows)` 里，界面不是控制台程序）。这几处都不该换，计划已改成把它们列全。
 
 ## 5. 编译和行为上的风险
 
@@ -93,8 +96,9 @@
    - `Ctx` 的字段在非 unix 上只写不读，已挂 `allow(dead_code)`。
    - 测试里挂掉换钥匙的测试以后，`key_change.rs`、`conn/tests/relay.rs` 还可能剩别的只给它们用的东西没被我看出来，Windows 上的 `-D warnings` 会指出来。
 2. **windows-sys 0.61 的签名**（`rust/net/src/win.rs`）：`SetNamedSecurityInfoW` 的路径参数是 `PCWSTR` 还是 `PWSTR`；`EXPLICIT_ACCESS_W` / `TRUSTEE_W` 的字段名和类型（`grfAccessPermissions` 是 `u32`，`grfInheritance` 的类型）；`GetAce`、`GetSecurityDescriptorControl` 的参数；`GetDiskFreeSpaceExW`（`PCWSTR`，三个 `*mut u64`，返回 `BOOL`）；各常量所在的模块和要开的特性。第一次 `cargo check --target x86_64-pc-windows-msvc` 多半要在这里改几处。
+   - **2026-11-27 已对过源码**：按本机 cargo 缓存里的 `windows-sys-0.61.2` 源码逐个对了 `win.rs` 用到的函数、结构体字段、常量和它们所在的模块/特性，`socket2-0.6.5` 的 `set_only_v6`、`SockAddr::from`、`into()` 也对过，没发现不合的。只是读，没编译；风险降为“读漏了”。
 3. **`Cargo.lock` 没重新生成**：第一次 cargo 会改它；要提交（这是 A 段的依赖变化，不是版本号）。确认用户同意由 A 段提交它。
-4. **`UpdateOpts::windows` 里的闭包**（`rust/service/src/lib.rs:148`）：`&|k| std::env::var_os(k).map(Into::into)` 传给 `&dyn Fn(&str) -> Option<PathBuf>`，`k` 的类型和 `Into` 的目标可能推不出来，要写成 `|k: &str| std::env::var_os(k).map(PathBuf::from)`。
+4. **`UpdateOpts::windows` 里的闭包**（`rust/service/src/lib.rs:148`）：`&|k| std::env::var_os(k).map(Into::into)` 传给 `&dyn Fn(&str) -> Option<PathBuf>`，`k` 的类型和 `Into` 的目标可能推不出来，要写成 `|k: &str| std::env::var_os(k).map(PathBuf::from)`。**已改**（`f628efe7`）。
 5. **PowerShell 脚本没跑过**：`check-windows.ps1` 里 5.1 下 `2>&1` 把 stderr 变成错误记录（已用 `"$_"` 取文字，`$ErrorActionPreference = 'Continue'`）；`Step` 用脚本块返回布尔值，若哪个命令往管道里多吐了东西，返回值会变成数组而判成失败。`stage-windows.ps1` 用 `Copy-Item <Release>\* -Recurse` 复制 Flutter 目录。
 6. `rapp-state` 在 Windows 上没有自己设私有，靠继承 `<数据根>\local` 的访问列表；有人把 `--data` 指到别处时不私有。
 7. Windows 的 `mount_of` 把挂在文件夹上的卷算作那个文件夹所在的盘；网络盘 `GetDiskFreeSpaceExW` 卡住时靠现有的“卡住的盘一条线程”机制兜。
@@ -105,7 +109,7 @@
 
 ## 6. 验证的人先做什么（按顺序）
 
-1. 先问用户 §2 的 `CLAUDE.md` 四处改动和由 A 段提交 `Cargo.lock`（§4 第 1 条已定 (a)）。
+1. 先问用户由 A 段提交 `Cargo.lock`（§2 的 `CLAUDE.md` 四处已在 main 上；§4 第 1 条已定 (a)）。
 2. Mac 上：`cd rust && cargo check --workspace --all-targets`，确认 macOS 没变坏，顺带生成 `Cargo.lock`；再跑完整门禁（`swift test`、`cargo test --workspace --no-fail-fast`、clippy `-D warnings`、`flutter analyze`、`flutter test`）。`a_stuck_disk_gets_one_thread_not_one_per_read` 换了临时目录，要看它在 macOS、Linux 上仍然过。
 3. Mac 上交叉检查：`rustup target add x86_64-pc-windows-msvc`，`cargo check --workspace --all-targets --target x86_64-pc-windows-msvc --exclude rapp-relay --exclude rapp-host-linux --exclude rapp-client-gtk --exclude rapp-hub-ffi`。不用链接就能先把 §5 第 2、4 条的签名问题改掉（缺 MSVC 的 C 依赖时，个别 crate 可能要到 Windows 机器上才能查）。
 4. Windows 机器（Task 1 Step 4）：clone 后 `git ls-files --eol` 没有 `w/crlf`；在 `rust\` 里 `cargo test` 先跑 `-p rapp-net`（`win.rs` 的测试、`private.rs` 的三个测试，含中文带空格的目录），再 `-p rapp-service`、`-p rapp-cli`、`-p rapp-term`。
@@ -113,3 +117,44 @@
 6. 跑 `scripts\check-windows.ps1`，按 Task 7 的五条规则分类每个失败；关掉的测试照 `tasks/todo.md` 的格式加一行。
 7. Task 8 Step 4–6：探针 G1 的结果落到 Flutter 构建上，`check-windows.ps1 -Build` 全绿，再故意弄坏 `rust/cli/src/gui.rs` 一条断言看第 1 步变红、其余照跑、`EXIT=1`；然后手看一次 `bin\rapp.exe --help`、启动界面、双击两次 `rapp-service.exe` 只剩一个。
 8. 过一遍 `tasks/todo.md`「Windows 版 A 段（地基）」的六条实机检查，再按计划 Task 9 Step 3–4 收尾、合并。
+
+## 7. 合并 main 和第二轮读查（2026-11-27）
+
+还是只读不编：这一轮也没跑 `cargo`、`flutter`、`swift`、PowerShell。
+
+### 合并（`a8838b84`，main `c1448855`）
+
+- `services/state/src/disk.rs`：main 新加了测试 `an_old_file_without_desks_loads`，留着；`files_are_private` 保持 `#[test] #[cfg(unix)]`。
+- `tasks/todo.md`：两边都留，main 新加的小节在前。
+- `CLAUDE.md`、`Cargo.lock` 没冲突。
+
+### main 新代码要不要接缝
+
+都不要。看过的：`hub` 的 `lib.rs`、`link.rs`、`services.rs`；`net/src/msg.rs`（`SetService`）；`service` 的 `companion.rs`（serve / answer / ipc）、`peer.rs`、`share_cmds.rs`；`testkit/tests` 的 `common`、`hub`、`hub_terms`、`route`、`set_service`；`services/state` 的 `http`、`store`、`tests`。里面没有新的起程序、私有文件、unix 专用 API、找同级程序或数据/日志目录的地方。
+
+### 改掉的错
+
+| 提交 | 文件 | 改了什么 |
+|---|---|---|
+| `f628efe7` | `rust/service/src/lib.rs` | §5 第 4 条：`UpdateOpts::windows` 的闭包写成 `\|k: &str\| std::env::var_os(k).map(PathBuf::from)` |
+| `40a7db52` | `rust/service/src/main.rs` | 草稿用 `std::env::args().collect()` 取参数：遇到非 UTF-8 的参数会 panic（退出 101），main 原来是报用法、退出 2。改成 `args_os` + `to_string_lossy`，unix 上回到原样 |
+| `375bf339` | `rust/conn/src/paired.rs` | `paired.json` 走 `config::write_private`，原来只有 unix 的权限测试；加了 Windows 的访问列表测试 `file_is_private_on_windows` |
+
+### unix 那一支
+
+对 `git diff main` 里每个 Mac 上会编的文件逐个看过。unix 上改到的只有这几类，行为都不变：
+
+- `Command::new` → `rapp_net::proc::command` / `tokio_command`（`hub/src/session.rs`、`service/src/{companion,data,workers}.rs`、`update/src/runner.rs`）：非 Windows 上就是 `Command::new`；tokio 的 `Command::new` 本身就是 `From<std::process::Command>`（tokio 1.54.1 源码）。
+- `DirBuilder` / `OpenOptions` 的 `.mode()` 拆成 `cfg(unix)` 的语句（`relay/src/audit.rs`、`services/state/src/disk.rs`、`net/src/config.rs`）：同样的标志、同样的顺序。
+- 原样代码外面套 `#[cfg(unix)]` / `#[cfg(not(windows))]`，`cfg(target_os = "linux")` 扩成 `cfg(any(target_os = "linux", windows))`。
+- testkit 用 `rapp-host{EXE_SUFFIX}`（unix 上后缀是空的）。
+- `rapp-term` 的 `main.rs` 拆成分派 + `unix_main.rs`（和原 `main.rs` 只差 `pub fn main`）。
+- `rapp-service` 的参数：unix 上 `parse_args(.., false)` 有任何参数就返回原来那句用法，退出 2；`stopped()` 的 unix 一支没动。
+- `load/disks.rs` 的 `a_stuck_disk_gets_one_thread_not_one_per_read` 从 `/dev` 换成临时目录（§3），这是唯一改了 unix 上测试内容的地方，要在 macOS、Linux 上跑过才算数。
+
+没看出不确定的。
+
+### 还剩的风险
+
+§5 的第 1、3、5–11 条照旧；第 2 条只剩“读漏了”；第 4 条已改。
+
