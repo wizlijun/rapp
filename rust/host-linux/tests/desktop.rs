@@ -954,6 +954,173 @@ a.connect('draw',draw);w.connect('destroy',Gtk.main_quit);w.show_all();Gtk.main(
 }
 
 #[test]
+#[ignore = "requires an isolated nested Hyprland compositor"]
+fn isolated_hyprland_paste_delivers_chinese_to_terminal_and_gui() {
+    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_none() {
+        return;
+    }
+    assert_eq!(
+        std::env::var("RAPP_TEST_ISOLATED_DESKTOP").as_deref(),
+        Ok("1")
+    );
+    let mut host = Worker(
+        Command::new(env!("CARGO_BIN_EXE_rapp-host"))
+            .args([
+                "serve",
+                "--app",
+                "desktop:",
+                "--bind",
+                "127.0.0.1",
+                "--port",
+                "0",
+                "--token-env",
+                "RAPP_HOST_TEST_TOKEN",
+                "--json",
+            ])
+            .env("RAPP_HOST_TEST_TOKEN", "paste-test-token")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    );
+    let mut output = BufReader::new(host.0.stdout.take().unwrap());
+    let mut line = String::new();
+    output.read_line(&mut line).unwrap();
+    let event: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let port = event["port"].as_u64().unwrap() as u16;
+    let mut socket = connect(port, "paste-test-token");
+    until(&mut socket, |m| matches!(m, Incoming::Ready(..)));
+
+    let dir = tempfile::tempdir().unwrap();
+    let paste_text = |socket: &mut TcpStream, seq: u32, text: &str| {
+        let mut payload = seq.to_le_bytes().to_vec();
+        payload.push(0);
+        protocol::string(&mut payload, text);
+        socket.write_all(&protocol::packet(20, payload)).unwrap();
+        let pasted = until(socket, |m| matches!(m, Incoming::Pasted { seq: s, .. } if *s == seq));
+        let Incoming::Pasted { error, .. } = pasted else {
+            unreachable!()
+        };
+        assert!(error.is_empty(), "paste failed: {error}");
+    };
+
+    // 1. GUI text entry receives Chinese via Ctrl+V.
+    let gtk_out = dir.path().join("gtk.txt");
+    let _gtk = Worker(
+        Command::new("python3")
+            .args([
+                "-c",
+                r#"
+import pathlib, sys, gi
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, GLib
+out = pathlib.Path(sys.argv[1])
+w = Gtk.Window(title='PasteGui')
+w.set_default_size(320, 120)
+e = Gtk.Entry()
+w.add(e)
+e.connect('changed', lambda _: out.write_text(e.get_text(), encoding='utf-8'))
+w.connect('destroy', Gtk.main_quit)
+w.show_all()
+e.grab_focus()
+GLib.timeout_add(100, lambda: (out.write_text(e.get_text(), encoding='utf-8'), True)[1])
+Gtk.main()
+"#,
+                gtk_out.to_str().unwrap(),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    std::thread::sleep(Duration::from_millis(700));
+    paste_text(&mut socket, 1, "图形界面中文粘贴");
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        if std::fs::read_to_string(&gtk_out).is_ok_and(|s| s == "图形界面中文粘贴") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "GUI entry did not receive pasted Chinese: {:?}",
+            std::fs::read_to_string(&gtk_out)
+        );
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    drop(_gtk);
+    std::thread::sleep(Duration::from_millis(200));
+
+    // 2. Terminal window (foot with Omarchy's Ctrl+Shift+V binding) receives Chinese via Ctrl+Shift+V.
+    if Command::new("foot").arg("--version").output().is_ok() {
+        let foot_cfg = dir.path().join("foot.ini");
+        std::fs::write(
+            &foot_cfg,
+            "[key-bindings]\nclipboard-paste=Shift+Insert Control+Shift+v XF86Paste\n",
+        )
+        .unwrap();
+        let foot_out = dir.path().join("foot.txt");
+        let foot_reader = dir.path().join("reader.py");
+        std::fs::write(
+            &foot_reader,
+            r#"
+import os, pathlib, select, sys, termios, time, tty
+out = pathlib.Path(sys.argv[1])
+fd = sys.stdin.fileno()
+old = termios.tcgetattr(fd)
+tty.setraw(fd)
+buf = bytearray()
+end = time.time() + 5.0
+try:
+    while time.time() < end:
+        r, _, _ = select.select([fd], [], [], 0.05)
+        if r:
+            chunk = os.read(fd, 4096)
+            if not chunk:
+                break
+            buf.extend(chunk)
+            out.write_bytes(bytes(buf))
+finally:
+    termios.tcsetattr(fd, termios.TCSADRAIN, old)
+"#,
+        )
+        .unwrap();
+        let _foot = Worker(
+            Command::new("foot")
+                .args([
+                    "--config",
+                    foot_cfg.to_str().unwrap(),
+                    "--",
+                    "python3",
+                    foot_reader.to_str().unwrap(),
+                    foot_out.to_str().unwrap(),
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        std::thread::sleep(Duration::from_millis(800));
+        paste_text(&mut socket, 2, "终端中文粘贴测试");
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            if std::fs::read(&foot_out)
+                .is_ok_and(|b| b == "终端中文粘贴测试".as_bytes())
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "foot terminal did not receive pasted Chinese: {:?}",
+                std::fs::read(&foot_out)
+            );
+            std::thread::sleep(Duration::from_millis(30));
+        }
+    }
+}
+
+#[test]
 #[ignore = "requires an isolated X11 server"]
 fn isolated_input_sources_follow_and_switch_xkb_groups() {
     if std::env::var_os("WAYLAND_DISPLAY").is_some() {
