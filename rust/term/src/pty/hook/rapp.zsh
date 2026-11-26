@@ -29,7 +29,9 @@ _rapp_precmd() {
   return $ret
 }
 
+# A line kept out of the history by its leading space (HIST_IGNORE_SPACE) is how secrets are typed: never reported.
 _rapp_preexec() {
+  if [[ -o HIST_IGNORE_SPACE && "$1" == [[:space:]]* ]]; then return 0; fi
   emulate -L zsh
   { printf '\033]7502;run;%s\007' "$(_rapp_b64 "$1")" } 2>/dev/null
 }

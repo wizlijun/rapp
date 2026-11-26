@@ -60,8 +60,10 @@ _rapp_prompt() {
   return $ret
 }
 
-# The DEBUG trap: runs before every simple command, reports only the first one after a prompt. An entry that did
-# not reach the history (ignorespace, ignoredups, history off) is reported by its first simple command.
+# The DEBUG trap: runs before every simple command, reports only the first one after a prompt. A line that did not
+# reach the history is not reported when the user keeps lines out on purpose (HISTCONTROL ignorespace/ignoreboth,
+# HISTIGNORE): a line with a leading space is how secrets are typed, and it cannot be told from a skipped duplicate.
+# Otherwise (ignoredups alone, history off) it is reported by its first simple command.
 _rapp_debug() {
   if [ -z "${_rapp_ready-}" ] || [ -n "${COMP_LINE-}" ]; then return 0; fi
   _rapp_ready=
@@ -70,7 +72,12 @@ _rapp_debug() {
     local c= n=${_rapp_hnum-}
     if [[ -o history ]]; then
       _rapp_hist
-      if [ -n "$_rapp_hnum" ] && [ "$_rapp_hnum" != "$n" ]; then c=$_rapp_hline; fi
+      if [ -n "$_rapp_hnum" ] && [ "$_rapp_hnum" != "$n" ]; then
+        c=$_rapp_hline
+      else
+        case ":${HISTCONTROL-}:" in *:ignorespace:*|*:ignoreboth:*) return 0 ;; esac
+        if [ -n "${HISTIGNORE-}" ]; then return 0; fi
+      fi
     fi
     if [ -z "$c" ]; then c=$BASH_COMMAND; fi
     printf '\033]7502;run;%s\007' "$(_rapp_b64 "$c")"

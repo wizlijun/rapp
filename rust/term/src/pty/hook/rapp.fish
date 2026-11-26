@@ -30,7 +30,9 @@ function _rapp_prompt --on-event fish_prompt
     end 2>/dev/null
 end
 
+# fish keeps a line with a leading space out of the history; that is how secrets are typed, so it is never reported.
 function _rapp_preexec --on-event fish_preexec
+    string match -qr -- '^\s' "$argv[1]"; and return
     begin
         printf '\e]7502;run;%s\a' (_rapp_b64 "$argv[1]")
     end 2>/dev/null

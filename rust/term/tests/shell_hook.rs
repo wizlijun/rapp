@@ -288,17 +288,55 @@ fn bash_reports_whole_line() {
 }
 
 #[test]
-fn bash_never_reports_the_previous_line_for_one_kept_out_of_history() {
+fn bash_never_reports_a_line_kept_out_of_history() {
     for bash in bash_shells() {
-        let (h, root) = (home(&[(".bash_profile", "PS1='$ '\nHISTCONTROL=ignorespace\n")]), tempfile::tempdir().unwrap());
-        let mut sh = Sh::start(&[&bash, "-l"], root.path(), h.path(), None, None);
-        sh.run("echo a | cat");
-        // Not in the history: its first simple command stands for it.
-        sh.run(" echo b | cat");
-        sh.run("echo c");
-        let ev = sh.events();
-        assert_eq!(runs(&ev), ["echo a | cat", "echo b", "echo c"], "{bash}: {ev:?}");
+        // A leading space (or a HISTIGNORE pattern) keeps the line out of the history, so it is a secret: no run
+        // report at all.
+        let cases = [
+            ("HISTCONTROL=ignorespace", " echo secret"),
+            ("HISTCONTROL=ignoreboth", " echo secret"),
+            ("HISTCONTROL=erasedups:ignorespace", " echo secret"),
+            ("HISTIGNORE='*secret*'", "echo secret"),
+        ];
+        for (ctl, secret) in cases {
+            let rc = format!("PS1='$ '\n{ctl}\n");
+            let (h, root) = (home(&[(".bash_profile", rc.as_str())]), tempfile::tempdir().unwrap());
+            let mut sh = Sh::start(&[&bash, "-l"], root.path(), h.path(), None, None);
+            sh.run("echo a | cat");
+            sh.run(secret);
+            sh.run("echo ok");
+            let ev = sh.events();
+            assert_eq!(runs(&ev), ["echo a | cat", "echo ok"], "{bash} {ctl}: {ev:?}");
+        }
     }
+}
+
+#[test]
+fn zsh_never_reports_a_line_kept_out_of_history() {
+    let Some(zsh) = shell_path("zsh") else { return };
+    let (h, root) = (home(&[(".zshrc", "PS1='%# '\nsetopt HIST_IGNORE_SPACE\n")]), tempfile::tempdir().unwrap());
+    let mut sh = Sh::start(&[&zsh, "-l"], root.path(), h.path(), None, None);
+    sh.run(" echo secret");
+    sh.run("echo ok");
+    let ev = sh.events();
+    assert_eq!(runs(&ev), ["echo ok"], "{ev:?}");
+    // Without the option the line goes into the history, and so into the report.
+    let (h, root) = (home(&[(".zshrc", "PS1='%# '\n")]), tempfile::tempdir().unwrap());
+    let mut sh = Sh::start(&[&zsh, "-l"], root.path(), h.path(), None, None);
+    sh.run(" echo spaced");
+    let ev = sh.events();
+    assert_eq!(runs(&ev), [" echo spaced"], "{ev:?}");
+}
+
+#[test]
+fn fish_never_reports_a_line_starting_with_a_space() {
+    let Some(fish) = shell_path("fish") else { return };
+    let (h, root) = (home(&[(".config/fish/config.fish", "function fish_prompt; echo -n '> '; end\n")]), tempfile::tempdir().unwrap());
+    let mut sh = Sh::start(&[&fish, "-l"], root.path(), h.path(), None, None);
+    sh.run(" echo secret");
+    sh.run("echo ok");
+    let ev = sh.events();
+    assert_eq!(runs(&ev), ["echo ok"], "{ev:?}");
 }
 
 #[test]
@@ -415,6 +453,9 @@ fn holder_env(h: &Path) -> Vec<(&'static str, String)> {
     vec![("HOME", h.display().to_string()), ("PATH", "/usr/bin:/bin:/usr/sbin:/sbin".into()), ("TERM", "xterm-256color".into())]
 }
 
+/// Taken out of the holder's environment, so a ZDOTDIR or hook variable set where the tests run changes nothing.
+const SEALED: [&str; 5] = ["ZDOTDIR", "RAPP_ZDOTDIR", "RAPP_BASH_LOGIN", "RAPP_RESTORE_VENV", "RAPP_RESTORE_CONDA"];
+
 #[test]
 fn the_holder_starts_zsh_through_the_hook() {
     let Some(zsh) = shell_path("zsh") else { return };
@@ -422,7 +463,7 @@ fn the_holder_starts_zsh_through_the_hook() {
     let term = d.path().join("t");
     let h = home(&[(".zshrc", "PS1='%# '\n")]);
     let env = holder_env(h.path());
-    let mut w = pty::Window::start_env(&term, &["--", &zsh, "-l"], &env);
+    let mut w = pty::Window::start_env(&term, &["--", &zsh, "-l"], &env, &SEALED);
     w.wait_output("\x1b]7502;state;cwd=");
     w.type_in(b"echo \"[${ZDOTDIR-unset}]\"\r");
     w.wait_output("[unset]");
@@ -438,7 +479,7 @@ fn shell_hook_off_starts_the_shell_plain() {
     std::fs::write(d.path().join("term.json"), r#"{"shellHook":false}"#).unwrap();
     let h = home(&[(".zshrc", "PS1='%# '\n")]);
     let env = holder_env(h.path());
-    let mut w = pty::Window::start_env(&term, &["--", &zsh, "-l"], &env);
+    let mut w = pty::Window::start_env(&term, &["--", &zsh, "-l"], &env, &SEALED);
     w.type_in(b"echo D$((1+1))\r");
     w.wait_output("D2");
     assert!(!w.output().contains("\x1b]7502;"), "{:?}", w.output());

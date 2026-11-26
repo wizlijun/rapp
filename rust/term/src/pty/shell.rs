@@ -8,7 +8,7 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 
 /// The version of the hook files; bump it whenever one of them changes, so installed copies are written again.
-pub const HOOK_V: u32 = 1;
+pub const HOOK_V: u32 = 2;
 const ZSHENV: &str = include_str!("hook/zshenv");
 const RAPP_ZSH: &str = include_str!("hook/rapp.zsh");
 const RAPP_BASH: &str = include_str!("hook/rapp.bash");
