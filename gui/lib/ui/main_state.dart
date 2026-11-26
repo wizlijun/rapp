@@ -787,12 +787,12 @@ class MainState extends ChangeNotifier {
   }
 
   /// What the queue shows, newest first: [hintHistory] alone, or, while the service is connected, the app's own
-  /// lines plus the service's program rows. The app's inferred rows come back from the service as its reports,
-  /// so they step aside too, unless their device's fingerprint is unknown (nothing was reported).
+  /// lines plus the service's program rows. The app's inferred rows whose state it reported come back from the
+  /// service, so they step aside too; one that was not reported (an unsure block, no fingerprint) stays.
   List<HintRecord> get queueRows {
     if (!_fromService) return hintHistory;
     final all = [
-      ...hintHistory.where((r) => !r.term && !(r.inferred && r.device != null && _hostFp(r.device!) != null)),
+      ...hintHistory.where((r) => !r.term && _reportedRow[r] != true),
       ...stateSync!.rows.map(_serviceRow).whereType<HintRecord>(),
     ]..sort((a, b) => b.at.compareTo(a.at));
     return all.take(hintHistoryMax).toList();
@@ -1631,7 +1631,8 @@ class MainState extends ChangeNotifier {
       final seq = n['seq'];
       if (n['src'] == 'app') {
         final key = '$id/$session';
-        if (_records[key]?.phase == Phase.live) continue;
+        // Any record of it here (live, dropped, reconnecting): this app computes that one itself.
+        if (_records.containsKey(key)) continue;
         final title = _text(row?['name']) ?? _text(n['name']) ?? session;
         yield NeedItem(NeedKind.app, key, '$title @ ${deviceName(id)}：${termAskWord(ps)}（推断）', seq is num ? seq.toInt() : 0,
             device: id, title: title, at: since is num ? since.toInt() : 0, greyWord: deviceOffline(id) ? '设备离线' : null);
@@ -2418,9 +2419,15 @@ class MainState extends ChangeNotifier {
     final was = _appSeen[sid];
     _appSeen[sid] = now;
     if (was == null || was == now) return;
-    _queue(HintRecord('${r.appName} @ ${deviceName(r.id)}：${programWord(ps)}', _now(),
-        device: r.id, app: r.app, title: r.appName, lamp: programLamp(ps), inferred: true));
+    final row = HintRecord('${r.appName} @ ${deviceName(r.id)}：${programWord(ps)}', _now(),
+        device: r.id, app: r.app, title: r.appName, lamp: programLamp(ps), inferred: true);
+    _queue(row);
+    // [_reportAppState] runs next and reports this state: the service's row for it stands in for this one.
+    if (_reportTo(r) != null && _appReportOf(r) != null) _reportedRow[row] = true;
   }
+
+  /// The app's own queue rows whose state went to the service as a report.
+  final _reportedRow = Expando<bool>();
 
   /// The device fingerprint each record's state was last reported under (by record key): a gone goes there.
   final Map<String, String> _reportedFp = {};
@@ -2439,22 +2446,31 @@ class MainState extends ChangeNotifier {
   /// and a device whose fingerprint is unknown is not reported.
   void _reportAppState(SessionRecord r, {bool gone = false}) {
     final out = stateSync?.out;
-    if (out == null || isTermApp(r.app) || isDesktopApp(r.app)) return;
-    final rs = gone || r.sid == null ? null : remote[r.sid];
-    final ps = rs?.inferredPs;
-    final a = rs?.appState;
-    final AppReport? now = ps == null || a == null || (ps.state == 'blocked' && !rs!.inferredNeed)
-        ? null
-        : (state: ps.state, kind: ps.state == 'blocked' ? ps.kind : null, app: a.pack, name: r.appName);
+    if (out == null) return;
+    final now = gone ? null : _appReportOf(r);
     if (now == null) {
       final fp = _reportedFp.remove(r.key);
       if (fp != null) out.report(fp: fp, id: r.id, session: r.app, now: null);
       return;
     }
-    final fp = _hostFp(r.id);
+    final fp = _reportTo(r);
     if (fp == null) return;
     _reportedFp[r.key] = fp;
     out.report(fp: fp, id: r.id, session: r.app, now: now);
+  }
+
+  /// The device fingerprint [r]'s state goes to: null with no state service, for a text terminal or the desktop,
+  /// and while the device's fingerprint is unknown.
+  String? _reportTo(SessionRecord r) =>
+      stateSync == null || isTermApp(r.app) || isDesktopApp(r.app) ? null : _hostFp(r.id);
+
+  /// What [r]'s live link infers, as reported: null for none and for an unsure block.
+  AppReport? _appReportOf(SessionRecord r) {
+    final rs = r.sid == null ? null : remote[r.sid];
+    final ps = rs?.inferredPs;
+    final a = rs?.appState;
+    if (ps == null || a == null || (ps.state == 'blocked' && !rs!.inferredNeed)) return null;
+    return (state: ps.state, kind: ps.state == 'blocked' ? ps.kind : null, app: a.pack, name: r.appName);
   }
 
   /// Each record's latest host notice (by record key: a reconnect keeps it), and its expiry.

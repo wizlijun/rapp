@@ -31,7 +31,8 @@ void main() {
   /// A live GUI session of [codex] on host 111 (`mini`, fingerprint [fp]), rules sent, in an app whose own
   /// fingerprint is `appA`. [sync] null: no state service wired in.
   void env(void Function(FakeAsync a, FakeTransport t, FakeSessionPort port, MainState st, Object sid) body,
-      {String? fp = 'devA', FakeStateSync? sync, bool noSync = false, AppProfileStore? profiles}) {
+      {String? fp = 'devA', FakeStateSync? sync, bool noSync = false, AppProfileStore? profiles, String app = codex,
+      FakeTermSessionPort? term}) {
     fakeAsync((a) {
       final t = FakeTransport();
       final hub = HubClient(t);
@@ -45,7 +46,7 @@ void main() {
       });
       a.flushMicrotasks();
       final port = FakeSessionPort();
-      final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, builtinStateRules: rulesJson, profiles: profiles,
+      final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, builtinStateRules: rulesJson, profiles: profiles, termPort: term,
           stateSync: noSync ? null : (sync ?? FakeStateSync(tmp.path)));
       t.onSend = (m) {
         if (m['cmd'] == 'open') {
@@ -58,10 +59,14 @@ void main() {
         }
       };
       a.flushMicrotasks();
-      st.openOrSwitch('111', codex, 'ChatGPT');
+      st.openOrSwitch('111', app, 'ChatGPT');
       a.flushMicrotasks();
       final sid = st.currentRecord!.sid!;
-      port.emit(ReadyEvent(sid, 'ChatGPT'));
+      if (term?.owns(sid) == true) {
+        term!.play(ReadyEvent(sid, 'ChatGPT'));
+      } else {
+        port.emit(ReadyEvent(sid, 'ChatGPT'));
+      }
       body(a, t, port, st, sid);
       st.dispose();
     });
@@ -118,6 +123,25 @@ void main() {
         profiles.setStateRules(codex, 'App', 'off');
         expect(sync.out.reports.last, ('devA', '111', codex, null));
       }, sync: sync, profiles: profiles);
+    });
+
+    test('a text terminal and the desktop are never reported', () {
+      for (final app in ['term:pty:sh', 'desktop:']) {
+        final sync = FakeStateSync(tmp.path);
+        final term = FakeTermSessionPort();
+        env((a, t, port, st, sid) {
+          final isTerm = term.owns(sid);
+          expect(isTerm, app.startsWith('term:'));
+          void emit(SessionEvent e) => isTerm ? term.play(e) : port.emit(e);
+          emit(AppStateEvent(sid, report('blocked', sure: true, kind: 'permission')));
+          emit(AppStateEvent(sid, report('working')));
+          expect(st.endSession('111/$app'), isTrue);
+          emit(ClosedEvent(sid, 'closed'));
+          a.flushMicrotasks();
+          expect(st.recordFor('111/$app'), isNull);
+          expect(sync.out.reports, isEmpty);
+        }, sync: sync, app: app, term: term);
+      }
     });
 
     test('no fp, no report', () {
@@ -181,6 +205,51 @@ void main() {
         final n = st.needs.where((x) => x.kind == NeedKind.app).single;
         expect(n.target, key);
         expect(n.text, isNot(endsWith('（推断）')));
+      }, sync: sync);
+    });
+
+    test('a dropped session shows once: its local 已断开, not the service report', () {
+      final sync = FakeStateSync(tmp.path)..ids['devA'] = '111';
+      env((a, t, port, st, sid) {
+        port.emit(AppStateEvent(sid, report('blocked', sure: true, kind: 'permission')));
+        expect(sync.out.reports.last.$4?.state, 'blocked');
+        port.emit(DisconnectedEvent(sid, 'connection closed'));
+        a.flushMicrotasks();
+        expect(sync.out.reports, hasLength(1));
+        sync.sessions['devA\n$codex'] = {'session': codex, 'src': 'app', 'name': 'ChatGPT', 'state': 'blocked'};
+        sync
+          ..status = StateStatus.connected
+          ..needs = [need(codex)]
+          ..push();
+        final mine = st.needs.where((n) => n.target == key).toList();
+        expect(mine, hasLength(1));
+        expect(mine.single.kind, NeedKind.session);
+        expect(st.needs.where((n) => n.text.endsWith('（推断）')), isEmpty);
+      }, sync: sync);
+    });
+
+    test('a local row stays until its state is reported', () {
+      final sync = FakeStateSync(tmp.path)..ids['devA'] = '111';
+      env((a, t, port, st, sid) {
+        sync
+          ..status = StateStatus.connected
+          ..push();
+        port.emit(AppStateEvent(sid, report('working')));
+        port.emit(AppStateEvent(sid, report('blocked', kind: 'permission'))); // unsure: not reported
+        final unsure = st.hintHistory.first;
+        expect(unsure.inferred, isTrue);
+        expect(st.queueRows, contains(unsure));
+        port.emit(AppStateEvent(sid, report('blocked', sure: true, kind: 'question'))); // reported
+        final sure = st.hintHistory.first;
+        expect(sure, isNot(unsure));
+        expect(sync.out.reports.last.$4?.kind, 'question');
+        expect(st.queueRows, isNot(contains(sure)));
+        expect(st.queueRows, contains(unsure));
+        // the session ends: the reported row is still the service's to show
+        st.endSession(key);
+        port.emit(ClosedEvent(sid, 'closed'));
+        a.flushMicrotasks();
+        expect(st.queueRows, isNot(contains(sure)));
       }, sync: sync);
     });
 
