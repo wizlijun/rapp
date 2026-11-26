@@ -673,6 +673,9 @@ abstract class SessionPort {
   /// Switches A's input source to [id]; '' is the plain English (ASCII) keyboard layout.
   void selectInput(Object sid, String id) => _send('select_input', {'sid': sid, 'id': id});
 
+  /// Pauses (false) or resumes (true) the English-first switch before a key-down.
+  void autoEnglish(Object sid, bool on) => _send('auto_english', {'sid': sid, 'on': on});
+
   /// Types A's system password into its lock screen (a desktop session; A drops it when unlocked).
   void unlock(Object sid, String password) => _send('unlock', {'sid': sid, 'password': password});
 

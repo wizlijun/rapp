@@ -625,6 +625,19 @@ void main() {
           onReturn: () => log.add('return'));
     }
 
+    test('setAutoEnglish tells the port once per change', () {
+      final calls = <bool>[];
+      final r = RemoteSession(1, 'x', onAutoEnglish: calls.add);
+      expect(r.autoEnglish, isTrue);
+      r.setAutoEnglish(true);
+      expect(calls, isEmpty);
+      r.setAutoEnglish(false);
+      r.setAutoEnglish(false);
+      expect(calls, [false]);
+      r.setAutoEnglish(true);
+      expect(calls, [false, true]);
+    });
+
     test('an older host (no input_source yet) gets no select_input', () {
       final r = session();
       r.selectInput('');

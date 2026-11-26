@@ -323,6 +323,20 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     return _remoteKey(sid, event);
   }
 
+  /// A key-down (not a modifier alone, not a Command shortcut) while A is on an input method:
+  /// switch A to English first, once (the same rule as the native session).
+  void _englishFirst(_Session s, int code, int mods) {
+    if (!s.autoEnglish || s.remoteAscii != false) return;
+    if (code >= 54 && code <= 63) return;
+    if (mods & (1 << 20) != 0) return;
+    s.remoteAscii = true;
+    s.send({'cmd': 'select_input', 'id': ''});
+  }
+
+  /// Test hook: A reported its input source.
+  @visibleForTesting
+  void inputSourceForTest(Object sid, bool ascii) => _sessions[sid]?.remoteAscii = ascii;
+
   bool _remoteKey(Object sid, KeyEvent event) {
     final s = _sessions[sid];
     if (s == null || s.closed || s.disconnected) return false;
@@ -374,6 +388,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         (keyboard.isShiftPressed ? 1 << 17 : 0) |
         (keyboard.isControlPressed ? 1 << 20 : 0) |
         (keyboard.isAltPressed ? 1 << 19 : 0) | latched;
+    if (down) _englishFirst(s, code, mods);
     s.send({'cmd': 'key', 'keyCode': code, 'modifiers': mods, 'down': down});
     if (useLatch) {
       s.latched = 0;
@@ -663,7 +678,12 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
       case 'key':
       case 'key_event':
         // The worker's key command uses an optional down flag for a single edge.
+        if (args['down'] != false && args['keyCode'] is int) {
+          _englishFirst(s, args['keyCode'] as int, (args['modifiers'] as int?) ?? 0);
+        }
         s.send({...args, 'cmd': 'key'});
+      case 'auto_english':
+        s.autoEnglish = args['on'] as bool;
       case 'latch':
         s.latched = (args['modifiers'] as int) & (latchCmd | latchOpt | latchCtrl | latchShift);
       case 'resize':
@@ -1009,6 +1029,10 @@ class _Session {
   int? selected;
   bool closed = false;
   bool disconnected = false;
+
+  /// Whether A's input source is ASCII (null: never reported); set true after we switch it.
+  bool? remoteAscii;
+  bool autoEnglish = true;
   /// A's focus is in a password field (v13 secure_focus): no type-to-compose.
   bool secure = false;
 
@@ -1269,6 +1293,7 @@ class _Session {
               });
             }
             final e = parseSessionEvent(method, {...m, 'sid': sid});
+            if (e is InputSourceEvent) remoteAscii = e.ascii;
             if (e is WindowsEvent) {
               nativeWindowTable = m['windows'] as List;
               await nativeWindows();

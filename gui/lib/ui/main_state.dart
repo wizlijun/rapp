@@ -788,6 +788,7 @@ class MainState extends ChangeNotifier {
   void composerFocusChanged(RemoteSession session, bool focused) {
     session.composer.editorFocused = focused;
     if (focused) {
+      session.setAutoEnglish(true);
       blurPicture();
     } else if (pictureFocused == session.sid) {
       notifyListeners();
@@ -2476,6 +2477,9 @@ class MainState extends ChangeNotifier {
         },
         onSelectInput: (id) {
           if (_liveSid(s.sid)) portOf(s.sid)!.selectInput(s.sid, id);
+        },
+        onAutoEnglish: (on) {
+          if (_liveSid(s.sid)) portOf(s.sid)!.autoEnglish(s.sid, on);
         },
         onClick: (w, at) {
           if (!_liveSid(s.sid)) return;
