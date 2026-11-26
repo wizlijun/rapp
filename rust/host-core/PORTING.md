@@ -148,7 +148,7 @@ on the real platform) or "not on Windows".
 | `PauseOutbox.swift` | ported → `pause` | `pacing::pause_outbox_matches_swift` |
 | `PeerNames.swift` | ported → `input` (`PeerNames`) | `rules_input::peer_names_match_swift` |
 | `PendingActions.swift` | controller only, not ported | - |
-| `Protocol.swift` | ported → `protocol` (host half; `RemoteAddress` and the client parsers are controller only) | `protocol::every_sample_decodes_and_reencodes_identically` |
+| `Protocol.swift` | ported → `protocol` (host half; `RemoteAddress` and the client parsers are controller only) | `protocol::every_sample_decodes_and_reencodes_identically`, `host_session::set_stream_fps_must_be_a_tier` |
 | `Quantize.swift` | ported → `quantize` | `quantize::quantize_matches_swift` |
 | `QueryCoalescer.swift` | ported → `query` | `rules_focus::query_rules_match_swift` |
 | `QueryDeadline.swift` | ported → `query` | `rules_focus::query_rules_match_swift` |

@@ -119,7 +119,7 @@
 - 在采集线程上量化。
 - 没有加 `Session::tables()`。
 - resize 留到任务 15 做。
-- fps 不取整到档位，只做 max(1)。
+- fps 不取整到档位：查过 Swift，它也不取整。协议解码只收 30/15/5/1（setStream 还收 0，表示暂停；Protocol.swift:676-684），省流梯子把上限压到 min(上限, 5)。Rust 的 `.max(1)`（capture.rs 两处）只是防御，到不了。第四批加了测试 `set_stream_fps_must_be_a_tier`：合法档位会话照常，fps 7 以 `bad data from client: fps must be 30, 15, 5, 1 or 0` 结束会话。
 - harness 新增 `auto_ack`、`frames`、`last_frame`、`hello_at`。
 - 假平台新增 `frame_calls`、`set_frame_size`、`set_scale`。
 

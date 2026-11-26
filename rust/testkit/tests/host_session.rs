@@ -550,6 +550,25 @@ fn set_stream_changes_mode() {
     }
 }
 
+/// Swift does not round fps to a tier: the decoder admits only 30, 15, 5 and 1, and 0 (a pause)
+/// in `setStream` (`Protocol.swift:676-684`); anything else ends the session as bad data.
+#[test]
+fn set_stream_fps_must_be_a_tier() {
+    let (_platform, host) = serve();
+    let mut c = ready(&host, 0);
+    for (i, fps) in [30u8, 5, 1, 0, 15].into_iter().enumerate() {
+        c.send(&client::stream(0, fps, 1.0, false, false));
+        let seq = 100 + i as u32;
+        c.send(&client::ping(seq));
+        c.wait_for(|m| matches!(m, Incoming::Pong(s) if *s == seq));
+    }
+    let text = "bad data from client: fps must be 30, 15, 5, 1 or 0";
+    c.send(&client::stream(0, 7, 1.0, false, false));
+    c.wait_for(|m| is_error(m, text));
+    assert_eq!(ended_event(&host)["reason"], text);
+    assert!(c.closes_within(Duration::from_secs(5)));
+}
+
 #[test]
 fn density_is_capped_by_the_display_scale() {
     // The fake display has 2 pixels per point; B asks for 3.
