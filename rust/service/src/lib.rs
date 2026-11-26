@@ -9,6 +9,7 @@ mod data;
 mod forward;
 pub mod forward_log;
 mod ipc;
+pub mod load;
 mod maps;
 mod numbers;
 mod own;
