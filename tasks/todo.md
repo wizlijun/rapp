@@ -1192,3 +1192,12 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] [Linux v0.15.34](https://github.com/wizlijun/rapp/releases/tag/v0.15.34) 已发布（源码 `2f544075`，`--latest=false`）；两包 40 文件逐字节一致、14 个 ELF 依赖完整、`BUILD-INFO.json` 与隔离网络命名空间服务/CLI/端口共享测试通过；三个远端附件大小与 SHA256 与本地一致，macOS Latest 保留 `v0.15.33`。
 - [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-25-linux-01534-parity.md`。
 - [ ] 实机验收：Linux / Omarchy 下运行 Claude Code / Codex / agy 验证 OSC 7501 状态与 OSC 0/1/2 标题、重名 ` · 2` 编号及重启 rApp 后总览「常用 · 终端」首点恢复。
+
+## Linux 0.15.36 协议 v16 状态规则客户端、本机接入列表与多文字终端对齐与发布（2026-11-26）
+
+- [x] 对齐 macOS 0.15.35：协议升至 **v16**（`rapp-client-core`、`rapp-session`、`LinuxSessionPort` 与 `rapp-client-gtk` 完整支持向兼容被控端发送 `stateRules` 并接收 `appState` 推断状态；`rapp-host-linux` 校验并安全忽略收到的规则包）、总览本机列「正在被接入 · N」与「断开」（Linux `--cm --background` 保持隐藏）、以及多文字终端 `Ctrl+Shift+T` / `Ctrl+Shift+W`、「结束终端」、干净退出与 Linux `/proc` 宿主 `<目录> · <程序>` 窗口标题。
+- [x] 补充 Linux 回归用例：真实 `rapp-session` 进程的协议 v16 `state_rules`/`appState` 往返测试、`TargetPlatform.linux` 下 `Ctrl+Shift+W` 结束终端与运行程序确认弹窗/防重复测试、以及总览本机列「正在被接入 · N」展示与「断开」测试。
+- [x] Flutter 3.50.0 全量 3262 项通过（3 项条件跳过），`flutter analyze` 无 error/warning（145 条既有弃用 info）；Rust 套件（`rapp-term` 284、`rapp-host-linux` 41、`rapp-client-core` 70、`rapp-client-gtk` 8、`rapp-service` 113、`rapp-hub` 45、`rapp-update` 61、`rapp-speech-linux` 4、`rapp-testkit --test term --test update` 52）与 `scripts/test-linux-build.py`、打包产物 `scripts/test-linux-terminal-service.py` 全部通过。
+- [x] [Linux v0.15.36](https://github.com/wizlijun/rapp/releases/tag/v0.15.36) 已发布（源码 `5b9ce64e`，`--latest=false`）；两包 41 文件逐字节一致、14 个 ELF 依赖完整、`BUILD-INFO.json`、协议 v16 版本校验与隔离网络命名空间服务/CLI/端口共享测试通过；三个远端附件大小与 SHA256 与本地一致，macOS Latest 保留 `v0.15.35`。
+- [x] 仓库下载快照已更新（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-26-linux-01536-parity.md`。
+- [ ] 实机验收：Linux 连接 macOS 0.15.35 验证协议 v16 状态规则推断显示；Linux 本地验证 `Ctrl+Shift+T`/`Ctrl+Shift+W`、宿主终端 `<目录> · <程序>` 标题与总览本机列「正在被接入」。
