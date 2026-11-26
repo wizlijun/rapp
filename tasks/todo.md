@@ -1506,3 +1506,20 @@ macOS、Linux、Duo、iPad 各一遍。
   - [ ] 5. 同一个登录会话里启动第二个 `rapp-service`：立刻退出，第一个不受影响；远程桌面的会话里另起一个不算“第二个”。
   - [ ] 6. Server 2022 云主机（没有显卡）上 `scripts\check-windows.ps1 -Build` 也是绿的。
 - Windows 上暂时关着的测试单列在上面的「Windows 版：现在在 Windows 上关着的测试」。
+
+## Windows B 段（主机核心）（计划 `docs/superpowers/plans/2026-11-26-rapp-windows-b-host-core.md`，分支 `feat/windows-host-core`，2026-11-27）
+
+现状（2026-11-27）：`rust/host-core` 加上 testkit 里的 `FakePlatform`、`fake-host-core` 都是草稿，**还没在任何机器上编译、没跑过测试**。
+
+- **已合进本机 `main`，这次合并不发版。** `main` 的文件里只有 `rust/host-core/` 整个目录和文档；`host-core` 不在 `rust/Cargo.toml` 的成员表里，Mac 的门禁和打包看不到它。Mac 编译的文件和合并前一个字节都不差，所以不影响 macOS 和 iOS 发版。
+- **接线不在 `main` 的文件里。** 成员表那一行、`rust/testkit` 里的假平台和两组会话测试、`Tests/RappCoreTests/HostCoreFixtures/` 的 Swift 样本生成器，在提交 `6b27449b` 里撤下了，它们在 `main` 的历史里。分支 `feat/windows-host-core` 上已经把这个提交还原好，验证的人直接在分支上编译、修。
+- **接线进 `main` 的条件**：分支上 Mac 门禁全绿（先生成 Swift 样本：`RAPP_WRITE_FIXTURES=1 swift test --filter 'Fixtures/'`，再跑 `cargo test --workspace`），再照常合并。那一次合并是共用代码，算 macOS 的改动；macOS 版的行为不变，macOS 的被控端还是 Swift 的 `rapp-host`。
+- A、B 两段的接线都改 `rust/Cargo.toml` 的成员表和 `rust/testkit/tests/common/mod.rs`，后合的一方解冲突。
+
+验证顺序见 `docs/superpowers/plans/notes/2026-11-26-windows-b3-draft-notes.md` §6。下面几项假平台演不出来，要等 D 段有了真的 Windows 平台再到实机上看。交接内容见 `rust/host-core/PORTING.md` 第 5 部分「B 段交接」。
+
+- [ ] 1 真的 Windows 截屏在五种模式（gray4、color8、color16、duogray、duocolor）下画面都对：颜色和灰阶不错位，块边界上没有错行
+- [ ] 2 滚动复用：在一个真会滚的程序里（浏览器、长文档）滚轮滚动，画面跟着平滑走，没有撕裂的行。日志里看得出滚动复用确实生效了，不是每帧整张重发
+- [ ] 3 在一个真的程序里打字（中英文都打，每段超过 20 个字），字都到了，没丢也没重复
+- [ ] 4 从 Mac 粘贴文件到 Windows：文件落在 NTFS 的下载目录里。名字是保留名（如 `CON.txt`、`aux`）时改名为 `_CON.txt` 这类，同名再来时编号为 `_CON (2).txt`；SHA-256 和原文件一致
+- [ ] 5 锁屏后经系统服务解锁：B 端输入密码，A 真的解开；密码错时 A 保持锁着，B 端还显示「已锁」；日志里没有密码
