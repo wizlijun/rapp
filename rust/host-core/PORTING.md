@@ -65,7 +65,7 @@ on the real platform) or "not on Windows".
 | `Sources/rapp-host/Paster.swift:110-137` | `noteOwnWrite` and `write`: the item on the clipboard. | `session::clip` paster `note_own_write`, `write` (platform: `ClipboardOps::write`) | `host_session::paste_text_inline` |
 | `Sources/rapp-host/Paster.swift:138-164` | `waitFrontmost` and `sendPaste`: the target in front, then the paste key; locked A fails with the fixed text. | `session::clip` paster `wait_frontmost` (platform: `InputOps::paste_key`) | `host_session::paste_when_locked_fails_with_the_fixed_text` |
 | `Sources/rapp-host/Paster.swift:165-200` | `takeSnapshot` and `restoreOnMain`: the old clipboard back, unless something newer was copied. | `session::clip` `paste_restore_check`, paster `restore`, `read` (platform: `ClipboardOps::snapshot`, `restore`) | `host_session::paste_does_not_restore_over_a_newer_copy` |
-| `Sources/rapp-host/PowerHold.swift:1-45` | Keeps A awake while a session is open. | `lock::StayAwake`; platform: `LockOps::stay_awake` | `rules_lock::lock_rules_match_swift` |
+| `Sources/rapp-host/PowerHold.swift:1-45` | Keeps A awake while a session is open. | `session::session` `stay_awake` (a `lock::StayAwake` on a lock handle of its own; the two log lines); platform: `LockOps::stay_awake` | `rules_lock::lock_rules_match_swift`, `host_session::stay_awake_spans_the_session`, `host_session::a_refused_hello_never_holds_a_awake` |
 | `Sources/rapp-host/ScreenLocker.swift:1-22` | Locks the screen for `lock`. | platform: `LockOps::lock`; `lock` `lock_screen` | `host_session::lock_command_reports_ok_already_failed`, `rules_lock::lock_rules_match_swift` |
 | `Sources/rapp-host/SecureFocusWatcher.swift:1-65` | Watches for keyboard focus in a password field; tells B on a change. | `session::hints` `check_secure_focus` | `host_session::secure_focus_follows_the_platform` |
 | `Sources/rapp-host/SecureFocusWatcher.swift:66-110` | `readSecure` and `installObserver`: the focused element's role. | platform: `ControlOps::secure_focus` | phase D |
@@ -260,10 +260,12 @@ Each entry: what differs from Swift, why, and the weaker check that stands in.
   `host_session::locked_start_announces_the_app_display`,
   `host_session::locked_start_without_app_windows_announces_the_main_display`.
 - **Staying awake (`PowerHold.swift`).** Swift's session holds an IOKit assertion through
-  `StayAwake`. host-core ports `lock::StayAwake` with the same ids and release-once rule, but
-  the session calls `LockOps::stay_awake(true)` at a valid hello and `stay_awake(false)` at
-  the end, so the platform keeps the id. Check: the `StayAwake` fixture
-  (`rules_lock::lock_rules_match_swift`); the session's two calls are not asserted by a test.
+  `StayAwake`, begun at a valid hello and ended at the end. host-core does the same with
+  `lock::StayAwake` around `LockOps::stay_awake(true/false)` on a lock handle the session keeps
+  for this alone, and writes PowerHold's two lines ("keeping A awake while the session is
+  open", "A may idle again"). `stay_awake` returns nothing, so a refusal is not seen and
+  Swift's "could not keep A awake (IOKit …)" line has no counterpart. Check:
+  `host_session::stay_awake_spans_the_session`, `host_session::a_refused_hello_never_holds_a_awake`.
 - **Typing after the session ended.** Swift's typing loop asks only the screen's lock state;
   host-core's also stops once the session is gone (plan B Review Focus 2). Check:
   `host_session::disconnect_while_typing_frees_the_lock`.

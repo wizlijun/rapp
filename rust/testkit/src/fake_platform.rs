@@ -67,7 +67,11 @@ struct State {
     can_unlock: bool,
     /// Why the next `lock` call cannot be made (`None`: it locks).
     lock_error: Option<String>,
-    awake: bool,
+    /// The lock handles holding A awake now. A hold belongs to the handle that made it (Windows'
+    /// execution state belongs to a thread), so only that handle's `stay_awake(false)` ends it.
+    awake: Vec<u64>,
+    /// The id the next lock handle gets.
+    next_lock: u64,
     /// What `locked_app_windows` answers for the fake app (`None`: the platform cannot say).
     locked_windows: Option<Vec<Rect>>,
 
@@ -222,7 +226,8 @@ impl FakePlatform {
             typed_ok: true,
             can_unlock: true,
             lock_error: None,
-            awake: false,
+            awake: Vec::new(),
+            next_lock: 1,
             locked_windows: None,
             clip: None,
             change: 0,
@@ -358,9 +363,9 @@ impl FakePlatform {
         self.st().locked_windows = w;
     }
 
-    /// Whether the session holds A awake.
+    /// Whether any lock handle holds A awake.
     pub fn awake(&self) -> bool {
-        self.st().awake
+        !self.st().awake.is_empty()
     }
 
     /// What the user copied on A.
@@ -501,7 +506,7 @@ impl FakePlatform {
             clipboard: Box::new(FakeClipboard(s())),
             controls: Box::new(FakeControls(s())),
             text: Some(Box::new(FakeText(s()))),
-            lock: Box::new(FakeLock(s())),
+            lock: Box::new(FakeLock::new(s())),
         }
     }
 }
@@ -543,7 +548,7 @@ impl Platform for FakePlatform {
     }
 
     fn lock(&self) -> Box<dyn LockOps> {
-        Box::new(FakeLock(self.state.clone()))
+        Box::new(FakeLock::new(self.state.clone()))
     }
 
     fn locked_app_windows(&self, app: &str) -> Option<Vec<Rect>> {
@@ -882,7 +887,19 @@ impl TextReader for FakeText {
 }
 
 /// The lock screen: typed units are compared with the password here and never kept.
-struct FakeLock(Arc<Mutex<State>>);
+struct FakeLock(Arc<Mutex<State>>, u64);
+
+impl FakeLock {
+    fn new(state: Arc<Mutex<State>>) -> FakeLock {
+        let id = {
+            let mut s = lock_state(&state);
+            let id = s.next_lock;
+            s.next_lock += 1;
+            id
+        };
+        FakeLock(state, id)
+    }
+}
 
 impl LockOps for FakeLock {
     fn locked(&mut self) -> bool {
@@ -929,8 +946,15 @@ impl LockOps for FakeLock {
         s.typed_ok = true;
     }
     fn stay_awake(&mut self, on: bool) {
+        let id = self.1;
         let mut s = lock_state(&self.0);
         s.log.push(format!("stay_awake {}", if on { "on" } else { "off" }));
-        s.awake = on;
+        if on {
+            if !s.awake.contains(&id) {
+                s.awake.push(id);
+            }
+        } else {
+            s.awake.retain(|h| *h != id);
+        }
     }
 }

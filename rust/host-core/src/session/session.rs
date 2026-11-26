@@ -13,7 +13,7 @@ use crate::desktop::{desktop_table, desktop_target, desktop_title, ordered_displ
 use crate::geometry::{window_title, Rect, Size};
 use crate::hints::CoverNotices;
 use crate::input::{HeldInput, InputYield, YieldDecision, INPUT_REPORT_EVERY};
-use crate::lock::locked_start_display;
+use crate::lock::{locked_start_display, StayAwake};
 use crate::pacing::{save_ladder_steps, save_ladder_stream, PacedSender, SenderOutput, StreamSpec};
 use crate::pause::PauseOutbox;
 use crate::platform::{
@@ -112,6 +112,10 @@ pub struct Session {
     pub(crate) desktop: bool,
     /// The platform lock handle: the platform's before the target opens, the target's after.
     pub(crate) lock: Shared<dyn LockOps>,
+    /// Holds A awake from a valid hello to the end (Swift `awake`, `Server.swift:251`), on a lock
+    /// handle of its own: `lock` above is swapped when the target opens, and the hold must be
+    /// released on the handle that made it.
+    pub(crate) awake: StayAwake,
     pub(crate) ops: Option<Ops>,
     /// The capture source, until the capture thread takes it.
     pub(crate) capture_source: Option<Box<dyn Capture>>,
@@ -196,6 +200,7 @@ impl Session {
         let reader = stream.try_clone();
         let _ = stream.set_write_timeout(Some(inner.clock.real(WRITE_TIMEOUT)));
         let lock = shared(inner.platform.lock());
+        let awake = stay_awake(&inner);
         let session = Session {
             inner: inner.clone(),
             id,
@@ -223,6 +228,7 @@ impl Session {
             outbox: PauseOutbox::new(),
             desktop: false,
             lock,
+            awake,
             ops: None,
             capture_source: None,
             capture: None,
@@ -496,7 +502,7 @@ impl Session {
         self.started = true;
         self.started_flag.store(true, Ordering::SeqCst);
         // Held from a valid hello to the end, so A doesn't idle-lock under B.
-        hold(&self.lock).stay_awake(true);
+        self.awake.begin();
         self.schedule(Timer::InputReport, INPUT_REPORT_EVERY);
         let from = self.peer_name.as_ref().map(|n| format!(", from {n}")).unwrap_or_default();
         self.inner.out.log(&format!("client connected: {app}, {}{from}", self.stream_description(mode)));
@@ -1066,14 +1072,33 @@ impl Session {
         // Nothing B pressed stays pressed on A (`releaseAll`).
         self.release_all_input();
         self.stop_hints();
-        if self.started {
-            hold(&self.lock).stay_awake(false);
-        }
+        // Unconditional, as in Swift (`awake.end()`, `Server.swift:1306`): a no-op unless begun.
+        self.awake.end();
         self.paced = None;
         self.ops = None;
         let _ = self.stream.shutdown(Shutdown::Both);
         self.inner.session_ended(self.id, reason, self.started);
     }
+}
+
+/// `PowerHold.stayAwake` (`Sources/rapp-host/PowerHold.swift`): the platform keeps A awake;
+/// host-core writes Swift's two log lines. `LockOps::stay_awake` cannot report a refusal, so
+/// Swift's "could not keep A awake" line has no counterpart (the hold id is always 0).
+fn stay_awake(inner: &Arc<Inner>) -> StayAwake {
+    let power = shared(inner.platform.lock());
+    let (on, off) = (power.clone(), power);
+    let (out_on, out_off) = (inner.out.clone(), inner.out.clone());
+    StayAwake::new(
+        move || {
+            hold(&on).stay_awake(true);
+            out_on.log("keeping A awake while the session is open");
+            Some(0)
+        },
+        move |_| {
+            hold(&off).stay_awake(false);
+            out_off.log("A may idle again");
+        },
+    )
 }
 
 /// The messages that pass the yield gate (`Server.swift:415`), in Swift's order.

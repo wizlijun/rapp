@@ -158,7 +158,7 @@
 
 任务 18
 - 新增 3 个测试：`desktop_session_shows_the_main_display`、`input_source_is_reported_and_selected`、`window_commands_reach_the_platform`。
-- 会话直接调用 `LockOps::stay_awake(true/false)`（session.rs:495、:1053）。`lock::StayAwake` 移植了但会话没用，会话里这两处调用也没有测试覆盖。
+- 保持唤醒按 Swift 接上（第四批）：会话里有一个 `lock::StayAwake`，用一个专用的锁句柄调 `LockOps::stay_awake`，在合法 hello 时 `begin()`、结束时无条件 `end()`。原来的草稿把 `stay_awake(true)` 发到 `self.lock`，可打开目标后 `self.lock` 换成了目标的句柄，结束时的 `stay_awake(false)` 落在另一个句柄上；Windows 的执行状态跟线程走，这样会关不掉。假平台现在按句柄记保持，测试 `stay_awake_spans_the_session`（程序和桌面两种）、`a_refused_hello_never_holds_a_awake`。PowerHold 的两行日志由 host-core 写；`stay_awake` 没有返回值，“could not keep A awake” 这一行没法对应。
 - Timeout.swift 没移植。
 - sha2 本来就是 dev-dependency，Cargo.toml 没改。
 - 摘要测试跳过点开头的隐藏文件。

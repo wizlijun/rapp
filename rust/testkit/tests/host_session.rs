@@ -679,6 +679,44 @@ fn disconnect_mid_frame_cleans_up() {
     let _next = ready(&host, 0);
 }
 
+/// `Server.swift:438`, `:1306`, `PowerHold.swift`: one hold from a valid hello to the end, released
+/// on the handle that made it, although the session's lock handle changes when the target opens.
+#[test]
+fn stay_awake_spans_the_session() {
+    for app in [FAKE_APP, "desktop:"] {
+        let platform = FakePlatform::new();
+        let host = Host::start(platform.clone(), app, TOKEN);
+        let mut c = Controller::connect(host.port());
+        c.hello(TOKEN, app, "B", 0, 15);
+        c.wait_for(|m| matches!(m, Incoming::Ready(..)));
+        // A frame: the target is open, its lock handle has replaced the platform's.
+        c.wait_for(is_frame);
+        assert!(platform.awake(), "{app}: not held awake");
+        wait_text(&host, "keeping A awake while the session is open", 1);
+        c.close();
+        ended_event(&host);
+        assert!(!platform.awake(), "{app}: still held awake");
+        wait_text(&host, "A may idle again", 1);
+        let log = platform.log();
+        assert_eq!(log.iter().filter(|l| *l == "stay_awake on").count(), 1, "{app}: {log:?}");
+        assert_eq!(log.iter().filter(|l| *l == "stay_awake off").count(), 1, "{app}: {log:?}");
+    }
+}
+
+/// A hello that is refused never starts the hold, so nothing is released either.
+#[test]
+fn a_refused_hello_never_holds_a_awake() {
+    let (platform, host) = serve();
+    let mut c = Controller::connect(host.port());
+    c.hello("not-the-secret", FAKE_APP, "B", 0, 15);
+    c.wait_for(|m| matches!(m, Incoming::Error(_)));
+    assert!(c.closes_within(Duration::from_secs(5)));
+    host.wait_event("rejected");
+    let log = platform.log();
+    assert!(!log.iter().any(|l| l.starts_with("stay_awake")), "{log:?}");
+    assert_eq!(count_text(&host, "A may idle again"), 0);
+}
+
 // MARK: - Task 15: input, covers, focus pane, state rules
 
 use rapp_host_core::platform::OpenedApp;
