@@ -1,6 +1,6 @@
 # rApp Windows 版：功能对齐与总体框架（设计）
 
-日期：2026-11-26。状态：**待用户审阅**。基于 main `65807ebe`（0.15.41，画面协议 v16）。
+日期：2026-11-26。状态：**待用户审阅**。基于 main `0decfe8d`（0.15.41，画面协议 v16）。
 
 本文是 Windows 版的总设计：做什么、不做什么、分成哪些模块、模块之间怎么接、怎么验、怎么发版。具体实现交给别人，本文要让接手的人不用回头问就能排计划。
 
@@ -17,7 +17,7 @@
 
 为什么：rApp 现在的被控端只有 Mac（完整）和 Linux（精简），控制端有 Mac、Linux、iOS。用户的 Agent 也跑在 Windows 服务器和 Windows 电脑上，这些机器现在进不了工作台；用 Windows 笔记本的人也没法当控制端。
 
-### 0.2 用户定的五件事
+### 0.2 用户定的十一件事
 
 | # | 事 | 决定 |
 |---|---|---|
@@ -26,6 +26,12 @@
 | U3 | 没接显示器的机器 | **不做虚拟显示器驱动。** 云主机用它自带的虚拟显示；物理机没接显示器就插 HDMI 假负载。真的没有显示输出时，桌面和应用会话报“没有显示器”，文本终端和端口共享照常。分辨率不跟着控制端窗口变。 |
 | U4 | 代码签名 | **按签名设计，证书到位前先发不签名的包。** 打包脚本里有签名这一步，有证书就签，没有就跳过并标出来。设计不依赖任何“必须签名才能用”的系统能力。 |
 | U5 | 整体怎么搭 | **全部 Rust，新建共用主机核心。** 见 §4。 |
+| U6 | 系统基准 | **Windows 11 和 Windows Server 2022 起（内部版本 ≥ 20348），Windows 10 不支持。** 见 §3.1。 |
+| U7 | 第一个公开版的范围 | **A 到 H 全部做完再公开。** 中间的成果只打内部用的 zip，不建 release、不进官网。见 §17.1。 |
+| U8 | 自动升级 | **装了系统服务的机器默认开自动升级，没人登录时也升**（由 `rapp-svc` 做）。见 §12.3。 |
+| U9 | `host-linux` | **这次不动。** Windows 首发以后再单独把它换到 `host-core` 上。见 §17.1。 |
+| U10 | 为了对样本，改不改 Swift | **不动 Swift。** `Sources/RappCore/` 里的算法由 Swift 生成样本、Rust 逐字节对；`Sources/rapp-host/` 里的会话逻辑（握手和接管、解锁的整套步骤、粘贴的步骤、窗口跟踪循环）照着读着搬，靠对照表、假平台整会话测试和实机验收。见 §14.2。 |
+| U11 | Windows 的改动怎么进 `origin/main` | **每台机器各管各的推送。** 功能 session 合并到自己那台机器的本机 main，由那台机器的发版 session 过门禁后推送。Mac 发版 session 遇到只动 Windows 的合并：过门禁、立刻推、不发版。Windows 机器上的那个 session 在首发之前只做集成（过门禁、推送、打内部包），不建 release。见 §14.4、§14.5。 |
 
 ### 0.3 这份设计让哪些旧话作废
 
@@ -56,18 +62,18 @@
 | 平台能力表里的 Windows 一行 | `gui/lib/platform_caps.dart:40-52` | 有服务、托盘、窗口管理、在线升级、端口面板；没有拆窗口。 |
 | 服务启停 | `gui/lib/service_control.dart:78-99` | `HKCU\…\Run` + `taskkill /IM … /F`。 |
 | 路径 | `gui/lib/paths.dart`、`rust/net/src/config.rs:19,59`、`rust/net/src/log.rs:286-287` | 数据根 `%USERPROFILE%\rapp`，旧配置 `%APPDATA%\rapp`，日志 `%LOCALAPPDATA%\rapp\logs`。 |
-| shell 检查 | `rust/term/src/shells.rs:98-137` | `cmd`、PowerShell、`pwsh`、Git Bash、Git sh；写好测好，没接上（`serve.rs:848-852` 在非 unix 上返回空表）。 |
-| 升级清单里的位置 | `rust/update/src/lib.rs:277` 的测试 | 用了 `windows-x64` 这个键；真正的代码只认 `macos-arm64`（`:21`）。 |
+| shell 检查 | `rust/term/src/shells.rs:98-137` | `cmd`、PowerShell、`pwsh`、Git Bash、Git sh；写好测好，没接上（`rust/term/src/serve.rs:855-860` 的 `installed_shells()` 在非 unix 上返回空表）。 |
+| 升级清单里的位置 | `rust/update/src/lib.rs:293-299` 的测试 | 用了 `windows-x64` 这个键；真正的代码只认 `macos-arm64`（`:21`）。 |
 | 官网 | `website/releases.mjs` | 认 `^rapp-.*(?:windows|win32|win64).*(?:\.exe|\.msi)$`；页面写“Windows — No build yet”，测试断言 `windows === null`。 |
 
 **现在在 Windows 上会坏的地方**（都是读代码推断的，没有编过）：
 
-- `rapp-service`：`rust/service/src/lib.rs:117` 用 `std::os::unix::process::parent_id()`；单实例保护只有 Linux 有；重启靠 `exit(0)` 让 launchd 拉起；缓存目录写死 `Library/Caches`；`workers.rs:166-185` 在所有非 Linux 系统上跑 `tccutil`；`cm.rs:10` 认为界面程序叫 `rapp`。
+- `rapp-service`：`rust/service/src/lib.rs:117` 用 `std::os::unix::process::parent_id()`；单实例保护只有 Linux 有；重启靠 `exit(0)` 让 launchd 拉起；缓存目录写死 `Library/Caches`；`workers.rs:180-202` 的 `reset_permissions` 在所有非 Linux 系统上跑 `tccutil`；`cm.rs:10` 认为界面程序叫 `rapp`。
 - `rapp-term`：`pty/holder.rs`、`pty/local.rs`、`pty/launch.rs`、`pty/fg.rs`、`pty/sweep.rs`、`serve.rs` 都是 unix 专用（unix socket、信号、`/proc` 或 macOS 接口）。
 - `rapp-hub`：只因为依赖 `rapp-term` 才编不过（它只用到 `rapp_term::id::is_term` 和 `rapp_term::config::OFF`）。
 - `rapp-net`：`quic.rs` 的双栈绑定在非 unix 上直接返回错误。
 - `rapp-update`：`runner.rs` 写死 `curl`、`ditto`、`codesign`、`plutil`、`tccutil`、`open`、`ps`、`df`、`lsregister`。
-- 界面：`main.dart:93` 只在 macOS、Linux 上建会话端口，Windows 上应用会话走不通；`main.dart:118` 把终端端口也关了；语音、记住解锁密码、开文件夹、数据搬家、自动锁屏这一行，在 Windows 上要么隐藏要么走到 `xdg-open`。
+- 界面：`main.dart:93` 只在 macOS、Linux 上建会话端口，Windows 上应用会话走不通；`main.dart:118` 把终端端口也关了；语音、记住解锁密码、数据搬家、自动锁屏这一行，在 Windows 上是隐藏的；开文件夹有两处走到 `xdg-open`（“本机”页和数据页），另外两处已经对（主窗口用 `explorer`，终端里的链接用 `cmd /c start`），见 §10.1。
 
 **可以直接借的 Linux 先例**：控制端的嵌入会话（`rapp-session` 进程解码，Dart 画），传输、文字上传是纯 Dart，键位表 `linuxMacKeyCode`，语音程序 `rapp-speech`，被控端的通用循环 `rust/host-linux/src/{wire,gate,pacing,pause,encode}.rs`，发版用单独的版本号且不标 Latest。
 
@@ -95,6 +101,7 @@
 - 控制端的原生输入框（macOS 的 `NSTextView` + Sumi 候选栏）；Windows 用 Flutter 输入框加系统输入法。
 - 同一台机器上几个 Windows 用户同时各跑一份 rApp。
 - 没人登录时的文本终端和端口共享（要先连桌面登录进去）。
+- 不登录就完成第一次配置（用命令行配 relay、配对设备）。新装的服务器要登录一次，在界面里配好（§12.1）。
 - 微软商店版、MSIX、winget。
 - relay 的 Windows 版（relay 只在 Linux 上跑）。
 - H.264 等视频编码（主线也没做）。
@@ -111,7 +118,7 @@
 
 ## 3. 约束
 
-### 3.1 系统基准【我定的】
+### 3.1 系统基准【用户定的，U6；只出 x64 包是我定的】
 
 - **Windows 11（21H2，内部版本 22000 起）和 Windows Server 2022（内部版本 20348 起，带桌面体验）。** 安装程序检查内部版本号 ≥ 20348，不够就拒绝安装并说明。这一条线正好把 Windows 10（最高 19045）挡在外面。
 - 理由：逐窗口采集时去掉黄色边框的接口从 20348 起才有（【未验证】）；Windows 11 自带 Windows Terminal；用户说“2022 年后做基准，轻装上阵”。
@@ -123,19 +130,20 @@
 |---|---|---|
 | 性能优先于安全，唯一的门禁是 relay（D8） | `platform-design:18` | 本机的管道、端口只用“目录权限 + token”防同机其他用户，不再加门。 |
 | 极简（D9），KISS / YAGNI / DRY | `platform-design:5,19`、`tasks/todo.md:4` | 能复用就不新写；不做“以后可能用到”的东西。 |
-| worker 的命令行约定（D10）；Windows 和 Linux 的 Rust worker 按同一份约定 | `platform-design:43,199` | `rapp-host.exe` 的参数、事件、退出码照 Swift 版。 |
+| worker 的命令行约定（D10）；Windows 和 Linux 的 Rust worker 按同一份约定 | `platform-design:20,43,195-199` | `rapp-host.exe` 的参数、事件、退出码照 Swift 版。 |
 | 代码只留一份；按“平台有什么能力”分开，不到处判断平台；新平台不改已有平台 | `pc-key-bar:9`、`ipad-duo:69,197` | Dart 里用 `PlatformCaps`；Rust 里用 `cfg` 缝，unix 那一支原样不动。 |
 | 一种卡片一个实现 | 用户的长期要求 | Windows 不另画界面。 |
 | 被控端始终保持英文输入；组字在控制端 | `type-to-compose:19-21` | Windows 被控端收文字前切到英文（§6.6）。 |
 | 不接管不是 rApp 开的终端 | `text-terminal:45` | Windows 也只管 `rapp-term run` 开的。 |
-| 不侵入 app，只看画面（K2、K5） | `conversation-design:36-38` | 不注入 DLL，不装钩子。 |
+| 不侵入 app，只看画面（K2、K5） | `conversation-design:35,38` | 不注入 DLL，不装钩子。 |
 | rapp 之外什么都不设；不改用户自己的文件 | `local-ports:30`、`install-level:15` | 安装程序改了什么系统设置，一条条列出来（§12.2），卸载时还原。 |
 | 不冒称支持，也不削弱系统安全策略 | Linux 对齐计划 | 做不到就报原因。**§7.7 有两处放宽，单独说明。** |
 | 绝不记密码、令牌、打的字 | `observability:15` | 系统服务和帮手也一样。 |
 | 画面协议版本必须完全相等，所有关口一起改 | `offstage-pause:107-108` | Windows 从第一天就是 v16，以后每次升版都跟（§14）。 |
 | 控制面、终端、服务：只加可选字段，不升版本 | `device-os-marks:69` | Windows 需要的新信息一律走可选字段。 |
 | 名字和路径还是 `rapp`，显示名是 rApp | `tasks/todo.md:870` | `rapp.exe`、`%USERPROFILE%\rapp`、注册表键 `rapp`；窗口标题、开始菜单写 rApp。 |
-| GPL-3.0；依赖钉版本；没有统计和崩溃上报 | `product-decisions` PD16 | 随包的 ConPTY 是 MIT，可以带；`Cargo.lock` 进仓库。 |
+| GPL-3.0（PD16） | `product-decisions:206` | 随包的 ConPTY 是 MIT，可以带。 |
+| 依赖钉版本；没有统计和崩溃上报。这两条没有一份总规格写过，是仓库现在的做法（iOS 的规格写过后一条），这里明写成 Windows 的规矩【我定的】 | `ipad-duo-design:470`；`Cargo.lock`、`pubspec.lock` 都在仓库里 | Windows 新加的依赖和随包工具（ConPTY、Inno Setup）钉死版本；不加任何上报。 |
 | 照 hurryvc 的方法重写，不搬它的代码 | `text-terminal:20` | 终端照此。 |
 
 ## 4. 方案
@@ -246,25 +254,27 @@ Windows 专用的 crate 在别的系统上要能编过【我定的】：内容�
 
 | 形式 | Windows 上的行为 |
 |---|---|
-| `serve --app <id> (--token <s> \| --token-env <VAR>) [--port] [--bind] [--json]` | 和 Swift 版一样。服务实际用的是 `serve --app <id> --bind 127.0.0.1 --port 0 --token-env RAPP_TOKEN --json`（`rust/service/src/workers.rs:256-265`），15 秒内要打出 `listening`。 |
+| `serve --app <id> (--token <s> \| --token-env <VAR>) [--port] [--bind] [--json]` | 和 Swift 版一样。服务实际用的是 `serve --app <id> --bind 127.0.0.1 --port 0 --token-env RAPP_TOKEN --json`（`rust/service/src/workers.rs:273-282` 的 `worker_cmd`），15 秒内要打出 `listening`（`START_WAIT`，`:22`）。 |
 | `list-apps [--json]` | `{"apps":[桌面一项（带 displays）, {"app","name"}…], "permissions":{…}}`。列哪些 app 见 §6.4。 |
 | `check [--json]` | 见下面“权限怎么报”。`--prompt` 接受但不做事。 |
 | `lock [--json]` | `{"ok":true}` / `{"ok":true,"already":true}` / `{"ok":false,"error"}`。 |
 | `version [--json]` | `{"version","protocol","platform":"windows"}`。 |
 | `secure-helper --pipe <名字>` | **新增，内部用。** 只由 `rapp-svc` 以 SYSTEM 身份启动（§7.4）。普通用户身份启动时直接退出 2。 |
 
-- **标准输出的事件**（`--json`，一行一个）：`listening`、`session`（started 带 `client,mode,fps`，ended 带 `reason`）、`rejected`、`stats`（每秒一次）、`transfer`（`dir` 是 `"a_to_b"` / `"b_to_a"`，`kind` 是名字）、`input`、`input_blocked`、`unlock`、`exit`。**字段名和取值照 Swift 版**（`Sources/RappCore/WorkerCLI.swift:195-253`）；Linux 版的偏差（`"bToA"`、数字 kind、不发 `stats`）不要学。
+- **标准输出的事件**（`--json`，一行一个）：`listening`、`ready`（`width,height,title`）、`windows`（`count`）、`session`（started 带 `client,mode,fps`，ended 带 `reason`）、`rejected`、`stats`（每秒一次）、`transfer`（`dir` 是 `"a_to_b"` / `"b_to_a"`，`kind` 是名字）、`input`、`input_blocked`、`unlock`、`exit`。**字段名和取值照 Swift 版**（`Sources/RappCore/WorkerCLI.swift:195-253`）；Linux 版的偏差（`"bToA"`、数字 kind、不发 `stats`）不要学。
 - **标准输入的命令**：`kick`、`quit`、`peer{port,name}`、`yield{by}`、`focus`（收下不做事）。标准输入关闭就停止并退出 0。
 - **退出码**：0 正常、1 运行失败、2 用法错、3 缺权限、5 版本不对。
 - **约定字符串原样用**：粘贴的错误（"target not frontmost"、"screen locked"、"not uploaded"、"not supported"、"no clipboard on this screen"、"远程电脑已锁屏，解锁后再发送"）、"taken over[ by 名字]"、会话结束原因。这些字符串控制端和服务会去匹配。
 
 **权限怎么报【我定的】。** Windows 没有“屏幕录制”“辅助功能”这两个开关，但有真做不到的时候。约定：
 
-- `permissions` 固定报 `{"screen_recording": 能不能出画面, "accessibility": true, "platform": "windows"}`，出不了画面时再带一个 `"error"`，写原因。
-- 原因只有这几种，文字固定（控制端照着显示）：`no display`（没有显示器）、`session disconnected`（桌面被远程桌面断开且接不回来）、`not interactive`（没有登录的桌面）。
+- `permissions` 固定报 `{"screen_recording": 能不能出画面, "accessibility": true, "platform": "windows", "applications": 能不能开单个 app 的会话}`，出不了画面时再带一个 `"error"`，写原因。`applications` 平时是 `true`，登录前实例是 `false`（§7.6）。这个字段 `host-linux` 已经在报（`rust/host-linux/src/main.rs:23`），不是新字段。
+- 原因只有这几种，文字固定（控制端照着显示）：`no display`（没有显示器）、`session disconnected`（机主的桌面不在本机屏幕上：被远程桌面断开且接不回来，或者被别的用户切走了）、`not interactive`（没有登录的桌面）、`other user`（本机屏幕上登录着的不是机主，§7.2）。
 - Windows 上不用退出码 3。`serve` 因为这些原因起不来时退出 1，`exit` 事件的 `reason` 就是上面的文字。
-- 配套要改两处共用代码（都是把“只认 linux”放宽成“带 `platform` 字段的都算”，Linux 的行为不变）：`rust/service/src/workers.rs:132-139` 的 `permissions()` 和 `:91-104` 的 `capabilities()`；`gui/lib/permissions.dart:22-25` 的 `missingPermissions`。`workers.rs:166-185` 的 `tccutil` 只在 macOS 上跑。
-- 控制端看到这三种原因，显示中文说明（“这台电脑没有接显示器，画面出不来；文本终端和端口共享不受影响”等），不显示 macOS 的权限引导。
+- 配套要改两处共用代码（都是在“只认 linux”旁边加一支“认 windows”，Linux 的行为不变）：`rust/service/src/workers.rs:149-156` 的 `permissions()` 和 `:91-104` 的 `capabilities()`；`gui/lib/permissions.dart:22-25` 的 `missingPermissions`。`workers.rs:180-202` 的 `tccutil` 只在 macOS 上跑。
+- **`applications` 要一路带到控制端**【我定的】。现在 `permissions()` 只留 `screen_recording`、`accessibility`，Linux 再留 `platform`、`error`，**把 `applications` 丢了**；`capabilities()` 在 `:101` 去读它，读到的永远是“没有”。所以 Linux 被控端现在对外报的 `applications` 一直是假，控制端因此不显示它的 app 入口（`gui/lib/ui/device_apps.dart:16` 等四处）。这是有意还是漏了，本文不判断，**也不改**（新平台不改已有平台）：Windows 这一支单独写，`platform` 是 `windows` 时 `permissions()` 留下 `platform`、`error`、`applications`，`capabilities()` 报 `desktop: true` 和 `applications`；`platform` 是 `linux` 的那一支一个字不动。把这个发现记进 `tasks/todo.md` 交给 Linux 那边的 session。
+- 登录前实例的能力不是算出来的，是写死的：`graphical` 有、`desktop` 有、`applications` 没有、`terminal` 没有、`ports` 没有（§7.6）。`capabilities()` 里 `ports` 现在是写死的 `true`，要加 `--prelogin` 这一支。
+- 控制端看到这四种原因，显示中文说明（“这台电脑没有接显示器，画面出不来；文本终端和端口共享不受影响”等），不显示 macOS 的权限引导。
 
 ### 6.2 `host-core` 对外的两个面
 
@@ -290,7 +300,7 @@ Windows 专用的 crate 在别的系统上要能编过【我定的】：内容�
 
 | 协议里的东西 | macOS | Windows | 理由 / 注意 |
 |---|---|---|---|
-| app id | bundle id | **exe 文件名，全小写，带 `.exe`**，如 `chrome.exe`。比较时不分大小写。（沿用旧规格 `host-client-spec:817-826`、`app-profiles-authoring:39`） | 重启后不变，`app_profiles.json` 和 `state_rules.json` 才能按 id 认 app。不含 `/`，能放进 `rapp://host/<id>`。同名 exe 的不同程序算同一个 app，接受。 |
+| app id | bundle id | **exe 文件名，全小写，带 `.exe`**，如 `chrome.exe`。比较时不分大小写。（沿用旧规格 `host-client-spec:817-826`、`app-profile-authoring:39`） | 重启后不变，`app_profiles.json` 和 `state_rules.json` 才能按 id 认 app。不含 `/`，能放进 `rapp://host/<id>`。同名 exe 的不同程序算同一个 app，接受。 |
 | 桌面的 id | `desktop:`、`desktop:<显示器 id>` | 一样 | —— |
 | 显示器 id | CGDirectDisplayID | 一个稳定的非零 u32：显示器设备路径的哈希（重启、重新插拔后不变）；拿不到设备路径时用 `\\.\DISPLAYn` 的哈希 | `HMONITOR` 重启会变，不能用。哈希算法由实现的人定，写进测试。 |
 | 窗口 id | CGWindowID | HWND 的低 32 位（非零）；桌面会话固定用 1 | 64 位 Windows 的窗口句柄只有低 32 位有效【未验证】。 |
@@ -310,7 +320,7 @@ Windows 专用的 crate 在别的系统上要能编过【我定的】：内容�
 | macOS 现在怎么做 | Windows | 状态 |
 |---|---|---|
 | `list-apps` 列出有“像样的窗口”（屏幕上、≥50×50）的普通 app，按名字排（`WorkerCLI.swift:313-336`） | 列出**正在运行**、至少有一个合格顶层窗口的程序（合格的定义见 §6.5），按名字排。显示名取 exe 版本资源里的“文件说明”，没有就用去掉 `.exe` 的文件名。 | 换实现 |
-| app 没开就按 bundle id 启动，等最多 10 秒出窗口（`WindowCapture.swift:51-94`） | 照做。按 exe 名字找程序的顺序：注册表的 `App Paths` → 开始菜单快捷方式指向的同名 exe → PATH。找到就用系统的“打开”启动，等最多 10 秒。找不到报错 `<id> not found`。 | 换实现【我定的，旧规格说“报错”，这次改成对齐 macOS】 |
+| app 没开就按 bundle id 启动，等最多 10 秒出窗口（`WindowCapture.swift:51-94`） | 照做。按 exe 名字找程序的顺序：注册表的 `App Paths` → 开始菜单快捷方式指向的同名 exe → PATH。找到就用系统的“打开”启动，等最多 10 秒。找不到报错 `<id> not found`。启动出来的 app 是用户的东西，不能留在 §8.1 的作业对象里（否则服务一重启它就没了）。 | 换实现【我定的，旧规格说“报错”，这次改成对齐 macOS】 |
 | app 退出，会话以 "`<名字>` quit" 结束（`Server.swift:1104-1106`） | 照做：该 exe 名字下一个进程都不剩了才算退出。 | 照做 |
 | app 版本号读 `Info.plist`（`AppStateWatcher.swift:7-14`） | 读 exe 的版本资源（`app-state-rules:308`）。 | 换实现 |
 | 桌面：`desktop:` 是主屏，`desktop:<id>` 是指定屏；标题 “`<电脑名>` · 屏幕 N”；等屏幕醒来最多 5 秒 | 照做。 | 照做 |
@@ -327,7 +337,7 @@ Windows 专用的 crate 在别的系统上要能编过【我定的】：内容�
 | macOS 现在怎么做 | Windows | 状态 |
 |---|---|---|
 | 每秒 10 次读窗口表，前到后，只要这个 app 的；最多 256 个（`WindowTracker.swift:36-103`） | 照做。合格的窗口：可见、没有被系统隐藏（cloaked）、不是最小化、大于 4×4、属于这个 exe 名字的进程。 | 换实现 |
-| 分成 7 种：普通、对话框、浮动、sheet、弹出、菜单、提示（`RappCore/Windows.swift`） | 第一步“系统事实 → 种类”在 `host-windows`（纯函数，Mac 上能测）：无所有者的带标题栏窗口 = 普通；有所有者的对话框 = 对话框；工具窗口 = 浮动；菜单类 `#32768` = 菜单；提示类 `tooltips_class32` = 提示；其余有所有者的无标题栏弹出（下拉列表、自动完成）= 弹出；sheet 不会出现。第二步的后处理（主窗口提升、找上级等）在 `host-core`，从 Swift 搬过来。对照表由实现的人在实机上按常见 app 校一遍。 | 换实现 |
+| 分成 7 种：普通、对话框、浮动、sheet、弹出、菜单、提示（枚举在 `Sources/RappCore/Protocol.swift:56-57`，归类之后的处理在 `RappCore/Windows.swift`） | 第一步“系统事实 → 种类”在 `host-windows`（纯函数，Mac 上能测）：无所有者的带标题栏窗口 = 普通；有所有者的对话框 = 对话框；工具窗口 = 浮动；菜单类 `#32768` = 菜单；提示类 `tooltips_class32` = 提示；其余有所有者的无标题栏弹出（下拉列表、自动完成）= 弹出；sheet 不会出现。第二步的后处理（主窗口提升、找上级等）在 `host-core`，从 Swift 搬过来。对照表由实现的人在实机上按常见 app 校一遍。 | 换实现 |
 | 标题、标题行高度、能不能改大小、是不是焦点窗口 | 矩形用“去掉看不见的缩放边框后”的那个矩形。标题行高度：用系统标准标题栏的给系统值，自己画标题栏的（Chrome、VS Code）给 0，不猜。 | 换实现 |
 | 抬到前面、关、移、改大小；移动和大小的夹取规则在 `Geometry.swift`、`Windows.swift` | 系统调用换成 Windows 的；夹取规则在 `host-core`。关窗口是“请它关”（相当于点关闭按钮），不是杀进程。 | 换实现 |
 | 采集区域 = 各窗口矩形的并集，取整到 8 点；跟着窗口变，不重置编码器 | 照做，在 `host-core`。 | 照做 |
@@ -343,6 +353,8 @@ Windows 专用的 crate 在别的系统上要能编过【我定的】：内容�
 | 像素数 = 区域 × min(density, 屏幕缩放比)；帧率 30/15/5/1 | 照做。缩放在显卡上做还是在内存里做，由实现的人定，以探针 H3 的性能线为准。 | 照做 |
 | 采集中断（屏幕变了）→ 会话以 "capture stopped: …" 结束 | 分辨率或显示器变化、切到别的桌面时，先自己重建采集；重建不了才结束会话。 | 换实现 |
 | 没有显示器 | 报 `no display`（§6.1），不装虚拟显示器（U3）。 | 新增 |
+
+**同时有几个进程在采整块屏**【我定的】。每个会话一个 `rapp-host`（照 Swift 版）。桌面会话采整块屏；应用会话为了菜单、提示这类小窗口也要整块屏的画面（上表第一行），只在有这类小窗口时才开，用完就关。所以同一个登录会话里开着几个 app，就可能有几个进程同时在用桌面复制，而“一台机器上开很多个 app 会话”正是 rApp 的主要用法。桌面复制对同时使用它的进程数可能有上限【未验证，探针 H3：同一个登录会话里 8 个进程同时采】。有上限时的做法在这里先定下：每个登录会话只留一个采整块屏的进程（`rapp-host screen-source`，用户身份；第一个需要的 worker 把它起起来，最后一个走了它自己退出），别的 worker 从它那里取帧。它和安全桌面帮手是同一份“本地采集 + 管道外壳”（§7.4），只是身份不同，不另写一套。没有上限就不做这个进程。
 
 **编码和发送：全部在 `host-core`，从 Swift 搬，逐字节对样本（§14.2）**
 
@@ -374,7 +386,7 @@ Windows 专用的 crate 在别的系统上要能编过【我定的】：内容�
 | 输入前先把 app 拿到前台 | 照做。Windows 会拦“后台程序抢前台”，绕过的办法由实现的人定。 | 换实现，探针 H5 |
 | 几台控制端之间让输入（`yield`，1 秒） | 照做，在 `host-core`。 | 照做 |
 | 输入法：报告现在是哪个（开始时、变化时、每秒）；`selectInput("")` 切到英文布局；按 id 切换（`InputSourceWatcher.swift`） | 照做。“被控端始终保持英文”：会话开始和每次激活目标后，把前台窗口切到英文键盘布局；机器上没有英文布局就把中文输入法切到英文状态；两样都做不到就照常发，记一条日志。 | 换实现，探针 H6 |
-| **以管理员身份运行的窗口** | Windows 不让普通程序给它们发输入。装了系统服务：输入由帮手发，能操作（§7.4）。没装：这次输入不发，报 `input_blocked`，`by` 写 `elevated`，控制端提示“这个窗口以管理员身份运行，这台电脑没装系统服务，不能远程操作”。 | 新增【我定的】 |
+| **以管理员身份运行的窗口** | Windows 不让普通程序给它们发输入，也不让普通程序移动、关闭它们或读它们的控件【未验证，探针 H5 逐项试】。画面照常出。**装了系统服务**：输入由帮手发；抬到前面、移动、改大小、请它关闭这四个窗口操作，目标是管理员窗口时也交给帮手做（§7.4）；读控件的三样（焦点面板、密码框提示、用到控件的状态规则）对管理员窗口不做，焦点面板按协议退成“整个窗口”；切英文布局做不到就照上一行记日志（发文字不经过输入法，不受影响）。**没装**：输入不发，回 `inputBlocked`（26），`by` 写约定值 `elevated`，worker 的 `input_blocked` 事件同样；四个窗口操作不做。控制端把 `elevated` 说成“这个窗口以管理员身份运行，这台电脑没装系统服务，不能远程操作”（§10.6）。 | 新增【我定的】，探针 H5、S1 |
 
 ### 6.7 剪贴板和传输
 
@@ -419,7 +431,7 @@ Windows 专用的 crate 在别的系统上要能编过【我定的】：内容�
 | 锁着的时候开 app 会话：先报画布和“已锁”，每秒看一次，解锁后才开始采集 | 照做，规则在 `host-core`（`ScreenLock.swift`）。 | 照做 |
 | `lock` 子命令：立刻锁屏，2 秒内确认 | 照做。 | 换实现 |
 | 自动锁屏：在服务里，最后一个计数的会话结束 10 秒后跑 `rapp-host lock`（`rust/service/src/autolock.rs`） | 服务的代码不用改。**只在装了系统服务时生效**：没有系统服务就解不了锁，锁了等于把自己关在门外，所以用户方式下这个开关隐藏并视为关。 | 照做 + 限制【我定的】 |
-| 解锁（v11）：点一下唤醒输入框，打密码，回车；几个 worker 之间用文件锁保证一次一个；等最多 8 秒；密码 ≤1024 字节，绝不进日志 | 步骤在 `host-core`（`UnlockSequence.swift`）。打字这一步交给帮手（§7.4）。打进去的是锁屏上当前那个输入框要的东西，密码或 PIN，rApp 不分。没装系统服务：回答“这台电脑没装系统服务，要在本机解锁”。 | 换实现，探针 S1 |
+| 解锁（v11）：点一下唤醒输入框，打密码，回车；几个 worker 之间用文件锁保证一次一个；等最多 8 秒；密码 ≤1024 字节，绝不进日志 | 步骤在 `host-core`（`UnlockSequence.swift`）。打字这一步交给帮手（§7.4）。**Server 版默认要先按 Ctrl+Alt+Del 才出密码框**：`host-windows` 看系统策略，要的话先请 `rapp-svc` 发一次（§7.5），等输入框出来再打【未验证，探针 S1】。打进去的是锁屏上当前那个输入框要的东西，密码或 PIN，rApp 不分。没装系统服务：收到的密码直接丢掉（和“没锁时收到”一样处理），继续报已锁；协议里没有“解锁失败”这条消息，macOS 也是靠再报一次锁屏状态。控制端从对方的 `resident: "user"` 知道解不了，不弹解锁框，写“这台电脑没装系统服务，要在本机解锁”（§10.6）。 | 换实现，探针 S1 |
 | 会话期间不让屏幕睡、不让屏保和锁屏出来（`PowerHold.swift`） | 照做。没有会话时不管；电脑睡了就连不上，和 Mac 一样，在说明里提醒用户改电源设置（笔记本合盖也是）。 | 换实现 |
 
 **远程桌面（RDP）和 rApp 一起用**【我定的】。服务器的管理员常用远程桌面。远程桌面断开后，那个登录会话没有画面可采。规则：
@@ -438,21 +450,26 @@ Windows 专用的 crate 在别的系统上要能编过【我定的】：内容�
 | 开机没人登录时 | 能连上，看到登录界面，登录进去 | 连不上 |
 | 锁屏、UAC 提示 | 能看、能操作 | 看不到，报原因 |
 | 远程解锁、自动锁屏 | 有 | 没有（开关隐藏） |
-| 管理员身份运行的窗口 | 能操作 | 不能，报原因 |
+| 管理员身份运行的窗口 | 能看、能输入、能移动和关闭；读不到里面的控件（§6.6） | 只能看，输入报原因 |
 | 崩溃重启、升级后重启 | 有 | 有 |
 | 在线升级 | 静默装 | 静默装 |
 | 文本终端、端口共享、app 和桌面会话 | 有 | 有 |
 
 两种方式用**同一个 `rapp-svc.exe`**，区别只在参数（`service` / `user`）。`rapp-service` 永远有一个监督它的上级，所以它“退出等人拉起”的写法（`rust/service/src/main.rs:65-67`，macOS 上靠 launchd）不用改。
 
-控制端看得到对方是哪种方式：服务状态里加一个可选字段（比如 `"resident": "system" | "user"`），设备卡片和出错提示用它。
+控制端看得到对方是哪种方式：`list_apps` 的回答里加一个可选字段 `"resident": "system" | "user"`（放在哪、要一起改哪几处见 §8.1），设备卡片和出错提示用它。
 
 ### 7.2 机主
 
 一台机器只有一个“机主”：rApp 以谁的身份干活、读谁的数据根。
 
 - 系统服务方式下，机主的 SID 记在 `HKLM\Software\rapp`。安装程序最后以“发起安装的那个用户”的身份运行 `rapp-svc claim-owner`，服务从管道对端的身份里取 SID，**不从消息内容里取**。已有机主时再认领要管理员权限。
-- 机主以外的用户登录这台机器：rApp 不为他们启动。这台设备对外表现为“有人在用，但不是机主”，桌面会话报原因。几个用户同时各跑一份是非目标。
+- **无人值守安装时没有“发起安装的用户”**（管理工具是以 SYSTEM 或另一个管理员的身份跑的）【我定的】：静默安装系统服务方式时，必须用安装参数 `/OWNER=<账户>` 指明机主，`rapp-svc install` 把它解析成 SID 写进去，这时不走 `claim-owner`。没给这个参数就失败并说明，不猜。
+- **本机屏幕上登录着的不是机主**【我定的】：rApp 不为别的用户启动，也不把别人的桌面给机主看。
+  - 机主没有登录会话：SYSTEM 身份的那个实例（就是登录前实例，§7.6）留着不停，但不再给桌面：`permissions` 报 `screen_recording: false`、`error: "other user"`，能力全关，正在进行的桌面会话以 `other user` 结束。设备还在线，卡片上写“别的用户正在使用这台电脑”。那个用户注销后回到登录前的状态。
+  - 机主有登录会话，但被切到了后台（快速切换用户）：机主的 `rapp-service` 照常跑，文本终端和端口共享照常；桌面和应用会话报 `session disconnected`。**这时不做 `reattach`**：接回本机屏幕会把坐在机器前的那个人踢回锁屏。`rapp-svc` 看到本机屏幕上登录着别的用户就拒绝 `reattach`。
+  - 别的用户用远程桌面登录不占本机屏幕，不算这两种情况。
+  - 几个用户同时各跑一份是非目标。
 
 ### 7.3 `rapp-svc` 做什么
 
@@ -488,13 +505,14 @@ Windows 专用的 crate 在别的系统上要能编过【我定的】：内容�
 
 Windows 把锁屏、登录界面、UAC 提示、Ctrl+Alt+Del 那一屏放在另一个“安全桌面”上，普通程序看不到也碰不到。
 
-- **帮手是什么**：`rapp-host secure-helper`，和 `rapp-host` 同一个程序的另一种运行方式，由 `rapp-svc` 以 SYSTEM 身份、在机主的登录会话里启动。它只会两件事：把“当前显示的那个桌面”的画面采出来（桌面复制），把收到的鼠标键盘事件发进去。它跟着系统在普通桌面和安全桌面之间切。
+- **帮手是什么**：`rapp-host secure-helper`，和 `rapp-host` 同一个程序的另一种运行方式，由 `rapp-svc` 以 SYSTEM 身份、在机主的登录会话里启动。它只会三件事：把“当前显示的那个桌面”的画面采出来（桌面复制）；把收到的鼠标键盘事件发进去；对指定的窗口做四个固定的操作（抬到前面、移动、改大小、请它关闭），只在目标是管理员身份的窗口、`rapp-host` 自己做不了时才用（§6.6）。它跟着系统在普通桌面和安全桌面之间切。
 - **谁是会话的主人**：还是用户身份的那个 `rapp-host`。协议、编码、剪贴板、传输都在它那里。帮手只是它的“另一块屏”和“另一只手”。
-- **两者怎么连**：用户身份的 `rapp-host` 开一条只许 SYSTEM 和自己连的管道，把名字交给 `rapp-svc`，帮手连上来。管道上走两种东西：帧（宽、高、像素）和输入事件。帧走管道还是共享内存由实现的人定，以探针 S1 量出来的延迟为准。
+- **两者怎么连**：用户身份的 `rapp-host` 开一条只许 SYSTEM 和自己连的管道，把名字交给 `rapp-svc`，帮手连上来。管道上走三种东西：帧（宽、高、像素）、输入事件、上面那四个窗口操作（目标只用窗口句柄指明）。没有别的命令。帧走管道还是共享内存由实现的人定，以探针 S1 量出来的延迟为准。
 - **什么时候用帮手**【我定的】：
   - 输入：系统服务方式下，**所有输入都经帮手发**（这样管理员身份的窗口也能操作，而且只有一条路）。用户方式下由 `rapp-host` 自己发。
   - 画面：平时 `rapp-host` 自己采；整桌面会话在系统切到安全桌面时改用帮手的画面，切回来再换回去。
-  - 单应用会话遇到安全桌面：不切画面，按“已锁屏”或一条提示处理（“被控端在等系统确认，请打开桌面会话处理”）。
+  - 单应用会话遇到安全桌面：不切画面（那一屏不是这个 app 的），画面停在最后一帧。**锁屏**照现有的办法报 `screenLocked(true)`（34）。**不是锁屏的安全桌面**（UAC 提示、Ctrl+Alt+Del 那一屏）借用现有的 `covered`（37）：控制端这时发来输入，就回一条 `covered`，`name` 写“系统确认（UAC）”，`bundleID` 写 `consent.exe`，`dismissable` 是假，节流照点穿保护（5 秒说一次）。已经发出去的控制端会显示“A 上「系统确认（UAC）」的弹窗挡住了点击”，意思是对的；新的控制端认出这个 id，后面多说一句“请打开桌面会话处理”。不能报成锁屏：那样控制端会弹解锁框。
+  - 用户方式（没有帮手）遇到安全桌面：桌面会话也和上一条一样处理，画面停在最后一帧，锁屏报 `screenLocked(true)`，别的报 `covered`。用户身份的进程看不到安全桌面上是什么，只知道“切走了”和“锁没锁”。【未验证，探针 H4】
 - **在 `host-windows` 里的样子**：采集和输入各有两个实现，“本地的”和“经帮手的”，对 `host-core` 是同一个接口。帮手本身就是“本地的”那个实现加一个管道外壳。**不为帮手另写一套采集和输入。**
 
 没选的做法：让整个桌面 worker 以 SYSTEM 身份跑（一些远程桌面软件这么做）。没选是因为那样协议、编码、剪贴板、文件传输全在系统权限下，违反 §2.3 的反目标。
@@ -502,6 +520,10 @@ Windows 把锁屏、登录界面、UAC 提示、Ctrl+Alt+Del 那一屏放在另�
 ### 7.5 Ctrl+Alt+Del
 
 这个组合只有系统服务能发，而且要先打开一条系统策略（“允许服务模拟安全注意序列”）。系统服务方式安装时由 `rapp-svc install` 打开它，记下原值，卸载时还原，并在安装界面上列出来（§12.2）。【未验证，探针 S1】
+
+这条策略不只是为了菜单里那一项：Windows Server 默认要先按 Ctrl+Alt+Del 才出密码框，所以这些机器上的远程解锁（§6.9）和登录前的登录（§7.6）都靠它。
+
+发到哪个登录会话【未验证，探针 S3】：机主在远程桌面会话里的时候，它可能落到本机屏幕而不是机主的会话。落不到的话，这种情况下菜单项置灰并说明原因。
 
 控制端怎么触发：Windows 控制端按不出来（本机系统会先截走），Mac 上也别扭。所以**被控端是 Windows 的桌面会话，会话菜单里加一项“发送 Ctrl+Alt+Del”**，发的就是 §6.3 说的那个键组合，不加协议消息。
 
@@ -515,7 +537,7 @@ Windows 把锁屏、登录界面、UAC 提示、Ctrl+Alt+Del 那一屏放在另�
 - 它**不执行、不加载数据根里指到的任何程序**，只启动自己版本目录里的程序。数据根是机主可写的，SYSTEM 身份的进程只把它当数据读。
 - 画面和输入：请 `rapp-svc` 用 `spawn-host` 在控制台会话里启动一个 SYSTEM 身份的 `rapp-host`（它直接用“本地的”采集和输入实现，不需要帮手）。
 - 机主登录后：`rapp-svc` 停掉登录前实例，在机主会话里启动正常的 `rapp-service`。控制端的连接会断一下，靠现有的重连逻辑接上。
-- 登录进来的不是机主：登录前实例照样停掉，这台设备的桌面不可用（§7.2）。
+- 登录进来的不是机主：登录前实例不停，改成“被别人占用”的状态，不再给桌面（§7.2）。
 
 登录前不可用的情况（服务日志里写明原因，不报错给用户）：机主的数据根在网络盘或加密文件夹里，SYSTEM 读不到；开机要先输 BitLocker 密码的机器，系统还没起来。
 
@@ -531,21 +553,21 @@ Windows 把锁屏、登录界面、UAC 提示、Ctrl+Alt+Del 那一屏放在另�
 
 ## 8. 现有 Rust crate 的 Windows 缝
 
-总规则：每条缝都是**加一支** `cfg(windows)`，unix 那一支一个字不动。下面的行号是 main `65807ebe` 上的。
+总规则：每条缝都是**加一支** `cfg(windows)`，unix 那一支一个字不动。下面的行号是 main `0decfe8d` 上的。
 
 ### 8.1 `rapp-service`
 
 | 位置 | 现在 | Windows 上 |
 |---|---|---|
-| 单实例（`main.rs:15`、`instance.rs`） | 只有 Linux 有：抽象 unix socket `com.rapp.service.<uid>` | 命名互斥量，名字带登录会话（登录前实例和登录后实例不同名）。第二个实例照 Linux 的写法退出。 |
+| 单实例（`rust/service/src/main.rs:8-9,19-30`、`instance.rs`） | 只有 Linux 有：抽象 unix socket `com.rapp.service.<uid>` | 命名互斥量，名字带登录会话（登录前实例和登录后实例不同名）。第二个实例照 Linux 的写法退出。 |
 | 重启（`main.rs:65-67`） | `exit(0)`，launchd 拉起 | 不改。上级是 `rapp-svc`（§7.1）。 |
 | 停止（`stopped()`） | SIGTERM、Ctrl+C | Windows 没有 SIGTERM。【我定的】`rapp-svc` 启动它时带 `--supervised`，握着它标准输入的写端；**标准输入读到结束就是“请停”**。`rapp-svc` 自己死了，这一端也跟着关，`rapp-service` 自己退出，不会留下占着端口的孤儿。不带 `--supervised`（开发时手动跑）不看标准输入。 |
-| 孤儿进程 | unix 上靠信号和进程组 | 【我定的】`rapp-svc` 把 `rapp-service` 放进一个“上级没了就全部结束”的作业对象，worker 都在里面。**文本终端是例外**：启动终端窗口时要脱离这个作业（§9.4），否则重启服务会带走终端。 |
-| 升级选项（`lib.rs:113-125` `UpdateOpts::system`） | `launchd: parent_id() == 1`；缓存目录 `Library/Caches/rapp/update`；`bundle_of` 找 `.app` | “有人监督”改成看 `--supervised`；“装在哪”改成自己所在的版本目录；下载和安装不在这里（§12.3）。 |
+| 孤儿进程 | unix 上靠信号和进程组 | 【我定的】`rapp-svc` 把 `rapp-service` 放进一个“上级没了就全部结束”的作业对象，worker 都在里面。**作业里只该有 rApp 自己的后台进程**（`rapp-service`、`rapp-host`、`rapp-term serve`、`rapp-speech` 这类）。下面三样启动时都要脱离这个作业，否则重启服务、升级会把用户的东西一起带走：**文本终端的窗口**（§9.4）；**`rapp-host` 替控制端打开的 app**（§6.4，用户在远程开的 Chrome 不能因为服务重启就没了）；**界面程序**（`--cm` 小窗和升级后重新打开的主界面）。验收写在探针 T5。 |
+| 升级选项（`rust/service/src/lib.rs:113-128` `UpdateOpts::system`；`bundle_of` 在 `rust/update/src/lib.rs:172`，从 `rust/service/src/main.rs:55` 调） | `launchd: parent_id() == 1`；缓存目录 `Library/Caches/rapp/update`；`bundle_of` 找 `.app` | “有人监督”改成看 `--supervised`；“装在哪”改成自己所在的版本目录；下载和安装不在这里（§12.3）。 |
 | 界面程序在哪（`cm.rs:9-12`） | `RAPP_GUI`，否则旁边的 `rapp` | 旁边的 `rapp-gui.exe`，带 `--cm`。 |
-| 权限、能力、重置权限（`workers.rs:91-104,132-139,166-185`） | 见 §6.1 | 见 §6.1。`tccutil` 那一段只在 macOS 上跑。 |
+| 权限、能力、重置权限（`workers.rs:91-104,149-156,180-202`） | 见 §6.1 | 见 §6.1。`tccutil` 那一段只在 macOS 上跑。 |
 | 启动 worker | `Command::new` | 不许弹出黑窗口：`rapp-host.exe`、`rapp-term.exe` 是控制台程序，从没有窗口的进程里启动时要明说“不要窗口”。程序名一律带 `.exe`，在自己的版本目录里找。 |
-| 常驻方式 | 没有这个概念 | `rapp-svc` 启动它时告诉它是 `system` 还是 `user`（参数）。服务状态里报可选字段 `resident`；登录前实例报 `prelogin`（§7.6）。**加字段的同一个提交里**改：`rust/testkit/tests/service.rs` 里钉死的键集合、hub 转发已知字段的那张表、`config-reference`。 |
+| 常驻方式 | 没有这个概念 | `rapp-svc` 启动它时告诉它是 `system` 还是 `user`（参数）。两个可选字段 `resident`、`prelogin`（§7.6）**放在对端的 `list_apps` 回答里**（和 `os`、`version`、`capabilities` 并排，控制端就是从这里知道对方是什么机器的），本机 IPC 的 `status` 里也报一份给“本机”页用。只在 Windows 上出现，macOS、Linux 的回答一个键都不多。**加字段的同一个提交里**改：hub 转发已知字段的 `apps_event`（`rust/hub/src/lib.rs:466-481`，不加就传不到界面）、`rust/testkit/tests/service.rs:381` 那条整个对象相等的断言（它在 Mac 上跑，Mac 的回答没变，所以它应该原样还是绿的；另加一条 Windows 的）、`config-reference`。 |
 | 自动锁屏（`autolock.rs`） | 开关在服务配置里 | 代码不改。`resident` 不是 `system` 时这个开关视为关（§6.9）。 |
 | 数据同步 | 只有它跑 git | 照做。Windows 没有自带 git：找不到 `git.exe` 就只提示，不同步（`data-dir` D6 已经这么写）。同步仓库在初始化时关掉换行符转换（`core.autocrlf=false`），不然 Mac 和 Windows 之间会把每个文件都当成改过。 |
 | 本机 IPC（`127.0.0.1:22029` + `local/ipc.token`） | TCP | 照做，不改。 |
@@ -554,8 +576,8 @@ Windows 把锁屏、登录界面、UAC 提示、Ctrl+Alt+Del 那一屏放在另�
 
 | crate | 要改什么 |
 |---|---|
-| `rapp-net` | `quic.rs:239-326`：双栈绑定现在在非 unix 上直接报错，加 Windows 一支，行为和 unix 一样（一个 UDP 口同时收 IPv4 和 IPv6）。`log.rs:283-287`：找不到环境变量时的兜底目录认 `USERPROFILE`。`datadir.rs` 里五处改文件权限：见 §13.2。 |
-| `rapp-wire`、`rapp-conn` | 只有“保护密钥文件”那几处（`wire/src/identity.rs:124,141`、`conn/src/paired.rs:130`）：见 §13.2。协议和连接逻辑不动。 |
+| `rapp-net` | `rust/net/src/quic.rs:269-356`（unix 的 `mod sys` 在 269-346，非 unix 的在 348-356）：双栈绑定现在在非 unix 上直接报错，加 Windows 一支，行为和 unix 一样（一个 UDP 口同时收 IPv4 和 IPv6）。`log.rs:283-287`：找不到环境变量时的兜底目录认 `USERPROFILE`。设权限的三处：`datadir.rs:22-26`（把 `local` 设成 0700）、`config.rs:96-111` 的 `write_private`（写 0600 的文件）、`log.rs:218-225`（日志目录 0700），见 §13.2。 |
+| `rapp-wire`、`rapp-conn` | 自己不设权限，写密钥文件都调 `rapp-net` 的 `write_private`（`rust/wire/src/identity.rs:85-86`、`rust/conn/src/paired.rs:75`），所以 §13.2 改好 `write_private` 这两个 crate 就跟着对了。协议和连接逻辑不动。 |
 | `rapp-ports` | 预计不改。它只在回环地址上开口子。Windows 会把一些端口段留给系统（装了 Hyper-V、WSL 的机器尤其如此），28000–28999 里的号可能开不了：这种失败要和“端口被占”一样报出来，不能当成程序错。【未验证，探针 N1】 |
 | `rapp-hub` | 自己的代码没有平台分支，只因为依赖 `rapp-term` 才编不过；§9 做完它就能编。转发字段表加 `resident`、`prelogin`。 |
 | `rapp-cli` | Windows 一条规则：不带子命令时启动界面（§5.1）。启动时把控制台输出设成 UTF-8，否则中文是乱码。【未验证】 |
@@ -596,7 +618,7 @@ unix 上是 unix socket `pty/<pid>.sock`。Windows 上换成**回环 TCP**：`ru
 
 ### 9.4 `rapp-term serve`（开终端、列 shell）
 
-- **shell 列表**：接上已经写好的 `shells.rs:98-137`（现在 `serve.rs:848-852` 在非 unix 上返回空表）。规则照 `term-entry`：默认 `cmd.exe`；按钮叫 `cmd`、`PowerShell`、`pwsh`、`Git Bash`、`Git sh`；`System32\bash.exe` 是 WSL 的入口，永远不列。
+- **shell 列表**：接上已经写好的 `shells.rs:98-137`（现在 `rust/term/src/serve.rs:855-860` 的 `installed_shells()` 在非 unix 上返回空表）。规则照 `term-entry`：默认 `cmd.exe`；按钮叫 `cmd`、`PowerShell`、`pwsh`、`Git Bash`、`Git sh`；`System32\bash.exe` 是 WSL 的入口，永远不列。
 - **开窗口**：装了 Windows Terminal 就让它在**已有窗口里开一个新标签页**，里面跑 `rapp-term.exe run …`（对应 macOS 上“在 Terminal 的窗口里开标签页”）；没装（Server 2022 默认没有）就开一个普通控制台窗口。不写 `.command` 脚本文件，命令行直接给。5 秒内没等到 `run` 回来报到，报 `START_TIMEOUT`，和现在一样。
 - **终端不归服务管**：窗口进程启动时脱离 §8.1 的作业对象。重启服务、升级都不结束终端（`cli-update-design` 的要求）；升级后旧版本目录留着，它们继续用旧的 `rapp-term.exe`（§5.1）。
 - **结束终端**（Ctrl+Shift+W、会话菜单）：结束里面的程序，`run` 随之退出。Windows Terminal 默认只在退出码是 0 时自动关标签页，所以 rApp 主动结束的终端让 `run` 以 0 退出。【未验证，探针 T2】
@@ -612,9 +634,9 @@ unix 上是 unix socket `pty/<pid>.sock`。Windows 上换成**回环 TCP**：`ru
 | 能力 | macOS | Linux | Windows | 现在是怎么判断的 |
 |---|---|---|---|---|
 | 画面由 `rapp-session` 进程解码、Dart 画 | 否（原生） | 是 | **是** | `main.dart:93-97` 按系统名分支 |
-| 能用系统程序打开文件、文件夹、网址（`systemOpen`） | 是 | 是 | **是**（现在是否） | 四处查这一位；另有三处直接落到 `xdg-open` |
+| 用系统程序打开文件、文件夹、网址 | 是（`open`） | 是（`xdg-open`） | **是**（现在只对了一半） | **这不是一个能力位。** `systemOpen` 只有 iOS 是真（`gui/lib/platform_caps.dart:17,37-41`），意思是“走 iOS 的系统接口，不起子进程”；桌面三个系统都是假，Windows 也保持假。要改的是下面说的那个共用函数 |
 | 记住解锁密码 | 钥匙串 | 只在内存 | **系统凭据管理器** | `ui/unlock.dart` 按系统名 |
-| 语音 | 原生 | `rapp-speech` | **`rapp-speech`** | `ui/main_state.dart:167-172` |
+| 语音 | 原生 | `rapp-speech` | **`rapp-speech`** | `gui/lib/ui/main_state.dart:170-175` |
 | 搬数据目录 | 是 | 是 | **是** | `pages/data_section.dart:165` 对 Windows 隐藏（因为用了 `cp -Rp`） |
 | 键栏“按了实体键就收起”时 Ctrl 不算 | 否 | 是 | **是** | `embed/key_bar.dart:176-183` 只认 Linux |
 | 拆出独立窗口 | 是 | 是 | 否（非目标） | 已有 |
@@ -622,7 +644,7 @@ unix 上是 unix socket `pty/<pid>.sock`。Windows 上换成**回环 TCP**：`ru
 
 “自动锁屏”这一行不是平台能力：它看**对方或本机服务报的 `resident`**（§7.1），macOS 上一直显示。
 
-“用系统程序打开”收成一个函数（macOS `open`、Linux `xdg-open`、Windows 资源管理器），现在散在 `pages/local_section.dart:40-46`、`pages/data_section.dart:52-57`、`embed/linux_transfer.dart` 的几处都改成调它。
+“用系统程序打开”收成一个函数（macOS `open`、Linux `xdg-open`、Windows 上文件夹用资源管理器、文件和网址用系统的“打开”）。现在它散在六处，各写各的：`gui/lib/ui/main_window.dart:39-43`（经 `service_control.dart:122-125` 的 `openFolderCommand`，Windows 上已经是 `explorer`）、`gui/lib/term/term_stage.dart:47-61`（Windows 上已经是 `cmd /c start`）、`gui/lib/embed/linux_session_port.dart:473`、`gui/lib/pages/local_section.dart:40-46` 和 `gui/lib/pages/data_section.dart:52-57`（**这两处在 Windows 上落到 `xdg-open`，是错的**）。六处都改成调这一个函数；iOS 那一支（`systemOpen`）留在函数里面。
 
 ### 10.2 嵌入的远程画面
 
@@ -675,7 +697,8 @@ unix 上是 unix socket `pty/<pid>.sock`。Windows 上换成**回环 TCP**：`ru
 - `data_relocate.dart:51` 的 `cp -Rp` 换成不依赖外部命令的复制。
 - `embed/linux_speech.dart`、`main.dart:93-97` 里写死的不带 `.exe` 的程序名，都走 `findBinary`。
 - “本机”页：权限那一行在 Windows 上显示的是常驻方式（带系统服务 / 只为我）和“有没有显示器”，没有 macOS 的授权引导。
-- **被控端是 Windows 时控制端要会说的话**（在共用的 Dart 里，所以 Mac、Linux、iOS 控制端也都有）：`no display`、`session disconnected`、`not interactive` 三种原因；`input_blocked` 的 `by: "elevated"`；登录前的设备卡片“未登录，只能打开桌面”；解锁框写“密码或 PIN”；桌面会话菜单里的“发送 Ctrl+Alt+Del”（§7.5）。
+- **被控端是 Windows 时控制端要会说的话**（在共用的 Dart 里，所以 Mac、Linux、iOS 控制端也都有）：`no display`、`session disconnected`、`not interactive`、`other user` 四种原因；`inputBlocked` 的 `by` 是 `elevated` 时不套“远端正在被 X 操作”那句（`gui/lib/ui/main_state.dart:4757` 的 `inputBlockedHint`、`gui/lib/access_log.dart:37`），换成 §6.6 的那句；`covered` 的 `bundleID` 是 `consent.exe` 时在原句后面加“请打开桌面会话处理”（§7.4）；对方的 `resident` 是 `user` 时，锁屏不弹解锁框，写“这台电脑没装系统服务，要在本机解锁”（§6.9）；登录前的设备卡片“未登录，只能打开桌面”；`other user` 时“别的用户正在使用这台电脑”；解锁框写“密码或 PIN”；桌面会话菜单里的“发送 Ctrl+Alt+Del”（§7.5）。
+- **已经发出去的控制端遇到这些会怎样**【我定的】：`elevated` 会被说成“远端正在被 elevated 操作”，别扭但不出错；`covered` 那句本来就通；不认识的原因按原文显示。这些话都在共用的 Dart 里，C、D 段合并以后随 macOS、iOS 的正常发版出去，比第一个公开的 Windows 版（U7）早，所以用户实际碰不到。`elevated` 是约定值，设备名正好叫这个的会被说错，接受。
 - **审一遍写死“Mac”的句子**：提示语里“在那台 Mac 上……”这类话，对方是 Windows 时要按对方的系统说（设备的 `os` 字段已经有了）。
 - 终端的等宽字体回退表里要有 Windows 自带的等宽字体；正文的回退表已经有微软雅黑（`design-language:141`）。
 
@@ -711,7 +734,8 @@ unix 上是 unix socket `pty/<pid>.sock`。Windows 上换成**回环 TCP**：`ru
 - 系统服务方式下，最后以**发起安装的那个用户**的身份运行 `rapp-svc claim-owner`（§7.2）。
 - **装在哪**：系统服务方式固定是 `%ProgramFiles%\rapp\`，不让改【我定的】（装到别的盘，目录权限就不是“只有管理员能写”，§7.7 的前提没了）。“只为我安装”固定是 `%LOCALAPPDATA%\Programs\rapp\`。
 - **再装一次就是升级**：解出新的版本目录，走和在线升级同一个“切换”（§12.3）。换方式（只为我 → 带系统服务，或反过来）也是再跑一次安装程序：`rapp-svc install` 先撤掉另一种方式留下的东西。两种方式不同时存在。
-- **无人值守**：Inno Setup 自带静默安装参数，方式用一个参数给。给批量装服务器的人用，不另做工具。
+- **无人值守**：Inno Setup 自带静默安装参数，方式用一个参数给；系统服务方式还要用 `/OWNER=<账户>` 指明机主（§7.2）。给批量装服务器的人用，不另做工具。
+- **静默安装只把程序和服务装上，第一次配置要在界面里做**【我定的】。`rapp` 命令行现在只有 `share`、`unshare`、`hosts`、`pipe`、`update`（`rust/cli/src/args.rs`），没有配 relay、配对设备的命令，这次不加（relay 是唯一的门，不为了 Windows 给它开新的入口）。所以一台新服务器要有人登录一次（本机或者远程桌面），打开 rApp 配好；配好以后就不用再登录，重启后登录前实例用的就是这份配置（§7.6）。不登录就完成第一次配置是非目标。
 - 安装不结束正在跑的文本终端，也不要求重启电脑。
 
 ### 12.2 安装会改哪些系统设置（全部列在这里，卸载时还原）
@@ -765,7 +789,7 @@ unix 上是 unix socket `pty/<pid>.sock`。Windows 上换成**回环 TCP**：`ru
 
 **旧目录什么时候删**：`rapp-svc` 启动时和切换后，删掉既不是“现在的”也不是“上一版”的版本目录；删不掉（还有文本终端开着里面的文件）就留到下次。
 
-**登录前的升级**【我定的】：没人登录时没有用户身份的 `rapp-service`，由 `rapp-svc` 自己按同样的间隔查（判断函数用 `rapp-update` 里现成的），在没有它启动的 `rapp-host` 在跑的时候（也就是没人连着登录界面）下载并切换。机主的 `auto_update` 关了就不做。理由：长期没人登录的服务器如果停在旧版，协议一升版就连不上去登录，只能到机房去。
+**自动升级默认开，登录前也升**【用户定的，U8】：`auto_update` 的默认值现在就是开（`rust/service/src/config.rs:86-88`），Windows 上不改这个默认，系统服务方式也一样。没人登录时没有用户身份的 `rapp-service`，由 `rapp-svc` 自己按同样的间隔查（判断函数用 `rapp-update` 里现成的），在没有它启动的 `rapp-host` 在跑的时候（也就是没人连着登录界面）下载并切换。机主的 `auto_update` 关了就不做。理由：长期没人登录的服务器如果停在旧版，协议一升版就连不上去登录，只能到机房去。
 
 **信任明说**：没有证书的时候，升级包的可信度就是“HTTPS + 谁能往这个仓库发 release”；sha256 和清单同源，只防下载坏了（`online-update-design` 对 macOS 也是这么写的）。系统方式下这意味着**能发 release 的人能在所有装了系统服务的机器上以系统权限运行代码**。这是自动升级加系统服务必然带来的，写在这里让用户知道；不想要就把 `auto_update` 关掉。
 
@@ -813,7 +837,7 @@ unix 上是 unix socket `pty/<pid>.sock`。Windows 上换成**回环 TCP**：`ru
 
 ### 13.2 文件权限
 
-unix 上的规矩是“目录 0700、文件 0600”，代码里有十来处 `chmod`（§8.2 列了位置）。Windows 上【我定的】：
+unix 上的规矩是“目录 0700、文件 0600”。Rust 里真正设权限的有五处（别的 `chmod` 都在测试里）：`rust/net/src/datadir.rs:22-26`（`local` 目录）、`rust/net/src/config.rs:96-111` 的 `write_private`（密钥和配置文件，`rapp-wire`、`rapp-conn` 都调它）、`rust/net/src/log.rs:218-225`（日志目录）、`rust/term/src/pty/local.rs:30-37`（终端的几个目录）、`rust/service/src/lib.rs:303-311` 的 `make_private`（launchd 的日志，Windows 上没有这个文件，不用管）。Windows 上【我定的】：
 
 - 在 `rapp-net` 里加一个函数“设成私有”：关掉继承，只留**这个用户、SYSTEM、Administrators**。原来做 `chmod` 的地方在 Windows 上都调它。
 - 为什么不能什么都不做：`%USERPROFILE%` 下面默认就是这三者，看起来不用管；但数据根搬到 `D:\rapp` 这类地方以后，默认权限是“本机所有用户可读”，密钥就漏了。
@@ -833,7 +857,7 @@ unix 上的规矩是“目录 0700、文件 0600”，代码里有十来处 `chm
 
 ### 13.4 配置参考
 
-`config-reference` 的规矩是“代码改了字段，同一个提交里改文档”。Windows 版会加进去的：服务状态的 `resident`、`prelogin`；`HKLM\Software\rapp` 里的各个值；各个路径的 Windows 写法；`permissions` 里 Windows 的三种原因。
+`config-reference` 的规矩是“代码改了字段，同一个提交里改文档”。Windows 版会加进去的：`list_apps` 回答和本机 `status` 里的 `resident`、`prelogin`；`HKLM\Software\rapp` 里的各个值；各个路径的 Windows 写法；`permissions` 里 Windows 的四种原因和 `applications`；`inputBlocked` 的约定值 `elevated`；`covered` 里表示系统确认的 `consent.exe`；安装参数 `/OWNER`。
 
 ## 14. 协议、测试、发版
 
@@ -851,7 +875,14 @@ unix 上的规矩是“目录 0700、文件 0600”，代码里有十来处 `chm
 
 - **样本由 Swift 生成**，`host-core` 只读样本、比结果，不自己造期望值。已有先例：`Tests/RappCoreTests/CrossFixtureTests.swift` 生成 `rust/client-core/tests/fixtures/scroll-copy.bin`。
 - 每个样本是“输入 + Swift 的输出”：给定的像素帧序列（含上一帧）、参数（模式、密度、是否全帧）→ 编码后的字节；给定的窗口原始事实 → 窗口表；给定的控件层级 → 焦点面板矩形；给定的规则和像素 → 状态规则的结果；给定的事件序列 → 分片发送的时序决定。
-- **要覆盖的模块**（§6.5 那张表的每一行，加上 §6.6–§6.9 里标“在 `host-core`”的规则）：量化的五种模式和圆角规则、瓦片编码的每种瓦片和分片与收尾帧、压缩（同一个 zlib 级别、同样的刷新点，输出要逐字节相同；`flate2` 用哪个后端才能和 Swift 的 zlib 一致要先试，【未验证，探针 C1】）、滚动复制、分片发送、省流阶梯、暂停、取景、窗口后处理和夹取、焦点面板、状态规则引擎、解锁步骤、剪贴板规则、传输的续传规则、握手和接管。
+- **哪些能出样本，哪些不能**【用户定的，U10：不动 Swift】。样本生成器是 `Tests/RappCoreTests/` 下的测试，只能调 `Sources/RappCore/` 里不碰系统的代码。所以分两类：
+  - **`Sources/RappCore/` 里有的，全部出样本、逐字节对**：量化的五种模式和圆角规则（`Quantize`）、瓦片编码的每种瓦片和分片与收尾帧（`TileCodec`）、压缩（`Deflate`；同一个 zlib 级别、同样的刷新点，输出要逐字节相同；`flate2` 用哪个后端才能和 Swift 的 zlib 一致要先试，【未验证，探针 C1】）、滚动复制（`ScrollDetect`）、分片发送和省流阶梯（`PacedSender`、`SendPacer`、`SaveLadder`、`WeakTier`）、暂停（`PauseOutbox`）、取景和几何（`Geometry`）、窗口后处理和夹取（`Windows`）、点穿判断（`HitTest`）、焦点面板（`FocusPane`、`FocusTracker`）、状态规则引擎（`StateRules/`）、解锁步骤表（`UnlockSequence`）、锁屏判断（`ScreenLock`）、剪贴板规则（`Clipboard`）、传输的续传规则（`Transfers`）、消息的编码解码和已知类型表（`Protocol`）、命令行解析（`WorkerCLI`）、按住的键和让出输入（`HeldInput`、`InputYield`）、查询的合并和超时（`QueryCoalescer`、`QueryDeadline`、`PendingActions`）。以搬的时候 `Sources/RappCore/` 里实际有的文件为准，上面没点到名的也算。
+  - **只在 `Sources/rapp-host/` 里有的，出不了样本**：握手和接管的先后、会话主循环里各种消息的处理顺序（`Server.swift`）、解锁时“打字、等、再看锁没锁”的整套编排（`Server.swift`、`UnlockTyper.swift`）、粘贴的步骤（`Paster.swift`）、窗口跟踪循环什么时候重发窗口表（`WindowTracker.swift`）、关掉遮挡的重试（`CoverCloser.swift`）。这些和 macOS 的系统接口写在一起，不改 Swift 就单独调不了。**不为了出样本去改 Swift**（U10）：改 macOS 被控端要过门禁、发版，有回归风险，而且和“新平台不改已有平台”相反。
+- **第二类靠三样东西代替样本**：
+  1. **一张对照表**，放在 `rust/host-core/` 里（一份 Markdown）。每一行：Swift 的文件和行号范围 → 这段规定了什么行为 → `host-core` 里哪个模块实现 → 哪条测试钉住。搬一段写一行。没有测试的行不算搬完。
+  2. **假平台整会话测试**：`host-core` 配假平台，对面是**真的 Rust 控制端代码**（`rapp-testkit`），把握手、接管、暂停恢复、解锁（成功、密码错、没锁时收到）、粘贴、传文件、窗口增减、遮挡各走一遍。控制端解得了、状态走得对，才算过。
+  3. **实机验收**：Mac 控制 Windows，§15.3 逐行过（D、F 段的完成标准）。
+- **Swift 那边以后改了怎么办**【我定的】。第一类不用管：样本一重新生成，`host-core` 没跟上门禁就红。第二类没有这道保险，所以对照表里记下它引用的每个 Swift 文件当时的内容摘要，Mac 门禁里加一条测试核对。有人改了 `Server.swift` 这类文件，这条测试就红，提醒他看一眼 `host-core` 要不要跟着改；看过以后更新摘要（要改就一起改，不用改就在对照表里那一行写一句为什么）。代价是 Mac 上改被控端的人每次多这一步；换来的是两份被控端不会不知不觉走岔。这条测试只读文件、算摘要，不拖慢门禁。
 - 逐字节做不到的地方（比如压缩后端的输出确实不同），退一步的标准是“Swift 的解码器解 `host-core` 的输出，得到的像素完全相同”，并且在文档里记下是哪一处、为什么。
 - 这些测试和系统无关，**在 Mac 的门禁里就跑**（`host-core` 不认识操作系统，§5.3）。Mac 上的人改了 Swift 的算法，样本一重新生成，`host-core` 没跟上就红。
 
@@ -865,7 +896,7 @@ unix 上的规矩是“目录 0700、文件 0600”，代码里有十来处 `chm
 
 **Mac 的门禁不改命令**：`swift test`、`cargo test --workspace --no-fail-fast`、clippy `-D warnings`、`flutter analyze`、`flutter test`。新 crate 是 workspace 成员，自动进来：`host-core` 整个在 Mac 上测；`host-windows`、`svc-windows` 在 Mac 上是空壳加纯逻辑测试（§5.3）。加了 Windows 代码以后，Mac 上的门禁时间不能明显变长。
 
-**Windows 的门禁**（Windows 发版 session 用，功能 session 在 Windows 机器上开发时也用）：
+**Windows 的门禁**（Windows 机器上的集成 session、首发后的发版 session 用，功能 session 在 Windows 机器上开发时也用）：
 
 1. `cargo test --workspace --no-fail-fast`，排除 `rapp-relay`、`rapp-host-linux`、`rapp-client-gtk`、`rapp-hub-ffi`（这四个 Windows 上不编）。
 2. `cargo clippy` 同样的范围，`-D warnings`。
@@ -873,13 +904,23 @@ unix 上的规矩是“目录 0700、文件 0600”，代码里有十来处 `chm
 4. 构建和包的自检（§12.6）。
 5. Windows 上能自动化的那部分实机测试（§14.2）。
 
-Swift 的测试 Windows 上不跑。**Mac 上看不到 Windows 专用代码的编译错误**（空壳把它们包掉了），所以改了 `cfg(windows)` 里的代码，要在 Windows 机器上过了门禁才能合并；Mac 上的功能 session 改到共用代码时，Windows 那一支编不编得过，只能等 Windows 发版 session 的门禁发现。这是 U2 的已知代价，和 Linux 现在的情况一样。要不要加 CI 来提前发现，不在这次范围里。
+Swift 的测试 Windows 上不跑。**Mac 上看不到 Windows 专用代码的编译错误**（空壳把它们包掉了），所以改了 `cfg(windows)` 里的代码，要在 Windows 机器上过了门禁才能合并；Mac 上的功能 session 改到共用代码时，Windows 那一支编不编得过，只能等 Windows 机器上那个 session 的门禁发现（它发现了就在 `tasks/todo.md` 记一条并自己修，或者交回给改的人；修好之前不发 Windows 版）。这是 U2 的已知代价，和 Linux 现在的情况一样。要不要加 CI 来提前发现，不在这次范围里。
 
 ### 14.4 Windows 发版 session 的规则（U2）
 
-照 Linux 现在的做法，写成明文：
+照 Linux 现在的做法，写成明文。
 
-- **在哪**：一台 Windows 机器上的专用 session。它**只看 `origin/main`**（Mac 发版 session 推上来的），不看任何人的本机 main。
+**代码怎么到 `origin/main`**【用户定的，U11】：
+
+- 每台机器有自己的本机 main 和自己的发版 session。功能 session 合并到**自己那台机器**的本机 main（现在的规矩，只是不再只有 Mac 一台），不推送；推送归那台机器的发版 session。
+- **Mac 发版 session**：只动 Windows 的合并（§14.5 第 1 条列的那些路径）照常过 Mac 门禁，**过了就立刻推到 `origin/main`，不发版、不改版本号、不打 tag**。不推的话这些提交到不了 Windows 机器。只改文档的合并也一样：现在是“攒到下一次代码改动”，改成立刻推，因为 Windows 机器上的人要读到最新的规格和计划【我定的】。
+- **Windows 机器上的 session**：看这台机器的本机 main 和 `origin/main`。本机有新合并：先 `git fetch`、合并 `origin/main`，过 Windows 门禁，推送。推被拒就再 fetch、合并、重过门禁。
+- **首发之前它是“集成 session”**：只做上面这件事，外加按需打内部用的 zip（U7）。不取版本号、不打 tag、不建 release、不动清单。H 段做完那天它才变成发版 session，下面的规则从那天起生效。
+- 两台机器都改到同一个共用文件时，后推的那边合并。冲突由后推的那个 session 解；解不了就停下来报告，不硬推。
+
+**Windows 发版 session**（首发之后）：
+
+- **在哪**：一台 Windows 机器上的专用 session。它看这台机器的本机 main 和 `origin/main`，不看别的机器的本机 main。
 - **什么时候发**：`origin/main` 上出现了影响 Windows 的代码改动。不发的：只改文档的；只影响 macOS、iOS 的（`Sources/`、`gui/macos/`、`gui/ios/`、`cfg(target_os = "macos")` 等）；只影响 Linux 的；`release: x.y.z`、`docs(website): snapshot …`、`docs(release): …` 和发版时产生的 `merge:` 提交。拿不准算影响。
 - **版本号**：`git fetch origin`，合并 `origin/main`，取 `max(所有 v* tag, pubspec)` + 1；pubspec 的 build 号加 1。`update-windows` 这个 tag 不是版本号，不参与。
 - **先占号再打包**【我定的】：门禁过了以后，先提交 `release: x.y.z`、打 tag，**立刻推 main 和 tag**，推成功了再打包、上传。推被拒（别人先推了）就 fetch、合并、重新取号。理由：三台机器（Mac、Linux、Windows）抢同一串补丁号，打包要十几分钟，这段时间里号很容易被别人用掉。占了号但打包失败，这个号就废掉，下次用下一个（仓库里已有废号的先例）。
@@ -897,15 +938,17 @@ Swift 的测试 Windows 上不跑。**Mac 上看不到 Windows 专用代码的�
 
 **第一行 Windows 代码合并进 main 之前就要加**（否则 Mac 发版 session 会为每一次只动 Windows 的合并发一个 macOS 版）：
 
-1. Mac 发版 session 那条“只影响 Linux 的改动也不发 macOS 版”后面加：“只影响 Windows 的改动（`rust/host-windows/`、`rust/svc-windows/`、`gui/windows/`、`scripts/` 里 Windows 的脚本、`cfg(windows)` 里的代码）也不发。”改到共用代码的（`host-core`、`rapp-service` 的缝、共用 Dart）照常算 macOS 的改动，照常过门禁、发版。
-2. 给做功能的 session 加一条：“改了 `cfg(windows)` 里的代码，要在 Windows 机器上过了 Windows 的门禁再合并；给协议加被控端行为时，`host-core` 和它的样本在同一个提交里改。”
+1. Mac 发版 session 那条“只影响 Linux 的改动也不发 macOS 版”后面加：“只影响 Windows 的改动（`rust/host-windows/`、`rust/svc-windows/`、`gui/windows/`、`scripts/` 里 Windows 的脚本、`cfg(windows)` 里的代码）也不发 macOS 版，但要过门禁并立刻推到 `origin/main`，Windows 机器等着用。只改文档的合并同样立刻推。”改到共用代码的（`host-core`、`rapp-service` 的缝、共用 Dart）照常算 macOS 的改动，照常过门禁、发版。
+2. “其他 session”第 2 条里的“合并到本机 checkout（`/Users/bruce/git/rapp`）的 `main`”改成“合并到**自己这台机器**的本机 main”，并写明 Windows 机器上 checkout 的路径（到时填）。
+3. 给做功能的 session 加一条：“改了 `cfg(windows)` 里的代码，要在 Windows 机器上过了 Windows 的门禁再合并；给协议加被控端行为时，`host-core` 和它的样本在同一个提交里改；改了 `Sources/rapp-host/` 里被 `host-core` 对照表引用的文件，同一个提交里看 `host-core` 要不要跟着改，并更新对照表里的摘要。”
+4. 新加一小节“Windows 集成 session（首发前）”，内容是 §14.4 里“代码怎么到 `origin/main`”的后三条。
 
 **第一次发 Windows 版时加**：
 
-3. “版本号协调”那条里，“另一台机器的 Linux”改成“另外两台机器的 Linux 和 Windows”；跳过的提交里加上 `docs(release): …`。
-4. 新加一小节“Windows 发版 session”，内容就是 §14.4。
+5. “版本号协调”那条里，“另一台机器的 Linux”改成“另外两台机器的 Linux 和 Windows”；跳过的提交里加上 `docs(release): …`。
+6. “Windows 集成 session”那一小节换成“Windows 发版 session”，内容就是 §14.4 的后一半。
 
-改 `CLAUDE.md` 要用户点头，这两批文字到时候各问一次。
+规矩本身用户已经定了（U2、U11）；`CLAUDE.md` 的具体文字要用户点头，这两批到时候各给用户看一次。
 
 ### 14.6 第一次发 Windows 版时要一起改的
 
@@ -958,6 +1001,7 @@ Swift 的测试 Windows 上不跑。**Mac 上看不到 Windows 专用代码的�
 | Dock 菜单、⌘Q | 不做（托盘菜单是同一份内容） | §2.2 |
 | 开机后、登录前能连上（macOS 不支持） | **新增**，只有系统服务方式有 | §7.6，S2 |
 | 两种常驻方式，控制端看得到是哪种 | **新增**（可选字段 `resident`、`prelogin`） | §7.1、§8.1 |
+| 本机屏幕上登录着的不是机主 | **有限制**：不给桌面和 app，报 `other user`；机主自己的会话还在时终端、端口照常。不接回、不踢人 | §7.2，S2 |
 
 ### 15.3 被控端：应用会话和桌面会话
 
@@ -972,7 +1016,7 @@ Swift 的测试 Windows 上不跑。**Mac 上看不到 Windows 专用代码的�
 | 不采鼠标指针 | 照做 | §6.5 |
 | 量化、瓦片编码、压缩、分片发送、收尾帧、统计 | 照做（`host-core`） | §6.5、§14.2 |
 | 取景（v14 `setView`，捏合缩放的被控端一半） | 照做 | §6.5 |
-| 权限检查和授权引导（屏幕录制、辅助功能） | 不适用。换成三种“出不了画面”的原因 | §6.1 |
+| 权限检查和授权引导（屏幕录制、辅助功能） | 不适用。换成四种“出不了画面”的原因 | §6.1 |
 | 鼠标、滚轮、按键、文字输入；结束时松开所有键 | 换实现 | §6.6，H5 |
 | 被控端保持英文输入；报告和切换输入法 | 换实现 | §6.6，H6 |
 | 点穿保护（`covered`）、关掉遮挡（`dismissCover`）、开了别的 app 的提示（`appOpened`） | 换实现；规则在 `host-core` | §6.6、§6.8 |
@@ -986,9 +1030,10 @@ Swift 的测试 Windows 上不跑。**Mac 上看不到 Windows 专用代码的�
 | 报告锁屏状态；锁着时开 app 会话先等 | 换实现 / 照做 | §6.9 |
 | 自动锁屏、远程解锁 | **有限制**：只有系统服务方式有；用户方式下开关隐藏 | §6.9、§7.4，S1 |
 | 会话期间保持唤醒 | 换实现 | §6.9 |
-| 以管理员身份运行的窗口 | **新增**。系统服务方式能操作；用户方式报 `input_blocked` | §6.6 |
-| UAC 提示、锁屏、登录界面上的画面和输入 | **新增**，只有系统服务方式有，只在整桌面会话里 | §7.4，S1 |
-| Ctrl+Alt+Del | **新增**，只有系统服务方式有 | §7.5，S1 |
+| 以管理员身份运行的窗口 | **新增**。系统服务方式：能输入、能抬前、移动、改大小、关闭；**读不到里面的控件**（没有焦点面板矩形、密码框提示、用到控件的状态规则）。用户方式：只能看，输入报 `inputBlocked`（`elevated`） | §6.6，H5、S1 |
+| UAC 提示、锁屏、登录界面上的画面和输入 | **新增**，只有系统服务方式有，只在整桌面会话里。单应用会话和用户方式下：画面停住，锁屏报已锁，别的借 `covered` 说明 | §7.4，S1、H4 |
+| Ctrl+Alt+Del | **新增**，只有系统服务方式有。机主在远程桌面会话里时可能不可用 | §7.5，S1、S3 |
+| 几个 app 会话同时开着 | 照做；同时采整块屏的进程数有没有上限要先试，有就合成一个采集进程 | §6.5，H3 |
 | 和远程桌面（RDP）一起用 | **新增** | §6.9，S3 |
 
 **状态规则和应用档案的内容**【我定的】。机制在 Windows 上是全的，但随包的规则和档案是对着 macOS 的 app 写的（按 bundle id）。第一版 Windows 不承诺任何一个 Windows app 有现成的规则或档案：exe 名字对不上任何条目时，状态规则不报状态，档案用默认值，和 macOS 上一个没写过规则的 app 一样。给哪些 Windows app 补内容是之后的事，不在本文范围。文本终端里的程序状态不受影响（它走 OSC 7501，和 app id 无关）。
@@ -1067,13 +1112,15 @@ Swift 的测试 Windows 上不跑。**Mac 上看不到 Windows 专用代码的�
 ### 15.9 Windows 版比 macOS 版少的（给用户看的一张单子）
 
 1. 没接显示器的机器没有画面（U3）。
-2. “只为我安装”时：登录前连不上；锁屏、UAC 看不到；不能远程解锁；管理员身份的窗口操作不了。
-3. 没有菜单栏镜像、拆出独立窗口、任务栏跳转列表、原生输入框。
-4. 认不出真正程序的微软商店应用不能单独分享（整桌面会话里照样能用）。
-5. 终端窗口可能不跟着控制端变大小（T3）；标题里的目录可能停在启动目录（T4）。
-6. 控制端上被本机系统截走的键（Alt+Tab、Win 组合键、Ctrl+Alt+Del）要用键栏和菜单发。
-7. 随包的状态规则和应用档案里还没有 Windows app 的内容（§15.3）。
-8. 证书到位前安装包不签名，系统会多提示一次。
+2. “只为我安装”时：登录前连不上；锁屏、UAC 看不到；不能远程解锁；管理员身份的窗口操作不了。带系统服务时管理员窗口能操作，但焦点面板、密码框提示对它们不起作用。
+3. 新装的机器要登录一次，在界面里配好 relay 和设备；不能只靠命令行配（§12.1）。
+4. 别的用户坐在这台机器前登录着的时候，机主连上来没有桌面和 app（§7.2）。
+5. 没有菜单栏镜像、拆出独立窗口、任务栏跳转列表、原生输入框。
+6. 认不出真正程序的微软商店应用不能单独分享（整桌面会话里照样能用）。
+7. 终端窗口可能不跟着控制端变大小（T3）；标题里的目录可能停在启动目录（T4）。
+8. 控制端上被本机系统截走的键（Alt+Tab、Win 组合键、Ctrl+Alt+Del）要用键栏和菜单发。
+9. 随包的状态规则和应用档案里还没有 Windows app 的内容（§15.3）。
+10. 证书到位前安装包不签名，系统会多提示一次。
 
 ## 16. 探针：先在实机上试，再照着做
 
@@ -1099,9 +1146,9 @@ Swift 的测试 Windows 上不跑。**Mac 上看不到 Windows 专用代码的�
 |---|---|---|---|---|---|
 | H1 | 一 | 逐个窗口采集再拼，行不行 | 用系统的逐窗口采集接口同时采一个 app 的 1、3、10 个窗口：有没有黄边框、带不带指针、被挡住的部分出不出、每个窗口的帧到得齐不齐；Server 2022 没有显卡时能不能用；窗口移动、改大小时会不会断 | 没有边框和指针；被完全挡住的窗口内容正确；10 个窗口时处理器占用不超过一个核的一半；没有显卡的机器上也能出画 | 改成“采整块屏，按窗口矩形裁”。代价是被别的 app 挡住的地方出不来（这时那块涂掉并报 `covered`）。**这是产品上的退步，要回来问用户** |
 | H2 | 二 | 菜单、提示、下拉列表这些小窗口怎么出 | 试能不能单独采；试从整屏画面里按矩形裁，看它和主窗口差几帧、阴影怎么办 | 点开菜单后 100 毫秒内出现在画面里，位置不偏 | 全部从整屏裁；裁不干净的阴影不要 |
-| H3 | 一 | 桌面复制采整块屏，性能和适用面 | 4K 屏 30 帧采集并缩到目标密度，量处理器和显卡占用；集显加独显的笔记本、HDR 屏、竖屏、Hyper-V 和云主机的虚拟显示 | 4K 30 帧时采集加缩放不超过一个核的 40%；上面几种机器都能出画，颜色不偏 | 个别机器不行：退到逐屏的窗口采集接口（帮手除外）；再不行用最老的整屏拷贝，帧率降到 15。普遍不行：回来改设计 |
-| H4 | 二 | 桌面切换时采集断不断得回来 | 普通桌面 ↔ UAC、锁屏、Ctrl+Alt+Del 那一屏；改分辨率；插拔显示器；全屏游戏 | 切换后 1 秒内恢复出画，会话不断 | 恢复不了的那种情况单独报原因，会话以 "capture stopped: …" 结束（和 macOS 一样） |
-| H5 | 一 | 输入发得准不准 | 往记事本、Chrome、VS Code、Windows Terminal、Office、一个 Java 程序里直接送 Unicode 文字（含 emoji、换行、Tab）；扫描码按键在非美式布局下位置对不对；把后台窗口拿到前台的几种办法；对管理员窗口发输入时能不能知道被拦了 | 1000 字中英混排连发 20 次，不丢不乱；抢前台 50 次成功 50 次；被拦时能得到明确的失败 | 文字在个别 app 里不行：那个 app 走“写剪贴板再粘贴”（已有的粘贴流程）。抢不到前台：报原因，不硬发 |
+| H3 | 一 | 桌面复制采整块屏，性能和适用面 | 4K 屏 30 帧采集并缩到目标密度，量处理器和显卡占用；集显加独显的笔记本、HDR 屏、竖屏、Hyper-V 和云主机的虚拟显示 | 4K 30 帧时采集加缩放不超过一个核的 40%；上面几种机器都能出画，颜色不偏；**同一个登录会话里 8 个进程同时采整块屏，个个出画** | 个别机器不行：退到逐屏的窗口采集接口（帮手除外）；再不行用最老的整屏拷贝，帧率降到 15。普遍不行：回来改设计。8 个进程不能同时采：每个登录会话合成一个采集进程（§6.5 已写），不用回来问 |
+| H4 | 二 | 桌面切换时采集断不断得回来；用户身份的进程知不知道“现在是安全桌面” | 普通桌面 ↔ UAC、锁屏、Ctrl+Alt+Del 那一屏；改分辨率；插拔显示器；全屏游戏。另用普通用户身份的进程试：安全桌面出现和消失时收不收得到明确的信号，分不分得出“锁了”和“没锁但切走了” | 切换后 1 秒内恢复出画，会话不断；用户身份下 1 秒内知道切走了、切回来了，并且分得出锁没锁 | 恢复不了的那种情况单独报原因，会话以 "capture stopped: …" 结束（和 macOS 一样）。分不出是不是安全桌面：用户方式下只报锁屏状态，UAC 时画面停住、不另外说明，写进已知限制 |
+| H5 | 一 | 输入发得准不准 | 往记事本、Chrome、VS Code、Windows Terminal、Office、一个 Java 程序里直接送 Unicode 文字（含 emoji、换行、Tab）；扫描码按键在非美式布局下位置对不对；把后台窗口拿到前台的几种办法；对管理员窗口发输入时能不能知道被拦了。**对管理员窗口逐项试**（普通用户身份）：采画面、抬到前面、移动、改大小、请它关闭、读它的控件，各自行不行、不行时有没有明确的失败 | 1000 字中英混排连发 20 次，不丢不乱；抢前台 50 次成功 50 次；被拦时能得到明确的失败；管理员窗口的六项各有一个明确的结论，写进结果 | 文字在个别 app 里不行：那个 app 走“写剪贴板再粘贴”（已有的粘贴流程）。抢不到前台：报原因，不硬发。管理员窗口上判断不出被拦：发输入前先看目标窗口是不是管理员身份，是就不发、直接报 |
 | H6 | 二 | 怎么让被控端停在英文 | 有英文键盘布局时切布局；只有中文输入法时切它的英文状态；微软拼音、搜狗、微信输入法各试 | 会话开始后，原样按键出来的是英文字母 | 做不到的输入法：记日志，在控制端提示“被控端的输入法没切到英文”。文字输入不受影响（它不经过输入法） |
 | H7 | 二 | 系统自带的文字识别能不能用 | 列出可用语言；没装中文包时的表现；Server 2022 上有没有；一块 800×200 的图要多久 | 简体中文和英文都能识别；一次不超过 200 毫秒 | 不报 `text` 这项能力（规格允许），用到文字的状态规则在 Windows 上不生效 |
 
@@ -1109,9 +1156,9 @@ Swift 的测试 Windows 上不跑。**Mac 上看不到 Windows 专用代码的�
 
 | 号 | 级 | 要回答什么 | 怎么试 | 过关线 | 没过怎么办 |
 |---|---|---|---|---|---|
-| S1 | 一 | 安全桌面帮手行不行 | 系统服务在机主的登录会话里以 SYSTEM 身份启动一个小程序：跟着系统切到当前显示的桌面，采画面、发输入。试锁屏上打密码、点 UAC 提示、打开策略后发 Ctrl+Alt+Del；量帧经管道和经共享内存的延迟 | 锁屏上远程打密码解锁 20 次成功 20 次；UAC 框看得见、点得动；Ctrl+Alt+Del 那一屏出得来；帮手这条路每帧多出来的延迟不超过 5 毫秒 | 某一项做不到（比如锁屏上采不到画面）：系统服务方式的好处就少了一块，**回来问用户**还值不值得装服务 |
-| S2 | 一 | 登录前能不能连上去登录 | 冷启动、不碰本机：服务（在系统自己的那个会话里）起登录前实例，在控制台会话里起 `rapp-host`，标准输入输出接得过去；登录界面采得到；输密码登录；登录后切到机主会话。再试开了自动登录的机器、快速切换用户 | 从控制端看到登录界面并登录成功；登录后 10 秒内自动重连到机主的会话，不用人管 | 登录界面采不到：登录前只报“未登录”，不给桌面，**回来问用户**。重连慢：只是体验，调重连参数 |
-| S3 | 二 | 和远程桌面一起用 | 远程桌面连着时 rApp 采的是什么；断开后把会话接回控制台再锁屏；没有物理显示输出的云主机上接回控制台后有没有画面 | 连着时采到远程桌面里的桌面；断开后接回并锁屏，再从 rApp 解锁成功 | 接不回来：报 `session disconnected`，说明里写“别用远程桌面的断开，注销或者直接用 rApp” |
+| S1 | 一 | 安全桌面帮手行不行 | 系统服务在机主的登录会话里以 SYSTEM 身份启动一个小程序：跟着系统切到当前显示的桌面，采画面、发输入。试锁屏上打密码、点 UAC 提示、打开策略后发 Ctrl+Alt+Del；对管理员窗口做抬前、移动、改大小、请它关闭；量帧经管道和经共享内存的延迟。**Windows 11 和 Server 2022 各一台**：Server 默认要先按 Ctrl+Alt+Del 才出密码框，试“先发它、等输入框出来、再打密码” | 两种系统上，锁屏上远程打密码解锁各 20 次成功 20 次；UAC 框看得见、点得动；Ctrl+Alt+Del 那一屏出得来；管理员窗口的四个操作都成；帮手这条路每帧多出来的延迟不超过 5 毫秒 | 某一项做不到（比如锁屏上采不到画面）：系统服务方式的好处就少了一块，**回来问用户**还值不值得装服务 |
+| S2 | 一 | 登录前能不能连上去登录 | 冷启动、不碰本机：服务（在系统自己的那个会话里）起登录前实例，在控制台会话里起 `rapp-host`，标准输入输出接得过去；登录界面采得到；输密码登录；登录后切到机主会话。再试开了自动登录的机器；Server 上先发 Ctrl+Alt+Del 再登录；**别的用户在本机登录**（机主没登录、机主被切到后台两种） | 从控制端看到登录界面并登录成功；登录后 10 秒内自动重连到机主的会话，不用人管；别的用户在本机时，控制端看到的是 `other user`，没有任何一帧是那个用户的桌面，那个用户没有被踢回锁屏 | 登录界面采不到：登录前只报“未登录”，不给桌面，**回来问用户**。重连慢：只是体验，调重连参数 |
+| S3 | 二 | 和远程桌面一起用 | 远程桌面连着时 rApp 采的是什么；断开后把会话接回控制台再锁屏；没有物理显示输出的云主机上接回控制台后有没有画面；机主在远程桌面会话里时发 Ctrl+Alt+Del，落到哪个会话 | 连着时采到远程桌面里的桌面；断开后接回并锁屏，再从 rApp 解锁成功；Ctrl+Alt+Del 落在哪弄清楚并写进结果 | 接不回来：报 `session disconnected`，说明里写“别用远程桌面的断开，注销或者直接用 rApp”。Ctrl+Alt+Del 落不到机主的会话：机主在远程桌面会话里时那个菜单项置灰并说明（§7.5） |
 | S4 | 一 | 升级的切换和退回 | 两个假版本 A、B：系统服务方式和用户方式各来回切 20 次；放一个起不来的版本看会不会自己退回；切换时开着文本终端；切到一半断电 | 40 次切换不用人管；坏版本 30 秒后自己退回并且不再自动装它；终端全程不断；断电重启后停在 A 或 B 之一，能连 | 改启动项这条路不稳：换成“系统里登记的是一个固定路径的极小启动器，它读 `current` 再起对应版本”。这是另一种结构，在探针里两种都比一下再定 |
 
 ### 16.4 文本终端（T）
@@ -1122,7 +1169,7 @@ Swift 的测试 Windows 上不跑。**Mac 上看不到 Windows 专用代码的�
 | T2 | 二 | 外面的控制台能不能直通 | 在 Windows Terminal 的标签页和老式控制台窗口里各跑：按键、粘贴、鼠标、改窗口大小都按转义序列进来；Ctrl+C 当成一个字节传进去；窗口被关时来不来得及收尾；`run` 以 0 退出后标签页自己关不关 | Claude Code、vim、`cmd` 的行编辑在两种窗口里都正常；主动结束的终端标签页自己关 | 老式控制台窗口里不行的功能写进已知限制（建议装 Windows Terminal）。标签页不自己关：留着，显示“已结束” |
 | T3 | 二 | 终端窗口能不能跟着控制端变大小 | 给 Windows Terminal 和老式控制台发 `ESC[8;行;列t`；老式控制台另试直接改窗口 | 至少一种终端跟着变 | 都不行：`term-fit` 规格里已有的退路（控制端缩放显示） |
 | T4 | 二 | 前台程序和当前目录读不读得到 | 从 shell 往下找最新的子孙进程；各种 shell 报目录的转义序列；试读别的进程的当前目录 | 程序名在 `cmd`、PowerShell、Git Bash 下都对；目录至少在会报的 shell 下对 | 目录用启动目录（§9.2 已写） |
-| T5 | 一 | 终端开得出来、留得住 | 从后台服务里让 Windows Terminal 在已有窗口开标签页（它是商店应用，入口是个别名）；没有窗口时、没装时；窗口进程脱离作业对象；重启 `rapp-service`、重启 `rapp-svc`、升级之后终端还在、`serve` 还找得到 | 三种情况下都开得出来；三种重启之后终端都还在、还能接着用 | Windows Terminal 从服务里起不来：一律开普通控制台窗口。脱离不了作业对象：终端不放进作业（由 `run` 自己看 `serve` 在不在） |
+| T5 | 一 | 终端开得出来、留得住 | 从后台服务里让 Windows Terminal 在已有窗口开标签页（它是商店应用，入口是个别名）；没有窗口时、没装时；窗口进程脱离作业对象；重启 `rapp-service`、重启 `rapp-svc`、升级之后终端还在、`serve` 还找得到。同样的三种重启，再看 `rapp-host` 替控制端打开的 app（记事本、Chrome 各一个）和主界面还在不在 | 三种情况下都开得出来；三种重启之后终端都还在、还能接着用；打开的 app 和主界面也都还在 | Windows Terminal 从服务里起不来：一律开普通控制台窗口。脱离不了作业对象：终端不放进作业（由 `run` 自己看 `serve` 在不在） |
 
 ### 16.5 其余（N、V、C、I）
 
@@ -1132,7 +1179,7 @@ Swift 的测试 Windows 上不跑。**Mac 上看不到 Windows 专用代码的�
 | N2 | 二 | 用户方式下防火墙怎么表现 | 没有管理员权限时第一次收 UDP 22028 弹不弹框；不点允许时直连和中继各怎样；换版本目录后再不再弹 | 行为弄清楚并写进说明；不点允许时经中继照样能用 | 用户方式的说明里写明“局域网直连要点允许；不点只走中继”。每次升级都弹的话，用户方式的界面里给一句提示 |
 | V1 | 二 | 语音识别在 Windows 上能不能编、够不够快 | 用 Windows 的工具链编钉死版本的 whisper；同一段 10 秒的话和 Linux 上比时间 | 编得过；10 秒的话 5 秒内出结果 | 太慢：打开处理器的新指令集（要定最低处理器）。编不过：第一版 Windows 控制端不带语音，按钮隐藏 |
 | C1 | 一 | Rust 的压缩和 Swift 的压缩出来的字节一不一样 | 同一批输入，Swift 版（系统 zlib，6 级，同步刷新）和 `flate2` 的几种后端各压一遍，逐字节比。**这个探针在 Mac 上就能做，不用 Windows 机器** | 有一种后端完全一样 | 没有：压缩这一层的核对标准改成“Swift 的解码器解出来像素完全一样”（§14.2 已写），其余各层照旧逐字节 |
-| I1 | 二 | 安装程序的几处细节 | 标准用户用另一个管理员账号的密码提权安装时，“发起安装的用户”是谁；静默安装；PATH 改完不重启生不生效；未签名时系统的提示长什么样；卸载后 §12.2 的每一项还原了没有 | 机主是那个标准用户；卸载后逐项核对无残留 | 认领机主改成“装完后第一次以普通身份打开界面时认领”（先到先得，已有机主时要管理员） |
+| I1 | 二 | 安装程序的几处细节 | 标准用户用另一个管理员账号的密码提权安装时，“发起安装的用户”是谁；静默安装（以 SYSTEM 身份、带 `/OWNER`；不带 `/OWNER`）；PATH 改完不重启生不生效；未签名时系统的提示长什么样；卸载后 §12.2 的每一项还原了没有 | 机主是那个标准用户；带 `/OWNER` 的静默安装机主是指定的账户，不带的失败并说清原因；卸载后逐项核对无残留 | 认领机主改成“装完后第一次以普通身份打开界面时认领”（先到先得，已有机主时要管理员） |
 
 ### 16.6 做探针的顺序
 
@@ -1150,23 +1197,23 @@ Swift 的测试 Windows 上不跑。**Mac 上看不到 Windows 专用代码的�
 ### 17.1 规矩
 
 - **每一段做完都能合并进 main**：Mac 的门禁是绿的，macOS、Linux、iOS 的行为没变。半成品用“Windows 上还没接上”的方式留在 main 里，不用长期分支。
-- **第一行 Windows 代码合并之前，先把 §14.5 的前两条加进 `CLAUDE.md`**，否则 Mac 发版 session 会为只动 Windows 的合并白发版。
-- **公开的第一个 Windows 版要等 A 到 H 全部做完**【我定的】。理由：升级机制必须从第一个公开版本起就是对的（不然装出去的机器升不上来）；主要用途之一是远程服务器，没有系统服务那一半就不成立。中间的成果打成 zip 给自己人装，不建 release、不进官网。
-- **过渡期 Rust 里有两份被控端代码**【我定的】：`host-core`（新，完整）和 `host-linux`（旧，精简）。`host-core` 起步时可以把 `host-linux` 里已经有的通用部分（握手、接管、省流、暂停、取景）拷过来再对着 Swift 的样本校；**这次不改 `host-linux`**（它由另一台机器的 session 维护，“新平台不改已有平台”）。把 `host-linux` 换到 `host-core` 上是 Windows 首发以后单独的一件事，那时 §2.3 的第二条反目标才算真正守住。在那之前，协议加被控端行为要改三处：Swift、`host-core`、`host-linux`。
+- **第一行 Windows 代码合并之前，先把 §14.5 的前四条加进 `CLAUDE.md`**，否则 Mac 发版 session 会为只动 Windows 的合并白发版，Windows 机器也拿不到这些提交。
+- **公开的第一个 Windows 版要等 A 到 H 全部做完**【用户定的，U7】。理由：升级机制必须从第一个公开版本起就是对的（不然装出去的机器升不上来）；主要用途之一是远程服务器，没有系统服务那一半就不成立。中间的成果打成 zip 给自己人装，不建 release、不进官网。
+- **过渡期 Rust 里有两份被控端代码**【用户定的，U9】：`host-core`（新，完整）和 `host-linux`（旧，精简）。`host-core` 起步时可以把 `host-linux` 里已经有的通用部分（握手、接管、省流、暂停、取景）拷过来再对着 Swift 的样本校；**这次不改 `host-linux`**（它由另一台机器的 session 维护，“新平台不改已有平台”）。把 `host-linux` 换到 `host-core` 上是 Windows 首发以后单独的一件事，那时 §2.3 的第二条反目标才算真正守住。在那之前，协议加被控端行为要改三处：Swift、`host-core`、`host-linux`。
 
 ### 17.2 各段
 
 | 段 | 做什么 | 在哪做 | 要先有 | 怎么算做完 |
 |---|---|---|---|---|
 | **P 探针** | §16，按 §16.6 的顺序 | Windows 机器（C1 在 Mac） | —— | 每个一级探针有结果；没过的已经回来改了设计 |
-| **A 地基** | `CLAUDE.md` 前两条；三个新 crate 的空壳进 workspace；§8 里“为了编过”的缝（`rapp-net` 双栈和日志兜底、“设成私有”函数、`rapp-service` 的单实例、停止、`--supervised`、缓存目录、worker 启动方式、`rapp-cli`、`rapp-term` 把 unix 专用的部分包起来并在 Windows 上先报“不支持”）；Windows 门禁的脚本 | 两边 | P 里的 G1 | Windows 上 §14.3 的 1–3 步是绿的；`flutter build windows` 过；Mac 门禁是绿的 |
-| **B 主机核心** | `host-core` 全部：Swift 样本生成器和样本；编码发送一组（量化、瓦片、压缩、滚动复制、分片、省流、暂停、取景）；会话一组（握手、接管、命令行、事件、会话循环）；规则一组（窗口后处理、焦点面板、点穿、剪贴板、传输、锁屏和解锁步骤）；状态规则引擎；“不处理的消息”那张表和它的测试（§14.1） | **Mac**，不需要 Windows 机器 | P 里的 C1 | §14.2 的样本测试在 Mac 门禁里全绿；一台真的 Mac 控制端连上“假平台”的 `host-core`，测试图案画得对、能滚、能传一个文件 |
+| **A 地基** | `CLAUDE.md` 前四条，Windows 集成 session 开张（§14.4）；三个新 crate 的空壳进 workspace；§8 里“为了编过”的缝（`rapp-net` 双栈和日志兜底、“设成私有”函数、`rapp-service` 的单实例、停止、`--supervised`、缓存目录、worker 启动方式、`rapp-cli`、`rapp-term` 把 unix 专用的部分包起来并在 Windows 上先报“不支持”）；Windows 门禁的脚本 | 两边 | P 里的 G1 | Windows 上 §14.3 的 1–3 步是绿的；`flutter build windows` 过；Mac 门禁是绿的 |
+| **B 主机核心** | `host-core` 全部：Swift 样本生成器和样本；编码发送一组（量化、瓦片、压缩、滚动复制、分片、省流、暂停、取景）；会话一组（握手、接管、命令行、事件、会话循环）；规则一组（窗口后处理、焦点面板、点穿、剪贴板、传输、锁屏和解锁步骤）；状态规则引擎；“不处理的消息”那张表和它的测试（§14.1）；`Sources/rapp-host/` 的对照表和核对摘要的那条测试（§14.2） | **Mac**，不需要 Windows 机器 | P 里的 C1 | §14.2 的样本测试在 Mac 门禁里全绿；对照表里每一行都有测试；假平台整会话测试把 §14.2 列的几条流程都走过；一台真的 Mac 控制端连上“假平台”的 `host-core`，测试图案画得对、能滚、能传一个文件；**`Sources/` 没有改动** |
 | **C 控制端** | 外壳（§10.3）；`rapp-hub`、`rapp-session` 编过并接上；会话端口的小接口（§10.2）；能力位（§10.1）；§10.6 的小处；文本终端的界面打开；端口面板、`localhost` 共享号；`rapp-svc user` 的最小版（只监督） | Windows | A；G2 的结果 | 一台 Windows 笔记本能添加一台 Mac，打开应用和桌面、打字（含中文）、传文件、开文本终端、用共享端口；§15.6 除语音外逐行过 |
-| **D 被控端（用户方式）** | `host-windows`：目标、窗口、采集、输入、输入法、剪贴板、控件、文字识别、锁屏状态、保持唤醒；`rapp-service` 认 Windows 的 worker；§6.1 的三种原因和控制端的说法 | Windows | A、B；H1、H3、H5 的结果 | 从 Mac 控制一台**已登录、没锁屏**的 Windows：§15.3 里不标“只有系统服务方式有”的每一行都过；Mac 控制端一行代码不用为它改（除了 §10.6 说的那几句话） |
+| **D 被控端（用户方式）** | `host-windows`：目标、窗口、采集、输入、输入法、剪贴板、控件、文字识别、锁屏状态、保持唤醒；`rapp-service` 认 Windows 的 worker；§6.1 的四种原因和 §10.6 里控制端的说法 | Windows | A、B；H1、H3、H5 的结果 | 从 Mac 控制一台**已登录、没锁屏**的 Windows：§15.3 里不标“只有系统服务方式有”的每一行都过；Mac 控制端一行代码不用为它改（除了 §10.6 说的那几句话） |
 | **E 文本终端（被控端）** | `rapp-term` 的 Windows 一支（§9）：ConPTY、本机通道、开窗口、前台程序、结束 | Windows | A；T1、T5 的结果 | §15.4 逐行过；重启服务后终端还在 |
 | **F 系统服务** | `rapp-svc service`、机主、管道和它的权限、安全桌面帮手、所有输入经帮手、远程解锁、自动锁屏、Ctrl+Alt+Del、登录前实例、远程桌面接回 | Windows | D；S1、S2 的结果 | §7.1 表里左边一列逐行过；§18.2 的审计过了 |
 | **G 安装和升级** | `rapp-svc install` / `uninstall`；Inno Setup 脚本；`rapp-update` 的 Windows 一支；`fetch-update` / `apply-update` / `take-over` / 退回；登录前的自动升级；构建和打包脚本、包的自检、签名这一步（没证书就跳过） | Windows | C、F；S4、I1 的结果 | 干净的机器上两种方式各装一遍、升一遍、退一遍、卸一遍；卸载后按 §12.2 逐项核对；坏版本自己退回 |
-| **H 收尾和首发** | 语音（§10.5）；输入法打磨（G3）；任务栏（G4）；审一遍写死“Mac”的句子；§15 全表验收；§14.6 的几样；`CLAUDE.md` 后两条；Windows 发版 session 开张 | Windows | 以上全部 | 第一个 Windows release 建好、不是 Latest；官网和 README 更新；一台已装的机器经在线升级升到下一个版本 |
+| **H 收尾和首发** | 语音（§10.5）；输入法打磨（G3）；任务栏（G4）；审一遍写死“Mac”的句子；§15 全表验收；§14.6 的几样；`CLAUDE.md` 后两条；Windows 集成 session 转成发版 session | Windows | 以上全部 | 第一个 Windows release 建好、不是 Latest；官网和 README 更新；一台已装的机器经在线升级升到下一个版本 |
 
 可以同时走的三条线：**B**（Mac 上，一开始就能动）；**A → C**（Windows 控制端）；**A → D → F**（Windows 被控端）。**E** 在 A 之后随时可以插进来，和 D 互不相干。**G** 最晚，但它的探针（S4、I1）要早做，因为“一版一个目录”这个结构是 A 就要定死的。
 
@@ -1212,7 +1259,7 @@ Windows Server 2025 和 Windows 11 的后续版本也在基准线以上，首发
 | 6 | 安装目录只有管理员和 SYSTEM 能写（系统服务方式） | `rapp-svc install` 装完核对一次，不对就算安装失败；`rapp-svc` 每次启动把它对齐一次并记日志（§5.1）。实机上手动放宽权限再重启服务，看它改回来 |
 | 7 | 登录前实例不写机主的数据根，不执行、不加载数据根指到的任何东西 | 读 `--prelogin` 这条路径上所有的文件操作；自动测试：数据根里放一个改过的配置指向别的程序，登录前实例不理它 |
 | 8 | 系统服务方式下，升级的地址不能被机主身份的程序改掉 | 改数据根里的 `update_url`，系统服务方式下不生效；升级包的地址必须以 §12.3 的那个前缀开头 |
-| 9 | 帮手只做两件事：采当前桌面、发输入 | 读 `secure-helper` 的入口：没有文件操作、没有网络、不启动进程；普通用户身份启动它直接退出 2 |
+| 9 | 帮手只做三件事：采当前桌面、发输入、对指定窗口做四个固定操作（抬前、移动、改大小、请它关闭） | 读 `secure-helper` 的入口：没有文件操作、没有网络、不启动进程、不结束进程（“请它关闭”是给窗口发关闭请求，不是杀进程）；管道上的命令只有 §7.4 列的那几种，多一种都算没过；普通用户身份启动它直接退出 2 |
 | 10 | `rapp-svc` 的代码量是小的 | 首发时记下 `rust/svc-windows/` 的行数；以后每次明显变长，在合并说明里解释为什么这件事非得在系统权限下做 |
 | 11 | §7.7 的五条代价写进了安装界面和 README | 看安装程序“带系统服务”那一页和 README 的 Windows 一节 |
 
@@ -1223,8 +1270,9 @@ Windows Server 2025 和 Windows 11 的后续版本也在基准线以上，首发
 | 1 | Windows 被控端发出的字节和 Swift 的一样 | §14.2 的样本测试在 Mac 门禁里是绿的 |
 | 2 | 每种消息类型要么 `host-core` 处理，要么在“不处理”的表里 | §14.1 的那条测试 |
 | 3 | 没有为 Windows 加协议消息、没有升协议号 | 协议号还是合并前的那个；Swift 的 `knownTypes` 没有因为 Windows 多出类型 |
-| 4 | 控制面只加了可选字段（`resident`、`prelogin`） | `rust/testkit/tests/service.rs` 里的键集合和 hub 的转发表在同一个提交里改了；老版本的控制端连新的 Windows 被控端不出错（用 0.15.41 的 Mac 控制端试一次） |
-| 5 | macOS、Linux、iOS 的行为没变 | Mac 门禁的命令一个字没改，并且是绿的；`Sources/` 下除了样本生成器的测试之外没有改动；unix 那一支的代码差异为零（每条缝都是加一支） |
+| 4 | 控制面只加了可选字段（`list_apps` 回答和本机 `status` 里的 `resident`、`prelogin`），而且只在 Windows 上出现 | `rust/testkit/tests/service.rs:381` 那条整个对象相等的断言没有改也是绿的（Mac、Linux 的回答一个键都没多）；hub 的 `apps_event`（`rust/hub/src/lib.rs:466-481`）在同一个提交里加了转发；老版本的控制端连新的 Windows 被控端不出错（用 0.15.41 的 Mac 控制端试一次） |
+| 5 | macOS、Linux、iOS 的行为没变 | Mac 门禁的命令一个字没改，并且是绿的；`Sources/` 没有改动，样本生成器在 `Tests/RappCoreTests/` 下（先例是 `CrossFixtureTests.swift`）；unix 那一支的代码差异为零（每条缝都是加一支） |
+| 5a | 出不了样本的那部分（`Sources/rapp-host/`）有对照表兜着 | 对照表里每一行都指到一条存在的测试；核对 Swift 文件摘要的那条测试在 Mac 门禁里；随手改一下 `Server.swift`，门禁变红 |
 | 6 | Mac 的门禁没有明显变慢 | 记下合并前后 `cargo test --workspace` 的时间 |
 | 7 | 字段名和约定字符串照 Swift 版 | §6.1 列的事件和字符串有样本或测试钉住；没有学 Linux 版的偏差 |
 
@@ -1232,7 +1280,7 @@ Windows Server 2025 和 Windows 11 的后续版本也在基准线以上，首发
 
 | # | 要成立的事 | 怎么查 |
 |---|---|---|
-| 1 | 做不到的事都报了原因 | 实机上逐个造出来：没显示器、远程桌面断开、没人登录、对管理员窗口输入（用户方式）、用户方式下请求解锁、没装语言包、麦克风被关、端口被系统保留。每一种控制端上都有一句看得懂的话 |
+| 1 | 做不到的事都报了原因 | 实机上逐个造出来：没显示器、远程桌面断开、没人登录、别的用户占着本机屏幕、对管理员窗口输入（用户方式）、单应用会话里弹出 UAC、用户方式下请求解锁、没装语言包、麦克风被关、端口被系统保留。每一种控制端上都有一句看得懂的话 |
 | 2 | 用户方式下不出现用不了的开关 | 自动锁屏、远程解锁在 `resident` 不是 `system` 时隐藏 |
 | 3 | 日志里没有密码、令牌、密钥、打的字、剪贴板内容 | 实机上做一遍解锁、粘贴、打字、配对，然后在全部日志目录（含 `%ProgramData%\rapp\logs\`）里搜这些内容；读 `rapp-svc` 和帮手里每一条日志语句 |
 | 4 | 密码不经过命令行、环境变量、临时文件 | 读解锁这条路：控制端 → 协议 → `rapp-host` → 管道 → 帮手，中间不落盘 |
@@ -1248,6 +1296,7 @@ Windows Server 2025 和 Windows 11 的后续版本也在基准线以上，首发
 | 3 | 升级不结束文本终端、不要求重启 | 开着终端升级；升完终端还能用，新开的终端用新版 |
 | 4 | 坏版本会自己退回 | S4 的那个测试留在 Windows 的门禁里 |
 | 5 | Windows 的 release 没有抢走 Latest | 发完后看 GitHub 的 Latest 还是 macOS 的那个；`releases/latest/download/latest.json` 还是 macOS 的清单 |
+| 5a | 只动 Windows 的合并到得了 Windows 机器，又没有白发 macOS 版 | 首发前挑一次只动 `rust/host-windows/` 的合并：Mac 发版 session 推了、没有新 tag；Windows 机器 fetch 得到 |
 | 6 | 版本号没有和别的机器撞 | 发版 session 是先推 `release:` 提交和 tag、再打包的 |
 | 7 | 包里的东西对得上 | 包的自检：每个程序的版本号一致，`rapp-host version --json` 报的协议号和 main 上的一致，ConPTY 的摘要对得上钉的那个 |
 | 8 | 依赖都钉了版本，许可证都相容 | `Cargo.lock`、`pubspec.lock` 进了仓库；新加的每个依赖在合并说明里写了许可证；ConPTY 的许可证文件在包里 |
@@ -1275,7 +1324,7 @@ Windows Server 2025 和 Windows 11 的后续版本也在基准线以上，首发
 - 钉哪一版 ConPTY、哪一版 Inno Setup。
 - 探针过关线里的数字（量出实际值后连同理由一起改）。
 
-**不留给实现的人定的**（改这些要回来问）：§0.2 的五件事；§5.3 的三条边界；§6.1 的命令行约定和三种原因的文字；§6.3 的对照表；§7.3 的“请求里的东西不当真”；一版一个目录；协议不为 Windows 加消息；§14.4 的发版规则。
+**不留给实现的人定的**（改这些要回来问）：§0.2 的十一件事；§5.3 的三条边界；§6.1 的命令行约定和四种原因的文字；§6.3 的对照表；§7.3 的“请求里的东西不当真”；一版一个目录；协议不为 Windows 加消息；§14.4 的发版规则。
 
 ### 19.2 要顺手改的旧文档
 
@@ -1295,44 +1344,51 @@ Windows Server 2025 和 Windows 11 的后续版本也在基准线以上，首发
 | 端口面板规格和它的交接文档 | `:216`、`:179` | `openUrl` 在 Windows 上的说法（现在有了，§10.1） |
 | 焦点面板、`term-fit`、`term-entry`、桌面会话几份规格 | `focus-pane-rules:43`、`term-fit:31`、`term-entry:39,73`、`desktop-sessions:40` | “被控端只有 macOS”一类的句子 |
 | `ipad-duo` 规格 | 能力表 | 没有 Windows 一列 |
-| `config-reference` | `:235`、`:241`，加 §13.4 的内容 | Windows 的路径和新增项 |
+| `config-reference` | `:24-25`（已有的 Windows 路径）、`:235`，加 §13.4 的内容 | Windows 的路径和新增项 |
 | `tasks/todo.md` | `:30`、`:58`、`:60-61`、`:64`、`:72`、`:812`、`:819` | 提到 Windows 的旧待办，改成指向本文或删掉 |
 
-### 19.3 我替用户定的事（请重点看前七条）
+### 19.3 我替用户定的事（请重点看前六条）
 
-全文标【我定的】的地方都在这里。前七条影响面最大，改了要动结构；后面的改起来便宜。
+全文标【我定的】的地方都在这里。前六条影响面最大，改了要动结构；后面的改起来便宜。原来在这张单子上的三条（系统基准、全部做完再公开和 `host-linux` 不动、登录前也升级）已经由用户定了，挪到 §0.2 的 U6–U9。
 
 **影响大的**
 
-1. **系统基准线是内部版本 20348**：Windows 11 和 Server 2022 起，**Windows 10 装不了**（§3.1）。
-2. **单应用会话改成“逐个窗口采集再拼”**；探针 H1 没过的退路是产品上的退步，到时回来问（§6.5）。
-3. **机主只有一个**：别的用户登录这台机器时 rApp 不为他们工作；登录前用的是机主的设备身份，所以设备密钥只靠文件权限保护，不用“登录后才能解开”的加密（§7.2、§7.6）。
-4. **装了系统服务：所有输入都经系统权限的帮手发**，所以管理员窗口和 UAC 提示也能远程操作。这把系统的一道栏放低了，代价写在 §7.7。
-5. **一版一个目录、升级靠改启动项切换、新版起不来 30 秒后自己退回**（§5.1、§12.3）。
-6. **公开的第一个 Windows 版等全部做完再发**，中间只出内部包；过渡期 `host-linux` 不动，Rust 里暂时有两份被控端代码（§17.1）。
-7. **Windows 的 release 不标 Latest，升级清单放在固定的 `update-windows` release 上；发版时先推版本号再打包**（§12.3、§14.4）。
+1. **单应用会话改成“逐个窗口采集再拼”**；探针 H1 没过的退路是产品上的退步，到时回来问（§6.5）。
+2. **机主只有一个**：别的用户登录这台机器时 rApp 不为他们工作；别的用户坐在本机前登录着时，机主连上来没有桌面，rApp 不把他的桌面给机主看，也不把他踢回锁屏。登录前用的是机主的设备身份，所以设备密钥只靠文件权限保护，不用“登录后才能解开”的加密（§7.2、§7.6）。
+3. **装了系统服务：所有输入都经系统权限的帮手发**，所以管理员窗口和 UAC 提示也能远程操作；帮手还替管理员窗口做四个窗口操作（抬前、移动、改大小、请它关闭）。这把系统的一道栏放低了，代价写在 §7.7。管理员窗口里的控件仍然读不到（§6.6、§7.4）。
+4. **一版一个目录、升级靠改启动项切换、新版起不来 30 秒后自己退回**（§5.1、§12.3）。
+5. **Windows 的 release 不标 Latest，升级清单放在固定的 `update-windows` release 上；发版时先推版本号再打包**（§12.3、§14.4）。
+6. **新装的机器要登录一次、在界面里做第一次配置**，不为 Windows 加配 relay、配对的命令行；静默安装系统服务方式必须用 `/OWNER` 指明机主，不猜（§7.2、§12.1）。
 
 **影响小的**
 
+7. 只出 x64 的包（§3.1）。
 8. 界面程序叫 `rapp-gui.exe`，命令行叫 `rapp.exe`，装在固定目录、不让选（§5.1、§12.1）。
 9. app 的 id 是小写的 exe 文件名；⌘ 和 ⌃ 都对到 Ctrl，没有 Win 键；Ctrl+Alt+Del 用一个键组合表示，不加协议消息（§6.3、§7.5）。
 10. app 没开就启动它（旧规格写的是报错）（§6.4）。
 11. 整桌面用桌面复制接口采；不采鼠标指针（§6.5）。
-12. 权限固定报“辅助功能有”，出不了画面时报三种原因之一（§6.1）。
-13. 自动锁屏、远程解锁只在系统服务方式下有（§6.9）。
-14. 远程桌面断开后，rApp 把会话接回本机并立刻锁屏（§6.9）。
-15. `rapp-service` 靠“标准输入关了就停”和作业对象来收尾；终端不在作业里（§8.1）。
-16. `run` 和 `serve` 之间用回环 TCP 加 token，不用命名管道（§9.3）。
-17. 语音用和 Linux 同一套本地识别，不用 Windows 自带的（§10.5）。
-18. 嵌入画面不另写一个 Windows 的会话端口类，从 Linux 那个里抽小接口（§10.2）。
-19. 安装程序用 Inno Setup，所有系统改动收在 `rapp-svc install` 里（§12.1）。
-20. 登录前由 `rapp-svc` 自己查升级（§12.3）。
-21. 卸载时有终端在跑就先问（§12.4）。
-22. Windows 上私有文件的保护办法（§13.2）。
-23. Windows 专用的 crate 在别的系统上编成空壳；`speech-linux` 不改名（§5.3）。
-24. 第一版不带任何 Windows app 的状态规则和应用档案（§15.3）。
-25. 微软商店应用认不出真正程序的不列（§6.4）。
-26. 探针过关线里的数字（§16）。
+12. 同时采整块屏的进程数要是有上限，每个登录会话合成一个采集进程，和帮手共用外壳（§6.5，H3）。
+13. 权限固定报“辅助功能有”，出不了画面时报四种原因之一：`no display`、`session disconnected`、`not interactive`、`other user`（§6.1）。
+14. `applications` 这项能力只给 Windows 加一支带到控制端；Linux 那一支现在把它丢了，本文不改，记进待办交给 Linux 的 session（§6.1）。
+15. `resident`、`prelogin` 放在 `list_apps` 的回答和本机 `status` 里，只在 Windows 上出现（§8.1）。
+16. 新出现的三种情况都借现有消息说，不加消息：管理员窗口用 `inputBlocked` 加约定值 `elevated`；单应用会话和用户方式遇到 UAC 用 `covered` 加 `consent.exe`；用户方式下的解锁请求丢掉并再报已锁，控制端凭 `resident` 不弹解锁框。已发出去的控制端看到的话别扭但不出错（§6.6、§6.9、§7.4、§10.6）。
+17. 自动锁屏、远程解锁只在系统服务方式下有（§6.9）。
+18. Server 上解锁和登录前先发一次 Ctrl+Alt+Del；机主在远程桌面会话里而它落不到那个会话时，菜单项置灰（§6.9、§7.5）。
+19. 远程桌面断开后，rApp 把会话接回本机并立刻锁屏；本机屏幕上有别的用户时不接回（§6.9、§7.2）。
+20. `rapp-service` 靠“标准输入关了就停”和作业对象来收尾；作业里只有 rApp 自己的后台进程，终端、替控制端打开的 app、界面程序都不在里面（§8.1）。
+21. `run` 和 `serve` 之间用回环 TCP 加 token，不用命名管道（§9.3）。
+22. 语音用和 Linux 同一套本地识别，不用 Windows 自带的（§10.5）。
+23. 嵌入画面不另写一个 Windows 的会话端口类，从 Linux 那个里抽小接口（§10.2）。
+24. 安装程序用 Inno Setup，所有系统改动收在 `rapp-svc install` 里（§12.1）。
+25. 卸载时有终端在跑就先问（§12.4）。
+26. Windows 上私有文件的保护办法（§13.2）。
+27. Windows 专用的 crate 在别的系统上编成空壳；`speech-linux` 不改名（§5.3）。
+28. 第一版不带任何 Windows app 的状态规则和应用档案（§15.3）。
+29. 微软商店应用认不出真正程序的不列（§6.4）。
+30. “依赖钉版本、没有统计和崩溃上报”当成一直有效的原则来守（§3.2）。
+31. 出不了样本的会话逻辑用对照表兜着，表里记 Swift 文件的摘要，Mac 门禁核对：以后在 Mac 上改 `Sources/rapp-host/` 的人每次多一步（§14.2）。
+32. 只改文档的合并，Mac 发版 session 也立刻推，不再攒到下一次代码改动（§14.4）。
+33. 探针过关线里的数字（§16）。
 
 ### 19.4 本文之后
 
