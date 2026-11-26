@@ -86,6 +86,7 @@
 3. **被控设备的指纹还不知道**（hub 的主机表里 `fp` 为空，例如只用密码加过、还没走过 `rapp/2`）：不报，也不出错；桌面那一项只带 `id`。测试在 Task 6。
 4. **桌面里有这台 app 设备表里没有的设备，或那台设备离线**：不进“别处开着”（点了也开不了）。会话这台已经开着的，也不进。测试在 Task 7。
 5. **P2 的旧服务**（没有 `/v1/desk`，回 404）：代报照发，桌面这次连接里不再重试；不弹错，状态仍是“已连上”。测试在 Task 5。
+   - **改了（最终评审）**：P2 的服务（0.15.48–0.15.51）代报也不发。它的 store 把 `src` 当信封丢掉，代报的行进了 `needs` 就成了终端的“在等你”，没有“推断”标记。看 `/v1/state` 有没有 `desks` 认出它：没有就整次连接什么都不发（代报、空 snap、桌面），每次接上重新看。桌面 PUT 回任何 4xx 也按 404 处理，这次连接里不再发。
 
 ---
 
@@ -344,6 +345,7 @@ git add rust && git commit -m "feat(service): SetService turns another device's 
 - Produces:
   - 命令 `{"cmd":"set_service","id":<设备 ID>,"name"?:"state","on"?:bool}`，回 `{"event":"service","id","reply":<设备的回复>}`。设备回 `ok:false` 时，命令报错，错误文字里带上设备原来的 `error`（`unknown op` 要原样出现，Dart 靠它认旧设备）。
   - `hosts` 事件多两个字段：`"me":<hub 身份的指纹>`（`identity.fp.to_string()`，从 `at_home()` 取），`"name":<hub.name>`。每台主机的 `fp` 已经在 `summary()` 里了，不动。
+  - **改了（最终评审）**：hub 连上一台主机、存下它新的（或第一次的）指纹时（`link.rs` 的 `remember_fp`），主动发一条不带 `req` 的 `hosts` 事件，app 的 `HubHost.fp` 不用等下次列主机就更新。
 
 - [ ] **Step 1: 写失败的测试**
   - `hosts_event_names_this_app`：起一个 hub（照 hub 现有测试的起法），`hosts` 事件的 `me` 是 64 位十六进制，`name` 非空。

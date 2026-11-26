@@ -12,6 +12,7 @@ void main() {
   late StateOut out;
   final events = <Map<String, Object?>>[];
   final desks = <(String, Object?)>[];
+  final batches = <int>[];
   var requests = 0;
   var inflight = 0;
   Completer<void>? hold;
@@ -20,6 +21,7 @@ void main() {
   setUp(() async {
     events.clear();
     desks.clear();
+    batches.clear();
     requests = 0;
     inflight = 0;
     hold = null;
@@ -34,6 +36,7 @@ void main() {
       final code = status(r);
       if (code < 300) {
         if (r.uri.path == '/v1/events') {
+          batches.add(body.split('\n').where((l) => l.isNotEmpty).length);
           for (final l in body.split('\n').where((l) => l.isNotEmpty)) {
             events.add(jsonDecode(l) as Map<String, Object?>);
           }
@@ -83,6 +86,7 @@ void main() {
       {'id': '111111111', 'fp': 'devA', 'app': 'com.x', 'name': 'Claude'},
     ]);
     out.attach(link, {
+      'desks': [],
       'devices': [
         {
           'fp': 'devB',
@@ -129,7 +133,7 @@ void main() {
 
   test('a change sends state, the same again sends nothing, null sends gone', () async {
     out.setMe('appA', 'iPad');
-    out.attach(link, {'devices': []});
+    out.attach(link, {'devices': [], 'desks': []});
     out.report(fp: 'devA', id: '1', session: 'com.x', now: (state: 'running', kind: null, app: null, name: 'X'));
     await settle();
     out.report(fp: 'devA', id: '1', session: 'com.x', now: (state: 'running', kind: null, app: null, name: 'X'));
@@ -147,7 +151,7 @@ void main() {
 
   test('nothing is sent before attach or without me', () async {
     out.setMe(null, null);
-    out.attach(link, {'devices': []});
+    out.attach(link, {'devices': [], 'desks': []});
     out.report(fp: 'devA', id: '1', session: 'a', now: blocked);
     out.setDesk([]);
     await settle();
@@ -176,7 +180,7 @@ void main() {
       }
       return 204;
     };
-    out.attach(link, {'devices': []});
+    out.attach(link, {'devices': [], 'desks': []});
     await settle();
     expect(events.map((e) => e['t']), ['snap']);
     expect(events.single['n'], 2);
@@ -186,7 +190,7 @@ void main() {
   test('a 404 desk is not retried while attached', () async {
     out.setMe('appA', 'iPad');
     status = (r) => r.uri.path.startsWith('/v1/desk/') ? 404 : 204;
-    out.attach(link, {'devices': []});
+    out.attach(link, {'devices': [], 'desks': []});
     out.setDesk([]);
     await settle();
     final after = requests;
@@ -202,14 +206,14 @@ void main() {
     expect(events.map((e) => e['t']), ['state'], reason: 'events still go out');
     final before = requests;
     out.detach();
-    out.attach(link, {'devices': []});
+    out.attach(link, {'devices': [], 'desks': []});
     await settle();
     expect(requests, before + 2, reason: 'one more desk try, then the snap');
   });
 
   test('more than 200 pending drops the oldest and re-sends whole', () async {
     out.setMe('appA', 'iPad');
-    out.attach(link, {'devices': []});
+    out.attach(link, {'devices': [], 'desks': []});
     hold = Completer<void>();
     out.report(fp: 'devA', id: '1', session: 's-first', now: blocked);
     await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -223,5 +227,89 @@ void main() {
     expect(events[1]['t'], 'snap');
     expect((events[1]['sessions'] as List), hasLength(202));
     expect(events, hasLength(2));
+  });
+  test('a service without desks (P2) gets no reports, snaps or desk; a later attach looks again', () async {
+    out.setMe('appA', 'iPad');
+    out.report(fp: 'devA', id: '1', session: 'a', now: blocked);
+    out.setDesk([
+      {'id': '1', 'app': 'x'},
+    ]);
+    out.attach(link, {
+      'devices': [
+        {
+          'fp': 'devB',
+          'sessions': [
+            {'session': 'com.y', 'by': 'appA', 'src': 'app'},
+          ],
+        },
+      ],
+    });
+    await settle();
+    out.report(fp: 'devA', id: '1', session: 'b', now: blocked);
+    out.setDesk([]);
+    out.setMe('appA', 'iPad2');
+    await settle();
+    expect(requests, 0);
+    out.attach(link, {'devices': [], 'desks': []});
+    await settle();
+    expect(events.map((e) => e['t']), ['snap']);
+    expect(desks, hasLength(1));
+  });
+
+  test('a device whose shared row lists me in vias gets an empty snap', () async {
+    out.setMe('appA', 'iPad');
+    out.attach(link, {
+      'desks': [],
+      'devices': [
+        {
+          'fp': 'devB',
+          'sessions': [
+            {'session': 'com.y', 'by': 'appMac', 'vias': ['appA', 'appMac'], 'src': 'app'},
+          ],
+        },
+        {
+          'fp': 'devC',
+          'sessions': [
+            {'session': 'com.z', 'by': 'appMac', 'vias': ['appMac'], 'src': 'app'},
+          ],
+        },
+      ],
+    });
+    await settle();
+    expect(events.map((e) => (e['t'], e['fp'])), [('snap', 'devB')]);
+  });
+
+  test('events go out at most 50 per post, the rest right after', () async {
+    out.setMe('appA', 'iPad');
+    out.attach(link, {'devices': [], 'desks': []});
+    hold = Completer<void>();
+    out.report(fp: 'devA', id: '1', session: 's-first', now: blocked);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    for (var i = 0; i < 120; i++) {
+      out.report(fp: 'devA', id: '1', session: 's$i', now: blocked);
+    }
+    hold!.complete();
+    hold = null;
+    await settle();
+    expect(batches, [1, 50, 50, 20]);
+    expect(events, hasLength(121));
+  });
+
+  test('a desk refused with any 4xx is not retried while attached', () async {
+    out.setMe('appA', 'iPad');
+    status = (r) => r.uri.path.startsWith('/v1/desk/') ? 400 : 204;
+    out.attach(link, {'devices': [], 'desks': []});
+    out.setDesk([]);
+    await settle();
+    expect(requests, 1);
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    out.setDesk([
+      {'id': '1', 'app': 'x'},
+    ]);
+    await settle();
+    expect(requests, 1, reason: 'no retry, no new try');
+    out.report(fp: 'devA', id: '1', session: 'a', now: blocked);
+    await settle();
+    expect(events.map((e) => e['t']), ['state'], reason: 'events still go out');
   });
 }

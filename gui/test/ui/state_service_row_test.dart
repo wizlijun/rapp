@@ -166,6 +166,65 @@ void main() {
     expect(api.calls, ['state 111111111 null']);
   });
 
+  for (final why in ['not supported', 'host only', 'unknown service']) {
+    testWidgets('$why is hidden and not retried', (tester) async {
+      final api = FakeSwitch()..onState = (_, _) async => throw ServiceException(why);
+      await tester.pumpWidget(row(api));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 35));
+      expect(api.calls, ['state 111111111 null']);
+      expect(find.text('状态服务'), findsNothing);
+    });
+  }
+
+  Future<List<Completer<Map<String, Object?>>>> twoLoads(WidgetTester tester) async {
+    final gates = <Completer<Map<String, Object?>>>[];
+    final api = FakeSwitch()
+      ..onState = (_, _) {
+        final c = Completer<Map<String, Object?>>();
+        gates.add(c);
+        return c.future;
+      };
+    final k = UniqueKey();
+    Widget w(String? id) => wrap(StateServiceRow(key: k, api: api, to: null, nameOf: (i) => i, localId: id));
+    await tester.pumpWidget(w(null));
+    await tester.pump();
+    await tester.pumpWidget(w('999999999'));
+    await tester.pump();
+    expect(gates, hasLength(2));
+    return gates;
+  }
+
+  testWidgets('a localId change during a load drops the old load', (tester) async {
+    final gates = await twoLoads(tester);
+    gates[1].completeError(ServiceException('offline'));
+    await tester.pump();
+    gates[0].complete({'ok': true, 'on': true, 'running': true, 'port': 1});
+    await tester.pump();
+    expect(find.text('状态服务'), findsNothing, reason: 'the superseded load does not win');
+    await tester.pump(const Duration(seconds: 11));
+    expect(gates, hasLength(3));
+    gates[2].complete({'ok': true, 'on': false});
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('状态服务'), findsOneWidget);
+  });
+
+  testWidgets('a localId change during a load leaves one retry chain', (tester) async {
+    final gates = await twoLoads(tester);
+    gates[0].completeError(ServiceException('offline'));
+    gates[1].completeError(ServiceException('offline'));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 11));
+    expect(gates, hasLength(3), reason: 'one retry, not one per load');
+    gates[2].completeError(ServiceException('offline'));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 11));
+    expect(gates, hasLength(4));
+    gates[3].complete({'ok': true, 'on': false});
+    await tester.pump();
+  });
+
   testWidgets('a new localId asks again', (tester) async {
     final api = FakeSwitch();
     final k = UniqueKey();

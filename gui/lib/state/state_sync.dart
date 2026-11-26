@@ -50,6 +50,10 @@ class StateSync extends ChangeNotifier {
   List<Row> _devices = [];
   Map<String, Row> _desks = {};
 
+  /// Whether the last `/v1/state` had a `desks` key: a P2 service (0.15.48–0.15.51) has none, and [out] then
+  /// sends it nothing.
+  bool _hasDesks = false;
+
   /// Every app's desk by fingerprint, sorted by fp.
   List<Row> get desks => [for (final k in _desks.keys.toList()..sort()) _desks[k]!];
 
@@ -260,9 +264,11 @@ class StateSync extends ChangeNotifier {
     _attempt = 0;
     _grace = false;
     _set(StateStatus.connected);
-    out.attach(link, {'devices': _devices});
+    _attachOut(link);
     _flush();
   }
+
+  void _attachOut(StateLink link) => out.attach(link, {'devices': _devices, if (_hasDesks) 'desks': desks});
 
   void _fail(int gen) {
     if (_disposed || gen != _gen) return;
@@ -295,6 +301,7 @@ class StateSync extends ChangeNotifier {
           if (x is Row) {...x, 'sessions': _sessions(x).map((s) => {...s}).toList()},
     ];
     final ds = st['desks'];
+    _hasDesks = st.containsKey('desks');
     _desks = {
       if (ds is List)
         for (final x in ds)
@@ -406,7 +413,7 @@ class StateSync extends ChangeNotifier {
         final st = await link.state();
         if (_disposed || gen != _gen) return;
         _applyState(st);
-          out.attach(link, {'devices': _devices});
+        _attachOut(link);
         notifyListeners();
       } catch (_) {
         // The watch notices a dead link itself; a failed look leaves things as they were.

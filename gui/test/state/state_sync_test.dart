@@ -12,8 +12,12 @@ import 'package:rapp/state/state_sync.dart';
 class CountOut extends StateOut {
   int attaches = 0;
   int detaches = 0;
+  Map<String, Object?>? snapshot;
   @override
-  void attach(StateLink link, Map<String, Object?> snapshot) => attaches++;
+  void attach(StateLink link, Map<String, Object?> snapshot) {
+    attaches++;
+    this.snapshot = snapshot;
+  }
   @override
   void detach() => detaches++;
 }
@@ -675,6 +679,36 @@ void main() {
     expect(sync.status, StateStatus.unreachable);
     expect(out.detaches, greaterThan(before));
     expect(sync.desks, isEmpty);
+    sync.dispose();
+  });
+
+  test('out sees desks only when the service gave them', () async {
+    final out = CountOut();
+    withState();
+    sync = StateSync(
+      localDir: dir.path,
+      find: () async => found,
+      link: (u) => configure(FakeLink(u))..also(links.add),
+      out: out,
+    )..start();
+    await settle();
+    links.single.watchCtl.add({'what': 'hello'});
+    await settle();
+    expect(out.snapshot!.containsKey('desks'), isFalse, reason: 'a P2 service has no desks key');
+    sync.dispose();
+
+    links.clear();
+    configure = (l) => l..stateBody = {'devices': [], 'desks': [], 'needs': []};
+    sync = StateSync(
+      localDir: dir.path,
+      find: () async => found,
+      link: (u) => configure(FakeLink(u))..also(links.add),
+      out: out,
+    )..start();
+    await settle();
+    links.single.watchCtl.add({'what': 'hello'});
+    await settle();
+    expect(out.snapshot!['desks'], isEmpty);
     sync.dispose();
   });
 }

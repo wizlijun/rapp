@@ -2559,9 +2559,13 @@ class MainState extends ChangeNotifier {
   }
 
   /// The device fingerprint [r]'s state goes to: null with no state service, for a text terminal or the desktop,
-  /// and while the device's fingerprint is unknown.
-  String? _reportTo(SessionRecord r) =>
-      stateSync == null || isTermApp(r.app) || isDesktopApp(r.app) ? null : _hostFp(r.id);
+  /// while the device's fingerprint is unknown, and for this app's own device (on macOS and Linux the app's
+  /// fingerprint is that device's own, the sender its service reports under).
+  String? _reportTo(SessionRecord r) {
+    if (stateSync == null || isTermApp(r.app) || isDesktopApp(r.app)) return null;
+    final fp = _hostFp(r.id);
+    return fp == null || fp == hub?.meFp ? null : fp;
+  }
 
   /// What [r]'s live link infers, as reported: null for none and for an unsure block.
   AppReport? _appReportOf(SessionRecord r) {

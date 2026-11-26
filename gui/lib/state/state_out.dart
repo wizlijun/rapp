@@ -30,6 +30,9 @@ class StateOut {
 
   static const maxPending = 200;
 
+  /// The most events one `POST /v1/events` carries; the service refuses more (413).
+  static const maxBatch = 50;
+
   final Duration deskDelay;
   final Duration retry;
   final DateTime Function() _clock;
@@ -46,6 +49,10 @@ class StateOut {
   String? _deskSent;
   bool _deskOff = false;
 
+  /// A service whose `/v1/state` has no `desks` (P2, 0.15.48–0.15.51) drops `src`, so proxy reports would show
+  /// there as terminal needs: it gets nothing at all until an attach to a service that has them.
+  bool _old = false;
+
   /// Events (maps) and desk marks, in the order they go out.
   final _queue = <Object>[];
   bool _sending = false;
@@ -54,7 +61,7 @@ class StateOut {
   Timer? _deskTimer;
   Timer? _retryTimer;
 
-  bool get _ready => _link != null && _me != null;
+  bool get _ready => _link != null && _me != null && !_old;
 
   static String _randomEpoch() {
     final r = Random.secure();
@@ -106,7 +113,8 @@ class StateOut {
     });
   }
 
-  /// Call once the service's picture is in place: [snapshot] is its `/v1/state`.
+  /// Call once the service's picture is in place: [snapshot] is its `/v1/state` (with `desks` only when the
+  /// service gave that key).
   void attach(StateLink link, Map<String, Object?> snapshot) {
     _gen++;
     _cancelTimers();
@@ -115,6 +123,7 @@ class StateOut {
     _link = link;
     _snapshot = snapshot;
     _deskOff = false;
+    _old = !snapshot.containsKey('desks');
     if (_ready) _resend();
   }
 
@@ -174,8 +183,7 @@ class StateOut {
       for (final d in devices) {
         if (d is! Map || d['fp'] is! String || reporting.contains(d['fp'])) continue;
         final sessions = d['sessions'];
-        final mine = sessions is List &&
-            sessions.any((s) => s is Map && s['by'] == _me && s['src'] == 'app');
+        final mine = sessions is List && sessions.any((s) => s is Map && s['src'] == 'app' && _reportedBy(s));
         if (!mine) continue;
         reporting.add(d['fp'] as String);
         _queue.add(_event('snap', d['fp'] as String, d['id'] is String ? d['id'] as String : null, {'sessions': []}));
@@ -184,6 +192,12 @@ class StateOut {
     _deskSent = null;
     if (_desk != null && !_deskOff) _queue.add(const _DeskMark());
     _pump();
+  }
+
+  /// Whether this app is among a proxy row's reporters: its `vias`, or `by` from a service without them.
+  bool _reportedBy(Map<Object?, Object?> row) {
+    final vias = row['vias'];
+    return vias is List ? vias.contains(_me) : row['by'] == _me;
   }
 
   void _push(Map<String, Object?> event) {
@@ -212,12 +226,13 @@ class StateOut {
             await link.putDesk(me, body);
             if (gen == _gen) _deskSent = sent;
           } on StateLinkError catch (e) {
-            if (e.status != 404) rethrow;
+            // 404 is a service without desks; any other 4xx will not change by asking again. Off until re-attach.
+            if (e.status < 400 || e.status >= 500) rethrow;
             if (gen == _gen) _deskOff = true;
           }
         } else {
           final batch = <Map<String, Object?>>[];
-          while (_queue.isNotEmpty && _queue.first is Map<String, Object?>) {
+          while (batch.length < maxBatch && _queue.isNotEmpty && _queue.first is Map<String, Object?>) {
             batch.add(_queue.removeAt(0) as Map<String, Object?>);
           }
           await link.postEvents(batch);

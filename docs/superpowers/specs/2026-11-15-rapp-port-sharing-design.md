@@ -283,7 +283,7 @@ relay 规格里，经中继的每一条流都要在里面再做一次 TLS 握手
 **`Op::StateSink{id,port,on}`**：设备之间的一个请求，“设备 `id` 的端口 `port` 上有（`on:false`：没了）状态服务”，一行回复就关流（`rust/wire`，`rust/service/src/sink.rs`）。知道的设备告诉自己认识的设备，收到的记进 `local/state-sinks.json`。全部做法见《rapp-state 设计》§7.2。
 
 **`Op::SetService{name,on}`（rapp-state P3）**：设备之间的一个请求，远程打开或关掉那台设备的状态服务，一行回复就关流。线上 `{"op":"set_service","name":"state","on":true|false}`；`on` 缺省是只问状态。
-- 谁能发：只有按 key 互信的普通设备（`forward::admit`，托管策略不管它）。密码连接或匿名回 `not supported`；服务器设备发来回 `host only`。
+- 谁能发：只有按 key 互信的普通设备（`forward::admit`，托管策略不管它）。密码连接或匿名回 `not supported`。服务器设备发来回 `host only` 要到第 3 步才生效：在那之前 `Caller.server` 固定是 false，和 `Share` 一样，服务器设备的请求照普通设备处理。
 - 回复：成功时就是本机 `rapp state on/off/status` 的回复（`ok`、`on`、`running`、`port`、`error`）；名字不认识回 `unknown service`。
 - 旧设备不认识这个请求，回 `unknown op`；设备页靠它认出旧设备，把“状态服务”开关藏起来。
 - 记录：被拒记 `service_refused`（带 `reason`），设了记 `service_set`（带 `result`），都带 `name`、`on` 和来源。

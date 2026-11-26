@@ -32,8 +32,13 @@ class _StateServiceRowState extends State<StateServiceRow> {
   String? _error;
   Timer? _retry;
 
-  /// The device is too old to have the switch: asking again would not change that.
+  /// The device is too old to have the switch, or will never have it here: asking again would not change that.
   bool _old = false;
+
+  /// Bumped by every load; an answer to an older one is dropped.
+  int _loads = 0;
+
+  static const _permanent = ['unknown op', 'old version', 'not supported', 'host only', 'unknown service'];
 
   static const _retryEvery = Duration(seconds: 10);
 
@@ -67,8 +72,11 @@ class _StateServiceRowState extends State<StateServiceRow> {
   }
 
   Future<void> _load() async {
+    _retry?.cancel();
+    _retry = null;
     final api = widget.api, to = widget.to;
-    bool stale() => !mounted || widget.api != api || widget.to != to;
+    final load = ++_loads;
+    bool stale() => !mounted || load != _loads || widget.api != api || widget.to != to;
     api.stateHost().then<String?>((h) => h, onError: (_) => null).then((h) {
       if (stale()) return;
       setState(() => _host = h);
@@ -83,12 +91,13 @@ class _StateServiceRowState extends State<StateServiceRow> {
     } catch (e) {
       if (stale()) return;
       final why = e is ServiceException ? e.message : '$e';
-      _old = why.contains('unknown op') || why.contains('old version');
+      _old = _permanent.any(why.contains);
       setState(() {
         _failed = true;
         _reply = null;
       });
-      if (!_old) _retry = Timer(_retryEvery, _load);
+      _retry?.cancel();
+      _retry = _old ? null : Timer(_retryEvery, _load);
     }
   }
 

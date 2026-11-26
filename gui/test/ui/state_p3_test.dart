@@ -157,6 +157,18 @@ void main() {
       }, sync: sync, fp: null);
     });
 
+    test("a GUI app on this app's own device is not reported: that device's service is the same sender", () {
+      final sync = FakeStateSync(tmp.path);
+      env((a, t, port, st, sid) {
+        port.emit(AppStateEvent(sid, report('blocked', sure: true, kind: 'permission')));
+        port.emit(AppStateEvent(sid, report('working')));
+        st.endSession(key);
+        port.emit(ClosedEvent(sid, 'closed'));
+        a.flushMicrotasks();
+        expect(sync.out.reports, isEmpty);
+      }, sync: sync, fp: 'appA');
+    });
+
     test('no state service: the GUI session goes on as before', () {
       env((a, t, port, st, sid) {
         port.emit(AppStateEvent(sid, report('working')));
