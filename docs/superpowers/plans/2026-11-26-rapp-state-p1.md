@@ -103,11 +103,7 @@ docs/superpowers/specs/2026-11-13-rapp-config-reference.md, 2026-11-15-rapp-port
   - `pub async fn cli(args: Vec<String>) -> i32`：解析、`run`，错误打到 stderr 返回 2（参数错）或 1（起不来）。绑不上端口时打一行 `{"event":"bind_failed","port":p,"error":"AddrInUse"}`（`error` 是 `io::ErrorKind` 的名字），Task 10 靠它认出“端口被占用”。`main.rs` 只有 `std::process::exit(rapp_state::cli(args).await)`。
   - 日志：一行一个 JSON 写 stderr，`{"at":<unix>,"event":"<名字>",…}`。P1 的事件名：`listening {port}`、`events {from,accepted,dup}`、`rejected {status,count}`、`saved {bytes}`、`load_failed {}`。
 
-- [ ] **Step 1: 建 worktree**
-
-```bash
-cd /Users/bruce/git/rapp && git worktree add .worktrees/rapp-state-p1 -b feat/rapp-state-p1 main
-```
+- [ ] **Step 1: worktree 已由主控建好（`.worktrees/rapp-state-p1`，分支 `feat/rapp-state-p1`），直接在里面做**
 
 - [ ] **Step 2: 写失败的测试**
 
@@ -304,7 +300,7 @@ git commit -m "feat(state): POST /v1/events, GET /v1/state and /v1/queue"
 #[test] fn files_are_private()                             // 目录 mode & 0o777 == 0o700，文件 == 0o600
 #[test] fn a_broken_file_is_moved_aside()                  // 写 "{not json" → load 回 (None, Some(_))；state.json.bad 存在，state.json 不在
 #[tokio::test] async fn a_restart_keeps_the_queue()        // tests/http.rs：data = tempdir，POST term-events，等 1.5 秒，停掉（abort）再起一个同目录的 → queued == 4
-#[tokio::test] async fn memory_mode_writes_nothing()       // data = None，cwd 和 tempdir 下 POST 后 1.5 秒：tempdir 为空（用 tempdir 作为 HOME 和 cwd 来检查）
+#[tokio::test] async fn memory_mode_writes_nothing()       // 单独放在 tests/memory.rs（独立进程，才能安全地 set_current_dir）：cwd 和 HOME 设成 tempdir，data = None，POST 后 1.5 秒 tempdir 仍为空
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -395,7 +391,7 @@ git commit -m "feat(service): optional Share.kind, told in list_shares, shares a
 - `dest`：候选 = 本机（`set_local` 给的端口，ID 用 `own_id`）加 `remote()`；按 ID 字符串排序取最小；`own_id` 为 `None` 时本机排第一。没有候选回 `None`。
 - `saw` 只在 `id` 是 9 位数字时起作用；`id` 是本机自己时不动 `remote`（本机由 companion 管）。
 - `hosts.json` 存在时，`dest` 之前先把不在 `known_ids` 里的远程项 `forget` 掉（在 `spawn` 循环的每一轮做）。
-- 告诉别人：每台目标设备记“告诉过的那份内容”（`HashMap<目标 id, Vec<(id, port, on)>>`，内存里）。一轮 = 对 `known_hosts` 里每台（去掉本机、去掉每个状态服务所在的那台）：要说的 = 每个现有的状态服务 `on:true`，加上本轮之前对它说过、现在没了的 `on:false`；和记下的一样就跳过。发 `pipe::set(state, id, &Op::StateSink{…})`：`Ok` 或 `Err(PipeErr::Old)` → 记成告诉过；别的错 → 不记，下一轮再试。
+- 告诉别人：每台目标设备记“告诉过的那份内容”（`HashMap<目标 id, Vec<(id, port, on)>>`，内存里）。一轮 = 对 `known_hosts` 里每台（只去掉本机）：要说的 = 每个现有的状态服务（**不含在这台目标自己身上的那个**）`on:true`，加上本轮之前对它说过、现在没了的 `on:false`；和记下的一样就跳过。状态服务所在的设备也要被告诉“别处的状态服务”，否则两台都开时它们互相不知道。发 `pipe::set(state, id, &Op::StateSink{…})`：`Ok` 或 `Err(PipeErr::Old)` → 记成告诉过；别的错 → 不记，下一轮再试。
 - 一轮什么时候跑：`Sinks` 变了（`subscribe`）立刻跑一轮；另外 **只在** 有状态服务、或者还有没说完的 `on:false` 时，每 `TELL_EVERY` 跑一轮。都没有时循环只等 `subscribe`，不读文件、不发请求。
 - 收到的 `StateSink` 不回传给发来的那台：把发来的那台（按 `peer.fp` 在 `known_hosts` 里找到的 `id`）记成“已经知道这份”。
 
@@ -410,13 +406,14 @@ git commit -m "feat(service): optional Share.kind, told in list_shares, shares a
 #[test] fn the_smallest_id_wins()                 // learn("222222222",1)、learn("111111111",2)、set_local(Some(3)) 且 own_id "333333333" → Remote{id:"111111111",port:2}；own_id None → Local(3)
 #[test] fn learned_sinks_survive_a_restart()       // learn 后重新 load → remote() 一样；forget 后文件里为空数组
 #[test] fn a_share_list_without_the_kind_forgets() // saw(id, [{"port":8102,"kind":"state"}]) → learn；saw(id, [{"port":8102}]) → forget
-#[test] fn what_to_tell_each_host()                // 纯函数 tell_plan(hosts, sinks, told) 的几种情形：新设备要说 on；说过一样的不说；状态服务没了要说 off；状态服务所在那台不说
+#[test] fn what_to_tell_each_host()                // 纯函数 tell_plan(hosts, sinks, told) 的几种情形：新设备要说 on；说过一样的不说；状态服务没了要说 off；不跟一台设备说它自己身上的状态服务，但要跟它说别处的
 ```
 `testkit/tests/state_sink.rs`（照 `tests/maps.rs` 的 `start_on` / `knows` 起三台：A 有 `hosts.json` 认识 B、C；B 和 C 没有 `hosts.json`）：
 ```rust
 #[tokio::test] async fn a_sink_seen_in_shares_spreads()   // B 的 shares.json 预先有 kind:"state" 的一项；A 跑 IPC hosts → 10 秒内 C 的 IPC state 的 sinks 里有 B
 #[tokio::test] async fn an_unshared_sink_is_forgotten_everywhere() // 接上一个：B 的 IPC unshare 那个端口，A 再跑 IPC hosts → A、C 都忘掉 B
-#[tokio::test] async fn two_sinks_pick_the_same_one()     // B、C 都有 kind:"state"；A hosts 一次后，A、B、C 的 dest 都指向 ID 较小的那台（B、C 自己那台也一样，因为 A 会把另一个告诉它们）
+#[tokio::test] async fn two_sinks_pick_the_same_one()     // B、C 都有 kind:"state"；A hosts 一次后：A 的 IPC state 的 sinks 两项、chosen 是 ID 较小的那台；B 的 sinks 有 C，C 的 sinks 有 B
+                                                           // （本机的状态服务要到 Task 10 才有，“三台选同一个”在 Task 10 的 two_companions_pick_the_same_one 断言）
 #[tokio::test] async fn no_sink_no_notice()               // 都没有 kind；A hosts 后 3 秒：B、C 的日志里没有 state_sink，A 的日志里没有 state_sink_told
 ```
 
@@ -650,7 +647,7 @@ git commit -m "feat(service): run the outbox while a state service is known"
   - `pub struct Companions`；`pub fn spawn(state: Arc<State>) -> JoinHandle<()>`：启动时把 `on` 的那些起起来
   - `pub async fn set(state: &Arc<State>, name: &str, on: bool) -> Value`、`pub async fn status(state: &Arc<State>, name: &str) -> Value`
   - IPC：`{"cmd":"state"}` → `status`；`{"cmd":"state","on":true|false}` → `set`。回复：`{"ok":true,"on","port","share":<分享号>|null,"running":bool,"error":<原因>|null,"stored":{"devices","sessions","queued","last":{"device","at"}|null}|null,"sinks":[{"id","port","local":bool,"chosen":bool}…],"outbox":<outbox::status>}`；`name` 不认识回 `err("unknown service")`。
-  - 日志：`companion_start {name, port}`、`companion_exit {name, code}`、`companion_ready {name}`、`companion_failed {name, why}`。子进程的 stderr 追加写到 `<log_dir>/rapp-state.log`，stdout 丢掉。
+  - 日志：`companion_start {name, port, pid}`、`companion_exit {name, code}`、`companion_ready {name}`、`companion_failed {name, why}`。子进程的 stderr 追加写到 `<log_dir>/rapp-state.log`，stdout 丢掉。
 
 管理器的行为：
 
@@ -678,6 +675,7 @@ git commit -m "feat(service): run the outbox while a state service is known"
 // （`set(on:true)` 在已经开着、但没跑起来时立即重试，不等退避）
 #[tokio::test] async fn a_crashed_service_comes_back() // 找到子进程 pid（日志 companion_start 后用 /v1/health 确认），kill -9 → 10 秒内 running:true 又成立
 #[tokio::test] async fn state_on_tells_the_known_devices() // A 认识 B（hosts.json）；A 上 state on → 10 秒内 B 的 IPC state 的 sinks 里有 A
+#[tokio::test] async fn two_companions_pick_the_same_one() // A 认识 B、C；B、C 都 state on（不同的空闲端口），A 跑一次 IPC hosts → 15 秒内 A、B、C 的 outbox.dest 都指向 ID 较小的那台
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -769,13 +767,15 @@ git commit -m "feat(cli): rapp state [on|off]"
 
 - [ ] **Step 1: 写验收测试**（规格 §15 P1 那一行，逐条）
 
+“停服务”不用 `state off`（关掉是有意移除，会发 `on:false`，B 会忘掉并清空发件箱，这是对的）。停、起的两个测试改用测试自己控制的 `rapp-state`：testkit 的测试直接调 `rapp_state::serve`（固定的空闲端口、tempdir 里存盘），A 的 `shares.json` 预先有这个端口、`kind:"state"` 的分享，B 的 `state-sinks.json` 预先指向 A 的这个端口；停 = abort 那个 task，起 = 同端口同目录再 `serve` 一次。确认 A 端口没人听时 `Op::Forward` 回的错误在 Task 9 的映射里是 `Down` 而不是 `Gone`。
+
 ```rust
 #[tokio::test] async fn claude_working_blocked_done_reach_the_queue()
 // A：state on（空闲端口）。B 认识 A；A 认识 B（hosts.json 两边都写），A 的 state on 告诉 B。
 // B 的 term.json fake_rows 依次改成 term:pty:a 的 working → blocked(kind permission, seq 1) → done，每次之间等到 A 的 /v1/queue 多一行（10 秒超时）。
 // 断言：/v1/queue 的前三行 state 依次是 done、blocked、working，fp 都是 B 的指纹；/v1/state 的 needs 在 blocked 时有一项、done 后为空。
 #[tokio::test] async fn three_changes_while_stopped_arrive_later()
-// 接着：A 的 IPC state off（服务停）；B 改 3 次状态；A 的 IPC state on；15 秒内 /v1/queue 多出这 3 行，顺序对；/v1/state 里 B 的 term:pty:a 是最后那个状态。
+// 用上面的自控 rapp-state：先确认 working 到了；停掉它；B 改 3 次状态；再起；15 秒内 /v1/queue 多出这 3 行，顺序对；/v1/state 里 B 的 term:pty:a 是最后那个状态。
 #[tokio::test] async fn three_hundred_changes_leave_a_gap_row()
 // 停服务期间 B 改 300 次（写 term.json 之间等 120 ms，确保 fake 的 watch 都发出来）；恢复后 /v1/queue 里有一行 t == "gap"、fp == B；B 的 IPC state 里 outbox.dropped == 100。
 #[tokio::test] async fn no_text_in_any_log()
@@ -830,7 +830,7 @@ git add scripts docs tasks
 git commit -m "build+docs: ship rapp-state; config reference, port sharing and todo for P1"
 ```
 
-- [ ] **Step 5: 合并**
+- [ ] **Step 5: 合并（主控在整条分支审完后做，实现这个任务的人不做）**
 
 ```bash
 git merge main            # 在分支上先合 main，解决冲突后重跑 cargo test --workspace --no-fail-fast
