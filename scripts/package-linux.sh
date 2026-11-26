@@ -83,14 +83,20 @@ Gateway hotwords provide spelling context to local recognition on each recording
 Cached correction rules fix recognized words locally before sending or editing.
 The input dock, quick-area toggle, regrouped key bar (first row ending with
 ⋯ and ⌄; second row starting with ⌘C ⌘V and adding ⌃L), overview Open App
-dropdown menu, OSC 7501 program status, top-bar status queue, Needs You
-direct jump, OSC 0/1/2 terminal titles (with · 2 numbering on clashes) and
-overview favorite Terminal restore/creation share the macOS 0.15.33 layout and rules.
+dropdown menu, overview Local column inbound sessions, OSC 7501 program
+status, GUI app state rules client support, top-bar status queue, Needs You
+direct jump, OSC 0/1/2 terminal titles (with · 2 numbering on clashes),
+multi-terminal Ctrl+Shift+T / Ctrl+Shift+W / End Terminal / clean exit /
+host `<dir> · <prog>` window titles, foreground-program terminal titles with
+CLI subtitle, single-flight New Terminal, and overview favorite Terminal
+restore/creation share the macOS 0.15.37 layout and rules.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and
-reattach without reconnecting. This release uses protocol v15 (compatible with
-macOS 0.15.12); update both peers when coming from protocol v14. Off-stage and
+reattach without reconnecting. This release uses protocol v16 (compatible with
+macOS 0.15.35–0.15.37); update both peers when coming from protocol v15. Incoming GUI
+state rules are forwarded by the Linux client to compatible hosts (such as
+macOS 0.15.35) and safely ignored by the Linux desktop/app host. Off-stage and
 hidden/minimized embedded or detached sessions pause pictures but keep activity
 signals, then resume from the existing canvas. Minimization requires compositor
 support; Wayland does not provide general window-occlusion detection.

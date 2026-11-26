@@ -28,6 +28,9 @@ use std::time::{Duration, Instant};
 
 pub const LAN_WAIT: Duration = Duration::from_millis(500);
 const REPLY_WAIT: Duration = Duration::from_secs(20);
+/// `open_term`'s reply: the host's service waits up to 30 s for its terminal worker, whose open may queue behind
+/// another one and then waits up to 20 s for the window.
+const OPEN_TERM_WAIT: Duration = Duration::from_secs(45);
 /// The relay lookup of a connect: a hung relay must not hang the connect.
 const RELAY_WAIT: Duration = Duration::from_secs(5);
 
@@ -59,6 +62,11 @@ impl Link {
         if let Link::Quic { conn, .. } = self {
             conn.close(0u32.into(), why);
         }
+    }
+
+    /// A connection known to be closed: nothing sent on it can have arrived. The relay is never known closed here.
+    fn closed(&self) -> bool {
+        matches!(self, Link::Quic { conn, .. } if conn.close_reason().is_some())
     }
 
     /// The same link (the same connection, or both the relay).
@@ -115,13 +123,28 @@ impl std::fmt::Display for Relayed {
 
 impl std::error::Error for Relayed {}
 
+/// How long a request waits for the reply to `op`.
+fn reply_wait(op: &Op) -> Duration {
+    match op {
+        Op::OpenTerm { .. } => OPEN_TERM_WAIT,
+        _ => REPLY_WAIT,
+    }
+}
+
+/// Whether `op` may be sent again after a try that may have reached the host. Not when doing it twice does it twice:
+/// each `open_term` opens a terminal window, and a second `end_term` answers that the terminal is gone.
+fn repeatable(op: &Op) -> bool {
+    !matches!(op, Op::OpenTerm { .. } | Op::EndTerm { .. })
+}
+
 /// One request/reply on a new stream; the stream stays open for `open`.
 async fn exchange(conn: &Connection, lines: &[&Op]) -> Result<(Pipe, Value)> {
     let mut s: Pipe = Box::new(bi(conn.open_bi().await?));
     for l in lines {
         write_json(&mut s, l).await?;
     }
-    let reply = tokio::time::timeout(REPLY_WAIT, read_json(&mut s)).await.map_err(|_| anyhow!("no reply"))??;
+    let wait = lines.last().map_or(REPLY_WAIT, |op| reply_wait(op));
+    let reply = tokio::time::timeout(wait, read_json(&mut s)).await.map_err(|_| anyhow!("no reply"))??;
     Ok((s, reply))
 }
 
@@ -661,7 +684,7 @@ impl Hub {
             let r = read_json(&mut pipe).await?;
             anyhow::Ok((r, accepted))
         };
-        let (r, accepted) = tokio::time::timeout(REPLY_WAIT, wait).await.map_err(|_| anyhow!("no reply"))??;
+        let (r, accepted) = tokio::time::timeout(reply_wait(op), wait).await.map_err(|_| anyhow!("no reply"))??;
         self.remember_fp(host, &accepted);
         Ok((pipe, r, accepted))
     }
@@ -853,11 +876,18 @@ impl Hub {
             }
             links.get(&host.id).cloned()
         };
-        if let Some(link) = cached {
+        // A cached connection already closed is passed over: nothing goes out on it, so even an `op` that is not
+        // repeatable may go out on a new one.
+        if let Some(link) = cached.filter(|l| !l.closed()) {
             match self.send_on(host, &link, op).await {
                 // The relay was just dialed and did not answer: a forced host has no other way to go.
                 Err(e) if host.forced_relay() && is_relay_unreachable(&e) => {
                     self.forget(&host.id);
+                    return Err(e);
+                }
+                // It may have reached the host: it is not sent again, and a connection still up keeps its sessions.
+                Err(e) if !repeatable(op) => {
+                    self.forget_if_dead(&host.id, &link, op);
                     return Err(e);
                 }
                 Err(e) if quiet() => drop(e),
@@ -876,9 +906,17 @@ impl Hub {
         match self.send_on(host, &link, op).await {
             Ok(x) => finish(x, link.path()),
             Err(e) => {
-                self.forget(&host.id);
+                self.forget_if_dead(&host.id, &link, op);
                 Err(e)
             }
+        }
+    }
+
+    /// After `op` failed on `link`: the link is dropped, unless `op` is not repeatable and the link is still up (a
+    /// slow answer is no sign of a dead link, and dropping it would end every session on it).
+    fn forget_if_dead(&self, id: &str, link: &Link, op: &Op) {
+        if must_forget(repeatable(op), link.closed()) {
+            self.forget(id);
         }
     }
 }
@@ -899,9 +937,42 @@ fn finish((s, r): (Pipe, Value), path: &'static str) -> Result<(Pipe, Value, &'s
     }
 }
 
+/// Whether a link a request failed on is dropped: always after a repeatable one (the next try dials afresh), and
+/// after any other only when the connection is closed.
+fn must_forget(repeatable: bool, closed: bool) -> bool {
+    repeatable || closed
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{cacheable, finish, dial_order, is_refusal, probe_asks_relay, unreached};
+    use super::{cacheable, finish, dial_order, is_refusal, must_forget, probe_asks_relay, repeatable, reply_wait, unreached};
+    use super::{OPEN_TERM_WAIT, REPLY_WAIT};
+    use rapp_net::msg::Op;
+
+    /// One tap on 新建 opened two windows: the hub sent `open_term` again on a new link after a slow answer.
+    #[test]
+    fn opening_and_ending_a_terminal_are_never_sent_twice() {
+        assert!(!repeatable(&Op::OpenTerm { shell: None, from: None, app: "Terminal".into() }));
+        assert!(!repeatable(&Op::EndTerm { term: "term:pty:k".into() }));
+        assert!(repeatable(&Op::ListTerms));
+        assert!(repeatable(&Op::Ping));
+    }
+
+    /// A slow `open_term` keeps the link and the sessions on it; a closed link is dropped either way.
+    #[test]
+    fn a_link_is_kept_after_a_slow_open_term() {
+        assert!(!must_forget(false, false));
+        assert!(must_forget(false, true));
+        assert!(must_forget(true, false));
+    }
+
+    /// The host's service waits 30 s for its terminal worker: B waits longer than that for `open_term`.
+    #[test]
+    fn open_term_outwaits_the_hosts_own_wait() {
+        assert!(reply_wait(&Op::OpenTerm { shell: None, from: None, app: "Terminal".into() }) > std::time::Duration::from_secs(30));
+        assert_eq!(reply_wait(&Op::OpenTerm { shell: None, from: None, app: "x".into() }), OPEN_TERM_WAIT);
+        assert_eq!(reply_wait(&Op::ListTerms), REPLY_WAIT);
+    }
     use crate::hosts::Host;
     use anyhow::anyhow;
 

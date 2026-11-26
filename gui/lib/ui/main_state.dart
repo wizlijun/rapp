@@ -1283,9 +1283,18 @@ class MainState extends ChangeNotifier {
   String? termName(String device, String term) =>
       hub?.termLists[device]?.terms.where((r) => r.id == term).firstOrNull?.shown;
 
-  /// What a favourite or project member is called: `CLI · <name>` for a text terminal, whose name is the list's
-  /// current one, else the one stored with it.
-  String labelOf(AppRef a) => isTermApp(a.bundle) ? termTitle(termName(a.device, a.bundle) ?? a.name) : a.name;
+  /// A text terminal's program in front on [device] (claude, codex, zsh), from the device's terms list; null when
+  /// it is not listed or the device does not say.
+  String? termFg(String device, String term) {
+    if (!isTermApp(term)) return null;
+    final fg = hub?.termLists[device]?.terms.where((r) => r.id == term).firstOrNull?.fg;
+    return fg == null || fg.isEmpty ? null : fg;
+  }
+
+  /// What a favourite or project member is called: `<program> · <name>` for a text terminal ([termTitle]), whose
+  /// name is the list's current one, else the one stored with it.
+  String labelOf(AppRef a) =>
+      isTermApp(a.bundle) ? termTitle(termName(a.device, a.bundle) ?? a.name, fg: termFg(a.device, a.bundle)) : a.name;
 
   /// A text terminal's program status from its live row on [device]; null when the app is no terminal, the row is
   /// gone or dead, or the device dropped (its last list is stale).
@@ -1318,6 +1327,7 @@ class MainState extends ChangeNotifier {
       takenOver: r.phase == Phase.disconnected && takenOver(r.reason),
       ps: r.phase == Phase.disconnected ? null : (_termPs(r.id, r.app) ?? inferredPs),
       inferred: inferredPs != null && !isTermApp(r.app),
+      fg: termFg(r.id, r.app),
     );
   }
 
@@ -1338,6 +1348,7 @@ class MainState extends ChangeNotifier {
           path: s.path,
           lamp: _termBlocked(s.id, s.app) ? Lamp.waiting : Lamp.active,
           ps: _termPs(s.id, s.app),
+          fg: termFg(s.id, s.app),
         );
         if (seen.add(e.key)) out.add(e);
       }
@@ -2823,14 +2834,38 @@ class MainState extends ChangeNotifier {
         hint = '这台设备没有可用的终端窗口，请在设备上安装终端并登录桌面后重试';
         notifyListeners();
       case NewText(:final shell):
+        // One at a time per device: a second tap while the host is still opening the first would open two.
+        if (!_newingText.add(id)) {
+          hint = '正在新建终端，请稍候';
+          notifyListeners();
+          return;
+        }
         try {
           await openText(id, shell: shell);
         } catch (e) {
-          hint = '$e';
+          if (_disposed) return;
+          hint = newTermWords(e);
           notifyListeners();
+        } finally {
+          _newingText.remove(id);
         }
     }
   }
+
+  /// Devices a 新建 from the 终端 entry is still opening a text terminal on.
+  final Set<String> _newingText = {};
+
+  /// What the hint says when opening a new text terminal failed with [e].
+  @visibleForTesting
+  static String newTermWords(Object e) => switch (e) {
+        StateError(:final message) => message,
+        // The host's Terminal tab script was cut off and no window came: most likely macOS asking for permission.
+        HubException(:final message) when message.contains('allow rApp to control Terminal') =>
+          '被控 Mac 上的「终端」没有回应：请在那台 Mac 上看看是否弹出了「允许 rApp 控制“终端”」，点「好」后再新建',
+        HubException(:final message) => message,
+        TimeoutException() => '新建终端没有回应，请稍后再试',
+        _ => '$e',
+      };
 
   /// Opens a text terminal window on [id], then switches to it without waiting for the session to connect; a
   /// refusal is thrown with the hub's words. [from]: the terminal it opens beside (its directory, shell and window).
@@ -2850,9 +2885,10 @@ class MainState extends ChangeNotifier {
 
   Future<void> _newTerms = Future<void>.value();
 
-  /// How long one queued ⌘T waits for its terminal before the next one goes ahead.
+  /// How long one queued ⌘T waits for its terminal before the next one goes ahead: past the hub's own 45 s wait,
+  /// so the host's words (such as a permission still being asked) reach the hint.
   @visibleForTesting
-  Duration newTermTimeout = const Duration(seconds: 20);
+  Duration newTermTimeout = const Duration(seconds: 50);
 
   /// ⌘T: a new text terminal on [device] beside [term], switched to once made. Presses queue: each opens after the
   /// one before it is made (or failed, or waited [newTermTimeout] for). A failure is the hint, as opening one from
@@ -2864,12 +2900,7 @@ class MainState extends ChangeNotifier {
           await openText(device, from: term).timeout(newTermTimeout);
         } catch (e) {
           if (_disposed) return;
-          hint = switch (e) {
-            StateError(:final message) => message,
-            HubException(:final message) => message,
-            TimeoutException() => '新建终端没有回应，请稍后再试',
-            _ => '$e',
-          };
+          hint = newTermWords(e);
           notifyListeners();
         }
       });
@@ -3012,6 +3043,7 @@ class MainState extends ChangeNotifier {
       device: deviceName(id),
       path: '',
       lamp: Lamp.connecting,
+      fg: termFg(id, app),
     );
     _entries = _mapEntries();
     final before = currentKey;

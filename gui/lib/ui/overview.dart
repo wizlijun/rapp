@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 
 import '../embed/traffic_label.dart';
 import '../service_client.dart';
-import 'controls.dart';
 import 'inbound.dart';
 import 'lamp.dart';
 import 'main_state.dart';
@@ -14,15 +13,13 @@ import 'open_apps_menu.dart';
 import 'overview_model.dart';
 import 'prefs.dart' show FirstLayer;
 import 'projects.dart' show orderedProjects;
-import 'session_model.dart';
-import 'term_status.dart' show programWord;
+import 'session_block.dart';
 import 'workspace_store.dart';
 import 'tokens.dart';
 
 const _gap = 12.0;
 const _colWidth = 220.0;
 const _cellWidth = 150.0;
-const _blockHeight = 56.0;
 
 /// Height of the counts row and of the project/resource row.
 const _bandHeight = 88 + 2 * _gap;
@@ -324,7 +321,7 @@ class _Column extends StatelessWidget {
           if (col.entries.isEmpty) Text('没有打开的 app', style: TextStyle(color: t.muted)),
           for (final (i, e) in col.entries.indexed) ...[
             if (i > 0) const SizedBox(height: 8),
-            _Block(state: state, entry: e),
+            SessionBlock(state: state, entry: e),
           ],
           // Who is in on this machine: not tasks, so they follow the sessions and open nothing.
           if (id == null && monitor != null)
@@ -341,7 +338,7 @@ class _Column extends StatelessWidget {
             ),
             for (final (i, f) in favorites.indexed) ...[
               if (i > 0) const SizedBox(height: 8),
-              _FavoriteBlock(
+              FavoriteBlock(
                 favorite: f,
                 label: state.labelOf(f),
                 verb: state.favoriteCreates(f) ? '新建' : '打开',
@@ -410,165 +407,6 @@ class _OpenAppsLink extends StatelessWidget {
         ),
       );
     });
-  }
-}
-
-/// A favourite that is not open: dashed, 「点按打开」; greyed while it cannot open.
-class _FavoriteBlock extends StatelessWidget {
-  const _FavoriteBlock({required this.favorite, required this.label, required this.verb, required this.onTap});
-  final AppRef favorite;
-  final String label, verb;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RappTokens.of(context);
-    final small = Theme.of(context).textTheme.bodySmall?.copyWith(color: t.muted);
-    final radius = BorderRadius.circular(t.r);
-    return SizedBox(
-      key: Key('ov-favorite-${favorite.key}'),
-      height: 48,
-      child: Semantics(
-        button: true,
-        enabled: onTap != null,
-        label: '常用 $label，${onTap != null ? '点按$verb' : '现在打不开'}',
-        excludeSemantics: true,
-        onTap: onTap,
-        child: Material(
-          type: MaterialType.transparency,
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: radius,
-            child: CustomPaint(
-              foregroundPainter: DashedOutline(t.line, t.r),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Row(children: [
-                  const StatusLamp(Lamp.notOpened),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: onTap != null ? t.text : t.muted),
-                    ),
-                  ),
-                  if (onTap != null) Text(verb, style: small),
-                ]),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _Block extends StatelessWidget {
-  const _Block({required this.state, required this.entry});
-  final MainState state;
-  final SessionEntry entry;
-
-  /// What a terminal's program says it is doing, while the session itself is up; it takes the traffic's place.
-  String? get _program {
-    final ps = entry.ps;
-    if (ps == null) return null;
-    return switch (entry.lamp) {
-      Lamp.disconnected || Lamp.connecting || Lamp.offline => null,
-      _ => programWord(ps),
-    };
-  }
-
-  String get _status => _program ?? switch (entry.lamp) {
-        Lamp.active => '活动',
-        Lamp.disconnected => entry.reason == null ? '已断开' : '已断开：${entry.reason}',
-        final l => lampWord(l),
-      };
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RappTokens.of(context);
-    final selected = entry.key == state.currentKey;
-    final backdrop = rowBackdrop(entry.lamp, t);
-    final border = rowBorder(entry.lamp, t, selected: selected);
-    final windows = windowsWord(state.windowsOf(entry.key));
-    final small = Theme.of(context).textTheme.bodySmall?.copyWith(color: t.muted);
-    final rate = state.embeds && entry.lamp == Lamp.active && _program == null;
-    void onTap() => state.select(entry.key);
-    final radius = BorderRadius.circular(t.r);
-    return SizedBox(
-      key: Key('block-${entry.key}'),
-      height: _blockHeight,
-      child: Semantics(
-        button: true,
-        selected: selected,
-        label: [entry.title, _status, if (_program != null && entry.inferred) '推断', ?windows].join('，'),
-        excludeSemantics: true,
-        onTap: onTap,
-        child: Material(
-          type: MaterialType.transparency,
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: radius,
-            child: Container(
-              key: Key('frame-block-${entry.key}'),
-              decoration: t.panelBox().copyWith(border: Border.all(color: border, width: selected ? 2 : 1)),
-              child: Stack(children: [
-                if (backdrop != null) Positioned.fill(child: DecoratedBox(decoration: backdrop)),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  child: Row(children: [
-                    StatusLamp(entry.lamp),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(children: [
-                            Expanded(
-                              child: Text(
-                                entry.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(color: t.text, fontWeight: FontWeight.w600),
-                              ),
-                            ),
-                            if (windows != null) Text(windows, maxLines: 1, style: small),
-                          ]),
-                          if (rate)
-                            Row(children: [
-                              LevelBars(entry.bytesPerSecond ?? 0),
-                              const SizedBox(width: 8),
-                              Flexible(
-                                child: Text(
-                                  formatRate(entry.bytesPerSecond ?? 0),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: small?.copyWith(fontFamily: t.mono, fontFamilyFallback: t.monoFallback),
-                                ),
-                              ),
-                            ])
-                          else if (_program != null && entry.inferred)
-                            Row(children: [
-                              Flexible(child: Text(_status, maxLines: 1, overflow: TextOverflow.ellipsis, style: small)),
-                              const SizedBox(width: 6),
-                              Text('推断', maxLines: 1, style: small),
-                            ])
-                          else
-                            Text(_status, maxLines: 1, overflow: TextOverflow.ellipsis, style: small),
-                        ],
-                      ),
-                    ),
-                  ]),
-                ),
-              ]),
-            ),
-          ),
-        ),
-      ),
-    );
   }
 }
 

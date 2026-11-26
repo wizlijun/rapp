@@ -363,6 +363,48 @@ void main() {
     }
   }, skip: !Platform.isLinux || !File(worker).existsSync() ? 'Build rapp-session first on Linux' : false);
 
+  test('v16 state_rules and appState roundtrip through real Linux worker', () async {
+    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final port = LinuxSessionPort(worker, framePresented: () async {});
+    final events = StreamIterator(port.events);
+    Socket? peer;
+    final wire = <int>[];
+    final gotRules = Completer<String>();
+    try {
+      await port.init();
+      final accepted = server.first;
+      await port.start(StartArgs(82, server.port, 'fixture', 'color16', 15, 'adaptive'));
+      peer = await accepted;
+      peer.listen((chunk) {
+        wire.addAll(chunk);
+        while (wire.length >= 5) {
+          final type = wire[0];
+          final len = ByteData.sublistView(Uint8List.fromList(wire), 1, 5).getUint32(0, Endian.little);
+          if (wire.length < 5 + len) break;
+          final body = wire.sublist(5, 5 + len);
+          wire.removeRange(0, 5 + len);
+          if (type == 43 && !gotRules.isCompleted) {
+            gotRules.complete(utf8.decode(body));
+          }
+        }
+      });
+      peer.add(packet(2, [...string('Fixture'), ...u16(4), ...u16(4)]));
+      await nextWhere(events, (e) => e is ReadyEvent);
+      const pack = '{"format":"1.0","id":"generic-chat","rev":1}';
+      await port.invoke('state_rules', {'sid': 82, 'json': pack});
+      expect(await gotRules.future.timeout(const Duration(seconds: 5)), pack);
+      const report = '{"pack":"generic-chat","rev":1,"state":"working","sure":true}';
+      peer.add(packet(44, utf8.encode(report)));
+      final ev = await nextWhere(events, (e) => e is AppStateEvent) as AppStateEvent;
+      expect((ev.sid, ev.json), (82, report));
+    } finally {
+      port.dispose();
+      await events.cancel();
+      peer?.destroy();
+      await server.close();
+    }
+  }, skip: !Platform.isLinux || !File(worker).existsSync() ? 'Build rapp-session first on Linux' : false);
+
   test('real Linux worker decodes full/delta, crops titlebar, sends input and closes on EOF', () async {
     final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
     final port = LinuxSessionPort(worker, framePresented: () async {});

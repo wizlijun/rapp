@@ -1,9 +1,10 @@
-// The top bar's session list: every open session, grouped by device, a tap switches to it.
+// The top bar's session list: every open session, grouped by device, each as its overview block; a tap switches to it.
 import 'package:flutter/material.dart';
 
 import 'main_state.dart';
 import 'session_model.dart';
-import 'session_row.dart';
+import 'session_block.dart';
+import 'session_row.dart' show SessionGroupTitle;
 
 class SessionSwitcher extends StatelessWidget {
   const SessionSwitcher({super.key, required this.state});
@@ -23,17 +24,12 @@ class SessionSwitcher extends StatelessWidget {
             Padding(
               key: ValueKey('switch-${e.key}'),
               padding: const EdgeInsets.only(bottom: 6),
-              child: SessionRow(
+              child: SessionBlock(
+                state: state,
                 entry: e,
-                forced: state.forcedRelay(e.id),
-                selected: e.key == state.currentKey,
-                byDevice: true,
-                embedded: state.embeds,
-                onTap: () {
-                  state.select(e.key);
-                  // Picking the current one changes no key, so nothing else closes the list.
-                  state.closeCorner();
-                },
+                keyPrefix: 'switch-block',
+                // Picking the current one changes no key, so nothing else closes the list.
+                onTap: state.closeCorner,
               ),
             ),
         ],

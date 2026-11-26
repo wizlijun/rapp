@@ -178,4 +178,20 @@ void main() {
     Text n(String key) => tester.widget<Text>(find.descendant(of: find.byKey(Key(key)), matching: find.byType(Text)).first);
     expect(n('count-active').data, '0');
   });
+
+  testWidgets('Linux: 本机 column lists 正在被接入 with 传文件 and 断开 kicks the session', (tester) async {
+    final m = _Mon()
+      ..set([
+        inbound(10, 'm1', 'term:pty:work'),
+        inbound(11, 'peer-2', 'desktop:', name: 'iPad', side: true),
+      ]);
+    await show(tester, monitor: m);
+    expect(find.text('正在被接入 · 2'), findsOneWidget);
+    expect(inside('inbound-10', find.text('CLI · work')), findsOneWidget);
+    expect(inside('inbound-10', find.text('mini · 12 秒')), findsOneWidget);
+    expect(inside('inbound-11', find.text('iPad · 12 秒 · 传文件')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('inbound-kick-11')));
+    await tester.pump();
+    expect(m.kicked, [11]);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 }

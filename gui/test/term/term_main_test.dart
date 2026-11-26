@@ -24,6 +24,7 @@ import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/sessions_tab.dart';
 import 'package:rapp/ui/stage.dart';
 import 'package:rapp/ui/top_bar.dart';
+import 'package:rapp/ui/workspace_store.dart' show AppRef;
 
 import '../fakes.dart';
 import '../ui/helpers.dart';
@@ -178,12 +179,12 @@ void main() {
     expect(term.calls.where((c) => c.$1 == 'close').single.$2['sid'], 1);
   });
 
-  void termsEvent(String name) => t.emit({
+  void termsEvent(String name, {String? fg}) => t.emit({
         'event': 'terms',
         'id': '111',
         'terms': [
           {'id': app, 'host': null, 'name': name, 'command': 'claude', 'panes': 1, 'attached': 1, 'activity': 0,
-           'dead': false, 'unread': false},
+           'dead': false, 'unread': false, 'fg': ?fg},
         ],
         'hosts': [
           {'host': null},
@@ -201,6 +202,27 @@ void main() {
     expect(s.current!.title, 'CLI · zsh');
     await tester.pumpWidget(wrap(SizedBox(width: 330, height: 400, child: SessionsTab(state: s))));
     expect(find.text('CLI · zsh'), findsOneWidget);
+  });
+
+  testWidgets('the title names the program in front, and the line under it says CLI', (tester) async {
+    termsEvent('zsh', fg: 'claude');
+    await tester.pumpWidget(wrap(window()));
+    await openTerm(tester, two);
+    expect(s.current!.title, 'claude · zsh');
+    expect(find.text('claude · zsh'), findsOneWidget);
+    expect(find.text('CLI · mini · 局域网'), findsOneWidget);
+    // The program changes: the title follows it.
+    termsEvent('zsh', fg: 'codex');
+    await settle(tester);
+    expect(find.text('codex · zsh'), findsOneWidget);
+    expect(s.labelOf(AppRef('111', app, 'zsh')), 'codex · zsh');
+    await tester.pumpWidget(wrap(SizedBox(width: 330, height: 400, child: SessionsTab(state: s))));
+    expect(find.text('codex · zsh'), findsOneWidget);
+    // The side panel's card is the overview's: CLI, then what the session is doing; no route.
+    // Embedded and up: the traffic branch, which says CLI too.
+    expect(find.text('CLI · '), findsOneWidget);
+    expect(find.text('0 KB/s'), findsOneWidget);
+    expect(find.textContaining('局域网'), findsNothing);
   });
 
   testWidgets('the title follows a rename', (tester) async {
@@ -1038,6 +1060,28 @@ void main() {
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await settle(tester);
       expect(t.sent.where((m) => m['cmd'] == 'open_term').single['from'], app);
+      await tester.pump(const Duration(seconds: 1));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
+    testWidgets('Ctrl+Shift+W ends a terminal off the mac and confirms when a program is running', (tester) async {
+      await tester.pumpWidget(wrap(window()));
+      t.emit(listOf(shell: false, fg: 'claude'));
+      await openTerm(tester, two);
+      hubAnswers(list: listOf(shell: false, fg: 'claude'));
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.keyW);
+      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyW);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.keyW);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await settle(tester);
+      expect(find.text('结束终端？'), findsOneWidget);
+      expect(find.text('里面还在跑 claude，结束后它也会被关掉。'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('end-term-ok')));
+      await settle(tester);
+      expect(t.sent.where((m) => m['cmd'] == 'end_term'), hasLength(1));
+      expect(s.entryFor(key), isNull);
       await tester.pump(const Duration(seconds: 1));
     }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
   });

@@ -242,6 +242,67 @@ void main() {
     expect(t.sent.where((m) => m['cmd'] == 'open_term').length, 2);
   });
 
+  testWidgets('常用 · 终端 新建 tapped again while the host is still opening sends nothing and says 请稍候', (tester) async {
+    await boot(tester);
+    s.prefs.termOpen['m1'] = 'text';
+    s.hub!.termLists['m1'] = TermList('m1',
+        terms: [TermRow('term:pty:a', 'a', 'zsh', null, 1, 0, 1, true, false)], hosts: [TermHost(null, launchers: const ['Terminal'])]);
+    final inner = t.onSend!;
+    final gate = Completer<void>();
+    var n = 0;
+    t.onSend = (m) {
+      if (m['cmd'] == 'open_term') {
+        final reply = {'event': 'term_created', 'req': m['req'], 'id': m['id'], 'term': 'term:pty:n${++n}'};
+        if (n == 1) {
+          gate.future.then((_) => t.emit(reply));
+        } else {
+          t.emit(reply);
+        }
+      } else if (m['cmd'] == 'terms') {
+        t.emit({'event': 'terms', 'req': m['req'], 'id': m['id'], 'terms': [], 'hosts': [{'host': null, 'launchers': ['Terminal']}]});
+      } else {
+        inner(m);
+      }
+    };
+    s.toggleFavorite('m1', termsEntry, termsEntryName);
+    await show(tester);
+    const key = Key('ov-favorite-m1/terms:');
+    Future<void> tap() async {
+      if (!s.overview) s.toggleOverview();
+      await tester.pump();
+      await tester.tap(find.byKey(key));
+      await tester.runAsync(() async {
+        for (var j = 0; j < 6; j++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+    }
+
+    await tap();
+    await tap();
+    await tap();
+    expect(t.sent.where((m) => m['cmd'] == 'open_term').length, 1);
+    expect(s.hint, '正在新建终端，请稍候');
+    await tester.runAsync(() async {
+      gate.complete();
+      for (var j = 0; j < 6; j++) {
+        await flush();
+      }
+    });
+    await tester.pump();
+    await tap();
+    expect(t.sent.where((m) => m['cmd'] == 'open_term').length, 2);
+  });
+
+  testWidgets('a cut-off Terminal script on the host reads as a permission question on that Mac', (tester) async {
+    await boot(tester);
+    expect(MainState.newTermWords(HubException('Terminal did not answer: on that Mac, allow rApp to control Terminal and System Events')),
+        contains('允许 rApp 控制“终端”'));
+    expect(MainState.newTermWords(HubException('device offline')), 'device offline');
+    expect(MainState.newTermWords(TimeoutException('x')), '新建终端没有回应，请稍后再试');
+  });
+
   testWidgets('常用 · 终端 first says 打开 and reopens the running terminals, then says 新建', (tester) async {
     final term = FakeTermSessionPort();
     await boot(tester, termPort: term);
@@ -889,6 +950,67 @@ void main() {
     if (!s.overview) s.toggleOverview();
     await tester.pump();
     expect(find.descendant(of: find.byKey(fav), matching: find.text('新建')), findsOneWidget);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
+  testWidgets('Linux: terminal block shows fg program title with CLI subtitle and 新建 runs one at a time',
+      (tester) async {
+    capsOf = {
+      'm1': {'graphical': true, 'desktop': true, 'applications': false, 'terminal': true, 'ports': true},
+    };
+    final term = FakeTermSessionPort();
+    await boot(tester, apps: ['m1/term:pty:a'], termPort: term);
+    term.play(const ReadyEvent(1, 'x'));
+    final inner = t.onSend!;
+    int? pendingReq;
+    t.onSend = (m) {
+      if (m['cmd'] == 'open_term') {
+        pendingReq = m['req'] as int?;
+      } else {
+        inner(m);
+      }
+    };
+    await tester.runAsync(() async {
+      t.emit({
+        'event': 'terms',
+        'id': 'm1',
+        'terms': [
+          {
+            'id': 'term:pty:a',
+            'name': 'zsh',
+            'title': '~/git/rapp · 2',
+            'fg': 'claude',
+            'shell': false,
+            'command': 'zsh',
+            'activity': 1,
+            'dead': false,
+            'ps': {'state': 'blocked', 'kind': 'permission', 'msg': 'approve Bash: ls', 'seq': 2},
+          },
+        ],
+        'hosts': [
+          {
+            'host': null,
+            'launchers': ['ghostty'],
+            'shells': [{'name': 'zsh', 'path': '/bin/zsh', 'default': true}],
+          },
+        ],
+      });
+      for (var i = 0; i < 4; i++) {
+        await flush();
+      }
+    });
+    s.toggleFavorite('m1', termsEntry, termsEntryName);
+    await show(tester);
+    expect(inside('block-m1/term:pty:a', find.text('claude · ~/git/rapp · 2')), findsOneWidget);
+    expect(inside('block-m1/term:pty:a', find.text('CLI · 等确认 · approve Bash: ls')), findsOneWidget);
+    const fav = Key('ov-favorite-m1/terms:');
+    await tester.tap(find.byKey(fav));
+    await tester.pump();
+    await tester.tap(find.byKey(fav));
+    await tester.pump();
+    expect(t.sent.where((m) => m['cmd'] == 'open_term'), hasLength(1));
+    expect(s.hint, '正在新建终端，请稍候');
+    t.emit({'event': 'term_created', 'req': pendingReq, 'id': 'm1', 'term': 'term:pty:b'});
+    await settle(tester);
   }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 
   testWidgets('count taps', (tester) async {

@@ -48,6 +48,8 @@ const OLD_RUN: &str = "this window was opened by an older version and cannot be 
 const INVALID_NAME: &str = "invalid name";
 const UNKNOWN_APP: &str = "unknown terminal app";
 const NOT_STARTED: &str = "the terminal window did not start in 10 s";
+/// An open whose asker closed before its turn; nobody reads it.
+const ASKER_GONE: &str = "the asker left before the terminal window was opened";
 
 pub struct ServeOpts {
     /// `term.json`, read afresh for every request.
@@ -274,7 +276,7 @@ impl Worker {
                 sent
             }
             Req::Open { shell, app, from } => {
-                let v = match self.open(shell.as_deref(), &app, from.as_deref()).await {
+                let v = match self.open(shell.as_deref(), &app, from.as_deref(), closed(&mut r)).await {
                     Ok(id) => json!({ "id": id }),
                     Err(e) => json!({ "error": e }),
                 };
@@ -435,8 +437,15 @@ impl Worker {
 
     /// Open a window of `app` that runs `rapp-term run` with `shell` (the default one when none is named) as a login
     /// shell, and wait for that `run` to show itself: the id of its session. One at a time, so each wait has only its
-    /// own ticket to look for.
-    async fn open(&self, shell: Option<&str>, app: &str, from: Option<&str>) -> Result<String, String> {
+    /// own ticket to look for. When `gone` completes before this open's turn (its asker gave up waiting), no window
+    /// is opened: nobody would be told of it, and a backlog of such opens would all start at once.
+    async fn open(
+        &self,
+        shell: Option<&str>,
+        app: &str,
+        from: Option<&str>,
+        gone: impl Future<Output = ()>,
+    ) -> Result<String, String> {
         let known = launch::known(app) || (self.opts.launch_with.is_some() && ["Terminal", "iTerm"].contains(&app));
         if !known { return Err(UNKNOWN_APP.into()); }
         if self.opts.launch_with.is_none() && !self.available_launchers().await.iter().any(|l| l == app) {
@@ -457,7 +466,12 @@ impl Worker {
         };
         let shell = found.ok_or("this shell is not found any more")?.path.clone();
         const FAILED: &str = "could not open the terminal window";
-        let _one = self.opening.lock().await;
+        tokio::pin!(gone);
+        let _one = tokio::select! {
+            biased;
+            _ = &mut gone => return Err(ASKER_GONE.into()),
+            one = self.opening.lock() => one,
+        };
         let dir = &self.opts.pty_dir;
         local::ensure_dirs(dir).map_err(|_| FAILED)?;
         sweep_launch(&dir.join("launch"));
@@ -475,7 +489,7 @@ impl Worker {
         write_private(&file, &body).map_err(|_| FAILED)?;
         let res = self.wait_for(&file, app, &ticket, dir, &token, source.tty.as_deref()).await;
         // A window that is slow to start may still read it after the wait: that one is left for the sweep.
-        if !matches!(&res, Err(e) if e == NOT_STARTED || e == launch::START_TIMEOUT) {
+        if !matches!(&res, Err(e) if e == NOT_STARTED || e == launch::NO_ANSWER || e == launch::START_TIMEOUT) {
             let _ = std::fs::remove_file(&file);
         }
         res
@@ -494,12 +508,12 @@ impl Worker {
         let tty = source_tty.map(str::to_string);
         let started =
             tokio::task::spawn_blocking(move || launch::open(&app, &file, with.as_deref(), tty.as_deref())).await;
-        match started {
-            Ok(Ok(())) => {}
+        let cut_off = match started {
+            Ok(Ok(l)) => l == launch::Launched::CutOff,
             Ok(Err(e)) if e.to_string() == launch::NO_DESKTOP => return Err(launch::NO_DESKTOP.into()),
             Ok(Err(e)) if e.to_string() == launch::START_TIMEOUT => return Err(launch::START_TIMEOUT.into()),
             _ => return Err("could not open the terminal window".into()),
-        }
+        };
         let end = tokio::time::Instant::now() + OPEN_WAIT;
         loop {
             let found = local::scan(dir, token).await.into_iter().find(|s| s.ticket.as_deref() == Some(ticket));
@@ -507,7 +521,7 @@ impl Worker {
                 return Ok(pty_id(&s));
             }
             if tokio::time::Instant::now() >= end {
-                return Err(NOT_STARTED.into());
+                return Err(if cut_off { launch::NO_ANSWER } else { NOT_STARTED }.into());
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
