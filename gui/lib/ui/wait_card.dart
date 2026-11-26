@@ -68,15 +68,15 @@ class _WaitCardState extends State<WaitCard> {
     final t = RappTokens.of(context);
     final first = shown.firstOrNull;
     final more = w.moreLine;
-    final small = TextStyle(color: t.muted, fontSize: 12);
+    final small = TextStyle(color: t.muted, fontSize: 14);
     return IgnorePointer(
       child: Align(
         alignment: const Alignment(0, -0.5),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
+          constraints: const BoxConstraints(minWidth: 360, maxWidth: 560),
           child: Container(
             key: const Key('wait-card'),
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
             decoration: t.floatBox(),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -85,29 +85,29 @@ class _WaitCardState extends State<WaitCard> {
                 if (outcome != null)
                   Text(
                     outcome.text,
-                    maxLines: 2,
+                    maxLines: 3,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: outcome.asks ? t.warn : t.text),
+                    style: TextStyle(color: outcome.asks ? t.warn : t.text, fontSize: 16, height: 1.4),
                   ),
-                if (outcome != null && first != null) const SizedBox(height: 8),
+                if (outcome != null && first != null) const SizedBox(height: 12),
                 if (first != null)
                   Row(mainAxisSize: MainAxisSize.min, children: [
-                    SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2, color: t.on)),
-                    const SizedBox(width: 10),
-                    Flexible(
-                      child: Text(first.what, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.text)),
-                    ),
+                    SizedBox.square(dimension: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: t.on)),
                     const SizedBox(width: 12),
+                    Flexible(
+                      child: Text(first.what, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.text, fontSize: 18)),
+                    ),
+                    const SizedBox(width: 16),
                     Text('${clock.now().difference(first.started).inSeconds} 秒', style: small),
                   ]),
                 if (first?.detail case final d?)
                   Padding(
-                    padding: const EdgeInsets.only(left: 26, top: 2),
+                    padding: const EdgeInsets.only(left: 34, top: 4),
                     child: Text(d, maxLines: 1, overflow: TextOverflow.ellipsis, style: small),
                   ),
                 if (more != null)
                   Padding(
-                    padding: EdgeInsets.only(left: first == null ? 0 : 26, top: 2),
+                    padding: EdgeInsets.only(left: first == null ? 0 : 34, top: 4),
                     child: Text(more, maxLines: 1, overflow: TextOverflow.ellipsis, style: small),
                   ),
               ],

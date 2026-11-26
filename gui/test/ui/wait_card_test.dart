@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -66,20 +67,31 @@ void main() {
     expect(taps, 1);
   });
 
-  testWidgets('long_outcome_wraps_within_card: the permission words fit in two lines', (tester) async {
+  testWidgets('long_outcome_wraps_within_card: the permission words show whole in up to three lines', (tester) async {
     await tester.pumpWidget(wrap(stage()));
     final words = MainState.newTermWords(HubException('macOS is asking on that Mac whether rApp may control Terminal'));
     w.run('正在新建终端…', () => Future<void>.error(HubException('x')), words: (_) => words, asks: (_) => true).ignore();
     await tester.pump();
     await tester.pump();
     expect(find.byKey(_card), findsOneWidget);
-    expect(tester.getSize(find.byKey(_card)).width, lessThanOrEqualTo(420));
+    expect(tester.getSize(find.byKey(_card)).width, lessThanOrEqualTo(560));
     final text = tester.widget<Text>(find.text(words));
-    expect(text.maxLines, 2);
+    expect(text.maxLines, 3);
+    expect(tester.renderObject<RenderParagraph>(find.text(words)).didExceedMaxLines, isFalse);
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pump(const Duration(seconds: 9));
     expect(find.byKey(_card), findsNothing);
+  });
+
+  testWidgets('wait_card_is_big: even a short wait gets a wide card with large words', (tester) async {
+    await tester.pumpWidget(wrap(stage()));
+    unawaited(w.run('正在新建终端…', () => Completer<void>().future, detail: 'mini'));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(tester.getSize(find.byKey(_card)).width, greaterThanOrEqualTo(360));
+    expect(tester.widget<Text>(find.text('正在新建终端…')).style!.fontSize, 18);
+    expect(tester.widget<Text>(find.text('mini')).style!.fontSize, 14);
+    expect(tester.getSize(find.byType(CircularProgressIndicator)), const Size.square(22));
   });
 
   testWidgets('wait_card_more_line: queued ones are said under the first', (tester) async {
