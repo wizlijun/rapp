@@ -49,6 +49,7 @@ class Overview extends StatelessWidget {
           entries: entries,
           name: state.deviceName,
           localVersion: state.hub?.version,
+          localOs: state.localOs,
         );
         final projectsFirst = state.prefs.first == FirstLayer.project;
         return Stack(children: [

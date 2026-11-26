@@ -34,6 +34,7 @@ import '../term/term_id.dart';
 import '../term/term_session_port.dart';
 import '../term/term_wire.dart' show TermPane, noSuchTextTerminal;
 import 'app_profile_store.dart';
+import 'device_os.dart';
 import 'lamp.dart';
 import 'term_status.dart' show programLamp, programWord, termAskWord;
 import 'lifecycle.dart';
@@ -161,7 +162,9 @@ class MainState extends ChangeNotifier {
     void Function(String line)? log,
     VoiceInput? voice,
     LlmApi? llmApi,
-  })  : _builtinStateRules = builtinStateRules,
+    DeviceOs? localOs,
+  })  : localOs = localOs ?? localDeviceOs(),
+        _builtinStateRules = builtinStateRules,
         stateRules = stateRules ?? StateRulesLibrary.parse(builtinStateRules, const {}),
         resources = ResourcesState(clock: clock),
         voice = voice ??
@@ -337,6 +340,9 @@ class MainState extends ChangeNotifier {
 
   /// Terminal sessions' port; null where the GUI has no native port (no terminals there).
   final TermSessionPort? termPort;
+
+  /// What system this device is, for its own column on the overview.
+  final DeviceOs localOs;
 
   /// Where calls for session [sid] go: the terminal port for its own sessions, else the native one.
   SessionPort? portOf(Object sid) => termPort?.owns(sid) == true ? termPort : port;
