@@ -12,7 +12,7 @@ use crate::state::State;
 use crate::UpdateOpts;
 use rapp_net::line::{err, ok};
 use rapp_net::log::Lvl;
-use rapp_update::runner::{OPEN, PS};
+use rapp_update::runner::{IOREG, OPEN, PS};
 use rapp_update::{self as up, InstallError, Manifest, Marker, Runner, Stage};
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -60,9 +60,12 @@ pub struct UpdState {
     manifest: Option<Manifest>,
     /// A marker for this very version was found at start: remove it once healthy.
     applied: bool,
-    /// Remote sessions between B's `open` and their end (K17, fix round 1): a session that is
-    /// still starting rapp-host is not in the session table yet but is about to be.
-    opening: usize,
+    /// An install is about to go in: the GUI quits itself (cli-update §5.2).
+    pub quit_gui: bool,
+    /// Why the auto install is waiting, as last found.
+    pub auto_wait: Option<String>,
+    /// No auto install before this: the last one found rApp still open.
+    auto_after: Option<Instant>,
 }
 
 impl Default for UpdState {
@@ -83,7 +86,9 @@ impl Default for UpdState {
             dr_current: None,
             manifest: None,
             applied: false,
-            opening: 0,
+            quit_gui: false,
+            auto_wait: None,
+            auto_after: None,
         }
     }
 }
@@ -93,6 +98,24 @@ enum Mode {
     Auto,
     Manual,
     Rollback,
+}
+
+/// Who asked for an install (the marker's and `update_applied`'s `by`).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum By {
+    Gui,
+    Cli,
+    Auto,
+}
+
+impl By {
+    fn as_str(self) -> &'static str {
+        match self {
+            By::Gui => "gui",
+            By::Cli => "cli",
+            By::Auto => "auto",
+        }
+    }
 }
 
 impl Mode {
@@ -204,6 +227,9 @@ pub fn status_json(state: &State) -> Value {
         "needs_confirm": u.needs_confirm, "needs_admin": u.needs_admin, "page": u.page,
         "can_rollback": can_rollback, "dismissed": dismissed,
         "needs_reinstall": needs_reinstall, "reinstall_page": up::RELEASES_PAGE,
+        "quit_gui": u.quit_gui, "auto_wait": u.auto_wait,
+        "launchd": state.update_opts.as_ref().is_some_and(|o| o.launchd),
+        "error_code": u.error.as_deref().map(error_code),
     })
 }
 
@@ -229,7 +255,11 @@ pub async fn on_start(state: &Arc<State>) {
     let Some(m) = up::read_marker(&state.home) else { return };
     let canon = |v: &str| up::canonical_version(v).unwrap_or_else(|| v.to_string());
     if current.as_deref().map(canon) == Some(canon(&m.to)) {
-        state.log.event(Lvl::Info, "update_applied", json!({"from": m.from, "to": m.to, "mode": m.mode}));
+        let mut f = json!({"from": m.from, "to": m.to, "mode": m.mode});
+        if !m.by.is_empty() {
+            f["by"] = json!(m.by);
+        }
+        state.log.event(Lvl::Info, "update_applied", f);
         if m.gui_was_open {
             reopen_gui(state, &o).await;
         }
@@ -462,32 +492,14 @@ async fn report_progress(state: Arc<State>, part: PathBuf, size: u64) {
     }
 }
 
-fn sessions_in_use(state: &State) -> Option<String> {
-    let n = state.sessions.lock().unwrap().1.len();
-    if n > 0 {
-        return Some(format!("有 {n} 个远程会话在用这台电脑"));
-    }
-    (state.update.lock().unwrap().opening > 0).then(|| "有远程会话正在连进来".to_string())
-}
-
-/// Held by `peer::open` for the whole session, from before rapp-host starts.
-pub struct Opening(Arc<State>);
-
-impl Drop for Opening {
-    fn drop(&mut self) {
-        let mut u = self.0.update.lock().unwrap();
-        u.opening = u.opening.saturating_sub(1);
-    }
-}
-
-/// A session may open unless the new version is going in (then A restarts in a moment).
-pub fn begin_open(state: &Arc<State>) -> Result<Opening, &'static str> {
-    let mut u = state.update.lock().unwrap();
-    if u.state == "installing" {
+/// A session may open unless the new version is going in (then A restarts in a moment). It
+/// counts as remote use for the auto-update.
+pub fn begin_open(state: &Arc<State>) -> Result<(), &'static str> {
+    if state.update.lock().unwrap().state == "installing" {
         return Err(UPGRADING);
     }
-    u.opening += 1;
-    Ok(Opening(state.clone()))
+    state.activity.touch();
+    Ok(())
 }
 
 /// One `pid ppid comm` line of ps; `comm` may contain spaces.
@@ -497,47 +509,121 @@ fn ps_fields(line: &str) -> Option<(u32, u32, &str)> {
     Some((pid.parse().ok()?, ppid.parse().ok()?, comm.trim()))
 }
 
-/// Why rApp counts as in use, or None when nobody is using it (K17): a remote session, or a
-/// process from the bundle other than this service and its own children. Only an auto install
-/// waits for remote sessions; a manual one cuts them off (people upgrade A from B through rApp).
-pub async fn in_use(state: &State) -> Option<String> {
-    if let Some(why) = sessions_in_use(state) {
-        return Some(why);
-    }
-    procs_in_use(state).await
+/// Bundle programs that never hold an install up (cli-update §5.1): a text terminal's `run`
+/// keeps its shell across the swap, and `rapp update` itself runs as rapp-cli.
+const NEVER_BLOCK: [&str; 2] = ["rapp-term", "rapp-cli"];
+
+/// What ps says about the bundle's processes other than this service and its children.
+#[derive(Debug, PartialEq)]
+struct Procs {
+    /// One that must be gone before the swap.
+    blocking: bool,
+    /// The GUI is among them.
+    gui: bool,
 }
 
-/// A process from the bundle other than this service and its own children (session workers are
-/// its children), or one started through the `rapp` link (a `rapp pipe`). A ps that
-/// fails, or whose output doesn't show this service, counts as in use.
-async fn procs_in_use(state: &State) -> Option<String> {
-    let o = state.update_opts.as_ref()?;
-    let prefix = format!("{}/Contents/", o.bundle.display());
-    let args = vec!["-axo".to_string(), "pid=,ppid=,comm=".to_string()];
-    let out = match blocking(state, move |r| r.run(PS, &args)).await {
-        Ok(out) if out.code == 0 => out.stdout,
-        _ => return Some("查不了进程表".into()),
-    };
-    let me = std::process::id();
-    let procs: Vec<_> = out.lines().filter_map(ps_fields).collect();
+/// None when the output does not show this service (`me`) under `<bundle>/Contents/`.
+fn read_procs(ps: &str, me: u32, bundle: &str) -> Option<Procs> {
+    let prefix = format!("{bundle}/Contents/");
+    let gui = format!("{bundle}/Contents/MacOS/rapp");
+    let procs: Vec<_> = ps.lines().filter_map(ps_fields).collect();
     if !procs.iter().any(|&(pid, _, comm)| pid == me && comm.starts_with(&prefix)) {
-        return Some("看不懂进程表".into());
+        return None;
     }
-    let other = procs
-        .iter()
-        .any(|&(pid, ppid, comm)| (comm.starts_with(&prefix) && pid != me && ppid != me) || comm == up::CLI_LINK);
-    other.then(|| STILL_OPEN.to_string())
+    let mut p = Procs { blocking: false, gui: false };
+    for &(pid, ppid, comm) in &procs {
+        let name = comm.rsplit('/').next().unwrap_or(comm);
+        if pid == me || ppid == me || !comm.starts_with(&prefix) || NEVER_BLOCK.contains(&name) {
+            continue;
+        }
+        p.blocking = true;
+        p.gui |= comm == gui;
+    }
+    Some(p)
 }
 
-/// Every `idle_poll`: a ready version installs itself when allowed and nobody is using rapp.
+/// `read_procs` on this Mac's ps; None when ps fails or cannot be read.
+async fn procs(state: &State) -> Option<Procs> {
+    let o = state.update_opts.as_ref()?;
+    let bundle = o.bundle.display().to_string();
+    let args = vec!["-axo".to_string(), "pid=,ppid=,comm=".to_string()];
+    match blocking(state, move |r| r.run(PS, &args)).await {
+        Ok(out) if out.code == 0 => read_procs(&out.stdout, std::process::id(), &bundle),
+        _ => None,
+    }
+}
+
+/// Why the swap must wait: a bundle process that blocks it, or a ps that cannot be read.
+async fn procs_in_use(state: &State) -> Option<String> {
+    match procs(state).await {
+        None => Some("查不了进程表".into()),
+        Some(p) if p.blocking => Some(STILL_OPEN.into()),
+        Some(_) => None,
+    }
+}
+
+/// Why an auto install waits (cli-update §5.1), first reason only; None: nobody uses this Mac.
+async fn auto_busy(state: &State, o: &UpdateOpts) -> Option<String> {
+    if !state.activity.quiet_for(o.quiet) {
+        return Some("最近有远程操作".into());
+    }
+    if state.activity.windows() > 0 {
+        return Some("本机开着远程窗口".into());
+    }
+    let args: Vec<String> = up::IOREG_ARGS.iter().map(|a| a.to_string()).collect();
+    let idle = match blocking(state, move |r| r.run(IOREG, &args)).await {
+        Ok(out) if out.code == 0 => up::parse_hid_idle(&out.stdout),
+        _ => None,
+    };
+    match idle {
+        None => return Some("读不到本机空闲时间".into()),
+        Some(d) if d < o.quiet => return Some("最近本机有人操作".into()),
+        Some(_) => {}
+    }
+    if procs(state).await.is_none() {
+        return Some("查不了进程表".into());
+    }
+    None
+}
+
+/// Every `idle_poll`: a ready version installs itself when allowed and nobody has used this Mac
+/// for `quiet`. The GUI is asked to quit; when rApp is still open after that, it comes back and
+/// the next try waits `auto_backoff`.
 async fn try_auto(state: &Arc<State>, o: &UpdateOpts) {
-    if !auto_allowed(state, o, "ready") || in_use(state).await.is_some() {
+    if !auto_allowed(state, o, "ready") {
+        return set_auto_wait(state, None);
+    }
+    if state.update.lock().unwrap().auto_after.is_some_and(|t| Instant::now() < t) {
+        return;
+    }
+    let why = auto_busy(state, o).await;
+    set_auto_wait(state, why.clone());
+    if why.is_some() {
         return;
     }
     let Some(busy) = Busy::begin(state) else { return };
-    if auto_allowed(state, o, "ready") {
-        put_in_place(state, busy, Mode::Auto).await;
+    if !auto_allowed(state, o, "ready") {
+        return;
     }
+    match quit_gui_and_wait(state, o, None, By::Auto).await {
+        Ok(gui_was_open) => put_in_place(state, busy, Mode::Auto, By::Auto, gui_was_open).await,
+        Err(_) => {
+            state.log.event(Lvl::Info, "update_auto_skipped", json!({"reason": STILL_OPEN}));
+            state.update.lock().unwrap().auto_after = Some(Instant::now() + o.auto_backoff);
+        }
+    }
+}
+
+/// Remembers (and logs once) why the auto install is waiting.
+fn set_auto_wait(state: &State, why: Option<String>) {
+    let same = state.update.lock().unwrap().auto_wait == why;
+    if same {
+        return;
+    }
+    if let Some(w) = &why {
+        state.log.event(Lvl::Info, "update_auto_wait", json!({"reason": w}));
+    }
+    modify(state, |u| u.auto_wait = why);
 }
 
 /// The version in `latest` is still the one on offer (not dismissed, not superseded).
@@ -550,8 +636,8 @@ fn still_offered(state: &State) -> bool {
     latest.is_some() && up::offer(&up::load_cache(&cache_file(state)), &current) == latest
 }
 
-/// Everything an auto install needs except "nobody is using rApp" (U-4c). Checked again after
-/// every await. A ready version that was dismissed meanwhile goes back to idle.
+/// Everything an auto install needs except "nobody is using this Mac" (U-4c). Checked again
+/// after every await. A ready version that was dismissed meanwhile goes back to idle.
 fn auto_allowed(state: &State, o: &UpdateOpts, want: &str) -> bool {
     if !still_offered(state) {
         modify(state, |u| {
@@ -588,29 +674,45 @@ async fn reopen_gui(state: &State, o: &UpdateOpts) {
     let _ = blocking(state, move |r| r.run(OPEN, &[b])).await;
 }
 
-fn page_err(msg: &str, page: Option<String>) -> Value {
-    json!({"ok": false, "error": msg, "page": page})
+/// The install is off: the GUI may stay, and comes back if it quit for this.
+async fn give_back_gui(state: &State, o: &UpdateOpts, gui_was_open: bool) {
+    modify(state, |u| u.quit_gui = false);
+    if gui_was_open {
+        reopen_gui(state, o).await;
+    }
+}
+
+/// An error reply with its fixed `code` (cli-update §5.4) beside the Chinese text.
+fn code_err(code: &str, msg: &str) -> Value {
+    json!({"ok": false, "error": msg, "code": code})
+}
+
+fn page_err(code: &str, msg: &str, page: Option<String>) -> Value {
+    json!({"ok": false, "error": msg, "code": code, "page": page})
+}
+
+/// The `code` of a failure text the updater sets (`error_code` in the status).
+fn error_code(error: &str) -> &'static str {
+    match error {
+        STILL_OPEN => "still_open",
+        NEEDS_ADMIN => "needs_admin",
+        NOT_LAUNCHD => "not_launchd",
+        _ => "failed",
+    }
 }
 
 /// Swaps in the ready version (or `previous/` for a rollback), writes the marker and asks for the
-/// restart (K12, K13, K15, K25). When the GUI quit for this, a failure opens it again.
-async fn put_in_place(state: &Arc<State>, busy: Busy, mode: Mode) {
+/// restart (K12, K13, K15, K25). When the GUI was open, a failure opens it again.
+async fn put_in_place(state: &Arc<State>, busy: Busy, mode: Mode, by: By, gui_was_open: bool) {
     let Some(o) = state.update_opts.clone() else { return };
-    let gui = mode != Mode::Auto;
+    let manual = mode != Mode::Auto;
     let failed = |stage, reason: &str| {
         fail(state, stage, reason);
         let o = o.clone();
-        async move {
-            if gui {
-                reopen_gui(state, &o).await;
-            }
-        }
+        async move { give_back_gui(state, &o, gui_was_open).await }
     };
     if leftover(state) {
-        if gui {
-            reopen_gui(state, &o).await;
-        }
-        return;
+        return give_back_gui(state, &o, gui_was_open).await;
     }
     let prev_dir = previous_dir(state);
     let (src, to) = if mode == Mode::Rollback {
@@ -633,29 +735,16 @@ async fn put_in_place(state: &Arc<State>, busy: Busy, mode: Mode) {
     };
     let from = state.update.lock().unwrap().current.clone().unwrap_or_default();
     // The last gate (fix round 1): from here on B's opens are refused, then everything is checked
-    // once more after the last await, right before the swap.
-    // A manual install or rollback goes in over open sessions: they drop with the restart.
-    let before = {
-        let mut u = state.update.lock().unwrap();
-        let before = u.state;
-        if gui || u.opening == 0 {
-            u.state = "installing";
-        }
-        before
-    };
+    // once more after the last await, right before the swap. A manual install or rollback goes
+    // in over open sessions: they drop with the restart.
+    let before = std::mem::replace(&mut state.update.lock().unwrap().state, "installing");
     state.notify();
-    let why = if gui {
-        procs_in_use(state).await
-    } else if state.update.lock().unwrap().state == "installing" {
-        in_use(state).await
-    } else {
-        Some("有远程会话正在连进来".to_string())
-    };
+    let mut why = procs_in_use(state).await;
+    if why.is_none() && !manual {
+        why = auto_busy(state, &o).await;
+    }
     if leftover(state) {
-        if gui {
-            reopen_gui(state, &o).await;
-        }
-        return;
+        return give_back_gui(state, &o, gui_was_open).await;
     }
     let wanted = match mode {
         Mode::Auto => auto_allowed(state, &o, "installing"),
@@ -670,12 +759,12 @@ async fn put_in_place(state: &Arc<State>, busy: Busy, mode: Mode) {
                 (u.state, u.ready_app, u.needs_confirm) = ("idle", None, false);
             }
         });
-        match (gui, why) {
+        return match (manual, why) {
             (true, Some(why)) => failed(Stage::Install, &why).await,
-            (true, None) => reopen_gui(state, &o).await,
-            _ => {}
-        }
-        return;
+            // Dismissed or superseded while the GUI was going: `rapp update` must hear of it.
+            (true, None) => failed(Stage::Install, NOTHING_TO_INSTALL).await,
+            (false, _) => give_back_gui(state, &o, gui_was_open).await,
+        };
     }
     let (bundle, pd) = (o.bundle.clone(), prev_dir.clone());
     match blocking(state, move |r| up::install(r, &src, &bundle, &pd)).await {
@@ -685,9 +774,10 @@ async fn put_in_place(state: &Arc<State>, busy: Busy, mode: Mode) {
                 from: canon(&from),
                 to: canon(&to),
                 at: up::now_secs(),
-                gui_was_open: gui,
+                gui_was_open,
                 mode: mode.as_str().into(),
                 perms_before: state.permissions.lock().unwrap().clone(),
+                by: by.as_str().into(),
             };
             if let Err(e) = up::write_marker(&state.home, &m) {
                 state.log.msg(Lvl::Warn, format!("update: write marker: {e}"));
@@ -701,9 +791,7 @@ async fn put_in_place(state: &Arc<State>, busy: Busy, mode: Mode) {
                 u.state = "ready";
                 u.needs_admin = true;
             });
-            if gui {
-                reopen_gui(state, &o).await;
-            }
+            give_back_gui(state, &o, gui_was_open).await;
         }
         Err(InstallError::NeedsAdmin) => {
             state.update.lock().unwrap().needs_admin = true;
@@ -713,16 +801,23 @@ async fn put_in_place(state: &Arc<State>, busy: Busy, mode: Mode) {
     }
 }
 
-/// K20: after the GUI's connection closes (at most `gui_wait`), look for no other rApp process
-/// for at most `gui_wait` more; remote sessions don't count. Still open: open the GUI again and
-/// fail.
-async fn wait_for_nobody(state: &Arc<State>, o: &UpdateOpts, mut closed: watch::Receiver<()>) -> bool {
-    // Nothing is ever sent: `changed` returns once the connection's sender is dropped.
-    let _ = tokio::time::timeout(o.gui_wait, closed.changed()).await;
+/// cli-update §5.2: raise `quit_gui`, then wait for the asking connection to close (at most
+/// `gui_wait`) and for no bundle process that blocks the swap (at most `gui_wait` more).
+/// Ok(whether the GUI was open, so it comes back after the restart). Still open: `quit_gui`
+/// drops, the GUI comes back, Err. A GUI that asked itself was open, even if it is gone by the
+/// time ps looks.
+async fn quit_gui_and_wait(state: &Arc<State>, o: &UpdateOpts, closed: Option<watch::Receiver<()>>, by: By) -> Result<bool, bool> {
+    // Read before the GUI hears `quit_gui`: it may be gone by the next ps.
+    let gui_was_open = by == By::Gui || procs(state).await.is_some_and(|p| p.gui);
+    modify(state, |u| u.quit_gui = true);
+    if let Some(mut closed) = closed {
+        // Nothing is ever sent: `changed` returns once the connection's sender is dropped.
+        let _ = tokio::time::timeout(o.gui_wait, closed.changed()).await;
+    }
     let deadline = Instant::now() + o.gui_wait;
     loop {
-        if procs_in_use(state).await.is_none() {
-            return true;
+        if procs(state).await.is_some_and(|p| !p.blocking) {
+            return Ok(gui_was_open);
         }
         let now = Instant::now();
         if now >= deadline {
@@ -730,65 +825,71 @@ async fn wait_for_nobody(state: &Arc<State>, o: &UpdateOpts, mut closed: watch::
         }
         tokio::time::sleep(MANUAL_POLL.min(deadline - now)).await;
     }
-    reopen_gui(state, o).await;
-    fail(state, Stage::Install, STILL_OPEN);
-    false
+    give_back_gui(state, o, gui_was_open).await;
+    Err(gui_was_open)
 }
 
-/// `update_apply` (K20). On ok the GUI quits; the install runs once its connection closes.
-pub async fn apply(state: &Arc<State>, confirm: bool, closed: watch::Receiver<()>) -> Value {
-    let Some(o) = state.update_opts.clone() else { return err(NOTHING_TO_INSTALL) };
+/// `update_apply` (K20). On ok the GUI quits; the install runs once rApp is closed.
+pub async fn apply(state: &Arc<State>, confirm: bool, by: By, closed: watch::Receiver<()>) -> Value {
+    let Some(o) = state.update_opts.clone() else { return code_err("nothing_to_install", NOTHING_TO_INSTALL) };
     {
         let u = state.update.lock().unwrap();
         if u.state != "ready" {
-            return err(NOTHING_TO_INSTALL);
+            return code_err("nothing_to_install", NOTHING_TO_INSTALL);
         }
         if u.needs_confirm && !confirm {
-            return err("需要确认");
+            return code_err("needs_confirm", "需要确认");
         }
-        if u.needs_admin || !o.launchd {
-            return page_err(if u.needs_admin { NEEDS_ADMIN } else { NOT_LAUNCHD }, u.page.clone());
+        if u.needs_admin {
+            return page_err("needs_admin", NEEDS_ADMIN, u.page.clone());
+        }
+        if !o.launchd {
+            return page_err("not_launchd", NOT_LAUNCHD, u.page.clone());
         }
     }
     if leftover(state) {
-        return err(LEFTOVER);
+        return code_err("failed", LEFTOVER);
     }
     // A pipeline or install already running would leave the GUI gone with nothing happening.
-    let Some(busy) = Busy::begin(state) else { return err(BUSY) };
+    let Some(busy) = Busy::begin(state) else { return code_err("busy", BUSY) };
     if state.update.lock().unwrap().state != "ready" {
-        return err(NOTHING_TO_INSTALL);
+        return code_err("nothing_to_install", NOTHING_TO_INSTALL);
     }
     let state = state.clone();
     tokio::spawn(async move {
-        if wait_for_nobody(&state, &o, closed).await {
-            put_in_place(&state, busy, Mode::Manual).await;
+        match quit_gui_and_wait(&state, &o, Some(closed), by).await {
+            Ok(gui_was_open) => put_in_place(&state, busy, Mode::Manual, by, gui_was_open).await,
+            Err(_) => fail(&state, Stage::Install, STILL_OPEN),
         }
     });
     ok(json!({}))
 }
 
 /// `update_rollback` (K13): swap with `previous/rapp.backup`, the same way as a manual install.
-pub async fn rollback(state: &Arc<State>, closed: watch::Receiver<()>) -> Value {
-    let Some(o) = state.update_opts.clone() else { return err(NO_PREVIOUS) };
+pub async fn rollback(state: &Arc<State>, by: By, closed: watch::Receiver<()>) -> Value {
+    let Some(o) = state.update_opts.clone() else { return code_err("no_previous", NO_PREVIOUS) };
     if !o.launchd {
-        return page_err(NOT_LAUNCHD, state.update.lock().unwrap().page.clone());
+        return page_err("not_launchd", NOT_LAUNCHD, state.update.lock().unwrap().page.clone());
     }
     if state.update.lock().unwrap().state == "off" || !up::previous_app(&previous_dir(state)).is_dir() {
-        return err(NO_PREVIOUS);
+        return code_err("no_previous", NO_PREVIOUS);
     }
     if leftover(state) {
-        return err(LEFTOVER);
+        return code_err("failed", LEFTOVER);
     }
-    let Some(busy) = Busy::begin(state) else { return err(BUSY) };
+    let Some(busy) = Busy::begin(state) else { return code_err("busy", BUSY) };
     let state = state.clone();
     tokio::spawn(async move {
-        if wait_for_nobody(&state, &o, closed).await {
-            // I-2: the older service must not fetch and install the version it is leaving.
-            let from = state.update.lock().unwrap().current.clone();
-            if let Some(v) = from {
-                dismiss(&state, &v);
+        match quit_gui_and_wait(&state, &o, Some(closed), by).await {
+            Ok(gui_was_open) => {
+                // I-2: the older service must not fetch and install the version it is leaving.
+                let from = state.update.lock().unwrap().current.clone();
+                if let Some(v) = from {
+                    dismiss(&state, &v);
+                }
+                put_in_place(&state, busy, Mode::Rollback, by, gui_was_open).await;
             }
-            put_in_place(&state, busy, Mode::Rollback).await;
+            Err(_) => fail(&state, Stage::Install, STILL_OPEN),
         }
     });
     ok(json!({}))
@@ -843,6 +944,31 @@ mod tests {
         );
         assert_eq!(ps_fields("x 1 /bin/sh"), None);
         assert_eq!(ps_fields("12"), None);
+    }
+
+    #[test]
+    fn which_bundle_processes_block_and_which_is_the_gui() {
+        let b = "/Applications/rApp.app";
+        let ps = |extra: &str| format!("  10     1 {b}/Contents/MacOS/rapp-service\n  11    10 {b}/Contents/MacOS/rapp-host\n{extra}");
+        let free = Some(Procs { blocking: false, gui: false });
+        // Its own children, text terminals, the CLI (by either path) and other apps never block.
+        let quiet = format!(
+            "  20     1 {b}/Contents/MacOS/rapp-term\n  21     1 {b}/Contents/MacOS/rapp-cli\n  22     1 {}\n  23     1 /bin/zsh\n",
+            up::CLI_LINK
+        );
+        assert_eq!(read_procs(&ps(&quiet), 10, b), free);
+        assert_eq!(read_procs(&ps(&format!("  30     1 {b}/Contents/MacOS/rapp\n")), 10, b), Some(Procs { blocking: true, gui: true }));
+        let helper = format!("  31     1 {b}/Contents/Helpers/x\n");
+        assert_eq!(read_procs(&ps(&helper), 10, b), Some(Procs { blocking: true, gui: false }));
+        // ps that does not show this service cannot be trusted.
+        assert_eq!(read_procs(&ps(""), 99, b), None);
+        assert_eq!(read_procs("", 10, b), None);
+    }
+
+    #[test]
+    fn failure_texts_have_codes() {
+        assert_eq!([STILL_OPEN, NEEDS_ADMIN, NOT_LAUNCHD, "x"].map(error_code), ["still_open", "needs_admin", "not_launchd", "failed"]);
+        assert_eq!([By::Gui, By::Cli, By::Auto].map(By::as_str), ["gui", "cli", "auto"]);
     }
 
     #[test]

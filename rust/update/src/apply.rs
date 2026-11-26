@@ -229,6 +229,9 @@ pub struct Marker {
     pub mode: String,
     #[serde(default)]
     pub perms_before: serde_json::Value,
+    /// Who asked: `gui`, `cli` or `auto` (empty in a marker from before cli-update).
+    #[serde(default)]
+    pub by: String,
 }
 
 pub fn write_marker(home: &Path, m: &Marker) -> io::Result<()> {
@@ -631,6 +634,7 @@ mod tests {
             gui_was_open: true,
             mode: "auto".into(),
             perms_before: serde_json::json!({"screen": true}),
+            by: "cli".into(),
         };
         write_marker(d.path(), &m).unwrap();
         assert_eq!(read_marker(d.path()), Some(m));

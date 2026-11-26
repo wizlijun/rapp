@@ -9,11 +9,11 @@ use rapp_net::line::{read_json, write_json};
 use rapp_net::quic::bi;
 use rapp_service::{Runner, Service, UpdateOpts};
 use rapp_update::fake::{arg_after, FakeRunner};
-use rapp_update::runner::{Out, CODESIGN, CURL, DF, DITTO, OPEN, PLUTIL, PS};
+use rapp_update::runner::{Out, CODESIGN, CURL, DF, DITTO, IOREG, OPEN, PLUTIL, PS};
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tempfile::TempDir;
@@ -58,6 +58,10 @@ struct Knobs {
     gui_wait: Duration,
     /// Extra `service.json` fields.
     cfg: Value,
+    /// `UpdateOpts.quiet`: zero means nobody's use ever holds an auto install.
+    quiet: Duration,
+    /// `UpdateOpts.auto_backoff`.
+    auto_backoff: Duration,
 }
 
 impl Default for Knobs {
@@ -71,6 +75,8 @@ impl Default for Knobs {
             launchd: true,
             gui_wait: Duration::from_millis(300),
             cfg: json!({}),
+            quiet: Duration::ZERO,
+            auto_backoff: Duration::ZERO,
         }
     }
 }
@@ -88,8 +94,14 @@ struct Env {
     ps_code: Arc<AtomicI32>,
     /// Non-zero: the fake curl fails with this exit code (switchable after start).
     curl_fail: Arc<AtomicI32>,
+    /// What the fake ioreg reports as the time since the last keyboard or mouse input, in ns.
+    hid_idle: Arc<AtomicU64>,
+    /// Non-zero: the fake ioreg fails with this exit code.
+    ioreg_code: Arc<AtomicI32>,
     launchd: bool,
     gui_wait: Duration,
+    quiet: Duration,
+    auto_backoff: Duration,
     /// `UpdateOpts.install_level`; None skips the check.
     install_level: Option<PathBuf>,
     svc: Option<Service>,
@@ -115,7 +127,18 @@ impl Env {
         let ps_extra: Arc<Mutex<Vec<String>>> = Arc::default();
         let ps_code = Arc::new(AtomicI32::new(0));
         let curl_fail = Arc::new(AtomicI32::new(0));
-        let runner = Arc::new(fake(&k, &bundle, &cache, &home, tmp.path(), ps_extra.clone(), ps_code.clone(), curl_fail.clone()));
+        let hid_idle = Arc::new(AtomicU64::new(1_000_000_000_000));
+        let ioreg_code = Arc::new(AtomicI32::new(0));
+        let (idle, code) = (hid_idle.clone(), ioreg_code.clone());
+        let runner = fake(&k, &bundle, &cache, &home, tmp.path(), ps_extra.clone(), ps_code.clone(), curl_fail.clone())
+            .on(IOREG, move |a| {
+                assert_eq!(a, rapp_update::IOREG_ARGS);
+                match code.load(Ordering::SeqCst) {
+                    0 => Out::ok(format!("    | |     \"HIDIdleTime\" = {}\n", idle.load(Ordering::SeqCst))),
+                    c => Out::fail(c, ""),
+                }
+            });
+        let runner = Arc::new(runner);
         Env {
             _tmp: tmp,
             home,
@@ -126,8 +149,12 @@ impl Env {
             ps_extra,
             ps_code,
             curl_fail,
+            hid_idle,
+            ioreg_code,
             launchd: k.launchd,
             gui_wait: k.gui_wait,
+            quiet: k.quiet,
+            auto_backoff: k.auto_backoff,
             install_level: None,
             svc: None,
         }
@@ -144,9 +171,18 @@ impl Env {
             healthy_after: Duration::from_millis(200),
             gui_wait: self.gui_wait,
             install_level: self.install_level.clone(),
+            quiet: self.quiet,
+            auto_backoff: self.auto_backoff,
         };
         let runner: Arc<dyn Runner> = self.runner.clone();
         self.svc = Some(start_service_with(&self.home, self.bins.path(), runner, Some(opts)).await);
+    }
+
+    /// An Env where someone just used the keyboard: no auto install until `hid_idle` grows.
+    fn someone_at_the_mac(k: Knobs) -> Env {
+        let e = Env::new(Knobs { quiet: Duration::from_secs(600), ..k });
+        e.hid_idle.store(1_000_000_000, Ordering::SeqCst);
+        e
     }
 
     fn svc(&self) -> &Service {
@@ -192,6 +228,29 @@ impl Env {
 
     fn previous(&self) -> PathBuf {
         self.home.join("previous/rapp.backup")
+    }
+
+    /// Waits until the status's `quit_gui` is `want`.
+    async fn wait_quit_gui(&self, want: bool) -> Value {
+        let deadline = tokio::time::Instant::now() + WAIT;
+        loop {
+            let u = self.update().await;
+            if u["quit_gui"] == want {
+                return u;
+            }
+            assert!(tokio::time::Instant::now() < deadline, "quit_gui never {want}: {u}");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// The reasons `update_auto_wait` logged so far.
+    fn auto_waits(&self) -> Vec<Value> {
+        log_events(&self.home).into_iter().filter(|v| v["ev"] == "update_auto_wait").map(|v| v["reason"].clone()).collect()
+    }
+
+    /// Waits for an `update_auto_wait` with this reason.
+    async fn wait_log_wait(&self, reason: &str) {
+        wait_log(&self.home, "update_auto_wait", |v| v["reason"] == reason).await;
     }
 
     fn gui_line(&self) -> String {
@@ -454,50 +513,116 @@ async fn install_records_perms_before() {
     assert_eq!(e.applied()["perms_before"], before);
 }
 
+/// cli-update §5.1: an open but idle remote session no longer holds the auto install; only
+/// remote use in the last `quiet` does (opening the session is such use).
 #[tokio::test]
-async fn sessions_block_auto_install() {
-    let mut e = Env::new(Knobs { cfg: json!({"check_updates": false}), ..Default::default() });
+async fn idle_session_does_not_block_auto_install() {
+    let quiet = Duration::from_millis(800);
+    let mut e = Env::new(Knobs { cfg: json!({"check_updates": false}), quiet, ..Default::default() });
     e.start().await;
-    let (_ep, conn, mut s) = session(e.svc()).await;
+    let (_ep, _conn, _s) = session(e.svc()).await;
+    let opened = tokio::time::Instant::now();
     assert_eq!(e.call(json!({"cmd":"update_check"})).await["ok"], true);
     e.wait_state("ready").await;
-    e.no_restart_for(POLL * 3).await;
+    e.no_restart_for(quiet.saturating_sub(opened.elapsed()).saturating_sub(Duration::from_millis(200))).await;
     assert_eq!(marker_of(&e.bundle), "current");
+    assert!(e.auto_waits().contains(&json!("最近有远程操作")), "{:?}", e.auto_waits());
+    // The session is still open.
+    e.wait_restart().await;
+    assert_eq!(marker_of(&e.bundle), "new");
+    assert_eq!(e.applied()["by"], "auto");
+}
 
-    s.writer_mut().finish().unwrap();
-    drop(s);
-    conn.close(0u32.into(), b"done");
+/// cli-update §5.1: someone at the keyboard or mouse in the last `quiet`, or an ioreg that
+/// cannot be read, holds the auto install.
+#[tokio::test]
+async fn local_input_blocks_auto_install() {
+    let mut e = Env::new(Knobs { quiet: Duration::from_secs(600), ..Default::default() });
+    e.hid_idle.store(5_000_000_000, Ordering::SeqCst);
+    e.start().await;
+    e.wait_state("ready").await;
+    e.no_restart_for(POLL * 4).await;
+    assert_eq!(e.update().await["auto_wait"], "最近本机有人操作");
+    e.ioreg_code.store(1, Ordering::SeqCst);
+    e.wait_log_wait("读不到本机空闲时间").await;
+    e.no_restart_for(POLL * 2).await;
+    assert_eq!(marker_of(&e.bundle), "current");
+    e.ioreg_code.store(0, Ordering::SeqCst);
+    e.hid_idle.store(601_000_000_000, Ordering::SeqCst);
     e.wait_restart().await;
     assert_eq!(marker_of(&e.bundle), "new");
 }
 
+/// cli-update §5.1: a GUI with remote windows open (other than text terminals) holds it, and
+/// the count goes with the GUI's connection.
 #[tokio::test]
-async fn gui_process_blocks_auto_install() {
-    let mut e = Env::new(Knobs::default());
+async fn remote_windows_block_auto_install() {
+    let mut e = Env::new(Knobs { cfg: json!({"check_updates": false}), ..Default::default() });
+    e.start().await;
+    let mut gui = Ipc::open(e.svc(), &e.home).await;
+    assert_eq!(gui.call(json!({"cmd":"gui_windows","count":1})).await["ok"], true);
+    e.call(json!({"cmd":"update_check"})).await;
+    e.wait_state("ready").await;
+    e.no_restart_for(POLL * 4).await;
+    assert_eq!(e.update().await["auto_wait"], "本机开着远程窗口");
+    drop(gui);
+    e.wait_restart().await;
+    assert_eq!(marker_of(&e.bundle), "new");
+}
+
+/// cli-update §5.2: the auto install asks the GUI to quit, installs once it is gone, and the
+/// marker brings it back after the restart.
+#[tokio::test]
+async fn auto_quits_the_gui_and_brings_it_back() {
+    let mut e = Env::new(Knobs { gui_wait: Duration::from_secs(5), ..Default::default() });
     e.ps_extra.lock().unwrap().push(e.gui_line());
     e.start().await;
-    e.wait_state("ready").await;
-    e.no_restart_for(POLL * 4).await;
-    assert_eq!(e.update().await["state"], "ready");
+    e.wait_quit_gui(true).await;
     assert_eq!(marker_of(&e.bundle), "current");
-    // Only the service's own child (rapp-host, ppid = service) is left: that is nobody.
+    // The GUI quits.
     e.ps_extra.lock().unwrap().clear();
     e.wait_restart().await;
     assert_eq!(marker_of(&e.bundle), "new");
+    let m = e.applied();
+    assert_eq!((&m["mode"], &m["by"], &m["gui_was_open"]), (&json!("auto"), &json!("auto"), &json!(true)), "{m}");
 }
 
+/// cli-update §5.2: a GUI that does not quit is opened again, the version stays ready and the
+/// next try waits `auto_backoff`.
 #[tokio::test]
-async fn a_pipe_through_the_rapp_link_blocks_auto_install() {
-    let mut e = Env::new(Knobs::default());
-    // ps names a process started as /usr/local/bin/rapp by the link, not the bundle path.
-    e.ps_extra.lock().unwrap().push(format!("  777   776 {}", rapp_update::CLI_LINK));
+async fn auto_backs_off_when_the_gui_stays() {
+    let mut e = Env::new(Knobs { auto_backoff: Duration::from_secs(60), ..Default::default() });
+    e.ps_extra.lock().unwrap().push(e.gui_line());
     e.start().await;
-    e.wait_state("ready").await;
-    e.no_restart_for(POLL * 4).await;
+    e.wait_quit_gui(true).await;
+    let u = e.wait_quit_gui(false).await;
+    assert_eq!(u["state"], "ready", "{u}");
+    assert!(e.calls_of(OPEN).contains(&vec![s(&e.bundle)]), "{:?}", e.calls_of(OPEN));
+    wait_log(&e.home, "update_auto_skipped", |v| v["reason"] == "rApp 还开着").await;
+    let opens = e.calls_of(OPEN).len();
+    for _ in 0..8 {
+        tokio::time::sleep(POLL).await;
+        assert_eq!(e.update().await["quit_gui"], false);
+    }
+    assert_eq!(e.calls_of(OPEN).len(), opens);
     assert_eq!(marker_of(&e.bundle), "current");
-    e.ps_extra.lock().unwrap().clear();
+}
+
+/// cli-update §5.1: text terminals keep their shells across the swap, and `rapp update` runs as
+/// rapp-cli (by either path): neither holds an install.
+#[tokio::test]
+async fn terminals_and_the_cli_never_block() {
+    let mut e = Env::new(Knobs::default());
+    let b = s(&e.bundle);
+    e.ps_extra.lock().unwrap().extend([
+        format!("  777   776 {}", rapp_update::CLI_LINK),
+        format!("  778     1 {b}/Contents/MacOS/rapp-term"),
+        format!("  779   778 {b}/Contents/MacOS/rapp-cli"),
+    ]);
+    e.start().await;
     e.wait_restart().await;
     assert_eq!(marker_of(&e.bundle), "new");
+    assert_eq!(e.applied()["gui_was_open"], false);
 }
 
 #[tokio::test]
@@ -518,9 +643,10 @@ async fn not_launchd_never_installs() {
     e.wait_state("ready").await;
     e.no_restart_for(POLL * 4).await;
     let r = e.call(json!({"cmd":"update_apply"})).await;
-    assert_eq!(r["ok"], false, "{r}");
+    assert_eq!((&r["ok"], &r["code"]), (&json!(false), &json!("not_launchd")), "{r}");
     assert!(r["page"].as_str().is_some_and(|p| !p.is_empty()), "{r}");
-    assert_eq!(e.call(json!({"cmd":"update_rollback"})).await["ok"], false);
+    assert_eq!(e.update().await["launchd"], false);
+    assert_eq!(e.call(json!({"cmd":"update_rollback"})).await["code"], "not_launchd");
     e.no_restart_for(POLL * 4).await;
     assert_eq!(marker_of(&e.bundle), "current");
 }
@@ -555,7 +681,8 @@ async fn signature_change_waits_for_confirm() {
     assert_eq!(marker_of(&e.bundle), "current");
 
     let mut gui = Ipc::open(e.svc(), &e.home).await;
-    assert_eq!(gui.call(json!({"cmd":"update_apply"})).await, json!({"ok": false, "error": "需要确认"}));
+    let no = json!({"ok": false, "error": "需要确认", "code": "needs_confirm"});
+    assert_eq!(gui.call(json!({"cmd":"update_apply"})).await, no);
     let r = gui.call(json!({"cmd":"update_apply","confirm_signature_change":true})).await;
     assert_eq!(r["ok"], true, "{r}");
     drop(gui);
@@ -566,8 +693,9 @@ async fn signature_change_waits_for_confirm() {
 
 #[tokio::test]
 async fn manual_apply_goes_in_over_open_sessions() {
-    // People upgrade A from B through a rApp session: the session must not block it.
-    let mut e = Env::new(Knobs { cfg: json!({"check_updates": false}), ..Default::default() });
+    // People upgrade A from B through a rApp session: the session must not block it. Someone
+    // at the Mac keeps the auto install out of the way.
+    let mut e = Env::someone_at_the_mac(Knobs { cfg: json!({"check_updates": false}), ..Default::default() });
     e.start().await;
     let (_ep, _conn, _s) = session(e.svc()).await;
     e.call(json!({"cmd":"update_check"})).await;
@@ -577,6 +705,40 @@ async fn manual_apply_goes_in_over_open_sessions() {
     e.wait_restart().await;
     assert_eq!(marker_of(&e.bundle), "new");
     assert_eq!(e.applied()["mode"], "manual");
+}
+
+/// cli-update §5.1: `rapp update` installs right away, whatever the keyboard, the mouse and
+/// the remote side did; with no GUI running, none is opened after the restart.
+#[tokio::test]
+async fn cli_apply_ignores_recent_use() {
+    let mut e = Env::new(Knobs { cfg: json!({"check_updates": false}), quiet: Duration::from_secs(600), ..Default::default() });
+    e.hid_idle.store(1_000_000_000, Ordering::SeqCst);
+    e.start().await;
+    let (_ep, _conn, _s) = session(e.svc()).await;
+    // `"wait": true` replies once the check (and download) is done.
+    assert_eq!(e.call(json!({"cmd":"update_check","wait":true})).await, json!({"ok": true}));
+    assert_eq!(e.update().await["state"], "ready");
+    let r = e.call(json!({"cmd":"update_apply","by":"cli"})).await;
+    assert_eq!(r, json!({"ok": true}));
+    e.wait_restart().await;
+    assert_eq!(marker_of(&e.bundle), "new");
+    let m = e.applied();
+    assert_eq!((&m["mode"], &m["by"], &m["gui_was_open"]), (&json!("manual"), &json!("cli"), &json!(false)), "{m}");
+}
+
+/// cli-update §5.2: a manual install with the GUI open asks it to quit too, and brings it back.
+#[tokio::test]
+async fn cli_apply_quits_the_gui() {
+    let mut e = Env::new(Knobs { cfg: json!({"check_updates": false}), gui_wait: Duration::from_secs(5), ..Default::default() });
+    e.ps_extra.lock().unwrap().push(e.gui_line());
+    e.start().await;
+    e.call(json!({"cmd":"update_check","wait":true})).await;
+    assert_eq!(e.call(json!({"cmd":"update_apply","by":"cli"})).await, json!({"ok": true}));
+    e.wait_quit_gui(true).await;
+    e.ps_extra.lock().unwrap().clear();
+    e.wait_restart().await;
+    let m = e.applied();
+    assert_eq!((&m["by"], &m["gui_was_open"]), (&json!("cli"), &json!(true)), "{m}");
 }
 
 #[tokio::test]
@@ -593,7 +755,7 @@ async fn rollback_goes_in_over_open_sessions() {
 
 #[tokio::test]
 async fn manual_apply_reopens_gui_when_still_in_use() {
-    let mut e = Env::new(Knobs::default());
+    let mut e = Env::someone_at_the_mac(Knobs::default());
     e.ps_extra.lock().unwrap().push(e.gui_line());
     e.start().await;
     e.wait_state("ready").await;
@@ -601,7 +763,7 @@ async fn manual_apply_reopens_gui_when_still_in_use() {
     let mut gui = Ipc::open(e.svc(), &e.home).await;
     assert_eq!(gui.call(json!({"cmd":"update_apply"})).await["ok"], true);
     let u = e.wait_state("failed").await;
-    assert_eq!(u["error"], "rApp 还开着", "{u}");
+    assert_eq!((&u["error"], &u["error_code"], &u["quit_gui"]), (&json!("rApp 还开着"), &json!("still_open"), &json!(false)), "{u}");
     assert!(e.calls_of(OPEN).contains(&vec![s(&e.bundle)]), "{:?}", e.calls_of(OPEN));
     assert_eq!(marker_of(&e.bundle), "current");
     drop(gui);
@@ -609,15 +771,14 @@ async fn manual_apply_reopens_gui_when_still_in_use() {
 
 #[tokio::test]
 async fn dismiss_hides_that_version_and_check_clears_it() {
-    let mut e = Env::new(Knobs::default());
-    e.ps_extra.lock().unwrap().push(e.gui_line());
+    let mut e = Env::someone_at_the_mac(Knobs::default());
     e.start().await;
     e.wait_state("ready").await;
     assert_eq!(e.call(json!({"cmd":"update_dismiss","version":"0.5.0"})).await["ok"], true);
     let u = e.update().await;
     assert_eq!(u["dismissed"], true, "{u}");
     assert_ne!(u["state"], "ready", "{u}");
-    e.ps_extra.lock().unwrap().clear();
+    e.hid_idle.store(u64::MAX, Ordering::SeqCst);
     e.no_restart_for(POLL * 5).await;
     assert_eq!(marker_of(&e.bundle), "current");
 
@@ -695,7 +856,7 @@ async fn old_previous_left_aside_blocks_rollback() {
     make_app(&aside, "older");
     e.start().await;
     let r = e.call(json!({"cmd":"update_rollback"})).await;
-    assert_eq!(r, json!({"ok": false, "error": "上次升级没收拾干净：请手动删除 rapp.app 同目录的 .rapp-new.app，或 previous 里的 .rapp-old.backup / .rapp-old.app"}));
+    assert_eq!(r, json!({"ok": false, "code": "failed", "error": "上次升级没收拾干净：请手动删除 rapp.app 同目录的 .rapp-new.app，或 previous 里的 .rapp-old.backup / .rapp-old.app"}));
     e.no_restart_for(POLL * 4).await;
     assert_eq!((marker_of(&e.bundle), marker_of(&aside)), ("current".into(), "older".into()));
 }
@@ -738,8 +899,7 @@ async fn marker_with_wrong_version_logs_restart_failure() {
 
 #[tokio::test]
 async fn progress_is_reported() {
-    let mut e = Env::new(Knobs { split: Some(Duration::from_millis(1200)), ..Default::default() });
-    e.ps_extra.lock().unwrap().push(e.gui_line());
+    let mut e = Env::someone_at_the_mac(Knobs { split: Some(Duration::from_millis(1200)), ..Default::default() });
     e.start().await;
     let mut sub = Ipc::open(e.svc(), &e.home).await;
     assert_eq!(sub.call(json!({"cmd":"subscribe"})).await["ok"], true);
@@ -801,7 +961,7 @@ async fn backup_left_aside_blocks_rollback() {
     make_app(&e.home.join("previous/.rapp-old.backup"), "older");
     e.start().await;
     let r = e.call(json!({"cmd":"update_rollback"})).await;
-    assert_eq!(r, json!({"ok": false, "error": "上次升级没收拾干净：请手动删除 rapp.app 同目录的 .rapp-new.app，或 previous 里的 .rapp-old.backup / .rapp-old.app"}));
+    assert_eq!(r, json!({"ok": false, "code": "failed", "error": "上次升级没收拾干净：请手动删除 rapp.app 同目录的 .rapp-new.app，或 previous 里的 .rapp-old.backup / .rapp-old.app"}));
 }
 
 /// Final review I-2: after 回到上一版 the restarted older service must not fetch and install the
@@ -858,45 +1018,6 @@ async fn set_update_persists() {
     assert_eq!(e.update().await["check_updates"], true);
 }
 
-/// Fix round 1, Important 1: a B session whose rapp-host is still starting is not in the
-/// session table yet, but it is about to be: no install may cut it off.
-#[tokio::test]
-async fn opening_session_blocks_auto_install() {
-    let mut e = Env::new(Knobs { cfg: json!({"check_updates": false}), ..Default::default() });
-    e.ps_extra.lock().unwrap().push(e.gui_line());
-    e.start().await;
-    e.call(json!({"cmd":"update_check"})).await;
-    e.wait_state("ready").await;
-
-    std::fs::write(e.bins.path().join("serve_delay"), "1500").unwrap();
-    let addr = a_addr(e.svc());
-    let opening = tokio::spawn(async move {
-        let ep = b_endpoint();
-        let (conn, r) = direct(&ep, addr, json!({"op":"auth","password":PASSWORD,"name":"mbp"})).await;
-        assert_eq!(r["ok"], true, "{r}");
-        let s = open_echo(&conn).await;
-        (ep, conn, s)
-    });
-    let deadline = tokio::time::Instant::now() + WAIT;
-    while !host_log(e.bins.path()).contains("delay com.example.echo") {
-        assert!(tokio::time::Instant::now() < deadline, "rapp-host never started");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    // The GUI goes; the only thing left is the session that is still opening.
-    e.ps_extra.lock().unwrap().clear();
-    e.no_restart_for(POLL * 6).await;
-    assert!(!opening.is_finished(), "the session must still be opening during the check");
-    assert_eq!(marker_of(&e.bundle), "current");
-
-    let (_ep, conn, mut s) = opening.await.unwrap();
-    e.no_restart_for(POLL * 3).await;
-    s.writer_mut().finish().unwrap();
-    drop(s);
-    conn.close(0u32.into(), b"done");
-    e.wait_restart().await;
-    assert_eq!(marker_of(&e.bundle), "new");
-}
-
 /// Fix round 1, Important 1 (c): once the new version is going in, B's open is refused.
 #[tokio::test]
 async fn open_while_installing_is_refused() {
@@ -923,7 +1044,8 @@ async fn second_apply_on_one_connection_waits_for_close() {
     e.start().await;
     e.wait_state("ready").await;
     let mut gui = Ipc::open(e.svc(), &e.home).await;
-    assert_eq!(gui.call(json!({"cmd":"update_apply"})).await, json!({"ok": false, "error": "需要确认"}));
+    let no = json!({"ok": false, "error": "需要确认", "code": "needs_confirm"});
+    assert_eq!(gui.call(json!({"cmd":"update_apply"})).await, no);
     let r = gui.call(json!({"cmd":"update_apply","confirm_signature_change":true})).await;
     assert_eq!(r, json!({"ok": true}));
     // The connection is still open: nothing goes in yet, although nobody else uses rapp.
@@ -939,8 +1061,7 @@ async fn second_apply_on_one_connection_waits_for_close() {
 /// the version must not install, and the state goes back to idle.
 #[tokio::test]
 async fn dismissed_in_cache_never_installs() {
-    let mut e = Env::new(Knobs { cfg: json!({"check_updates": false}), ..Default::default() });
-    e.ps_extra.lock().unwrap().push(e.gui_line());
+    let mut e = Env::someone_at_the_mac(Knobs { cfg: json!({"check_updates": false}), ..Default::default() });
     e.start().await;
     e.call(json!({"cmd":"update_check"})).await;
     e.wait_state("ready").await;
@@ -949,7 +1070,7 @@ async fn dismissed_in_cache_never_installs() {
     let mut c: Value = serde_json::from_slice(&std::fs::read(&p).unwrap()).unwrap();
     c["dismissed_version"] = json!("0.5.0");
     rapp_net::config::write_json(&p, &c).unwrap();
-    e.ps_extra.lock().unwrap().clear();
+    e.hid_idle.store(u64::MAX, Ordering::SeqCst);
     e.no_restart_for(POLL * 6).await;
     assert_eq!(marker_of(&e.bundle), "current");
     assert_eq!(e.update().await["state"], "idle");

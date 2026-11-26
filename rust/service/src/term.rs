@@ -226,11 +226,11 @@ pub async fn open<S: AsyncRead + AsyncWrite + Unpin + Send>(
     let ready = async {
         allowed(state)?;
         // Counts as "in use" for the updater from now until the session ends.
-        let opening = crate::update::begin_open(state).map_err(str::to_string)?;
+        crate::update::begin_open(state).map_err(str::to_string)?;
         let (port, token, counted) = start(state).await.map_err(|e| format!("{e:#}"))?;
-        Ok::<_, String>((opening, port, token, counted))
+        Ok::<_, String>((port, token, counted))
     };
-    let (_opening, port, token, _counted) = match ready.await {
+    let (port, token, _counted) = match ready.await {
         Ok(r) => r,
         Err(e) => return refuse(state, s, &peer, what, &e).await,
     };

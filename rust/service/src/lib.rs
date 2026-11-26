@@ -102,6 +102,11 @@ pub struct UpdateOpts {
     pub gui_wait: Duration,
     /// The file the pkg writes its install level to; `None` skips the check (install-level spec).
     pub install_level: Option<PathBuf>,
+    /// An auto install waits until nobody used this Mac, here or from far away, for this long.
+    pub quiet: Duration,
+    /// After an auto install found rApp still open once the GUI was asked to quit, the next try
+    /// waits this long, so the GUI does not quit and come back every `idle_poll`.
+    pub auto_backoff: Duration,
 }
 
 impl UpdateOpts {
@@ -117,6 +122,8 @@ impl UpdateOpts {
             healthy_after: Duration::from_secs(30),
             gui_wait: Duration::from_secs(10),
             install_level: Some(PathBuf::from(rapp_update::INSTALL_LEVEL_FILE)),
+            quiet: Duration::from_secs(600),
+            auto_backoff: Duration::from_secs(30 * 60),
         }
     }
 }

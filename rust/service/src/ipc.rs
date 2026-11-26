@@ -76,15 +76,20 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
                         r["ok"] = json!(true);
                         r
                     }
+                    // `wait`: reply once the check is done (`rapp update check`), not right away.
+                    "update_check" if cmd["wait"] == true => {
+                        update::check_now(state).await;
+                        ok(json!({}))
+                    }
                     "update_check" => {
                         let state = state.clone();
                         tokio::spawn(async move { update::check_now(&state).await });
                         ok(json!({}))
                     }
                     "update_apply" => {
-                        update::apply(state, cmd["confirm_signature_change"] == true, closed.clone()).await
+                        update::apply(state, cmd["confirm_signature_change"] == true, by(&cmd), closed.clone()).await
                     }
-                    "update_rollback" => update::rollback(state, closed.clone()).await,
+                    "update_rollback" => update::rollback(state, by(&cmd), closed.clone()).await,
                     // The GUI's remote windows other than text terminals: they keep the auto-update out.
                     "gui_windows" => match cmd["count"].as_u64() {
                         Some(n) => {
@@ -161,6 +166,15 @@ const HISTORY_MAX: u64 = 500;
 
 /// 访问记录 (spec §6): sessions, terminal inputs, failed auths, refused requests and blocked input; never side
 /// connections, nor the hub's background `watch_terms` (polled like `ping`, not a user action).
+/// Who sent an `update_apply`/`update_rollback`: `rapp update` says `"by": "cli"`.
+fn by(cmd: &Value) -> update::By {
+    if cmd["by"] == "cli" {
+        update::By::Cli
+    } else {
+        update::By::Gui
+    }
+}
+
 fn in_history(v: &Value) -> bool {
     let shown = match v["ev"].as_str() {
         Some("session_start" | "session_end" | "term_inputs" | "auth_fail" | "rejected" | "input_blocked" | "unlock" | "auto_lock" | "auto_lock_failed") => true,
