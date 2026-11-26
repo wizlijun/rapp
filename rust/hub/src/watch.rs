@@ -94,6 +94,7 @@ async fn watch(hub: &Arc<Hub>, id: &str) {
         if online(&r) {
             hub.log.event(Lvl::Info, "presence", json!({"id":id,"online":true,"by":"watch"}));
             crate::terms::ensure_watch(hub, &host);
+            crate::load::ensure_watch(hub, &host);
             hub.emit(json!({"event":"presence","id":id,"online":true}), &None).await;
             return;
         }
