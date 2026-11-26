@@ -16,8 +16,13 @@ async fn start_on(first: u16, key: &rapp_wire::Key, prepare: impl FnOnce(&Path))
 
 /// `a`'s `hosts.json` lists `others`.
 fn knows(a: &TestService, others: &[&TestService]) {
+    hosts_file(a.home.path(), others);
+}
+
+/// `home/hosts.json` lists `others` (before its service starts, or after).
+fn hosts_file(home: &Path, others: &[&TestService]) {
     let hosts: Vec<Value> = others.iter().map(|o| json!({"id": o.id, "name": o.id, "lan": [a_addr(&o.svc).to_string()]})).collect();
-    std::fs::write(a.home.path().join("hosts.json"), Value::Array(hosts).to_string()).unwrap();
+    std::fs::write(home.join("hosts.json"), Value::Array(hosts).to_string()).unwrap();
 }
 
 async fn ipc(s: &TestService, cmd: Value) -> Value {
@@ -28,10 +33,14 @@ fn term_log(bins: &Path) -> String {
     std::fs::read_to_string(bins.join("term.log")).unwrap_or_default()
 }
 
-/// A `term.json` whose fake sessions carry program status: session `a` in `state` with question `seq`.
+/// A `term.json` whose fake sessions carry program status: session `a` (named "secret-name") in
+/// `state` with question `seq`; `blocked` asks for a permission.
 fn term_json(home: &Path, state: &str, seq: u64) {
-    let ps = json!({"state": state, "seq": seq, "since": 1764130000 + seq, "msg": "SECRET-TEXT"});
-    let rows = json!([{"key": "a", "ps": ps, "title": "SECRET-TITLE", "fg": "claude"}]);
+    let mut ps = json!({"state": state, "seq": seq, "since": 1764130000 + seq, "msg": "SECRET-TEXT"});
+    if state == "blocked" {
+        (ps["kind"], ps["app"]) = (json!("permission"), json!("claude-code"));
+    }
+    let rows = json!([{"key": "a", "name": "secret-name", "ps": ps, "title": "SECRET-TITLE", "fg": "claude"}]);
     std::fs::write(home.join("term.json"), json!({"allow": true, "fake_rows": rows}).to_string()).unwrap();
 }
 
@@ -138,16 +147,23 @@ async fn wait_state(s: &TestService, within: Duration, f: impl Fn(&Value) -> boo
 
 /// `GET /v1/health` on `127.0.0.1:<port>`, by hand: the reply body, or None when nothing answers.
 async fn health(port: u16) -> Option<Value> {
+    http_get(port, "/v1/health").await
+}
+
+/// `GET <path>` on `127.0.0.1:<port>`, by hand (as `curl` would): the JSON body, or None when
+/// nothing answers.
+async fn http_get(port: u16, path: &str) -> Option<Value> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let get = async {
         let mut tcp = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.ok()?;
-        tcp.write_all(b"GET /v1/health HTTP/1.1\r\nHost: rapp-state\r\nConnection: close\r\n\r\n").await.ok()?;
+        let req = format!("GET {path} HTTP/1.1\r\nHost: rapp-state\r\nConnection: close\r\n\r\n");
+        tcp.write_all(req.as_bytes()).await.ok()?;
         let mut text = String::new();
         tcp.read_to_string(&mut text).await.ok()?;
         let (_, body) = text.split_once("\r\n\r\n")?;
         serde_json::from_str::<Value>(body.trim()).ok()
     };
-    tokio::time::timeout(Duration::from_secs(2), get).await.ok().flatten()
+    tokio::time::timeout(Duration::from_secs(5), get).await.ok().flatten()
 }
 
 /// The share of `port` in `s`'s IPC `shares`, if any.
@@ -386,4 +402,357 @@ async fn a_rapp_state_already_on_the_port_is_not_ours() {
     assert!(log.iter().all(|v| v["ev"] != "companion_ready"), "never ready");
     assert!(log.iter().all(|v| !(v["ev"] == "state_sink" && v["from"] == "local")), "never the local sink");
     drop(foreign);
+}
+
+// ---- the P1 acceptance (spec §15): B's terminal sessions reach a real `rapp-state` on A ----
+
+/// The texts that must never reach a log: the question, the session's name, title and id.
+const SECRETS: [&str; 4] = ["SECRET-TEXT", "secret-name", "SECRET-TITLE", "term:pty:"];
+
+/// The fingerprint `s` shows (IPC `status`): the `fp` of its events.
+async fn fp_of(s: &TestService) -> String {
+    ipc(s, json!({"cmd":"status"})).await["fp"].as_str().unwrap().to_string()
+}
+
+/// The whole of `/v1/queue` on `port`, newest first, page by page (None: nothing answers).
+async fn queue_of(port: u16) -> Option<Vec<Value>> {
+    let mut all: Vec<Value> = vec![];
+    loop {
+        let path = match all.last() {
+            None => "/v1/queue?limit=200".to_string(),
+            Some(last) => format!("/v1/queue?limit=200&before={}", last["eid"].as_str().unwrap()),
+        };
+        let page = http_get(port, &path).await?;
+        all.extend(page["events"].as_array().unwrap().iter().cloned());
+        if page["more"] != true {
+            return Some(all);
+        }
+    }
+}
+
+/// Polls `/v1/queue` on `port` until `f` accepts it, for at most `within`.
+async fn wait_queue(port: u16, within: Duration, f: impl Fn(&[Value]) -> bool) -> Vec<Value> {
+    let deadline = tokio::time::Instant::now() + within;
+    loop {
+        let q = queue_of(port).await;
+        if let Some(q) = q.as_ref().filter(|q| f(q)) {
+            return q.clone();
+        }
+        assert!(tokio::time::Instant::now() < deadline, "not within {within:?}: {q:?}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Polls `/v1/state` on `port` until `f` accepts it, for at most `within`.
+async fn wait_http_state(port: u16, within: Duration, f: impl Fn(&Value) -> bool) -> Value {
+    let deadline = tokio::time::Instant::now() + within;
+    loop {
+        let v = http_get(port, "/v1/state").await;
+        if let Some(v) = v.as_ref().filter(|v| f(v)) {
+            return v.clone();
+        }
+        assert!(tokio::time::Instant::now() < deadline, "not within {within:?}: {v:?}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Device `fp`'s row of session `term:pty:a` in a `/v1/state` reply.
+fn session_a<'a>(state: &'a Value, fp: &str) -> Option<&'a Value> {
+    let dev = state["devices"].as_array()?.iter().find(|d| d["fp"] == fp)?;
+    dev["sessions"].as_array()?.iter().find(|s| s["session"] == "term:pty:a")
+}
+
+/// `(t, state, seq)` of queue rows, for comparing their order.
+fn shape(rows: &[Value]) -> Vec<(String, String, u64)> {
+    rows.iter()
+        .map(|r| {
+            let s = |k: &str| r[k].as_str().unwrap_or_default().to_string();
+            (s("t"), s("state"), r["seq"].as_u64().unwrap_or(0))
+        })
+        .collect()
+}
+
+fn st(state: &str, seq: u64) -> (String, String, u64) {
+    ("state".into(), state.into(), seq)
+}
+
+/// Every row is one of `fp`'s, numbered in one epoch, newest (highest `n`) first.
+fn all_from(rows: &[Value], fp: &str) {
+    for r in rows {
+        assert_eq!(r["fp"], fp, "{r}");
+        assert_eq!(r["eid"].as_str().unwrap().split(':').next(), Some(fp), "{r}");
+    }
+    let epochs: std::collections::BTreeSet<&str> = rows.iter().map(|r| r["epoch"].as_str().unwrap_or("")).collect();
+    let ns: Vec<u64> = rows.iter().filter_map(|r| r["eid"].as_str()?.rsplit(':').next()?.parse().ok()).collect();
+    assert_eq!(ns.len(), rows.len(), "{rows:?}");
+    assert!(ns.windows(2).all(|w| w[0] > w[1]), "newest first by n: {ns:?}");
+    // Gap rows carry no epoch field; the others all the same one.
+    assert!(epochs.iter().filter(|e| !e.is_empty()).count() <= 1, "{epochs:?}");
+}
+
+/// No file in any of `dirs` (recursively), and none of `lines`, holds a secret. Returns how many
+/// files were read, after checking that each of `must` (paths) was among them.
+fn no_secrets(dirs: &[&Path], lines: &[Value], must: &[std::path::PathBuf]) -> usize {
+    fn walk(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = vec![];
+    for d in dirs {
+        walk(d, &mut files);
+    }
+    for m in must {
+        assert!(files.contains(m), "{m:?} not among {files:?}");
+    }
+    for f in &files {
+        let text = String::from_utf8_lossy(&std::fs::read(f).unwrap()).to_string();
+        assert!(!text.is_empty() || !must.contains(f), "{f:?} is empty");
+        for secret in SECRETS {
+            assert!(!text.contains(secret), "{secret} in {f:?}");
+        }
+    }
+    for l in lines {
+        for secret in SECRETS {
+            assert!(!l.to_string().contains(secret), "{secret} in the state service's log: {l}");
+        }
+    }
+    files.len()
+}
+
+/// A, with `rapp state on` (a free port, in memory), and B with session `a` idle: each knows the
+/// other, A's `state on` told B, B's outbox is up and its snap is in. Returns them, the port and
+/// B's fingerprint.
+async fn told_pair(first: u16) -> (TestService, TestService, u16, String) {
+    let key = rapp_wire::Key::new_local();
+    let p = free_port();
+    let a = start_on(first, &key, |h| services(h, p, "memory", false)).await;
+    let b = start_on(first + 10, &key, |h| term_json(h, "idle", 0)).await;
+    knows(&a, &[&b]);
+    knows(&b, &[&a]);
+    let b_fp = fp_of(&b).await;
+    let r = ipc(&a, json!({"cmd":"state","on":true})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let dest = json!({"id": a.id, "port": p});
+    wait_state(&b, Duration::from_secs(15), |r| r["outbox"]["dest"] == dest && r["outbox"]["up"] == true).await;
+    let v = wait_http_state(p, WAIT, |v| session_a(v, &b_fp).is_some_and(|s| s["state"] == "idle")).await;
+    assert_eq!(v["needs"], json!([]), "{v}");
+    assert_eq!(queue_of(p).await.unwrap(), Vec::<Value>::new(), "a snap is no queue row");
+    (a, b, p, b_fp)
+}
+
+/// Session `a` on B goes working → blocked (a permission, question 1) → done; each lands as one
+/// more row in A's queue within 10 s. Returns the queue.
+async fn working_blocked_done(b: &TestService, p: u16, b_fp: &str) -> Vec<Value> {
+    for (i, (state, seq)) in [("working", 0), ("blocked", 1), ("done", 1)].into_iter().enumerate() {
+        term_json(b.home.path(), state, seq);
+        let q = wait_queue(p, WAIT, |q| q.len() > i).await;
+        assert_eq!(q.len(), i + 1, "{q:?}");
+        let v = http_get(p, "/v1/state").await.unwrap();
+        assert_eq!(session_a(&v, b_fp).map(|s| s["state"].clone()), Some(json!(state)), "{v}");
+        let needs = v["needs"].as_array().unwrap();
+        if state == "blocked" {
+            assert_eq!(needs.len(), 1, "{v}");
+            let n = &needs[0];
+            assert_eq!((n["fp"].as_str(), n["session"].as_str(), n["kind"].as_str()), (Some(b_fp), Some("term:pty:a"), Some("permission")), "{n}");
+        } else {
+            assert_eq!(needs.len(), 0, "{v}");
+        }
+    }
+    queue_of(p).await.unwrap()
+}
+
+#[tokio::test]
+async fn claude_working_blocked_done_reach_the_queue() {
+    let (_a, b, p, b_fp) = told_pair(29190).await;
+    let q = working_blocked_done(&b, p, &b_fp).await;
+    assert_eq!(shape(&q), [st("done", 1), st("blocked", 1), st("working", 0)], "{q:?}");
+    all_from(&q, &b_fp);
+    for r in &q {
+        assert_eq!((r["session"].as_str(), r["fg"].as_str(), r["src"].as_str()), (Some("term:pty:a"), Some("claude"), Some("term")), "{r}");
+    }
+    assert_eq!((q[1]["kind"].as_str(), q[1]["app"].as_str()), (Some("permission"), Some("claude-code")), "{}", q[1]);
+}
+
+/// A `rapp-state` the test runs itself (`rapp_state::serve_with_log`), on a fixed port with its
+/// store in a temp dir: stopped by aborting it, started again on the same port and dir.
+struct Ctl {
+    port: u16,
+    dir: tempfile::TempDir,
+    task: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
+    lines: std::sync::Arc<std::sync::Mutex<Vec<Value>>>,
+}
+
+impl Ctl {
+    async fn new() -> Ctl {
+        let mut c = Ctl { port: free_port(), dir: tempfile::tempdir().unwrap(), task: None, lines: Default::default() };
+        c.start().await;
+        c
+    }
+
+    async fn start(&mut self) {
+        let l = tokio::net::TcpListener::bind(("127.0.0.1", self.port)).await.unwrap();
+        let cfg = rapp_state::Config { port: self.port, data: Some(self.dir.path().join("data")), ..Default::default() };
+        let lines = self.lines.clone();
+        let log = rapp_state::Log::new(move |v| lines.lock().unwrap().push(v.clone()));
+        self.task = Some(tokio::spawn(rapp_state::serve_with_log(cfg, l, log)));
+        assert_eq!(health(self.port).await.unwrap()["name"], "rapp-state");
+    }
+
+    async fn stop(&mut self) {
+        let t = self.task.take().unwrap();
+        t.abort();
+        let _ = t.await;
+        assert_eq!(health(self.port).await, None, "stopped");
+    }
+
+    /// The queue length in its `state.json` (what a restart finds).
+    fn saved_queue(&self) -> usize {
+        std::fs::read(self.dir.path().join("data").join("state.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .and_then(|v| v["queue"].as_array().map(Vec::len))
+            .unwrap_or(0)
+    }
+
+    fn log(&self) -> Vec<Value> {
+        self.lines.lock().unwrap().clone()
+    }
+}
+
+/// A sharing `ctl`'s port as a `kind:"state"` share (no companion: no `services.json`), and B
+/// pointed at it in `state-sinks.json`, session `a` idle. Returns them once B's snap is in, with
+/// B's fingerprint.
+async fn ctl_pair(first: u16, ctl: &Ctl) -> (TestService, TestService, String) {
+    let key = rapp_wire::Key::new_local();
+    let p = ctl.port;
+    let a = start_on(first, &key, |h| share_file(h, json!([{"port": p, "note": "状态服务", "kind": "state", "local": first + 1}]))).await;
+    let a_id = a.id.clone();
+    let b = start_on(first + 10, &key, |h| {
+        term_json(h, "idle", 0);
+        std::fs::write(h.join("state-sinks.json"), json!([{"id": a_id, "port": p}]).to_string()).unwrap();
+        hosts_file(h, &[&a]);
+    })
+    .await;
+    let b_fp = fp_of(&b).await;
+    let dest = json!({"id": a.id, "port": p});
+    wait_state(&b, Duration::from_secs(15), |r| r["outbox"]["dest"] == dest && r["outbox"]["up"] == true).await;
+    wait_http_state(p, WAIT, |v| session_a(v, &b_fp).is_some_and(|s| s["state"] == "idle")).await;
+    (a, b, b_fp)
+}
+
+/// Working reaches `ctl`, B holds nothing back, and `ctl` has saved it (so a restart has it).
+async fn working_arrives(b: &TestService, ctl: &Ctl) {
+    term_json(b.home.path(), "working", 0);
+    let q = wait_queue(ctl.port, WAIT, |q| !q.is_empty()).await;
+    assert_eq!(shape(&q), [st("working", 0)], "{q:?}");
+    wait_state(b, WAIT, |r| r["outbox"]["cached"] == 0).await;
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while ctl.saved_queue() != 1 {
+        assert!(tokio::time::Instant::now() < deadline, "never saved");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// The share of `ctl` on A is still the one preloaded: no companion took it back.
+async fn ctl_share_stays(a: &TestService, ctl: &Ctl) {
+    let s = share_of(a, ctl.port).await.expect("the state share stays");
+    assert_eq!(s["kind"], "state", "{s}");
+    let r = ipc(a, json!({"cmd":"state"})).await;
+    assert_eq!((r["on"].clone(), r["running"].clone()), (json!(false), json!(false)), "no companion on A: {r}");
+}
+
+#[tokio::test]
+async fn three_changes_while_stopped_arrive_later() {
+    let mut ctl = Ctl::new().await;
+    let (a, b, b_fp) = ctl_pair(29210, &ctl).await;
+    let p = ctl.port;
+    working_arrives(&b, &ctl).await;
+    ctl.stop().await;
+    let changes = [("blocked", 1), ("blocked", 2), ("done", 2)];
+    for (i, (state, seq)) in changes.into_iter().enumerate() {
+        term_json(b.home.path(), state, seq);
+        wait_state(&b, WAIT, |r| r["outbox"]["cached"] == i + 1).await;
+    }
+    // Nothing listens on A's shared port: A's forward says "refused", which is for now only
+    // (`Down`), never `Gone` (that would forget the sink and clear the cache).
+    wait_log(b.home.path(), "outbox_down", |v| v["why"] == "refused").await;
+    let r = ipc(&b, json!({"cmd":"state"})).await;
+    assert_eq!(r["sinks"], json!([{"id": a.id, "port": p, "local": false, "chosen": true}]), "{r}");
+    let o = &r["outbox"];
+    assert_eq!((o["dest"].clone(), o["active"].clone(), o["up"].clone(), o["cached"].clone()), (json!({"id": a.id, "port": p}), json!(true), json!(false), json!(3)), "{r}");
+    assert!(log_events(b.home.path()).iter().all(|v| !(v["ev"] == "state_sink" && v["on"] == false)), "the sink is not forgotten");
+
+    ctl.start().await;
+    let q = wait_queue(p, Duration::from_secs(15), |q| q.len() >= 4).await;
+    assert_eq!(shape(&q), [st("done", 2), st("blocked", 2), st("blocked", 1), st("working", 0)], "{q:?}");
+    all_from(&q, &b_fp);
+    let v = wait_http_state(p, WAIT, |v| session_a(v, &b_fp).is_some_and(|s| s["state"] == "done")).await;
+    assert_eq!(session_a(&v, &b_fp).unwrap()["seq"], 2, "{v}");
+    assert_eq!(v["needs"], json!([]), "{v}");
+    let r = wait_state(&b, WAIT, |r| r["outbox"]["cached"] == 0 && r["outbox"]["up"] == true).await;
+    assert_eq!(r["outbox"]["dropped"], 0, "{r}");
+    ctl_share_stays(&a, &ctl).await;
+    let must = [a.home.path().join("logs").join("service.log"), b.home.path().join("logs").join("service.log")];
+    assert!(ctl.log().iter().any(|l| l["event"] == "events"), "the state service logged its posts");
+    no_secrets(&[&a.home.path().join("logs"), &b.home.path().join("logs")], &ctl.log(), &must);
+}
+
+#[tokio::test]
+async fn three_hundred_changes_leave_a_gap_row() {
+    let mut ctl = Ctl::new().await;
+    let (a, b, b_fp) = ctl_pair(29230, &ctl).await;
+    let p = ctl.port;
+    working_arrives(&b, &ctl).await;
+    ctl.stop().await;
+    // 300 new questions; 120 ms apart so the fake's watch sends each one.
+    for seq in 1..=300 {
+        term_json(b.home.path(), "blocked", seq);
+        tokio::time::sleep(Duration::from_millis(120)).await;
+    }
+    let r = wait_state(&b, WAIT, |r| r["outbox"]["dropped"] == 100).await;
+    assert_eq!((r["outbox"]["cached"].clone(), r["outbox"]["up"].clone()), (json!(200), json!(false)), "{r}");
+
+    ctl.start().await;
+    // The backoff has grown to up to a minute while it was down.
+    let q = wait_queue(p, Duration::from_secs(90), |q| q.iter().any(|r| r["t"] == "gap")).await;
+    let gaps: Vec<&Value> = q.iter().filter(|r| r["t"] == "gap").collect();
+    assert_eq!(gaps.len(), 1, "{gaps:?}");
+    assert_eq!(gaps[0]["fp"], b_fp.as_str(), "{}", gaps[0]);
+    // The snap comes last: the gap row is the newest; under it the 200 kept (questions 101-300),
+    // then the working from before the stop. Questions 1-100 were dropped.
+    assert_eq!(q[0]["t"], "gap", "{}", q[0]);
+    let mut want: Vec<_> = (101..=300).rev().map(|s| st("blocked", s)).collect();
+    want.push(st("working", 0));
+    assert_eq!(shape(&q[1..]), want);
+    all_from(&q, &b_fp);
+    let v = wait_http_state(p, WAIT, |v| session_a(v, &b_fp).is_some_and(|s| s["seq"] == 300)).await;
+    assert_eq!(session_a(&v, &b_fp).unwrap()["state"], "blocked", "{v}");
+    let r = wait_state(&b, WAIT, |r| r["outbox"]["cached"] == 0 && r["outbox"]["up"] == true).await;
+    assert_eq!(r["outbox"]["dropped"], 100, "{r}");
+    wait_log(b.home.path(), "outbox_dropped", |v| v["count"] == 100).await;
+    ctl_share_stays(&a, &ctl).await;
+    let must = [a.home.path().join("logs").join("service.log"), b.home.path().join("logs").join("service.log")];
+    assert!(ctl.log().iter().any(|l| l["event"] == "events"), "the state service logged its posts");
+    no_secrets(&[&a.home.path().join("logs"), &b.home.path().join("logs")], &ctl.log(), &must);
+}
+
+#[tokio::test]
+async fn no_text_in_any_log() {
+    let (a, b, p, b_fp) = told_pair(29250).await;
+    let q = working_blocked_done(&b, p, &b_fp).await;
+    // The texts did travel: they are in A's queue and state.
+    assert!(q.iter().all(|r| r["msg"] == "SECRET-TEXT" && r["name"] == "secret-name" && r["title"] == "SECRET-TITLE"), "{q:?}");
+    let (al, bl) = (a.home.path().join("logs"), b.home.path().join("logs"));
+    let must = [al.join("service.log"), al.join("rapp-state.log"), bl.join("service.log")];
+    // The state service logged the posts it took.
+    let text = std::fs::read_to_string(&must[1]).unwrap();
+    assert!(text.contains("\"event\":\"events\""), "{text}");
+    let n = no_secrets(&[&al, &bl], &[], &must);
+    assert!(n >= must.len(), "{n}");
 }

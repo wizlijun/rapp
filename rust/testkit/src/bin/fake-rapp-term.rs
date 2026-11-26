@@ -7,7 +7,7 @@
 //! `rename` `{"ok":true}`. `view` says hello and echoes every line back. `term.log` next to argv[0] gets
 //! `argv <arguments>` per start, `view <term> <lines>` per view (never the lines), `open <request>`,
 //! `rename <request>`, `end <request>`, `watch open` and `watch closed`. A `fake_rows` item is a key, or
-//! `{"key","ps"?,"title"?,"fg"?}`: the row then carries those fields.
+//! `{"key","ps"?,"title"?,"fg"?,"name"?}`: the row then carries those fields.
 
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -101,13 +101,13 @@ fn row(key: &str) -> Value {
     json!({"id":format!("term:pty:{key}"),"host":null,"name":key,"command":"bash","panes":1,"attached":0,"activity":0,"dead":false,"unread":false})
 }
 
-/// A `fake_rows` item: a key, or `{"key","ps"?,"title"?,"fg"?}` whose other fields go on the row as they are.
+/// A `fake_rows` item: a key, or `{"key","ps"?,"title"?,"fg"?,"name"?}` whose other fields go on the row as they are.
 fn fake_row(item: &Value) -> Option<Value> {
     if let Some(key) = item.as_str() {
         return Some(row(key));
     }
     let mut r = row(item["key"].as_str()?);
-    for f in ["ps", "title", "fg"] {
+    for f in ["ps", "title", "fg", "name"] {
         if let Some(v) = item.get(f).filter(|v| !v.is_null()) {
             r[f] = v.clone();
         }
