@@ -1,6 +1,9 @@
 // The 状态服务 switch on a device page: turns that device's rapp-state service on or off.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../service_client.dart' show ServiceException;
 import '../shares.dart';
 import '../state/service_switch.dart';
 import 'controls.dart';
@@ -27,6 +30,18 @@ class _StateServiceRowState extends State<StateServiceRow> {
   bool _failed = false;
   bool _busy = false;
   String? _error;
+  Timer? _retry;
+
+  /// The device is too old to have the switch: asking again would not change that.
+  bool _old = false;
+
+  static const _retryEvery = Duration(seconds: 10);
+
+  @override
+  void dispose() {
+    _retry?.cancel();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -37,10 +52,16 @@ class _StateServiceRowState extends State<StateServiceRow> {
   @override
   void didUpdateWidget(StateServiceRow old) {
     super.didUpdateWidget(old);
-    if (old.to != widget.to || old.api != widget.api) {
-      _reply = null;
+    if (old.to != widget.to || old.api != widget.api || old.localId != widget.localId) {
+      final other = old.to != widget.to || old.api != widget.api;
+      _retry?.cancel();
+      _old = false;
       _failed = false;
-      _error = null;
+      if (other) {
+        _reply = null;
+        _error = null;
+        _busy = false;
+      }
       _load();
     }
   }
@@ -55,10 +76,19 @@ class _StateServiceRowState extends State<StateServiceRow> {
     try {
       final r = await api.stateService(to: to);
       if (stale()) return;
-      setState(() => _reply = r);
-    } catch (_) {
+      setState(() {
+        _reply = r;
+        _failed = false;
+      });
+    } catch (e) {
       if (stale()) return;
-      setState(() => _failed = true);
+      final why = e is ServiceException ? e.message : '$e';
+      _old = why.contains('unknown op') || why.contains('old version');
+      setState(() {
+        _failed = true;
+        _reply = null;
+      });
+      if (!_old) _retry = Timer(_retryEvery, _load);
     }
   }
 

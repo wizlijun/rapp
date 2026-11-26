@@ -283,11 +283,11 @@ relay 规格里，经中继的每一条流都要在里面再做一次 TLS 握手
 **`Op::StateSink{id,port,on}`**：设备之间的一个请求，“设备 `id` 的端口 `port` 上有（`on:false`：没了）状态服务”，一行回复就关流（`rust/wire`，`rust/service/src/sink.rs`）。知道的设备告诉自己认识的设备，收到的记进 `local/state-sinks.json`。全部做法见《rapp-state 设计》§7.2。
 
 **`Op::SetService{name,on}`（rapp-state P3）**：设备之间的一个请求，远程打开或关掉那台设备的状态服务，一行回复就关流。线上 `{"op":"set_service","name":"state","on":true|false}`；`on` 缺省是只问状态。
-- 谁能发：和 `Op::Share` 同一条检查（`forward::admit`，只过前三步）：密码连接回 `not supported`；托管策略不许远程设置时回 `policy`。
+- 谁能发：只有按 key 互信的普通设备（`forward::admit`，托管策略不管它）。密码连接或匿名回 `not supported`；服务器设备发来回 `host only`。
 - 回复：成功时就是本机 `rapp state on/off/status` 的回复（`ok`、`on`、`running`、`port`、`error`）；名字不认识回 `unknown service`。
 - 旧设备不认识这个请求，回 `unknown op`；设备页靠它认出旧设备，把“状态服务”开关藏起来。
-- 记录：`service_set` 或 `service_refused`，带 `name`、`on` 和来源。
-- 本机 IPC 的 `set_service` 带 `to` 指向别的设备时就发这个请求；hub 的 `set_service` 命令（`{"cmd":"set_service","id",…}`）给 iOS 用。
+- 记录：被拒记 `service_refused`（带 `reason`），设了记 `service_set`（带 `result`），都带 `name`、`on` 和来源。
+- 本机 IPC 命令是 `{"cmd":"state","to"?,"name"?,"on"?}`：`to` 指向别的设备时就发这个请求并原样返回回复；没有 `to` 时直接问或设本机。hub 的 `{"cmd":"set_service","id",…}` 命令给 iOS 用，它发的就是这个请求。
 
 **命令只有四个**（操作评审 M6）：
 

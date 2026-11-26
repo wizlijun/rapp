@@ -139,4 +139,41 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('已经有一个在 dev-555555555 上'), findsOneWidget);
   });
+
+  testWidgets('a failure that is not "old" retries every 10 s and shows the row once it answers', (tester) async {
+    var n = 0;
+    final api = FakeSwitch()
+      ..onState = (_, _) async {
+        if (++n == 1) throw ServiceException('offline');
+        return {'ok': true, 'on': false};
+      };
+    await tester.pumpWidget(row(api));
+    await tester.pump();
+    expect(find.text('状态服务'), findsNothing);
+    await tester.pump(const Duration(seconds: 9));
+    expect(n, 1);
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    expect(n, 2);
+    expect(find.text('状态服务'), findsOneWidget);
+  });
+
+  testWidgets('unknown op is not retried', (tester) async {
+    final api = FakeSwitch()..onState = (_, _) async => throw ServiceException('unknown op');
+    await tester.pumpWidget(row(api));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 35));
+    expect(api.calls, ['state 111111111 null']);
+  });
+
+  testWidgets('a new localId asks again', (tester) async {
+    final api = FakeSwitch();
+    final k = UniqueKey();
+    Widget w(String? id) => wrap(StateServiceRow(key: k, api: api, to: null, nameOf: (i) => i, localId: id));
+    await tester.pumpWidget(w(null));
+    await tester.pump();
+    await tester.pumpWidget(w('999999999'));
+    await tester.pump();
+    expect(api.calls.length, 2);
+  });
 }
