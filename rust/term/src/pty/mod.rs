@@ -2,9 +2,14 @@ pub mod consent;
 pub mod fg;
 pub mod fit;
 pub mod grid;
+#[cfg(unix)]
 pub mod holder;
+#[cfg(unix)]
 pub mod launch;
+#[cfg(unix)]
 pub mod local;
+// Windows: snapshots need unix permissions, `kill` and the holder's socket; back in phase E.
+#[cfg(unix)]
 pub mod saved;
 pub mod ps;
 pub mod resume;
@@ -87,6 +92,7 @@ impl Shared {
         self.dirty.send_modify(|v| *v += 1);
     }
 
+    #[cfg(unix)]
     pub fn status(&self) -> local::Status {
         let fg = self.fg.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let s = self.emu.lock().unwrap_or_else(|e| e.into_inner()).screen();

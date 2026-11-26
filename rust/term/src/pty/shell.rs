@@ -4,21 +4,31 @@
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 
 /// The version of the hook files; bump it whenever one of them changes, so installed copies are written again.
 pub const HOOK_V: u32 = 3;
+// Windows: no hook files before phase E.
+#[cfg(unix)]
 const ZSHENV: &str = include_str!("hook/zshenv");
+#[cfg(unix)]
 const RAPP_ZSH: &str = include_str!("hook/rapp.zsh");
+#[cfg(unix)]
 const RAPP_BASH: &str = include_str!("hook/rapp.bash");
+#[cfg(unix)]
 const RAPP_FISH: &str = include_str!("hook/rapp.fish");
 /// Each hook file and where it goes under `shell/`.
+#[cfg(unix)]
 const FILES: [(&str, &str); 4] =
     [("zsh/.zshenv", ZSHENV), ("rapp.zsh", RAPP_ZSH), ("rapp.bash", RAPP_BASH), ("rapp.fish", RAPP_FISH)];
 
 /// Writes the hook files under `<term_dir>/shell/` (0700) unless that version is there already; the `shell/` dir.
 /// Each file is written to a temporary name and renamed, so a shell starting meanwhile reads a whole file.
+#[cfg(unix)]
 pub fn install(term_dir: &Path) -> std::io::Result<PathBuf> {
     let dir = term_dir.join("shell");
     for d in [dir.clone(), dir.join("zsh")] {
@@ -200,6 +210,7 @@ impl ShellState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
@@ -321,6 +332,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn install_rewrites_on_version_change() {
         let d = tempfile::tempdir().unwrap();
