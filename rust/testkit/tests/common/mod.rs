@@ -451,6 +451,17 @@ impl Hub {
         self.next().await
     }
 
+    /// Sends `v` to a host whose fingerprint the hub saves on this connect: the hub first says so with a
+    /// `hosts` event (no `req`), then answers. Returns the fingerprint `id` has in that event, and the answer.
+    pub async fn call_learning_fp(&mut self, v: Value, id: &str) -> (Value, Value) {
+        self.send(v).await;
+        let hosts = self.next().await;
+        assert_eq!((&hosts["event"], &hosts["req"]), (&json!("hosts"), &Value::Null), "{hosts}");
+        let row = hosts["hosts"].as_array().into_iter().flatten().find(|h| h["id"] == id);
+        let fp = row.map(|h| h["fp"].clone()).unwrap_or(Value::Null);
+        (fp, self.next().await)
+    }
+
     /// Closes stdin and waits for the hub to exit; returns remaining events (`path` and `net` events left out).
     pub async fn finish(mut self) -> Vec<Value> {
         self.w.shutdown().await.unwrap();

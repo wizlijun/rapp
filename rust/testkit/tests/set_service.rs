@@ -119,7 +119,8 @@ async fn set_service_says_the_reply() {
     let hosts = json!([{"id": a.id, "name": "a", "lan": [a_addr(&a.svc).to_string()]}]);
     std::fs::write(h.path().join("hosts.json"), hosts.to_string()).unwrap();
     let mut hub = Hub::start(h.path(), a.bins.path());
-    let r = hub.call(json!({"cmd":"set_service","id":a.id,"name":"state","on":true})).await;
+    // The host has no saved fingerprint yet: the hub says the one it learns first.
+    let (_, r) = hub.call_learning_fp(json!({"cmd":"set_service","id":a.id,"name":"state","on":true}), &a.id).await;
     assert_eq!((&r["event"], &r["id"], &r["reply"]["ok"], &r["reply"]["on"]), (&json!("service"), &json!(a.id), &json!(true), &json!(true)), "{r}");
     wait_state(&a, true).await;
     let r = hub.call(json!({"cmd":"set_service","id":a.id})).await;
