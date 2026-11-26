@@ -45,7 +45,7 @@
 
 - **写了的**：两个空壳 crate 进 workspace；`rapp-net` 的 Windows 部分（`rust/net/src/win.rs`，新增的 `unsafe` 只在这一个文件）；`rapp-service` 的单实例和 `--supervised`；`rapp-term` 的 unix 部分包起来；`rapp-cli` 在 Windows 上的入口；测试在 Windows 上的写法（七处权限断言、testkit 复制四个假程序）；`.gitattributes`；`rust/.cargo/config.toml`；`scripts/stage-windows.ps1`、`scripts/check-windows.ps1`；规格 §19.2 列的旧文档句子；`tasks/todo.md` 末尾两个新标题。
 - **没做的**：`CLAUDE.md` 没动（四条文字在说明文件第 2 节，要先给用户看）；所有要 Windows 机器的步骤；Flutter 的 Windows 构建；§17.2 的完成标记；合并。
-- **计划里错的，已经改回计划 A**：中继只改 `audit.rs` 不够（见 4.2，用户已同意再改 `admin.rs`）；`rapp-state` 和余力的 `disks.rs` 是计划之后才进 main 的 unix 代码；testkit 的假程序是四个不是三个；`rapp-term` 的“改名检查”要改成比内容；`rust/.cargo/config.toml` 只在当前目录是 `rust\` 时生效。
+- **计划里错的，已经改回计划 A**：中继只改 `audit.rs` 不够（见 4.2，用户已同意再改 `admin.rs`，草稿里已经写了：提交 `132111ad`、`ddbdc52b`；Windows 上因此关掉“换钥”一组八个测试，首发前手工验一次，在计划 H 任务 5）；`rapp-state` 和余力的 `disks.rs` 是计划之后才进 main 的 unix 代码；testkit 的假程序是四个不是三个；`rapp-term` 的“改名检查”要改成比内容；`rust/.cargo/config.toml` 只在当前目录是 `rust\` 时生效。
 - **最先会撞上的**：
   1. `Cargo.lock` 没重新生成。第一次跑 cargo 会改它，这是加依赖的正常结果，和功能一起提交（只是不许动里面的版本号行，那归发版 session）。
   2. `rust/net/src/win.rs` 里 `windows-sys` 0.61 的签名和特性开关（`SetNamedSecurityInfoW`、`EXPLICIT_ACCESS_W`/`TRUSTEE_W`、`GetAce`、`GetDiskFreeSpaceExW`）是凭记忆写的。
