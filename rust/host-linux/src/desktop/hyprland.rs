@@ -35,6 +35,30 @@ pub fn request(command: &str) -> Result<Vec<u8>> {
 pub fn windows() -> Result<Vec<NativeWindow>> {
     parse_windows(&serde_json::from_slice(&request("j/clients")?)?)
 }
+pub fn active_window_is_terminal() -> bool {
+    request("j/activewindow")
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .is_some_and(|value| is_terminal_window(&value))
+}
+pub(crate) fn is_terminal_window(value: &Value) -> bool {
+    if value["tags"]
+        .as_array()
+        .is_some_and(|tags| {
+            tags.iter().any(|tag| {
+                tag.as_str()
+                    .is_some_and(|t| t.trim_end_matches('*') == "terminal")
+            })
+        })
+    {
+        return true;
+    }
+    ["class", "initialClass"].iter().any(|key| {
+        value[*key]
+            .as_str()
+            .is_some_and(super::is_terminal_class)
+    })
+}
 pub fn pointer_cover(x: f32, y: f32, selected_pid: u32) -> Result<Option<super::Cover>> {
     // Layer-shell overlays (launchers, notifications, authentication prompts)
     // are not in j/clients and must never receive an app session's click.
@@ -262,4 +286,50 @@ pub fn dispatch(
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn identifies_terminal_windows_by_tag_and_class() {
+        assert!(is_terminal_window(&json!({
+            "class": "custom-tui",
+            "tags": ["omarchy-floating-workspace", "terminal*"]
+        })));
+        assert!(is_terminal_window(&json!({
+            "class": "custom-tui",
+            "tags": ["terminal"]
+        })));
+        for class in [
+            "foot",
+            "org.codeberg.dnkl.foot",
+            "Alacritty",
+            "kitty",
+            "com.mitchellh.ghostty",
+            "wezterm",
+            "org.omarchy.btop",
+            "TUI.float",
+            "gnome-terminal-server",
+            "konsole",
+        ] {
+            assert!(
+                is_terminal_window(&json!({"class": class, "tags": []})),
+                "expected terminal class: {class}"
+            );
+            assert!(
+                is_terminal_window(&json!({"class": "", "initialClass": class})),
+                "expected terminal initialClass: {class}"
+            );
+        }
+        for class in ["notemd", "com.rapp.rapp", "firefox", "chromium", "org.gnome.Nautilus", ""] {
+            assert!(
+                !is_terminal_window(&json!({"class": class, "tags": ["transparent-window*"]})),
+                "unexpected terminal class: {class}"
+            );
+        }
+        assert!(!is_terminal_window(&json!({})));
+    }
 }
