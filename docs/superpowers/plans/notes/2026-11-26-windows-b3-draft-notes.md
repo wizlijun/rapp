@@ -202,7 +202,10 @@
    - password 加 name 认证后，`session_start` 日志带 `name`。
    - 关 stdin 后退出事件的 reason 是 `stdin closed`（run.rs `on_eof`）。
    - 服务启动时可能先调用 `rapp-host check --json` 等命令，fake-host-core 都支持。
-5. **比较类型不匹配**：`matches!` 守卫里拿 `&String` 和 `&str` 比，`Vec<String>` 和 `[&str; N]` 比，可能需要 `.as_str()` 或 `as_slice`。
+5. **比较类型（第四批逐处看过，判断能编译）**：
+   - `&String == &str` 走 `impl PartialEq<&B> for &A`（要 `String: PartialEq<str>`，有）；`Vec<String> == [&str; N]`、`Vec<&String> == [&str; N]` 走 `impl PartialEq<[U; N]> for Vec<T>`（要 `T: PartialEq<U>`，有）。看过的地方：host_session.rs:37、789、827、842、1485、1887、1920，rules_lock.rs:248，filename.rs:140，regions.rs:77，detectors.rs:87，hints.rs:131。
+   - 会编不过的是 `&&String == &str` 和 `Option<String> == Option<&str>`。第四批按这两种写法搜过，没有找到；`Option` 的比较都先 `.as_deref()` 了。
+   - 编译器真报出来时，改法是 `.as_str()` 或 `.as_deref()`。
 6. **会话互斥锁持有过久。**
    - 慢的 `focus_chain` 期间，会话的 `Shared<dyn ControlOps>` 锁一直被持有，会挡住会话线程的 secure 和 cover 轮询。
    - “clear to input” 在会话线程上最多睡 50 ms。

@@ -55,12 +55,13 @@ impl Session {
         let spawned = std::thread::Builder::new().name("rapp-host unlock".into()).spawn(move || {
             let units = password_units(password.as_str());
             drop(password);
-            // Once the session is gone nothing more is typed: B is no longer there to want it.
-            let is_locked = || alive.load(Ordering::SeqCst) && hold(&lock).locked();
             let mut log = |text: &str| out.log(text);
             // Held until A has finished checking, so the next typist sees the settled state.
+            // Every closure below only borrows `lock`, `alive` and `clock` (shared), so they
+            // can all live at once; `locked` is made here, inside the body, and reborrowed.
             with_unlock_lock(&file, &mut log, || {
-                let mut locked = is_locked;
+                // Once the session is gone nothing more is typed: B is no longer there to want it.
+                let mut locked = || alive.load(Ordering::SeqCst) && hold(&lock).locked();
                 type_unlock_password(
                     &units,
                     &mut locked,
