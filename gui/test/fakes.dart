@@ -5,6 +5,8 @@ import 'package:flutter/widgets.dart';
 import 'package:rapp/embed/composer_editor.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/state/state_link.dart';
+import 'package:rapp/state/state_out.dart';
 import 'package:rapp/state/state_sync.dart';
 import 'package:rapp/term/term_model.dart';
 import 'package:rapp/term/term_session_port.dart';
@@ -270,7 +272,23 @@ class FakeTermSessionPort extends TermSessionPort {
 
 /// A [StateSync] the test drives by hand: set the fields, then `notifyListeners()`. It never connects.
 class FakeStateSync extends StateSync {
-  FakeStateSync(String localDir) : super(localDir: localDir, find: () async => null);
+  FakeStateSync(String localDir) : super(localDir: localDir, find: () async => null, out: FakeStateOut());
+
+  @override
+  FakeStateOut get out => super.out as FakeStateOut;
+
+  List<Map<String, Object?>> _desks = [];
+  @override
+  List<Map<String, Object?>> get desks => _desks;
+  set desks(List<Map<String, Object?>> v) => _desks = v;
+
+  @override
+  String? fpOf(String deviceId) {
+    for (final e in ids.entries) {
+      if (e.value == deviceId) return e.key;
+    }
+    return null;
+  }
 
   StateStatus _status = StateStatus.off;
   List<Map<String, Object?>> _rows = [];
@@ -326,4 +344,22 @@ class FakeStateSync extends StateSync {
   }
 
   void push() => notifyListeners();
+}
+
+/// A [StateOut] that records what it is told and sends nothing.
+class FakeStateOut extends StateOut {
+  final List<(String, String?, String, AppReport?)> reports = [];
+  final List<List<Map<String, Object?>>> desksSet = [];
+  int attaches = 0;
+  int detaches = 0;
+
+  @override
+  void report({required String fp, String? id, required String session, required AppReport? now}) =>
+      reports.add((fp, id, session, now));
+  @override
+  void setDesk(List<Map<String, Object?>> sessions) => desksSet.add(sessions);
+  @override
+  void attach(StateLink link, Map<String, Object?> snapshot) => attaches++;
+  @override
+  void detach() => detaches++;
 }

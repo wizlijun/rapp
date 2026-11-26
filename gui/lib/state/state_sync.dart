@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import 'state_config.dart';
 import 'state_link.dart';
+import 'state_out.dart';
 
 enum StateStatus { off, none, connecting, connected, unreachable }
 
@@ -18,7 +19,9 @@ class StateSync extends ChangeNotifier {
     required this.find,
     StateLink Function(Uri)? link,
     DateTime Function()? clock,
-  }) : _makeLink = link ?? StateLink.new,
+    StateOut? out,
+  }) : out = out ?? StateOut(),
+       _makeLink = link ?? StateLink.new,
        config = StateConfig.load(localDir);
 
   static const maxRows = 200;
@@ -28,6 +31,9 @@ class StateSync extends ChangeNotifier {
   final String localDir;
   final Future<String?> Function() find;
   final StateLink Function(Uri) _makeLink;
+
+  /// The app's own reports and desk upload; attached while connected.
+  final StateOut out;
 
   StateConfig config;
   StateStatus status = StateStatus.off;
@@ -42,6 +48,10 @@ class StateSync extends ChangeNotifier {
   bool hasSnapshot = false;
 
   List<Row> _devices = [];
+  Map<String, Row> _desks = {};
+
+  /// Every app's desk by fingerprint, sorted by fp.
+  List<Row> get desks => [for (final k in _desks.keys.toList()..sort()) _desks[k]!];
 
   /// "Seen" marks not sent yet, by device id; the fp is looked up when they go out (spec §9.3).
   final _pending = <(String deviceId, String session)>[];
@@ -144,6 +154,7 @@ class StateSync extends ChangeNotifier {
   }
 
   void _cancelAll() {
+    out.detach();
     _timer?.cancel();
     _timer = null;
     _refetch?.cancel();
@@ -160,6 +171,7 @@ class StateSync extends ChangeNotifier {
     hasSnapshot = false;
     _known = false;
     _devices = [];
+    _desks = {};
     rows = [];
     needs = [];
   }
@@ -248,6 +260,7 @@ class StateSync extends ChangeNotifier {
     _attempt = 0;
     _grace = false;
     _set(StateStatus.connected);
+    out.attach(link, {'devices': _devices});
     _flush();
   }
 
@@ -281,6 +294,12 @@ class StateSync extends ChangeNotifier {
         for (final x in d)
           if (x is Row) {...x, 'sessions': _sessions(x).map((s) => {...s}).toList()},
     ];
+    final ds = st['desks'];
+    _desks = {
+      if (ds is List)
+        for (final x in ds)
+          if (x is Row && x['fp'] is String) x['fp'] as String: x,
+    };
     final n = st['needs'];
     needs = n is List ? n.whereType<Row>().toList() : [];
   }
@@ -335,6 +354,16 @@ class StateSync extends ChangeNotifier {
         if (n is List) needs = n.whereType<Row>().toList();
       case 'seen':
         _onSeen(e);
+      case 'desk':
+        final fp = e['fp'];
+        final d = e['desk'];
+        if (fp is String) {
+          if (d is Row) {
+            _desks[fp] = {'fp': fp, ...d};
+          } else {
+            _desks.remove(fp);
+          }
+        }
       default:
         return false;
     }
@@ -377,6 +406,7 @@ class StateSync extends ChangeNotifier {
         final st = await link.state();
         if (_disposed || gen != _gen) return;
         _applyState(st);
+          out.attach(link, {'devices': _devices});
         notifyListeners();
       } catch (_) {
         // The watch notices a dead link itself; a failed look leaves things as they were.
