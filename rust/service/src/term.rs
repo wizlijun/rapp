@@ -25,6 +25,20 @@ use tokio::sync::Notify;
 
 /// How long the worker has to give its (first) answer.
 const ASK_WAIT: Duration = Duration::from_secs(30);
+/// One restored terminal's share of a `restore` wait. Equal to the hub's `OPEN_TERM_WAIT` (rapp-hub link.rs): the
+/// service must never give up before the hub does.
+const RESTORE_WAIT_PER_KEY: Duration = Duration::from_secs(45);
+/// Empty `keys` means "all restorable", a count the service does not know: waits as for this many (serve keeps at
+/// most 50 snapshots), so the wait stays bounded.
+const RESTORE_ALL_KEYS: u32 = 50;
+
+/// How long a `restore` of `keys` waits for serve: per key, never less than for one, bounded for "all".
+fn restore_wait(keys: &[String]) -> Duration {
+    if keys.is_empty() {
+        return RESTORE_WAIT_PER_KEY * RESTORE_ALL_KEYS;
+    }
+    RESTORE_WAIT_PER_KEY * u32::try_from(keys.len()).unwrap_or(RESTORE_ALL_KEYS).min(RESTORE_ALL_KEYS)
+}
 
 /// Held around every read-modify-write of `term.json`.
 static EDIT: Mutex<()> = Mutex::new(());
@@ -70,7 +84,8 @@ pub async fn request<S: AsyncRead + AsyncWrite + Unpin + Send>(
                 answer(ask(state, &json!({"op": "open", "shell": shell, "from": from, "app": app})).await)
             }
             Op::RestoreTerms { keys, app } => {
-                answer(ask(state, &json!({"op": "restore", "keys": keys, "app": app})).await)
+                let wait = restore_wait(&keys);
+                answer(ask_for(state, &json!({"op": "restore", "keys": keys, "app": app}), wait).await)
             }
             Op::ForgetTerms { keys } => answer(ask(state, &json!({"op": "forget", "keys": keys})).await),
             Op::EndTerm { term } => answer(ask(state, &json!({"op": "end", "term": term})).await),
@@ -136,13 +151,13 @@ async fn next(w: &mut WorkerConn) -> Result<Option<Value>> {
 }
 
 /// Connects with `req` and waits for the worker's first line.
-async fn first(port: u16, token: &str, req: &Value) -> Result<(WorkerConn, Value)> {
+async fn first(port: u16, token: &str, req: &Value, wait: Duration) -> Result<(WorkerConn, Value)> {
     let asked = async {
         let mut w = connect(port, token, req).await?;
         let v = next(&mut w).await?.ok_or_else(|| anyhow!("the terminal worker closed"))?;
         Ok((w, v))
     };
-    tokio::time::timeout(ASK_WAIT, asked).await.map_err(|_| anyhow!("the terminal worker did not answer"))?
+    tokio::time::timeout(wait, asked).await.map_err(|_| anyhow!("the terminal worker did not answer"))?
 }
 
 /// One session counted on the worker (`workers::start_session` succeeded), ended when this is dropped: however
@@ -164,8 +179,13 @@ async fn start(state: &Arc<State>) -> Result<(u16, String, Counted<'_>)> {
 
 /// A one-line request (`list`, `new`) to the worker.
 pub(crate) async fn ask(state: &Arc<State>, req: &Value) -> Result<Value> {
+    ask_for(state, req, ASK_WAIT).await
+}
+
+/// [`ask`] waiting up to `wait` for the answer.
+pub(crate) async fn ask_for(state: &Arc<State>, req: &Value, wait: Duration) -> Result<Value> {
     let (port, token, _counted) = start(state).await?;
-    first(port, &token, req).await.map(|(_, v)| v)
+    first(port, &token, req, wait).await.map(|(_, v)| v)
 }
 
 /// The worker's watch, passed on to B. The worker's session count stays up until the watch ends, so it is not
@@ -197,7 +217,7 @@ async fn follow<S: AsyncRead + AsyncWrite + Unpin + Send>(
     port: u16,
     token: &str,
 ) -> Result<()> {
-    let (mut w, line) = match first(port, token, &json!({"op": "watch"})).await {
+    let (mut w, line) = match first(port, token, &json!({"op": "watch"}), ASK_WAIT).await {
         Ok((w, v)) => (Some(w), answer(Ok(v))),
         Err(e) => (None, answer(Err(e))),
     };
@@ -418,6 +438,17 @@ mod tests {
         std::fs::write(&q, "[1]").unwrap();
         write_allow(&q, false).unwrap();
         assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(&q).unwrap()).unwrap(), json!({"allow":false}));
+    }
+
+    #[test]
+    fn restore_wait_scales_with_keys_and_is_bounded() {
+        let k = |n: usize| vec!["k".to_string(); n];
+        assert_eq!(restore_wait(&k(1)), RESTORE_WAIT_PER_KEY);
+        assert_eq!(restore_wait(&k(3)), RESTORE_WAIT_PER_KEY * 3);
+        assert!(restore_wait(&k(3)) > ASK_WAIT);
+        let all = restore_wait(&[]);
+        assert_eq!(all, RESTORE_WAIT_PER_KEY * RESTORE_ALL_KEYS);
+        assert_eq!(restore_wait(&k(500)), all);
     }
 
     #[test]
