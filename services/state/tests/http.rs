@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use rapp_state::{serve, serve_with_log, Config, Log};
 use serde_json::{json, Value};
@@ -204,4 +205,111 @@ async fn seen_answers_204_404_400() {
     let row = get(addr, "/v1/queue?limit=1").await.1["events"][0].clone();
     assert_eq!(row["handled"], true);
     assert!(row["seen"].is_u64());
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+}
+
+/// Two states of session `s` on device `aa`, dated now (a device silent for 30 days is dropped).
+async fn post_sample(addr: SocketAddr) {
+    let t = unix_now();
+    let ev = |n: u64| json!({"v":1,"fp":"aa","epoch":"e","n":n,"at":t,"t":"state","session":"s","state":"working","seq":n}).to_string();
+    assert_eq!(post(addr, "/v1/events", &format!("{}\n{}\n", ev(1), ev(2))).await, (204, Value::Null));
+}
+
+async fn first_session_over_http(addr: SocketAddr) -> (String, String) {
+    let st = get(addr, "/v1/state").await.1;
+    let d = &st["devices"][0];
+    (d["fp"].as_str().unwrap().into(), d["sessions"][0]["session"].as_str().unwrap().into())
+}
+
+/// Opens `GET /v1/watch` and hands over every `data:` line as JSON. Dropping the receiver hangs up.
+async fn watch(addr: SocketAddr) -> tokio::sync::mpsc::Receiver<Value> {
+    let mut s = TcpStream::connect(addr).await.unwrap();
+    s.write_all(b"GET /v1/watch HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
+    let (tx, rx) = tokio::sync::mpsc::channel(64);
+    tokio::spawn(async move {
+        let (mut buf, mut head_done) = (Vec::new(), false);
+        let mut chunk = [0u8; 4096];
+        loop {
+            let n = tokio::select! {
+                n = s.read(&mut chunk) => match n { Ok(n) if n > 0 => n, _ => return },
+                _ = tx.closed() => return,
+            };
+            buf.extend_from_slice(&chunk[..n]);
+            if !head_done {
+                let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") else { continue };
+                let head = String::from_utf8_lossy(&buf[..end]).to_lowercase();
+                assert!(head.starts_with("http/1.1 200") && head.contains("content-type: text/event-stream"), "{head}");
+                buf.drain(..end + 4);
+                head_done = true;
+            }
+            // Chunk-size lines and `: ping` lines are not `data:` lines, so they are skipped.
+            while let Some(nl) = buf.iter().position(|b| *b == b'\n') {
+                let line: Vec<u8> = buf.drain(..=nl).collect();
+                let line = String::from_utf8(line).unwrap();
+                if let Some(data) = line.trim_end().strip_prefix("data: ") {
+                    if tx.send(serde_json::from_str(data).unwrap()).await.is_err() {
+                        return;
+                    }
+                }
+            }
+        }
+    });
+    rx
+}
+
+async fn recv(w: &mut tokio::sync::mpsc::Receiver<Value>) -> Value {
+    tokio::time::timeout(Duration::from_secs(2), w.recv()).await.expect("no push within 2 s").expect("watch ended")
+}
+
+#[tokio::test]
+async fn watch_says_hello_then_pushes_changes() {
+    let addr = start(Config::default()).await;
+    let mut w = watch(addr).await;
+    assert_eq!(recv(&mut w).await, json!({"what":"hello"}));
+    post_sample(addr).await;
+    let mut pushed = vec![];
+    while let Ok(Some(v)) = tokio::time::timeout(Duration::from_millis(500), w.recv()).await {
+        pushed.push(v);
+    }
+    let whats: Vec<&str> = pushed.iter().map(|v| v["what"].as_str().unwrap()).collect();
+    assert!(whats.contains(&"queue") && whats.contains(&"session"), "{whats:?}");
+    // The pushed rows look exactly like the ones GET /v1/state and GET /v1/queue give.
+    let last_row = pushed.iter().rev().find(|v| v["what"] == "session").unwrap();
+    assert_eq!(last_row["row"], get(addr, "/v1/state").await.1["devices"][0]["sessions"][0]);
+    let last_queued = pushed.iter().rev().find(|v| v["what"] == "queue").unwrap();
+    assert_eq!(last_queued["row"], get(addr, "/v1/queue?limit=1").await.1["events"][0]);
+    let (fp, sid) = first_session_over_http(addr).await;
+    assert_eq!(put(addr, "/v1/seen", &json!({"fp": fp, "session": sid}).to_string()).await.0, 204);
+    let seen = recv(&mut w).await;
+    assert_eq!((seen["what"].as_str(), seen["session"].as_str()), (Some("seen"), Some(sid.as_str())));
+    assert!(seen["at"].is_u64());
+}
+
+#[tokio::test]
+async fn a_closed_watch_is_let_go() {
+    let lines: Arc<Mutex<Vec<Value>>> = Arc::default();
+    let sink = lines.clone();
+    let log = Log::new(move |v| sink.lock().unwrap().push(v.clone()));
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    tokio::spawn(serve_with_log(Config::default(), l, log));
+    let mut ws = vec![];
+    for _ in 0..3 {
+        let mut w = watch(addr).await;
+        assert_eq!(recv(&mut w).await["what"], "hello");
+        ws.push(w);
+    }
+    let watching = |name: &str| -> Vec<u64> {
+        let all = lines.lock().unwrap();
+        all.iter().filter(|v| v["event"] == name).map(|v| v["watching"].as_u64().unwrap()).collect()
+    };
+    assert_eq!(watching("watch_open"), [1, 2, 3]);
+    drop(ws);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(watching("watch_closed").last(), Some(&0));
+    let closed = lines.lock().unwrap().iter().filter(|v| v["event"] == "watch_closed").cloned().collect::<Vec<_>>();
+    assert!(closed.iter().all(|v| v["lagged"] == false), "{closed:?}");
 }

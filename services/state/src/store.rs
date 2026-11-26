@@ -60,13 +60,29 @@ pub struct Store {
     devices: BTreeMap<String, Device>,
     /// Oldest first, sorted by (at, arr).
     queue: Vec<Queued>,
+    /// What moved since the last `take_changes`, in the shapes `GET /v1/watch` pushes.
+    #[serde(skip)]
+    changes: Vec<Value>,
 }
 
 const ENVELOPE: [&str; 8] = ["fp", "id", "device", "epoch", "n", "t", "via", "src"];
 
 impl Store {
     pub fn new(keep_days: u64, keep_events: usize) -> Store {
-        Store { keep_days, keep_events, arrivals: 0, seen: BTreeMap::new(), devices: BTreeMap::new(), queue: Vec::new() }
+        Store {
+            keep_days,
+            keep_events,
+            arrivals: 0,
+            seen: BTreeMap::new(),
+            devices: BTreeMap::new(),
+            queue: Vec::new(),
+            changes: Vec::new(),
+        }
+    }
+
+    /// Hands over the changes gathered so far and starts a new list.
+    pub fn take_changes(&mut self) -> Vec<Value> {
+        std::mem::take(&mut self.changes)
     }
 
     pub fn set_limits(&mut self, keep_days: u64, keep_events: usize) {
@@ -80,6 +96,7 @@ impl Store {
         if !self.note_seen(&ev) {
             return false;
         }
+        let needs_before = self.needs();
         let eid = ev.eid();
         let fp = ev.fp().to_string();
         let dev = self.devices.entry(fp.clone()).or_insert_with(|| Device { fp: fp.clone(), id: None, device: None, last: 0, sessions: BTreeMap::new() });
@@ -93,21 +110,40 @@ impl Store {
         match ev.t {
             Kind::State => {
                 let session = ev.body["session"].as_str().unwrap_or_default().to_string();
-                put_row(dev, session, row_data(&ev.body, ev.at, &ev.sender));
+                put_row(dev, session.clone(), row_data(&ev.body, ev.at, &ev.sender));
+                self.changes.push(session_change(&fp, &session, dev.sessions.get(&session)));
             }
             Kind::Gone => {
                 if let Some(s) = ev.body.get("session").and_then(Value::as_str) {
-                    dev.sessions.remove(s);
+                    if dev.sessions.remove(s).is_some() {
+                        self.changes.push(session_change(&fp, s, None));
+                    }
                 }
             }
             Kind::Snap => {
-                dev.sessions.retain(|_, r| r.data.get("by").and_then(Value::as_str) != Some(ev.sender.as_str()));
+                let mut dropped = Vec::new();
+                dev.sessions.retain(|sid, r| {
+                    let keep = r.data.get("by").and_then(Value::as_str) != Some(ev.sender.as_str());
+                    if !keep {
+                        dropped.push(sid.clone());
+                    }
+                    keep
+                });
+                let mut put = Vec::new();
                 for it in ev.body.get("sessions").and_then(Value::as_array).into_iter().flatten() {
                     if let Some(m) = it.as_object() {
                         if let Some(s) = m.get("session").and_then(Value::as_str) {
                             put_row(dev, s.to_string(), row_data(m, ev.at, &ev.sender));
+                            put.push(s.to_string());
                         }
                     }
+                }
+                // A row the snap brought back is pushed once, with its new content.
+                for sid in dropped.iter().filter(|sid| !dev.sessions.contains_key(*sid)) {
+                    self.changes.push(session_change(&fp, sid, None));
+                }
+                for sid in &put {
+                    self.changes.push(session_change(&fp, sid, dev.sessions.get(sid)));
                 }
             }
             Kind::Emit => {}
@@ -133,10 +169,21 @@ impl Store {
             self.arrivals += 1;
             let key = (ev.at, self.arrivals);
             let pos = self.queue.partition_point(|q| (q.at, q.arr) <= key);
-            self.queue.insert(pos, Queued { at: ev.at, arr: self.arrivals, row, seen: None, handled: false });
+            let q = Queued { at: ev.at, arr: self.arrivals, row, seen: None, handled: false };
+            self.changes.push(json!({"what": "queue", "row": queued_json(&q)}));
+            self.queue.insert(pos, q);
             self.trim();
         }
+        self.note_needs(needs_before);
         true
+    }
+
+    /// Adds a `need` change when the needs are no longer `before`.
+    fn note_needs(&mut self, before: Value) {
+        let after = self.needs();
+        if after != before {
+            self.changes.push(json!({"what": "need", "needs": after}));
+        }
     }
 
     fn note_seen(&mut self, ev: &Event) -> bool {
@@ -169,34 +216,54 @@ impl Store {
         let q_min = now.saturating_sub(self.keep_days.saturating_mul(86400));
         self.queue.retain(|q| q.at >= q_min);
         let d_min = now.saturating_sub(DEVICE_DAYS.saturating_mul(86400));
-        self.devices.retain(|_, d| d.last >= d_min);
+        if self.devices.values().all(|d| d.last >= d_min) {
+            return;
+        }
+        let needs_before = self.needs();
+        let (kept, gone): (BTreeMap<_, _>, BTreeMap<_, _>) =
+            std::mem::take(&mut self.devices).into_iter().partition(|(_, d)| d.last >= d_min);
+        self.devices = kept;
+        for d in gone.values() {
+            for sid in d.sessions.keys() {
+                self.changes.push(session_change(&d.fp, sid, None));
+            }
+        }
+        self.note_needs(needs_before);
+    }
+
+    /// The sessions that wait for the user, oldest first: `needs` in `state()`.
+    fn needs(&self) -> Value {
+        let mut needs: Vec<(u64, String, String, Value)> = Vec::new();
+        for d in self.devices.values() {
+            for (sid, r) in &d.sessions {
+                if r.data.get("state").and_then(Value::as_str) != Some("blocked") {
+                    continue;
+                }
+                let since = r.data.get("since").and_then(Value::as_u64).unwrap_or(r.first);
+                let mut n = json!({"fp": d.fp, "session": sid, "since": since});
+                if let Some(v) = &d.id {
+                    n["id"] = json!(v);
+                }
+                if let Some(v) = &d.device {
+                    n["device"] = json!(v);
+                }
+                for k in ["kind", "app", "msg"] {
+                    if let Some(v) = r.data.get(k) {
+                        n[k] = v.clone();
+                    }
+                }
+                needs.push((since, d.fp.clone(), sid.clone(), n));
+            }
+        }
+        needs.sort_by(|a, b| (a.0, &a.1, &a.2).cmp(&(b.0, &b.1, &b.2)));
+        Value::Array(needs.into_iter().map(|n| n.3).collect())
     }
 
     pub fn state(&self) -> Value {
-        let mut needs: Vec<(u64, String, String, Value)> = Vec::new();
         let devices: Vec<Value> = self
             .devices
             .values()
             .map(|d| {
-                for (sid, r) in &d.sessions {
-                    if r.data.get("state").and_then(Value::as_str) != Some("blocked") {
-                        continue;
-                    }
-                    let since = r.data.get("since").and_then(Value::as_u64).unwrap_or(r.first);
-                    let mut n = json!({"fp": d.fp, "session": sid, "since": since});
-                    if let Some(v) = &d.id {
-                        n["id"] = json!(v);
-                    }
-                    if let Some(v) = &d.device {
-                        n["device"] = json!(v);
-                    }
-                    for k in ["kind", "app", "msg"] {
-                        if let Some(v) = r.data.get(k) {
-                            n[k] = v.clone();
-                        }
-                    }
-                    needs.push((since, d.fp.clone(), sid.clone(), n));
-                }
                 let mut o = json!({"fp": d.fp, "last": d.last,
                     "sessions": d.sessions.values().map(row_json).collect::<Vec<_>>()});
                 if let Some(v) = &d.id {
@@ -208,8 +275,7 @@ impl Store {
                 o
             })
             .collect();
-        needs.sort_by(|a, b| (a.0, &a.1, &a.2).cmp(&(b.0, &b.1, &b.2)));
-        json!({"devices": devices, "needs": needs.into_iter().map(|n| n.3).collect::<Vec<_>>(), "queued": self.queue.len()})
+        json!({"devices": devices, "needs": self.needs(), "queued": self.queue.len()})
     }
 
     /// Marks a session (by device and session id) or a queue row (by eid) as seen at `now`.
@@ -218,11 +284,17 @@ impl Store {
             Look::Session { fp, session } => {
                 let row = self.devices.get_mut(fp).and_then(|d| d.sessions.get_mut(session)).ok_or("unknown session")?;
                 row.seen = Some(now);
+                self.changes.push(json!({"what": "seen", "fp": fp, "session": session, "at": now}));
             }
             Look::Eid(eid) => {
                 let q = self.queue.iter_mut().find(|q| q.row["eid"] == eid).ok_or("unknown eid")?;
                 q.seen = Some(now);
-                q.handled = handled;
+                q.handled |= handled;
+                let mut c = json!({"what": "seen", "eid": eid, "at": now});
+                if q.handled {
+                    c["handled"] = json!(true);
+                }
+                self.changes.push(c);
             }
         }
         Ok(())
@@ -247,6 +319,11 @@ fn row_json(r: &Row) -> Value {
         m.insert("seen".into(), json!(t));
     }
     Value::Object(m)
+}
+
+/// `{"what":"session",…}`; a `None` row means the session is gone.
+fn session_change(fp: &str, session: &str, row: Option<&Row>) -> Value {
+    json!({"what": "session", "fp": fp, "session": session, "row": row.map(row_json)})
 }
 
 fn queued_json(q: &Queued) -> Value {
@@ -329,6 +406,80 @@ mod tests {
         feed_one(&mut s, &fp, &sid, "working", 600);
         assert_eq!(session_row(&s, &fp, &sid)["seen"], 500);
         assert_eq!(s.mark_seen(Look::Session { fp: "nope", session: &sid }, false, 1), Err("unknown session"));
+    }
+
+    fn feed_gone(s: &mut Store, fp: &str, sid: &str, at: u64) {
+        let l = json!({"v":1,"fp":fp,"epoch":"e9","n":at,"at":at,"t":"gone","session":sid});
+        s.apply(parse_line(&l.to_string()).unwrap(), at);
+    }
+
+    #[test]
+    fn changes_name_what_moved() {
+        let mut s = st();
+        feed(&mut s, TERM, 2);
+        let ch = s.take_changes();
+        let whats: Vec<&str> = ch.iter().map(|c| c["what"].as_str().unwrap()).collect();
+        assert!(whats.contains(&"session") && whats.contains(&"queue"), "{whats:?}");
+        let row = ch.iter().rev().find(|c| c["what"] == "session").unwrap();
+        assert_eq!(row["row"], session_row(&s, A, "term:pty:a"));
+        let q = ch.iter().find(|c| c["what"] == "queue").unwrap();
+        assert_eq!(q["row"], s.queue(None, 1).unwrap()["events"][0]);
+        assert!(s.take_changes().is_empty());
+        // A blocked state brings a need, the whole list as in state().
+        feed_one(&mut s, "fpA", "t9", "blocked", 900);
+        let need = s.take_changes().into_iter().find(|c| c["what"] == "need").unwrap();
+        assert_eq!(need["needs"], s.state()["needs"]);
+        assert_eq!(need["needs"].as_array().unwrap().len(), 1);
+        // A state that leaves the needs as they were brings none.
+        feed_one(&mut s, A, "term:pty:a", "working", 901);
+        assert!(!s.take_changes().iter().any(|c| c["what"] == "need"));
+        // gone -> session/null, and the need goes too.
+        feed_gone(&mut s, "fpA", "t9", 902);
+        let ch = s.take_changes();
+        assert!(ch.iter().any(|c| c["what"] == "session" && c["fp"] == "fpA" && c["session"] == "t9" && c["row"].is_null()));
+        assert!(ch.iter().any(|c| c["what"] == "need" && c["needs"] == json!([])));
+    }
+
+    #[test]
+    fn a_snap_pushes_null_only_for_rows_it_dropped() {
+        let mut s = st();
+        feed(&mut s, MIXED, 6);
+        s.take_changes();
+        let l = json!({"v":1,"fp":A,"epoch":"e2","n":99,"at":2000,"t":"snap","sessions":[{"session":"term:pty:z","state":"idle"}]});
+        s.apply(parse_line(&l.to_string()).unwrap(), 2000);
+        let ch: Vec<(String, bool)> = s
+            .take_changes()
+            .iter()
+            .filter(|c| c["what"] == "session")
+            .map(|c| (c["session"].as_str().unwrap().to_string(), c["row"].is_null()))
+            .collect();
+        assert!(ch.contains(&("term:pty:z".into(), false)), "{ch:?}");
+        assert!(ch.contains(&("term:pty:c".into(), true)), "{ch:?}");
+        assert!(!ch.iter().any(|(sid, _)| sid == "claude:s1"), "another sender's row stays: {ch:?}");
+    }
+
+    #[test]
+    fn seen_and_expire_are_changes_too() {
+        let mut s = st();
+        feed(&mut s, TERM, 2);
+        s.take_changes();
+        s.mark_seen(Look::Session { fp: A, session: "term:pty:a" }, false, 500).unwrap();
+        assert_eq!(s.take_changes(), [json!({"what":"seen","fp":A,"session":"term:pty:a","at":500})]);
+        let eid = s.queue(None, 1).unwrap()["events"][0]["eid"].as_str().unwrap().to_string();
+        s.mark_seen(Look::Eid(&eid), true, 600).unwrap();
+        assert_eq!(s.take_changes(), [json!({"what":"seen","eid":eid,"at":600,"handled":true})]);
+        s.expire(1764130010 + 31 * 86400);
+        assert_eq!(s.take_changes(), [json!({"what":"session","fp":A,"session":"term:pty:a","row":null})]);
+    }
+
+    #[test]
+    fn a_later_mark_keeps_handled() {
+        let mut s = st();
+        feed(&mut s, TERM, 2);
+        let eid = s.queue(None, 1).unwrap()["events"][0]["eid"].as_str().unwrap().to_string();
+        s.mark_seen(Look::Eid(&eid), true, 700).unwrap();
+        s.mark_seen(Look::Eid(&eid), false, 800).unwrap();
+        assert_eq!(s.queue(None, 1).unwrap()["events"][0]["handled"], true);
     }
 
     #[test]
