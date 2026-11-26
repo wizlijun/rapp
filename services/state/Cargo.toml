@@ -11,7 +11,6 @@ path = "src/lib.rs"
 
 [[bin]]
 name = "rapp-state"
-workspace = "../../rust"
 path = "src/main.rs"
 
 [dependencies]
