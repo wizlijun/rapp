@@ -239,7 +239,7 @@ impl Worker {
             Some(pid) => {
                 local::socket_path(dir, pid).is_ok_and(|p| p.exists())
                     && !statuses.iter().any(|s| s.pid == pid)
-                    && pid_alive(pid)
+                    && saved::pid_alive(pid)
             }
             // Never seen by this worker: it may be the socket that did not answer.
             None => busy,
@@ -392,7 +392,7 @@ impl Worker {
 
     /// The saved terminals that are not alive, oldest start first (pruning the old ones as it goes).
     fn restorable(&self, live: &[Status]) -> Vec<saved::Snapshot> {
-        saved::restorable(&self.opts.pty_dir, &self.live_keys(live), unix_now())
+        saved::restorable(&self.opts.pty_dir, &self.live_keys(live), self.boot_time(), unix_now())
     }
 
     /// The saved terminals not alive now, freshly scanned.
@@ -883,14 +883,6 @@ async fn scan_pty(dir: &std::path::Path, seen: &Seen) -> (Vec<Status>, bool) {
         seen.insert(s.key.clone().unwrap_or_else(|| s.name.clone()), s.pid);
     }
     got
-}
-
-/// Whether process `pid` is alive (one of another user counts).
-fn pid_alive(pid: u32) -> bool {
-    let Ok(pid) = libc::pid_t::try_from(pid) else { return false };
-    // SAFETY: signal 0 only checks that the process exists.
-    let ok = unsafe { libc::kill(pid, 0) == 0 };
-    ok || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 /// The id of a `run` session: its key, or its name when it was started by a version that has no key.
@@ -1458,6 +1450,32 @@ mod tests {
         assert!(!json.contains("secret") && !json.contains("venv") && !json.contains("cmd"), "{json}");
         // The live one's file is still there.
         assert!(crate::pty::saved::read(&w.opts.pty_dir, live).is_some());
+    }
+
+    #[tokio::test]
+    async fn a_busy_live_holder_is_not_pruned_offered_or_restored() {
+        let d = tempfile::Builder::new().prefix("rt").tempdir_in("/tmp").unwrap();
+        let w = worker_in(d.path(), Some(|| Some(1)));
+        let now = unix_now();
+        // A holder (this process) whose socket takes connections but never answers: busy, so no scan lists it.
+        let sock = crate::pty::local::socket_path(&w.opts.pty_dir, std::process::id()).unwrap();
+        std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+        let _busy = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        let k = "0123456789abcde0";
+        let held = crate::pty::saved::Snapshot { pid: Some(std::process::id()), ..snapshot(k, None, now - 40 * 86_400) };
+        crate::pty::saved::write(&w.opts.pty_dir, &held).unwrap();
+        for i in 1..=50u64 {
+            crate::pty::saved::write(&w.opts.pty_dir, &snapshot(&format!("{:016x}", 0x100 + i), None, now - i)).unwrap();
+        }
+        let live = w.pty_statuses().await;
+        assert!(live.iter().all(|s| s.key.as_deref() != Some(k)), "it is busy: no scan lists it");
+        let hosts = w.hosts(&live).await;
+        assert_eq!(hosts[0].saved.len(), 50);
+        assert!(hosts[0].saved.iter().all(|s| s.key != k), "not offered");
+        assert_eq!(crate::pty::saved::read(&w.opts.pty_dir, k), Some(held.clone()), "neither 30 days nor 50 prune it");
+        let (ids, err) = w.restore(&[k.to_string()], None, std::future::pending()).await;
+        assert_eq!((ids, err), (Vec::<String>::new(), None), "no second holder");
+        assert!(crate::pty::saved::read(&w.opts.pty_dir, k).is_some());
     }
 
     #[tokio::test]

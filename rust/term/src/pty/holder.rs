@@ -138,7 +138,12 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
     let lock = tokio::task::spawn_blocking(move || local::name_lock(&dir)).await??;
     let live = local::scan(&opts.dir, &token).await;
     // A key that is live already is that terminal's: this one starts as a new terminal.
-    if restoring.as_ref().is_some_and(|r| live.iter().any(|s| s.key.as_deref() == Some(r.key.as_str()))) {
+    // So is one whose holder is alive but too busy to answer the scan.
+    let live_key = |r: &saved::Snapshot| {
+        live.iter().any(|s| s.key.as_deref() == Some(r.key.as_str()))
+            || r.pid != Some(pid) && saved::held(&opts.dir, r, saved::boot_time())
+    };
+    if restoring.as_ref().is_some_and(live_key) {
         restoring = None;
     }
     let taken: Vec<String> = live.into_iter().map(|s| s.name).collect();
@@ -511,6 +516,7 @@ fn snapshot_with(
         prog,
         started,
         saved: now,
+        pid: Some(shared.meta.pid),
     }
 }
 

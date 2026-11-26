@@ -42,6 +42,9 @@ pub struct Snapshot {
     pub started: u64,
     #[serde(default)]
     pub saved: u64,
+    /// The pid of the holder that wrote it, to tell a busy holder from a dead one. Older snapshots have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
 }
 
 /// A terminal key: 16 lowercase hex characters. Guards file names against `../x`.
@@ -266,10 +269,28 @@ pub fn remove(term_dir: &Path, key: &str) {
     }
 }
 
+/// Whether a process with this pid exists (one of another user's counts).
+pub fn pid_alive(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else { return false };
+    // SAFETY: signal 0 only checks that the process exists.
+    let ok = unsafe { libc::kill(pid, 0) == 0 };
+    ok || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// Whether the holder that wrote `s` looks alive still, though no scan heard from it (it was too busy to answer):
+/// its pid is alive, its socket is there and the snapshot is from this boot (`boot`, None when not known), so the
+/// pid is not one reused since. Such a key is not pruned, offered or restored.
+pub fn held(term_dir: &Path, s: &Snapshot, boot: Option<u64>) -> bool {
+    let Some(pid) = s.pid else { return false };
+    boot.is_none_or(|b| s.saved >= b)
+        && pid_alive(pid)
+        && crate::pty::local::socket_path(term_dir, pid).is_ok_and(|p| p.exists())
+}
+
 /// The snapshots of terminals that are not alive, oldest `started` first. Prunes as it goes: files older than 30 days
 /// and those beyond the 50 newest are deleted, as are junk files. A live key's file is never touched, nor one that
-/// could not be read.
-pub fn restorable(term_dir: &Path, live: &HashSet<String>, now: u64) -> Vec<Snapshot> {
+/// could not be read, nor one whose holder is `held` (`boot` as there).
+pub fn restorable(term_dir: &Path, live: &HashSet<String>, boot: Option<u64>, now: u64) -> Vec<Snapshot> {
     let Ok(rd) = std::fs::read_dir(dir(term_dir)) else { return Vec::new() };
     let mut out = Vec::new();
     for e in rd.flatten() {
@@ -292,6 +313,8 @@ pub fn restorable(term_dir: &Path, live: &HashSet<String>, now: u64) -> Vec<Snap
             continue;
         }
         match load(term_dir, key) {
+            // Alive though it did not answer: not this list's, and not to be pruned.
+            Loaded::Snap(s) if held(term_dir, &s, boot) => {}
             Loaded::Snap(s) if now.saturating_sub(s.saved) <= MAX_AGE => out.push(s),
             // Not readable just now: perhaps a good one, so neither deleted nor offered this time.
             Loaded::Unreadable | Loaded::Missing => {}
@@ -424,7 +447,7 @@ mod tests {
         std::fs::write(&fresh, "x").unwrap();
         let t = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
         std::fs::File::options().write(true).open(&old).unwrap().set_modified(t).unwrap();
-        restorable(d.path(), &HashSet::new(), 10);
+        restorable(d.path(), &HashSet::new(), None, 10);
         assert!(!old.exists() && fresh.exists());
     }
 
@@ -488,16 +511,16 @@ mod tests {
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o000)).unwrap();
         assert_eq!(load(d.path(), &k(1)), Loaded::Unreadable);
         // Skipped this round, not deleted, and not offered.
-        let got = restorable(d.path(), &HashSet::new(), 200);
+        let got = restorable(d.path(), &HashSet::new(), None, 200);
         assert_eq!(got.iter().map(|s| s.key.clone()).collect::<Vec<_>>(), vec![k(2)]);
         assert!(p.exists());
         // Readable again: offered again.
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
-        assert_eq!(restorable(d.path(), &HashSet::new(), 200).len(), 2);
+        assert_eq!(restorable(d.path(), &HashSet::new(), None, 200).len(), 2);
         // A directory in a snapshot's place cannot be read either: left alone too.
         std::fs::create_dir(path(d.path(), &k(5))).unwrap();
         assert_eq!(load(d.path(), &k(5)), Loaded::Unreadable);
-        assert_eq!(restorable(d.path(), &HashSet::new(), 200).len(), 2);
+        assert_eq!(restorable(d.path(), &HashSet::new(), None, 200).len(), 2);
         assert!(path(d.path(), &k(5)).is_dir());
         // What tells a bad file from an unreadable one.
         assert_eq!(load(d.path(), &k(3)), Loaded::Missing);
@@ -526,13 +549,54 @@ mod tests {
         assert!(p.exists());
     }
 
+    /// A holder of this process's pid with its socket bound under `term`, so `held` sees it alive.
+    fn holder_socket(term: &Path) -> std::os::unix::net::UnixListener {
+        let sock = crate::pty::local::socket_path(term, std::process::id()).unwrap();
+        std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+        std::os::unix::net::UnixListener::bind(sock).unwrap()
+    }
+
+    #[test]
+    fn held_needs_a_live_pid_its_socket_and_a_save_since_boot() {
+        let d = tempfile::Builder::new().prefix("rt").tempdir_in("/tmp").unwrap();
+        let me = std::process::id();
+        let s = Snapshot { pid: Some(me), ..snap(&k(1), 1, 100) };
+        assert!(!held(d.path(), &s, Some(50)), "no socket");
+        let _l = holder_socket(d.path());
+        assert!(held(d.path(), &s, Some(50)));
+        assert!(held(d.path(), &s, None), "boot time unknown");
+        assert!(!held(d.path(), &s, Some(101)), "saved before this boot: that pid is another process now");
+        assert!(!held(d.path(), &Snapshot { pid: None, ..s.clone() }, Some(50)), "an old snapshot without a pid");
+        let mut c = std::process::Command::new("/usr/bin/true").spawn().unwrap();
+        let dead = c.id();
+        c.wait().unwrap();
+        assert!(!held(d.path(), &Snapshot { pid: Some(dead), ..s.clone() }, Some(50)), "a dead pid");
+    }
+
+    #[test]
+    fn a_held_key_is_neither_pruned_nor_offered() {
+        let d = tempfile::Builder::new().prefix("rt").tempdir_in("/tmp").unwrap();
+        let _l = holder_socket(d.path());
+        let now = 100 * DAY;
+        // Busy, so not in `live`: older than 30 days and the oldest of 51.
+        let busy = Snapshot { pid: Some(std::process::id()), ..snap(&k(0), 1, now - 40 * DAY) };
+        write(d.path(), &busy).unwrap();
+        for i in 1..=50 {
+            write(d.path(), &snap(&k(i), i, now - i)).unwrap();
+        }
+        let got = restorable(d.path(), &HashSet::new(), Some(1), now);
+        assert_eq!(got.len(), 50);
+        assert!(got.iter().all(|s| s.key != k(0)), "not offered");
+        assert_eq!(read(d.path(), &k(0)), Some(busy), "not pruned");
+    }
+
     #[test]
     fn restorable_excludes_live_keys() {
         let d = tempfile::tempdir().unwrap();
         write(d.path(), &snap(&k(1), 1, 100)).unwrap();
         write(d.path(), &snap(&k(2), 2, 100)).unwrap();
         let live: HashSet<String> = [k(1)].into();
-        let got = restorable(d.path(), &live, 200);
+        let got = restorable(d.path(), &live, None, 200);
         assert_eq!(got.iter().map(|s| s.key.clone()).collect::<Vec<_>>(), vec![k(2)]);
         assert!(path(d.path(), &k(1)).exists());
     }
@@ -543,7 +607,7 @@ mod tests {
         let now = 100 * DAY;
         write(d.path(), &snap(&k(1), 1, now - 31 * DAY)).unwrap();
         write(d.path(), &snap(&k(2), 2, now - 29 * DAY)).unwrap();
-        let got = restorable(d.path(), &HashSet::new(), now);
+        let got = restorable(d.path(), &HashSet::new(), None, now);
         assert_eq!(got.len(), 1);
         assert!(!path(d.path(), &k(1)).exists());
     }
@@ -554,7 +618,7 @@ mod tests {
         for n in 0..55u64 {
             write(d.path(), &snap(&k(n + 1), n, 1000 + n)).unwrap();
         }
-        let got = restorable(d.path(), &HashSet::new(), 2000);
+        let got = restorable(d.path(), &HashSet::new(), None, 2000);
         assert_eq!(got.len(), 50);
         for n in 0..5u64 {
             assert!(!path(d.path(), &k(n + 1)).exists());
@@ -568,7 +632,7 @@ mod tests {
         let now = 100 * DAY;
         write(d.path(), &snap(&k(1), 1, now - 40 * DAY)).unwrap();
         let live: HashSet<String> = [k(1)].into();
-        assert!(restorable(d.path(), &live, now).is_empty());
+        assert!(restorable(d.path(), &live, None, now).is_empty());
         assert!(path(d.path(), &k(1)).exists());
     }
 
@@ -578,7 +642,7 @@ mod tests {
         write(d.path(), &snap(&k(1), 30, 100)).unwrap();
         write(d.path(), &snap(&k(2), 10, 100)).unwrap();
         write(d.path(), &snap(&k(3), 20, 100)).unwrap();
-        let got: Vec<u64> = restorable(d.path(), &HashSet::new(), 200).iter().map(|s| s.started).collect();
+        let got: Vec<u64> = restorable(d.path(), &HashSet::new(), None, 200).iter().map(|s| s.started).collect();
         assert_eq!(got, vec![10, 20, 30]);
     }
 
@@ -588,7 +652,7 @@ mod tests {
         std::fs::create_dir_all(d.path().join("saved")).unwrap();
         std::fs::write(d.path().join("saved/notakey.json"), "{}").unwrap();
         std::fs::write(path(d.path(), &k(1)), "{").unwrap();
-        assert!(restorable(d.path(), &HashSet::new(), 200).is_empty());
+        assert!(restorable(d.path(), &HashSet::new(), None, 200).is_empty());
         assert_eq!(std::fs::read_dir(d.path().join("saved")).unwrap().count(), 0);
     }
 

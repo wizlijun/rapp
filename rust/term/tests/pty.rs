@@ -587,6 +587,23 @@ async fn restore_of_an_unreadable_snapshot_stops_and_keeps_it() {
 }
 
 #[tokio::test]
+async fn restore_of_a_busy_holders_key_takes_a_new_one() {
+    let d = short_dir();
+    // A holder (this test) too busy to answer: its socket takes connections and never replies.
+    let sock = rapp_term::pty::local::socket_path(d.path(), std::process::id()).unwrap();
+    std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+    let _busy = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+    let k = "00000000000000b4";
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let snap = Snapshot { v: 1, key: k.into(), name: "busy".into(), pid: Some(std::process::id()), saved: now, ..Default::default() };
+    saved::write(d.path(), &snap).unwrap();
+    let _w = Window::start(d.path(), &["--restore", k, "--", "/bin/cat"]);
+    let key = key_of(d.path(), "cat").await;
+    assert!(key != k && saved::key_ok(&key), "{key}");
+    assert_eq!(saved::read(d.path(), k), Some(snap), "the busy one's snapshot is its own still");
+}
+
+#[tokio::test]
 async fn restore_of_a_live_key_takes_a_new_one() {
     let d = short_dir();
     let _a = Window::start(d.path(), &["--name", "a", "--", "/bin/cat"]);
