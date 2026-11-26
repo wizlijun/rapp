@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 
 import '../embed/traffic_label.dart';
 import '../service_client.dart';
-import 'controls.dart';
 import 'inbound.dart';
 import 'lamp.dart';
 import 'main_state.dart';
@@ -339,7 +338,7 @@ class _Column extends StatelessWidget {
             ),
             for (final (i, f) in favorites.indexed) ...[
               if (i > 0) const SizedBox(height: 8),
-              _FavoriteBlock(
+              FavoriteBlock(
                 favorite: f,
                 label: state.labelOf(f),
                 verb: state.favoriteCreates(f) ? '新建' : '打开',
@@ -408,58 +407,6 @@ class _OpenAppsLink extends StatelessWidget {
         ),
       );
     });
-  }
-}
-
-/// A favourite that is not open: dashed, 「点按打开」; greyed while it cannot open.
-class _FavoriteBlock extends StatelessWidget {
-  const _FavoriteBlock({required this.favorite, required this.label, required this.verb, required this.onTap});
-  final AppRef favorite;
-  final String label, verb;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RappTokens.of(context);
-    final small = Theme.of(context).textTheme.bodySmall?.copyWith(color: t.muted);
-    final radius = BorderRadius.circular(t.r);
-    return SizedBox(
-      key: Key('ov-favorite-${favorite.key}'),
-      height: 48,
-      child: Semantics(
-        button: true,
-        enabled: onTap != null,
-        label: '常用 $label，${onTap != null ? '点按$verb' : '现在打不开'}',
-        excludeSemantics: true,
-        onTap: onTap,
-        child: Material(
-          type: MaterialType.transparency,
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: radius,
-            child: CustomPaint(
-              foregroundPainter: DashedOutline(t.line, t.r),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Row(children: [
-                  const StatusLamp(Lamp.notOpened),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: onTap != null ? t.text : t.muted),
-                    ),
-                  ),
-                  if (onTap != null) Text(verb, style: small),
-                ]),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
   }
 }
 

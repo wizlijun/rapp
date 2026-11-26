@@ -12,6 +12,7 @@ import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
+import 'package:rapp/ui/session_block.dart';
 import 'package:rapp/ui/session_model.dart';
 import 'package:rapp/ui/side_panel.dart';
 import 'package:rapp/ui/projects_tab.dart';
@@ -87,33 +88,44 @@ void main() {
     await tester.pump();
     expect(s.grouping, Grouping.app);
     expect(find.text('Safari'), findsWidgets);
-    expect(find.text('mini · 局域网'), findsOneWidget);
-    expect(find.text('局域网'), findsNothing);
+    // By app the group title does not name the device, so the card's second line does; never the route.
+    final card = find.byKey(const Key('session-111/Safari'));
+    expect(find.descendant(of: card, matching: find.text('mini · 活动')), findsOneWidget);
+    expect(find.textContaining('局域网'), findsNothing);
+    await tester.tap(find.byKey(const Key('group-device')));
+    await tester.pump();
+    expect(find.descendant(of: card, matching: find.text('活动')), findsOneWidget);
   });
 
   testWidgets('session row semantics include the lamp word', (tester) async {
     await tester.pumpWidget(wrap(panel()));
     await open(tester, 1, 'Safari');
     final h = tester.ensureSemantics();
-    expect(find.bySemanticsLabel('Safari，活动，局域网'), findsOneWidget);
+    expect(find.bySemanticsLabel('Safari，活动'), findsOneWidget);
     h.dispose();
   });
 
-  testWidgets('session row is 60 tall', (tester) async {
+  testWidgets('a session card is as tall as the overview\'s', (tester) async {
     await tester.pumpWidget(wrap(panel()));
     await open(tester, 1, 'Safari');
-    expect(tester.getSize(find.byKey(const Key('session-111/Safari'))).height, 60);
+    expect(tester.getSize(find.byKey(const Key('session-111/Safari'))).height, sessionBlockHeight);
+    expect(find.ancestor(of: find.byKey(const Key('session-111/Safari')), matching: find.byType(SessionBlock)),
+        findsOneWidget);
   });
 
-  testWidgets('selected row gets an inner stroke', (tester) async {
+  testWidgets('the selected card has the overview\'s 2px frame', (tester) async {
     await tester.pumpWidget(wrap(panel()));
     await open(tester, 1, 'Safari');
     await open(tester, 2, 'Mail');
     s.select('111/Safari');
     s.togglePanel();
     await tester.pump();
-    expect(find.byKey(const Key('inner-stroke-111/Safari')), findsOneWidget);
-    expect(find.byKey(const Key('inner-stroke-111/Mail')), findsNothing);
+    double frame(String key) =>
+        ((tester.widget<Container>(find.byKey(Key('frame-session-$key'))).decoration! as BoxDecoration).border! as Border)
+            .top
+            .width;
+    expect(frame('111/Safari'), 2);
+    expect(frame('111/Mail'), 1);
   });
 
   test('tabOrder', () {
@@ -325,14 +337,14 @@ void main() {
     expect(one.style!.color, tokensFor(RappTheme.matrix).text);
   });
 
-  testWidgets('non-embedded rows get no status text (R22)', (tester) async {
+  testWidgets('a pending card says 连接中', (tester) async {
     await tester.pumpWidget(wrap(panel()));
     t.onSend = (_) {}; // the open never answers: a pending row, lamp connecting
     s.openOrSwitch('111', 'Safari', 'Safari');
     await tester.runAsync(flush);
     await tester.pump();
     expect(find.byKey(const Key('session-111/Safari')), findsOneWidget);
-    expect(find.byKey(const Key('session-status-111/Safari')), findsNothing);
+    expect(find.descendant(of: find.byKey(const Key('session-111/Safari')), matching: find.text('连接中')), findsOneWidget);
   });
 
   group('embedded rows', () {
@@ -371,6 +383,7 @@ void main() {
     }
 
     String? text(WidgetTester tester, String key) => tester.widget<Text>(find.byKey(Key(key))).data;
+    Finder textIn(String key, String text) => find.descendant(of: find.byKey(Key('session-$key')), matching: find.text(text));
 
     testWidgets('session rows show rate, idle and reason', (tester) async {
       await tester.pumpWidget(wrap(SidePanel(state: es, devicesTab: const Text('d'))));
@@ -383,13 +396,12 @@ void main() {
       port.emit(const TrafficEvent(3, 100, 1));
       port.emit(const DisconnectedEvent(3, 'host says: Calculator quit'));
       await tester.pump();
-      expect(text(tester, 'session-status-111/a'), '48.0 KB/s');
-      expect(text(tester, 'session-status-111/b'), '空闲');
-      expect(find.text('已断开：远端关闭了 app'), findsOneWidget);
-      expect(text(tester, 'session-status-111/c'), '');
+      expect(textIn('111/a', '48.0 KB/s'), findsOneWidget);
+      expect(textIn('111/b', '空闲'), findsOneWidget);
+      expect(textIn('111/c', '已断开：远端关闭了 app'), findsOneWidget);
       expect(find.bySemanticsLabel(RegExp('已断开：远端关闭了 app')), findsOneWidget);
       // The state word is said once (M-4).
-      expect(find.bySemanticsLabel(RegExp(r'^B，空闲(，局域网)?$')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp(r'^B，空闲$')), findsOneWidget);
     });
 
     testWidgets('total traffic sums live sessions', (tester) async {
@@ -682,8 +694,9 @@ void main() {
     expect(tester.getTopLeft(row).dy, greaterThan(tester.getTopLeft(find.byKey(const Key('session-111/com.apple.Safari'))).dy));
     final lamp = tester.widget<StatusLamp>(find.descendant(of: row, matching: find.byType(StatusLamp)));
     expect(lamp.kind, Lamp.notOpened);
-    expect(tester.getSize(row).height, 60);
+    expect(tester.getSize(row).height, sessionBlockHeight);
     expect(find.descendant(of: row, matching: find.text('mini')), findsOneWidget);
+    expect(find.descendant(of: row, matching: find.text('打开')), findsOneWidget);
   });
 
   testWidgets('favorites show under the empty state', (tester) async {
