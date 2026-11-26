@@ -513,6 +513,33 @@ async fn open_gives_up_after_ten_seconds() {
     w.stop().await;
 }
 
+/// Opens wait their turn; one whose asker closed meanwhile (it gave up waiting) starts no window when its turn
+/// comes. A launcher that only logs keeps the first open busy for its whole 10 s wait.
+#[tokio::test]
+async fn an_open_whose_asker_left_while_queued_starts_no_window() {
+    let dir = short_dir();
+    let log = dir.path().join("launches.log");
+    let script = dir.path().join("launch.sh");
+    std::fs::write(&script, format!("#!/bin/sh\necho \"$2\" >> '{}'\n", log.display())).unwrap();
+    std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+    let w = Worker::start_with(dir, None, None, Some(&script)).await;
+    let open = json!({"op":"open","app":"Terminal"});
+    let mut first = w.connect(&open, TOKEN).await;
+    let launched = |n: usize| std::fs::read_to_string(&log).unwrap_or_default().lines().count() == n;
+    let t = Instant::now();
+    while !launched(1) {
+        assert!(t.elapsed() < WAIT, "the first open did not launch");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let queued = w.connect(&open, TOKEN).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    drop(queued);
+    assert_eq!(first.line(Duration::from_secs(15)).await, Some(json!({"error": "the terminal window did not start in 10 s"})));
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(launched(1), "the queued open launched after its asker left: {:?}", std::fs::read_to_string(&log));
+    w.stop().await;
+}
+
 #[cfg(target_os = "macos")]
 #[tokio::test]
 async fn this_machine_lists_its_launchers() {
