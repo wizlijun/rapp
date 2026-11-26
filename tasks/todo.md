@@ -1231,3 +1231,7 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 11 只关窗口（不重启）后，总览按钮仍说「新建」；设备页有「上次没关的 1 个终端」。
 - [ ] 12 macOS 自己的「重新登录时重新打开窗口」：重启后 Terminal 会不会把 rapp 的旧标签页重开成普通 shell，和恢复出来的混在一起（规格 §8）。⌘Q 的情形见第 13 项。
 - [ ] 13 Terminal.app ⌘Q 实验（会关掉本机所有 Terminal 窗口，先确认没有别的会话在用）：开一个 rapp 文字终端，⌘Q 退出 Terminal 再打开。看标签页回不回来，回来的是同目录的普通 shell 还是重跑 `.command`；再看 rApp 恢复同一个终端后会不会出现两份。结果写进规格 §8。已知 `NSQuitAlwaysKeepsWindows` 没设（系统默认，退出时关闭窗口）。
+
+跟进：
+
+- [ ] `rust/term/src/pty/resume.rs` 改写表的三处问题（终审第 3 条，只影响预填，不会执行）：`claude -p hi` 被改成 `claude -p --continue`（一次性打印，不是交互会话）；表里没有的带值选项（如 `--system-prompt`、`--output-format`）会把 `--continue` 吞成自己的值，或把自己的值当提示词丢掉；子命令也被改写（`claude doctor` → `claude --continue`，`codex exec x` → `codex resume --last`）。做法：claude 的 `-p/--print` 和已知子命令原样不动。
