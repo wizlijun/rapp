@@ -166,19 +166,20 @@ class _HomeScreenState extends State<HomeScreen> {
     final HomeItem? card = items.isEmpty ? null : (items.where((i) => i.id == _open).firstOrNull ?? items.first);
     final rows = [for (final i in items) if (i != card) i];
     final from = _nav.cameFrom;
-    final cap = _maxRows - (from != null ? 1 : 0);
+    // A session that is gone has no row: its raw key is nothing to show or tap.
+    final fromName = from == null ? null : _s.entryFor(from)?.title;
+    final cap = _maxRows - (fromName != null ? 1 : 0);
     final shown = _all || rows.length <= cap + 1 ? rows : rows.take(cap).toList();
     final more = rows.length - shown.length;
     final second = [
       if (m.working.isNotEmpty) '${m.working.length} 个在干活',
       if (m.doneUnseen > 0) '做完 ${m.doneUnseen} 件',
     ].join(' · ');
-    final fromName = from == null ? null : (_s.entryFor(from)?.title ?? from);
     final noMotion = MediaQuery.disableAnimationsOf(context);
     // H10: eight taps in all. Header, second line, 刚才在 and the working rows come first; done rows take what is left.
     final workRows = _allWorking ? m.working.length : m.working.take(_maxWorking).length;
     final workMore = m.working.length - workRows > 0 ? 1 : 0;
-    final doneRoom = 8 - 2 - (from != null ? 1 : 0) - workRows - workMore;
+    final doneRoom = 8 - 2 - (fromName != null ? 1 : 0) - workRows - workMore;
     final done = m.recentDone.take(doneRoom < 0 ? 0 : doneRoom).toList();
     final listOn = h7 && (m.working.isNotEmpty || m.recentDone.isNotEmpty);
 

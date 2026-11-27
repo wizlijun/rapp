@@ -109,6 +109,18 @@ void main() {
     ));
   }
 
+  /// Was in [key]: the session is open (an entry), then left for home.
+  Future<void> cameFromOpen(WidgetTester tester, String key) async {
+    final slash = key.indexOf('/');
+    await tester.runAsync(() async {
+      s.openOrSwitch(key.substring(0, slash), key.substring(slash + 1), key.substring(slash + 1));
+      for (var i = 0; i < 4; i++) {
+        await flush();
+      }
+    });
+    nav.cameFrom = key;
+  }
+
   int taps(WidgetTester tester) {
     var n = 0;
     for (final w in tester.widgetList(find.byWidgetPredicate((w) => w is InkWell || w is PhoneButton))) {
@@ -164,9 +176,9 @@ void main() {
   });
 
   testWidgets('at most eight taps with came from row', (tester) async {
-    await boot(tester);
+    await boot(tester, termPort: true);
     await terms(tester, blocked(12));
-    nav.cameFrom = 'm1/term:pty:w0';
+    await cameFromOpen(tester, 'm1/term:pty:w0');
     nav.notifyListeners();
     await tester.pump();
     expect(find.byType(PhoneRow), findsNWidgets(4));
@@ -231,7 +243,7 @@ void main() {
     await terms(tester, [...many('k', 'working', 4), ...many('d', 'done', 3, unread: true)]);
     expect(find.text('没有等你的。'), findsOneWidget);
     expect(find.text('在干活的'), findsOneWidget);
-    nav.cameFrom = 'm1/term:pty:k0';
+    await cameFromOpen(tester, 'm1/term:pty:k0');
     nav.notifyListeners();
     await tester.pump();
     expect(taps(tester), lessThanOrEqualTo(8));
@@ -240,7 +252,7 @@ void main() {
   testWidgets('waiting list with working and came from stays within eight taps', (tester) async {
     await boot(tester);
     await terms(tester, [...blocked(12), ...many('k', 'working', 2)]);
-    nav.cameFrom = 'm1/term:pty:k0';
+    await cameFromOpen(tester, 'm1/term:pty:k0');
     nav.notifyListeners();
     await tester.pump();
     expect(taps(tester), lessThanOrEqualTo(8));
@@ -256,9 +268,9 @@ void main() {
   });
 
   testWidgets('the last card slides away even when came from clears with it', (tester) async {
-    await boot(tester);
+    await boot(tester, termPort: true);
     await terms(tester, blocked(1));
-    nav.cameFrom = 'm1/term:pty:w0';
+    await cameFromOpen(tester, 'm1/term:pty:w0');
     nav.notifyListeners();
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byType(PhoneCard), findsOneWidget);
@@ -325,7 +337,7 @@ void main() {
   testWidgets('tapping a row keeps came from', (tester) async {
     await boot(tester);
     await terms(tester, blocked(2));
-    nav.cameFrom = 'm1/term:pty:w0';
+    await cameFromOpen(tester, 'm1/term:pty:w0');
     nav.notifyListeners();
     await tester.pump();
     await tester.tap(find.byType(PhoneRow).first);
@@ -364,7 +376,7 @@ void main() {
   testWidgets('came from row', (tester) async {
     await boot(tester);
     await terms(tester, blocked(1));
-    nav.cameFrom = 'm1/term:pty:w0';
+    await cameFromOpen(tester, 'm1/term:pty:w0');
     nav.notifyListeners();
     await tester.pump();
     expect(find.textContaining('刚才在：'), findsOneWidget);
@@ -372,6 +384,17 @@ void main() {
     await tester.pump();
     expect(find.textContaining('刚才在：'), findsNothing);
     expect(nav.cameFrom, isNull);
+  });
+
+  // A session that is gone (closed, its host gone) has no 刚才在 row: a raw key is nothing to tap.
+  testWidgets('came from a gone session shows no row', (tester) async {
+    await boot(tester);
+    await terms(tester, blocked(1));
+    nav.cameFrom = 'm1/term:pty:gone';
+    nav.notifyListeners();
+    await tester.pump();
+    expect(find.textContaining('刚才在'), findsNothing);
+    expect(find.textContaining('term:pty:gone'), findsNothing);
   });
 
   testWidgets('home without service has no empty slots', (tester) async {
