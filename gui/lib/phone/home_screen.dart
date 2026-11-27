@@ -150,7 +150,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final empty = items.isEmpty && m.working.isEmpty && m.recentDone.isEmpty;
     final HomeItem? card = items.isEmpty ? null : (items.where((i) => i.id == _open).firstOrNull ?? items.first);
     final rows = [for (final i in items) if (i != card) i];
-    final shown = _all ? rows : rows.take(_maxRows).toList();
+    final cap = _maxRows - (_nav.cameFrom != null ? 1 : 0);
+    final shown = _all ? rows : rows.take(cap).toList();
     final more = rows.length - shown.length;
     final second = [
       if (m.working.isNotEmpty) '${m.working.length} 个在干活',
@@ -219,7 +220,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     padding: const EdgeInsets.only(bottom: 12),
                     child: PhoneCard(
                       item: card,
-                      onOpen: card.sessionKey == null ? null : () => _goLook(card),
+                      onOpen: null,
                       onButton: _buttonOf(card),
                     ),
                   ),

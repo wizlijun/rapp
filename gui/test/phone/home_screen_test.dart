@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
+import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/phone/home_screen.dart';
 import 'package:rapp/phone/phone_nav.dart';
 import 'package:rapp/phone/widgets.dart';
@@ -18,10 +19,15 @@ void main() {
   late FakeTransport t;
   late MainState s;
   late PhoneNav nav;
+  late FakeSessionPort port;
+  var sid = 0;
 
   Future<void> flush() => Future<void>.delayed(Duration.zero);
 
-  setUp(() => tmp = Directory.systemTemp.createTempSync('home_screen_test'));
+  setUp(() {
+    sid = 0;
+    tmp = Directory.systemTemp.createTempSync('home_screen_test');
+  });
   tearDown(() {
     nav.dispose();
     s.dispose();
@@ -49,7 +55,7 @@ void main() {
 
   List<Map<String, Object?>> blocked(int n) => [for (var i = 0; i < n; i++) term('w$i', 'blocked', kind: 'permission', msg: 'ok$i?')];
 
-  Future<void> boot(WidgetTester tester, {bool disableAnimations = false, bool noHosts = false}) async {
+  Future<void> boot(WidgetTester tester, {bool disableAnimations = false, bool noHosts = false, bool termPort = false}) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -64,10 +70,15 @@ void main() {
       });
     }
     await tester.runAsync(flush);
-    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs());
+    port = FakeSessionPort();
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, termPort: termPort ? FakeTermSessionPort() : null);
     nav = PhoneNav(s);
     t.onSend = (m) {
-      if (m['req'] is int) t.emit({'event': 'error', 'req': m['req'], 'error': 'test'});
+      if (m['cmd'] == 'open') {
+        t.emit({'event': 'opened', 'sid': ++sid, 'id': m['id'], 'app': m['app'], 'path': 'lan', 'req': m['req'], if (m['embed'] == true) ...{'port': 5000 + sid, 'token': 'tk'}});
+      } else if (m['req'] is int) {
+        t.emit({'event': 'error', 'req': m['req'], 'error': 'test'});
+      }
     };
     await tester.pumpWidget(MaterialApp(
       theme: themeDataFor(RappTheme.matrix),
@@ -77,9 +88,8 @@ void main() {
   }
 
   int taps(WidgetTester tester) {
-    final body = find.byType(ListView).first;
     var n = 0;
-    for (final w in tester.widgetList(find.descendant(of: body, matching: find.byWidgetPredicate((w) => w is InkWell || w is PhoneButton)))) {
+    for (final w in tester.widgetList(find.byWidgetPredicate((w) => w is InkWell || w is PhoneButton))) {
       if (w is InkWell && w.onTap != null) n++;
       if (w is PhoneButton && w.onPressed != null) n++;
     }
@@ -123,12 +133,60 @@ void main() {
     await boot(tester);
     await terms(tester, blocked(12));
     expect(find.byType(PhoneCard), findsOneWidget);
-    expect(find.byType(PhoneRow, skipOffstage: false), findsNWidgets(5));
+    expect(find.byType(PhoneRow), findsNWidgets(5));
     expect(find.text('还有 6 件'), findsOneWidget);
     expect(taps(tester), lessThanOrEqualTo(8));
     await tester.tap(find.text('还有 6 件'));
     await tester.pump();
     expect(find.text('还有 6 件'), findsNothing);
+  });
+
+  testWidgets('at most eight taps with came from row', (tester) async {
+    await boot(tester);
+    await terms(tester, blocked(12));
+    nav.cameFrom = 'm1/term:pty:w0';
+    nav.notifyListeners();
+    await tester.pump();
+    expect(find.byType(PhoneRow), findsNWidgets(4));
+    expect(find.text('还有 7 件'), findsOneWidget);
+    expect(taps(tester), lessThanOrEqualTo(8));
+  });
+
+  testWidgets('offline greys reconnect', (tester) async {
+    await boot(tester);
+    await tester.runAsync(() async {
+      s.openOrSwitch('m1', 'Safari', 'Safari');
+      for (var i = 0; i < 6; i++) {
+        await flush();
+      }
+    });
+    port.emit(const DisconnectedEvent(1, 'host says: taken over by M'));
+    await tester.pump();
+    expect(find.text('重连'), findsOneWidget);
+    PhoneButton btn() => tester.widget<PhoneButton>(find.widgetWithText(PhoneButton, '重连'));
+    expect(btn().onPressed, isNotNull);
+    await emit(tester, {'event': 'net', 'level': 'down'});
+    expect(btn().onPressed, isNull);
+    await emit(tester, {'event': 'net', 'level': 'strong'});
+    expect(btn().onPressed, isNotNull);
+  });
+
+  testWidgets('goLook enters the session', (tester) async {
+    await boot(tester, termPort: true);
+    await terms(tester, blocked(1));
+    await tester.runAsync(() async {
+      s.openOrSwitch('m1', 'term:pty:w0', 'w0');
+      for (var i = 0; i < 6; i++) {
+        await flush();
+      }
+    });
+    await tester.pump();
+    await tester.tap(find.text('进去看'));
+    await tester.runAsync(flush);
+    await tester.pump();
+    expect(nav.now, PhoneView.session);
+    expect(s.currentKey, 'm1/term:pty:w0');
+    expect(nav.entered, 'm1/term:pty:w0');
   });
 
   testWidgets('came from row', (tester) async {
