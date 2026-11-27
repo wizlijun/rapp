@@ -81,6 +81,27 @@ void main() {
     await sub.cancel();
   });
 
+  test('dropTextures forgets pictures and restoreStage brings them back', () async {
+    final link = FakeLink();
+    final port = WorkerSessionPort(OneLink(link), FakeHost(), framePresented: () async {});
+    final events = <SessionEvent>[];
+    final sub = port.events.listen(events.add);
+    port.seedSessionForTest(3, link, reading: true);
+    link.push(windowsEvent());
+    link.push(frame2x2());
+    await until(() => events.any((e) => e is WindowsEvent && e.windows.any((w) => w.image != null)));
+    // 会话断开、不在台上：memoryWarning 调 dropTextures 的情形
+    link.failInput();
+    await until(() => events.any((e) => e is DisconnectedEvent));
+    port.dropTextures(3);
+    expect(port.picturesForTest(3), isEmpty);
+    port.restoreStageForTest(3); // 等于会话回到台上
+    await until(() => port.picturesForTest(3).isNotEmpty);
+    expect(link.acks, 1); // 只有那一帧；重画不是新帧，不 ack
+    port.dispose();
+    await sub.cancel();
+  });
+
   test('a worker that dies mid-session gives one disconnected', () async {
     final link = ProcessSessionLink(SessionWorker.fromProcess(await Process.start('sh', ['-c', 'exit 3'])));
     final port = WorkerSessionPort(OneLink(link), FakeHost(), framePresented: () async {});

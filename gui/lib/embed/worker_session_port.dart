@@ -270,6 +270,9 @@ class WorkerSessionPort extends SessionPort with WidgetsBindingObserver {
   void freeze(Object sid, String reason) => _sessions[sid]?.disconnect(reason);
 
   @override
+  void dropTextures(Object sid) => _sessions[sid]?.dropPictures();
+
+  @override
   void dropTarget(Object? sid) {
     _dropSid = sid;
   }
@@ -407,6 +410,15 @@ class WorkerSessionPort extends SessionPort with WidgetsBindingObserver {
     _focused = sid;
     if (reading) _watch(sid, s);
   }
+
+  /// Test hook: the pictures the session holds now.
+  @visibleForTesting
+  List<RemoteWindow> picturesForTest(Object sid) =>
+      _sessions[sid]?._pictures.values.toList() ?? const [];
+
+  /// Test hook: the session comes back on stage.
+  @visibleForTesting
+  void restoreStageForTest(Object sid) => _sessions[sid]?.restoreStage();
 
   void _watch(Object sid, _Session s) {
     unawaited(
@@ -1432,6 +1444,16 @@ class _Session {
       () => link.kill(),
     );
     unawaited(link.exitCode.then((_) => timer.cancel()));
+  }
+
+  /// Lets go of every picture and tells the windows. [lastNativeFrame] stays:
+  /// [restoreStage] redraws from it.
+  void dropPictures() {
+    for (final p in _pictures.values) {
+      sink.retire(p.image);
+    }
+    _pictures.clear();
+    publish();
   }
 
   void close(String reason) {
