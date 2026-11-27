@@ -98,19 +98,36 @@ void main() {
     expect(s.quick.keys.any((a) => a.id == 'clear'), isFalse);
     expect(s.quick.stars, isNot(contains('k:clear')));
 
-    final before = s.quick.keys.map((a) => a.id).toList();
-    final r = tester.getRect(k('keys-row-search'));
+    // search, mode, expand, bg, newtab are left; drag search down past two rows.
+    expect(s.quick.keys.map((a) => a.id).toList(), ['search', 'mode', 'expand', 'bg', 'newtab']);
+    final rowH = tester.getRect(k('keys-row-search')).height;
     final handle = find.descendant(of: k('keys-row-search'), matching: find.byIcon(Icons.drag_handle));
     final g = await tester.startGesture(tester.getCenter(handle));
     await tester.pump(const Duration(milliseconds: 100));
-    await g.moveBy(Offset(0, r.height * 2.2));
+    await g.moveBy(Offset(0, rowH * 1.7));
+    await tester.pump();
+    await g.moveBy(Offset(0, rowH * 1.7));
     await tester.pump();
     await g.up();
     await tester.pumpAndSettle();
-    final after = s.quick.keys.map((a) => a.id).toList();
-    expect(after, isNot(before));
-    expect(after.toSet(), before.toSet());
-    expect(after.indexOf('search'), greaterThan(0));
+    expect(s.quick.keys.map((a) => a.id).toList(), ['mode', 'expand', 'search', 'bg', 'newtab']);
+  });
+
+  testWidgets('edit keeps per (and the id) on the page', (tester) async {
+    final per = {'agy': null, 'codex': const Chord('r', alt: true)};
+    s.setKeyActions([
+      KeyAction('search', label: '搜历史', chord: const Chord('r', ctrl: true), per: per),
+      ...builtinKeyActions.skip(1),
+    ]);
+    await open(tester);
+    await tester.tap(k('keys-row-search'));
+    await tester.pumpAndSettle();
+    await tester.enterText(k('keyact-name'), '找历史');
+    await tapK(tester, 'keyact-save');
+    final a = s.quick.keys.first;
+    expect(a.id, 'search');
+    expect(a.label, '找历史');
+    expect(a.per, per);
   });
 
   testWidgets('restore brings back the six built-ins', (tester) async {

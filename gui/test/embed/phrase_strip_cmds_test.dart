@@ -155,6 +155,26 @@ void main() {
     expect(s.quick.stars, isEmpty);
   });
 
+  iosTest('long press on a key action: 编辑 renames it and keeps its id and per', (tester) async {
+    await tester.pumpWidget(strip(tsess));
+    final list = find.descendant(of: ph('phrase-strip-list'), matching: find.byType(Scrollable));
+    await tester.scrollUntilVisible(ph('keyact-search'), 200, scrollable: list);
+    await tester.pump();
+    final per = s.quick.keys.firstWhere((a) => a.id == 'search').per;
+    expect(per, isNotEmpty);
+    await tester.longPress(ph('keyact-search'));
+    await tester.pumpAndSettle();
+    await tester.tap(ph('keyact-menu-edit'));
+    await tester.pumpAndSettle();
+    await tester.enterText(ph('keyact-name'), '找历史');
+    await tester.tap(ph('keyact-save'));
+    await tester.pumpAndSettle();
+    final a = s.quick.keys.firstWhere((a) => a.id == 'search');
+    expect(a.label, '找历史');
+    expect(a.per, per);
+    expect(s.quick.keys.map((k) => k.id).toList().indexOf('search'), 0);
+  });
+
   iosTest('常用语▾: lists commands when a tool is recognised, none under zsh', (tester) async {
     await tester.pumpWidget(strip(tsess));
     await tester.tap(ph('quick-menu-phrases'));
