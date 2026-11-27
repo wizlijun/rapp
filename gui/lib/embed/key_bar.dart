@@ -386,62 +386,108 @@ class _KeyBarState extends State<KeyBar> {
     return null;
   }
 
-  /// One row: the arrow block at its end ([keyBarTail]) one column of [keyBarColumns] each, the keys before it
-  /// sharing the rest, so the arrows line up across the rows.
-  Widget _rowOf(List<String> ids) {
+  Widget _rowOf(List<String> ids) => KeyBarRow(ids: ids, cell: _cellOf);
+
+  Widget? _cellOf(String id) {
+    final action = id.startsWith('k:') ? _actionOf(id.substring(2)) : null;
+    final key = barKeys[id];
+    if (action != null) {
+      final tool = widget.state.stripToolOf(widget.session);
+      final usable = keyActionUsable(action, term: widget.port is TermSessionPort, tool: tool);
+      return _BarKeyView(
+        key: Key('bar-k-${action.id}'),
+        keyDef: (
+          id: id,
+          label: action.label,
+          spoken: action.label,
+          kind: BarKind.send,
+          wire: null,
+          code: null,
+          mods: 0,
+          bit: null,
+          repeats: false,
+        ),
+        sid: _sid,
+        state: LatchState.off,
+        blocked: _blocked || !usable,
+        onFire: (haptic, flags) {
+          if (_blocked || !usable) return null;
+          if (haptic) unawaited(HapticFeedback.selectionClick());
+          // Key-bar taps do not count usage (spec §9).
+          sendKeyAction(state: widget.state, session: widget.session, port: widget.port, a: action, tool: tool);
+          return null;
+        },
+      );
+    }
+    if (key == null) return null; // an id nothing knows (cleaned layouts have none): draw nothing rather than crash
+    return _BarKeyView(
+      key: Key('bar-$id'),
+      keyDef: key,
+      sid: _sid,
+      state: key.bit == null ? LatchState.off : _latch.of(key.bit!),
+      blocked: _blocked,
+      onFire: (haptic, flags) => _fire(key, haptic: haptic, flags: flags),
+    );
+  }
+}
+
+/// One row of the bar: the arrow block at its end ([keyBarTail]) one column of [keyBarColumns] each, the keys before it
+/// sharing the rest, so the arrows line up across the rows. [cell] draws one id (null: nothing). The key settings page
+/// draws its layout editor with the same row, so the widths are the bar's.
+class KeyBarRow extends StatelessWidget {
+  const KeyBarRow({super.key, required this.ids, required this.cell});
+  final List<String> ids;
+  final Widget? Function(String id) cell;
+
+  @override
+  Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, c) {
       final column = ((c.maxWidth - (keyBarColumns - 1) * keyBarGap) / keyBarColumns).clamp(0.0, double.infinity);
       final tail = keyBarTail(ids);
       // A row made of the arrow block alone has nothing to share the rest: an empty cell holds the columns at the right.
       final children = <Widget>[if (ids.isNotEmpty && tail == ids.length) const Expanded(child: SizedBox())];
       for (final (i, id) in ids.indexed) {
-        final Widget view;
-        final action = id.startsWith('k:') ? _actionOf(id.substring(2)) : null;
-        final key = barKeys[id];
-        if (action != null) {
-          final tool = widget.state.stripToolOf(widget.session);
-          final usable = keyActionUsable(action, term: widget.port is TermSessionPort, tool: tool);
-          view = _BarKeyView(
-            key: Key('bar-k-${action.id}'),
-            keyDef: (
-              id: id,
-              label: action.label,
-              spoken: action.label,
-              kind: BarKind.send,
-              wire: null,
-              code: null,
-              mods: 0,
-              bit: null,
-              repeats: false,
-            ),
-            sid: _sid,
-            state: LatchState.off,
-            blocked: _blocked || !usable,
-            onFire: (haptic, flags) {
-              if (_blocked || !usable) return null;
-              if (haptic) unawaited(HapticFeedback.selectionClick());
-              // Key-bar taps do not count usage (spec §9).
-              sendKeyAction(state: widget.state, session: widget.session, port: widget.port, a: action, tool: tool);
-              return null;
-            },
-          );
-        } else if (key == null) {
-          continue; // an id nothing knows (cleaned layouts have none): draw nothing rather than crash
-        } else {
-          view = _BarKeyView(
-          key: Key('bar-$id'),
-          keyDef: key,
-          sid: _sid,
-          state: key.bit == null ? LatchState.off : _latch.of(key.bit!),
-          blocked: _blocked,
-          onFire: (haptic, flags) => _fire(key, haptic: haptic, flags: flags),
-          );
-        }
+        final view = cell(id);
+        if (view == null) continue;
         if (children.isNotEmpty) children.add(const SizedBox(width: keyBarGap));
         children.add(i >= ids.length - tail ? SizedBox(width: column, child: view) : Expanded(child: view));
       }
       return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: children);
     });
+  }
+}
+
+/// The face of a key: a rounded box with its [label]; [lit] draws the accent border (a lit modifier, or a selected cell
+/// in the layout editor), [locked] also tints it. Never focusable: a tap leaves the caret where it was.
+class KeyFace extends StatelessWidget {
+  const KeyFace({super.key, required this.label, this.lit = false, this.locked = false, this.onTap});
+  final String label;
+  final bool lit;
+  final bool locked;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    final accent = lit || locked;
+    return Material(
+      color: locked ? Color.alphaBlend(t.accent.withValues(alpha: .18), t.raise.first) : t.raise.first,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(t.r),
+        side: BorderSide(color: accent ? t.accent : t.line, width: accent ? 2 : 1),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        canRequestFocus: false,
+        onTap: onTap,
+        child: Center(
+          child: Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 13, color: t.text, fontFamily: t.mono, fontFamilyFallback: t.monoFallback)),
+        ),
+      ),
+    );
   }
 }
 
@@ -502,13 +548,8 @@ class _BarKeyViewState extends State<_BarKeyView> {
 
   @override
   Widget build(BuildContext context) {
-    final t = RappTokens.of(context);
     final k = _k;
     final once = widget.state == LatchState.once, locked = widget.state == LatchState.locked;
-    final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(t.r),
-      side: BorderSide(color: once || locked ? t.accent : t.line, width: once || locked ? 2 : 1),
-    );
     return Semantics(
       button: true,
       label: k.spoken,
@@ -522,23 +563,7 @@ class _BarKeyViewState extends State<_BarKeyView> {
           onPointerDown: _down,
           onPointerUp: (_) => _stop(),
           onPointerCancel: (_) => _stop(),
-          child: Material(
-            color: locked ? Color.alphaBlend(t.accent.withValues(alpha: .18), t.raise.first) : t.raise.first,
-            shape: shape,
-            clipBehavior: Clip.antiAlias,
-            // Never focusable: a tap leaves the caret where it was.
-            child: InkWell(
-              canRequestFocus: false,
-              onTap: widget.blocked ? null : () {},
-              child: Center(
-                child: Text(k.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: 13, color: t.text, fontFamily: t.mono, fontFamilyFallback: t.monoFallback)),
-              ),
-            ),
-          ),
+          child: KeyFace(label: k.label, lit: once, locked: locked, onTap: widget.blocked ? null : () {}),
         ),
       ),
     );
