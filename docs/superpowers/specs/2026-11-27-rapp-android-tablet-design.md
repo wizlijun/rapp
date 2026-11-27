@@ -1,8 +1,8 @@
 # rApp 安卓平板版设计
 
 日期：2026-11-27
-状态：用户已核对（2026-11-27），P0 计划已写，待执行
-分支：`docs/android-tablet-design`
+状态：P0 已完成（2026-11-27），待写 P1 计划
+位置：规格已在 `main`；P0 结果来自分支 `docs/android-p0-findings`（`2026-11-27-rapp-android-p0-findings.md`）
 相关规格：iPad 和 Duo（`2026-11-17-rapp-ipad-duo-design.md`，下文叫「iPad 规格」）、Windows（`2026-11-26-rapp-windows-design.md`，下文叫「Windows 规格」）、iOS 内置输入法（`2026-11-20-rapp-ios-rime-ime-design.md`）
 
 名词：**A** 是被控的电脑，**B** 是操作的那一端。安卓平板只做 B。
@@ -160,7 +160,16 @@ Windows 规格 §10.2 计划把这些抽成一个小接口，归 Windows 的 C �
 
 ### 4.5 这台 Mac 上的工具
 
-Flutter 3.44.1（`~/development/flutter/bin`，默认最低版本 24、编译和目标版本 36、NDK 28.2.13676358）。Android SDK 在 `~/Library/Android/sdk`，只有 `platforms/android-34` 和 `build-tools/35.0.0`，没有 NDK、没有模拟器和系统镜像。Rust 没装安卓目标，没有 `cargo-ndk`。`gui/android/` 不存在。有 `adb`，没有设备。
+P0 装完以后是这样（P0 结果 §1）：
+
+- Flutter 3.44.1（`~/development/flutter/bin`）：编译和目标版本 36（Flutter 默认），最低版本设成 34，只出 arm64-v8a。
+- Android SDK 在 `~/Library/Android/sdk`：NDK 28.2.13676358；build-tools 36.0.0（AGP 自己装的）和原有的 35.0.0；CMake 3.22.1；platform-tools 37.0.1；emulator 37.3.10.0。
+- 构建：AGP 9.0.1，Gradle 9.1.0（wrapper），Kotlin Gradle 插件 2.3.20。Gradle 9.1 不认机器默认的 JDK 27，构建用 Homebrew 的 openjdk@21（21.0.13.1），只在命令里设 `JAVA_HOME`。`gradle.properties` 里 Flutter 模板加的 `android.newDsl=false`、`android.builtInKotlin=false` 照留。
+- 系统镜像：`system-images;android-34;default;arm64-v8a`、`system-images;android-36;google_apis;arm64-v8a`。
+- AVD：`rapp-p0-34`、`rapp-p0-36`，`pixel_tablet`，2560x1600，`hw.keyboard=yes`，`hw.ramSize=4096`。
+- Rust：target `aarch64-linux-android`，`cargo-ndk` 4.1.2。
+- `gui/android/` 现在只在探查分支 `probe/android-p0` 上有，main 上还没有。
+- 磁盘：Android SDK 11 GB，两个 AVD 11 GB，`~/.gradle` 3.3 GB，openjdk@21 约 331 MB。工具和 AVD 都留着给 P1 用。（P0 结果 §1）
 
 ## 5. 办法
 
@@ -208,9 +217,9 @@ librapp_android.so（Rust）
 ### 6.1 hub
 
 - hub 的代码不改。选项和 iOS 相同：`owns_access: true, embed_only: true, dual_stack: true, map_ports`。
-- `FfiHubTransport` 现在用 `DynamicLibrary.process()`（iOS 是静态链接）。安卓要 `DynamicLibrary.open('librapp_android.so')`。做法：构造时传入库，iOS 传 `process()`，安卓传 `open(...)`；`_stopOffThread` 里那一处也要跟着改。这不是平台判断，是入口各自传参。
-- **要在 P0 看的**：`rust/net/src/quic.rs` 的 `sys` 模块说「只有 iOS 的 hub 用」，非苹果系统走 `AI_V4MAPPED | AI_ADDRCONFIG`。安卓的 C 库对 `AI_V4MAPPED` 的支持不确定。P0 要在纯 IPv4、双栈两种网络下各连一次 relay。不行就给安卓单独一支。
-- `cfg(target_os = "linux")` 在安卓上**不成立**（安卓是 `target_os = "android"`），`cfg(unix)` 成立。共用 crate 里按 Linux 写的分支不会编进安卓；P0 要确认没有哪段是安卓也需要的。
+- `FfiHubTransport` 现在用 `DynamicLibrary.process()`（iOS 是静态链接）。安卓要 `DynamicLibrary.open('librapp_android.so')`。做法：入口传库的**名字**，`null` 表示 `process()`；iOS 传 `null`，安卓传 `'librapp_android.so'`。`DynamicLibrary` 传不进 `Isolate.run`，`_stopOffThread` 只能按名字重新打开。这不是平台判断，是入口各自传参。（P0 结果 §3）
+- 地址解析不用给安卓单独一支。安卓的 C 库对 `AI_V4MAPPED` 怎么处理，这个问题不用回答：`getaddrinfo_v6` 在各平台都不返回映射地址，映射地址只由 `resolve_for` 自己用 `mapped()` 拼，安卓就走这一支。两台模拟器在「默认」和「只有 IPv4」两种状态下都把 relay 解析成 `::ffff:` 映射地址并连上。还要实机回答的：只有 IPv6 的网络（NAT64/DNS64）上 `getaddrinfo_v6` 能不能拿到合成地址，以及 relay 写成域名时的解析（§14.6 第 8、15 条）。（P0 结果 §3）
+- `cfg(target_os = "linux")` 在安卓上**不成立**（安卓是 `target_os = "android"`），`cfg(unix)` 成立。共用 crate 里按 Linux 写的分支不会编进安卓；P0 已查过，没有哪段是安卓也需要的，见 P0 结果 §2。（P0 结果 §2）
 
 ### 6.2 会话库（Rust）
 
@@ -250,13 +259,13 @@ type Sink = extern "C" fn(id: u64, kind: u8, ptr: *mut u8, len: usize);
 
 要守的规矩：
 
-1. **一次只有一帧在路上，顺序和管道一样**。子进程那条路靠管道写满来挡住发送方，进程内没有管道。`NativeCallable.listener` 是往 Dart 的消息队列里投，永远不会挡，不管的话 Dart 慢一点帧就会在内存里堆起来。做法是学管道：`Output` 不改，给它的写入端是一个带闸的东西，交出一帧后闸关上，下一条（不管是事件还是帧）等 `rapp_session_ack` 才交。`Output` 的队列照旧保序（描述一帧的窗口表事件永远排在那一帧前面），积压时照旧只留最新一帧，事件照旧受 `MAX_EVENTS = 32` 的上限。Dart 拿到一帧、做成图片或决定丢掉之后就 ack，不等画到屏幕上。`rapp_session_close` 要能把卡在闸上的写入端放开。
-2. **恐慌不能穿过 FFI**。每个 `extern "C"` 函数和每个库线程的入口包一层 `catch_unwind`，出事就给 sink 发一条 `kind = 2`。
+1. **一次只有一帧在路上，顺序和管道一样**。子进程那条路靠管道写满来挡住发送方，进程内没有管道。`NativeCallable.listener` 是往 Dart 的消息队列里投，永远不会挡，不管的话 Dart 慢一点帧就会在内存里堆起来。做法是学管道：`Output` 不改，给它的写入端是一个带闸的东西，交出一帧后闸关上，下一条（不管是事件还是帧）等 `rapp_session_ack` 才交。`Output` 的队列照旧保序（描述一帧的窗口表事件永远排在那一帧前面），积压时照旧只留最新一帧，事件照旧受 `MAX_EVENTS = 32` 的上限。Dart 拿到一帧、做成图片或决定丢掉之后就 ack，不等画到屏幕上。忘了 ack（哪怕是丢掉的帧），会话就永远结束不了，`disconnected` 和 kind 2 都不会来。写入端的顺序是「等闸开、关闸（是帧时）、交给 sink」，不能「交给 sink 再关闸」，否则 ack 可能先到而丢掉。`rapp_session_close` 要能把卡在闸上的写入端放开。（P0 结果 §2）
+2. **恐慌不能穿过 FFI**。每个 `extern "C"` 函数和每个库线程的入口包一层 `catch_unwind`，出事就给 sink 发一条 `kind = 2`。`rapp-hub-ffi` 的四个 `extern "C"` 函数要在它自己的 crate 里包（iOS 一起受益）：`rapp-android-ffi` 只能 `pub use` 它们，包不了。（P0 结果 §2）
 3. **内存归还**。sink 拿到的内存由 Dart 用完后经 `rapp_session_free` 归还（`asTypedList(len, finalizer: …)`）。Dart 一侧已经关掉的会话，后到的消息直接归还。
 4. 会话线程连的还是 `127.0.0.1:<port>`，和子进程时一样，hub 不用知道有区别。
 5. 这个 crate 在 Mac 上也能编、能测（对着本机回环起一个假的 A），进 `cargo test --workspace` 和 clippy。Windows 的门禁上它也要能编；编不过就用 `cfg` 把内容在 Windows 上置空，不要把它移出 workspace。
 
-`pub use` 重新导出的 `#[no_mangle]` 函数会不会真的出现在 `.so` 的导出表里，P0 用 `llvm-nm -D` 看；没有就在这个 crate 里用一个 `#[used]` 的静态量引用这四个函数。不能写四个同名的转调函数，名字会和 `rapp-hub-ffi` 里的撞。
+`pub use rapp_hub_ffi::{…}` 重新导出的四个 `#[no_mangle]` 函数会出现在 `.so` 的导出表里（`llvm-nm -D` 看过），不用 `#[used]` 的静态量。不能写四个同名的转调函数，名字会和 `rapp-hub-ffi` 里的撞。（P0 结果 §2）
 
 ### 6.3 会话端口（Dart）
 
@@ -304,17 +313,20 @@ type Sink = extern "C" fn(id: u64, kind: u8, ptr: *mut u8, len: usize);
 
 通道 `rapp/speech`：见 §11。
 
-权限（清单里声明的全部）：`INTERNET`、`ACCESS_NETWORK_STATE`、`RECORD_AUDIO`（第一次按语音时才问）、`REQUEST_INSTALL_PACKAGES`。不要存储权限（MediaStore 写「下载」不需要），不要通知权限，不要前台服务。
+权限（清单里声明的全部）：`INTERNET`、`ACCESS_NETWORK_STATE`、`RECORD_AUDIO`（第一次按语音时才问）、`REQUEST_INSTALL_PACKAGES`。不要存储权限（MediaStore 写「下载」不需要），不要通知权限，不要前台服务。清单里还要有 `<queries>` 声明 `android.speech.RecognitionService`，不然 Android 11 起看不到识别服务。（P0 结果 §6）
 
-其他清单设置：`android:allowBackup="false"`，并在 `dataExtractionRules` 里排除全部数据（身份密钥不能被云备份或换机克隆到另一台设备上）；网络安全配置只对 `localhost` 和 `127.0.0.1` 放行明文（AI 整理走本机的 `localhost:28001`）；`minSdk 34`、`compileSdk` 和 `targetSdk` 36（Flutter 默认）。**把目标版本升到 37 之前，先看本地网络权限**（§3.3）。
+其他清单设置：`android:allowBackup="false"`，并在 `dataExtractionRules` 里排除全部数据（身份密钥不能被云备份或换机克隆到另一台设备上）；网络安全配置只对 `localhost` 和 `127.0.0.1` 放行明文（AI 整理走本机的 `localhost:28001`）；`minSdk 34`、`compileSdk` 和 `targetSdk` 36（Flutter 默认）。**把目标版本升到 37 之前，先看本地网络权限**（§3.3）。网络安全配置和 `REQUEST_INSTALL_PACKAGES` 在正式包里一样生效，不只调试包。安卓上 `stderr` 到不了 logcat，入口的日志用 `debugPrint` 或写文件。（P0 结果 §3、§7）
 
 ### 6.5 能力表和写死的判断
 
 `PlatformCaps.forOs` 加：
 
 ```dart
-'android' => const PlatformCaps(hubInProcess: true, systemOpen: true, onlineUpdate: true),
+// systemOpen 等安卓的打开文件、分享通道接上再开
+'android' => const PlatformCaps(hubInProcess: true, onlineUpdate: true),
 ```
+
+`systemOpen` 现在的四处用法（`main_window.dart:43`、`term_stage.dart:50`、`local_section.dart:43`、`data_section.dart:54`）都走 `iosChannel`。要先给安卓接一个通道（打开文件、分享），再开这一位；没接之前安卓上留 false（上面的代码就是这样）。（P0 结果 §3）
 
 `onlineUpdate` 在安卓上的数据来源和界面位置都不同，见 §13.2。现在这个能力位的两处用法（`main_window.dart:411` 的红点、`pages/global_sections.dart:64` 的「版本与升级」行）读的都是 `ServiceMonitor` 的状态，安卓没有 service，`GlobalSections` 也不会出现（`main_window.dart:391`）。
 
@@ -438,14 +450,22 @@ Flutter 在安卓上把鼠标当鼠标（悬停、右键、滚轮都有），走
 
 **能不能用**（`available`，只在启动时问一次。`MainState.voice` 是构造时定死的，不为这个改成能中途换；用户后来装了识别器，重开 App 就有了）：
 
-1. 有设备上的识别器（`isOnDeviceRecognitionAvailable`），并且 `checkRecognitionSupport` 说中文（`zh-CN`）已装好 → 能用，用它。
+1. 有设备上的识别器（`isOnDeviceRecognitionAvailable`），并且 `checkRecognitionSupport` 说中文已装好 → 能用，用它。中文按语言前缀认：识别器报的是 `cmn-Hans-CN`（模拟器 36 上没有 `zh-CN`），`zh-CN`、`zh-Hans-CN` 也算。（P0 结果 §6）
 2. 否则有默认识别器（`isRecognitionAvailable`），并且 `checkRecognitionSupport` 说支持中文（在线或设备上都算）→ 能用，用它。
 3. 否则 → 不能用。`main_android.dart` 给 `voice` 传 `null`，按钮不出现（`main_state.dart:210–214` 现成的逻辑）。
 4. 识别器不让查（`ERROR_CANNOT_CHECK_SUPPORT`）→ 按不能用算。宁可少显示，不显示一个按了没反应的按钮。
 
+查的时候要注意（P0 结果 §6）：
+
+- 找识别服务用 `packageManager.queryIntentServices(Intent(RecognitionService.SERVICE_INTERFACE), 0)`，不读 `Settings.Secure` 里没写进文档的键。
+- `checkRecognitionSupport` 没有识别服务时回调不来，要加超时（P0 用 10 s），超时按不能用算；超时和回调只能回一次。
+- `createOnDeviceSpeechRecognizer` 在没有设备上识别器时抛 `UnsupportedOperationException`：先用 `isOnDeviceRecognitionAvailable` 挡住，再 try/catch。
+- 查和开始识别用同样的 intent（`EXTRA_LANGUAGE` 和 `EXTRA_LANGUAGE_MODEL` 都带）。
+
 **识别中**：
 
-- 按住说话，最长 5 分钟（现有上限）。系统识别器遇到停顿会自己结束一段。先试分段连续识别（`EXTRA_SEGMENTED_SESSION`）；识别器不支持，就在一段结束、手还按着时立刻开下一段，文字接在后面。对 Dart 来说始终是一次录音。
+- 按住说话，最长 5 分钟（现有上限）。系统识别器遇到停顿会自己结束一段。先试分段连续识别（`EXTRA_SEGMENTED_SESSION`）；识别器不支持，就在一段结束、手还按着时立刻开下一段，文字接在后面。对 Dart 来说始终是一次录音。分段时的静音时长参数要给 `int`，给 `Long` 模拟器 36 的识别器会拒绝；分段会话结束（`onEndOfSegmentedSession`）是单独的一个事件，不用带占位文字的 `final` 顶替。（P0 结果 §6）
+- 识别中报 `error 12`（`LANGUAGE_NOT_SUPPORTED`）或 `error 13`（`LANGUAGE_UNAVAILABLE`）：设备上识别器没装中文时就是这两个码。和别的识别错误一样，经 `error` 事件交给 Dart，走现有的错误处理。（P0 结果 §6）
 - 热词经 `EXTRA_BIASING_STRINGS` 传；识别器不理也不报错。
 - `level` 用 `onRmsChanged`。
 - 有的识别器开始、结束时会响一声，关不掉，不处理。
@@ -453,7 +473,7 @@ Flutter 在安卓上把鼠标当鼠标（悬停、右键、滚轮都有），走
 
 识别出的文字之后走现有的那一套（本地纠词、AI 整理、学习），不分平台。
 
-实话：国行平板上多半走到第 3 条，按钮不出现，用户用自己输入法上的语音键。这是 U6 定的。
+实话：国行平板上会判成不能用，按钮不出现，用户用自己输入法上的语音键。这是 U6 定的。P0 里那台荣耀平板走的是第 4 条（`checkRecognitionSupport` 报 14），不是第 3 条；模拟器 36 也报 14。（P0 结果 §6）
 
 ## 12. 安全
 
@@ -506,7 +526,7 @@ macOS 那句「10 分钟后自动安装」之类的话安卓上不出现。
 1. **查**：回前台时，距上次查过了 20 小时就查一次（和 macOS 的间隔一样）；设置里也能手动查。取 `latest.json`（地址同 macOS），读 `android-arm64` 那一项，和本机版本比。清单里没有这一项，就是「已是最新」。
 2. **下**：用户点了「更新」才下，不自动下（平板可能在用流量）。下到 `cacheDir/update/`，显示进度，能取消。
 3. **验**：大小和 SHA-256 对上才算好。对不上就删掉、报失败。
-4. **装**：`installApk` 用 `PackageInstaller` 会话交给系统，系统弹确认，装完 App 被系统重启。能免确认的情形（上一版就是它自己装的）让系统自己决定，App 不依赖这一点。
+4. **装**：`installApk` 用 `PackageInstaller` 会话交给系统，系统弹确认，装完 App 被系统杀掉、不会自己重启（模拟器 34、36 实测：进程没了、没有自己起来，要用户点图标；34 上没查到「打开」通知，36 没查；`success` 回调没观察到，页面也观察不了，因为进程死了），所以成败靠下次启动读到的 `versionCode` 判断。进程被杀前要先把「正在装、目标版本」落盘；下次启动比对上就清状态、删 `cacheDir/update/` 里的包。能免确认的情形（上一版就是它自己装的）让系统自己决定，App 不依赖这一点。接安装结果的广播接收器不能只跟着 Activity 活；写安装会话出错时要 `abandon()`；拷贝不在 UI 线程上做。（P0 结果 §7）
 5. **第一次**：系统要求用户先给 rApp「允许安装未知应用」。`canInstall` 是否，就先说明一句、带用户去那个设置页（`openInstallSettings`），回来接着装。
 6. 更新不看有没有会话开着：是用户自己点的（和 macOS 手动更新的规矩一致）。
 
@@ -562,7 +582,7 @@ build-android.sh [debug|release] [--install <序列号>]
 | 4 | 进程内会话连上一台 Mac 的桌面会话，画面出来，能点、能打字；ack 这套节流下，故意让 Dart 慢（每帧睡 200 ms）内存不涨 | 画面对，内存平 |
 | 5 | 外接键盘：Ctrl 组合（Ctrl+C、V、X、Z、A、T、W、Tab、空格、Enter）是不是都到得了 App，有没有被系统或输入法拿走的（14 和 16 各看一遍）；触控板双指滚动、捏合在 Flutter 里是什么事件 | 表列出来；Ctrl+C、V 到不了就停下来报告 |
 | 6 | 语音：带 Google 的镜像上 `checkRecognitionSupport` 对 `zh-CN` 的回答，按住说话能出字，分段连续识别行不行；不带 Google 的镜像上判成不能用 | 两边都符合 §11 |
-| 7 | 自己装自己：本机起个 HTTP 放一个高版本 APK，走完 §13.2 的 4、5 | 装上并重启 |
+| 7 | 自己装自己：本机起个 HTTP 放一个高版本 APK，走完 §13.2 的 4、5 | 装上（App 被杀，用户再点图标）（P0 结果 §7） |
 | 8 | 数字：APK 大小；一个 2560×1600 会话的内存；模拟器上的帧率（只作参考，不作结论） | 记下来 |
 
 2、3、4 任何一项过不了，停下来报告用户，不往下做。
@@ -574,7 +594,7 @@ build-android.sh [debug|release] [--install <序列号>]
 3. 接入引导和精简的「本机」页（共用 iPad 的）。
 4. 桌面会话、单应用会话、文本终端；触摸、外接键盘、鼠标；文字剪贴板；前后台；返回键；常亮；全屏和折叠。
 
-验收（模拟器）：装上 → 输入 relay 和密钥 → 全景看到设备 → 进桌面会话点和打字 → 开终端 → 切到后台 2 秒后 `adb shell` 看没有连接 → 切回来自动恢复 → 旋转、分屏不重建不崩。Mac 门禁全过；Linux 实机回归过了。
+验收（模拟器）：装上 → 输入 relay 和密钥 → 在设备页按 ID 添加主机（和 iPad 一样，主机不会自己出现；P0 结果 §3）→ 全景看到设备 → 进桌面会话点和打字 → 开终端 → 切到后台 2 秒后 `adb shell` 看没有连接 → 切回来自动恢复 → 旋转、分屏不重建不崩。Mac 门禁全过；Linux 实机回归过了。
 
 ### 14.3 和 Windows 的 C 段怎么对
 
@@ -606,7 +626,15 @@ Windows 的 C 段也要「会话端口的小接口」，在 Windows 机器上做
 4. 外接键盘上系统拿走的键，和 P0 的表对一遍。
 5. 语音按钮在这台设备上出不出现、识别准不准。
 6. 厂商系统的省电策略会不会在前台就限制它。
-7. 更新一遍。
+7. 更新一遍（细节见第 10 条）。（P0 结果 §7）
+8. 双栈的真 IPv6：有全局 IPv6 的网络、只有 IPv6 的网络（NAT64）下各连一次 relay（模拟器上没有全局 IPv6，P0 测不了）。（P0 结果 §3）
+9. 触控板双指滚动、捏合：Flutter 收到的是 `PointerPanZoom*` 还是 `PointerScrollEvent`（模拟器上用 `uinput` 虚拟触控板测不出；平板上没有触控板）。**一分钟检查（在 P1 第一个包上做，探查包已卸掉）：**平板上 Ctrl+C、Ctrl+V 的 `isControlPressed`（P0 里平板只做过 `input keycombination`，它发的字母 `metaState` 为 0，`uinput` 平板上被拒，所以注入显示不了修饰键状态；34、36 上 `uinput` 已过）。做法：把配对的蓝牙键盘接上，在 P1 第一个包里（会话里或一个看得到按键的地方）按 Ctrl+C、Ctrl+V，看 App 收到的是不是带 Ctrl 的组合。（P0 结果 §5）
+10. 自己装自己走完一遍：平板上点「更新」→ 荣耀的安全检测 → 勾「已了解…」→「继续安装」→ 输锁屏密码，看版本变新、App 是被杀还是自己起来；没有锁屏密码的机器是什么样也看一下。P0 里平板只走到输密码那一步（密码不能替用户输），「安装外部来源应用」的授权随探查包卸掉没了，要重新打开。（P0 结果 §7）
+11. 打字不少字：用真键盘和软键盘各打一段，到 Mac 上核对。P0 里模拟器 36 上重复 7 次、少字 3 次（有截图的两次，少的字在写作条里就没有了）；34 上到齐；平板上第一次也少了一个字，重打后到齐；是注入、写作条收字还是模拟器输入法丢的，没查清。（P0 结果 §4）
+12. 强制走 relay 时的帧率（P0 没量；局域网下平板 30 s 平均 26.1 帧）。（P0 结果 §8）
+13. 语音：真人对着平板按住说话，看有没有任何回调、按钮该不该出现。P0 里平板六次按住说话都没有回调，哪里都没拿到中文字。（P0 结果 §6）
+14. 真键盘在文本框里：Ctrl+空格（P0 里只到了 Ctrl，空格被输入法拿走）、单按字母（36 上没有按键事件、也看不到字）、Ctrl+C/V。这几处 P0 没查明原因。（P0 结果 §5）
+15. relay 写成域名时的解析和连接（P0 里这台 Mac 存的是 IPv4 字面地址，域名那一支没走到）。（P0 结果 §3）
 
 ## 15. 请你核对
 
