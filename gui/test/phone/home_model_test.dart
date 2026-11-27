@@ -151,7 +151,7 @@ void main() {
     expect(m.working.length, 5);
     expect(m.working.first.progress, 40);
     expect(m.doneUnseen, 2);
-    expect(m.recentDone.map((d) => d.id), ['term\nA\nd2', 'term\nA\nd3', 'term\nA\nd1']);
+    expect(m.recentDone.map((d) => d.id), ['term\nA\nd2', 'term\nA\nd1']);
   });
 
   test('messages: only from service, cleared and handled ones leave', () {
@@ -168,5 +168,36 @@ void main() {
     expect(m.items.map((i) => i.id), ['msg\ne3', 'msg\ne4']);
     expect(m.items.first.line, '做完了');
     expect(m.items.every((i) => i.button == HomeButton.gotIt), isTrue);
+  });
+
+  test('seen error does not show', () {
+    final m = build(
+      lists: {
+        'A': TermList('A', terms: [row('e', 'error', unread: false), row('e2', 'error', unread: true)]),
+      },
+      sessions: [('B', {'session': 's', 'state': 'error', 'seq': 1, 'since': 1, 'at': 5, 'seen': 6})],
+      fromService: true,
+    );
+    expect(m.items.map((i) => i.id), ['term\nA\ne2']);
+  });
+
+  test('recent done is unseen only', () {
+    final m = build(
+      lists: {
+        'A': TermList('A', terms: [
+          row('d1', 'done', unread: true, since: 100),
+          row('d2', 'done', since: 200),
+          row('d3', 'done', unread: true, since: 300, seq: 9),
+        ]),
+      },
+      sessions: [
+        ('B', {'session': 's1', 'state': 'done', 'seq': 1, 'since': 150, 'at': 150}),
+        ('B', {'session': 's2', 'state': 'done', 'seq': 1, 'since': 250, 'at': 250, 'seen': 260}),
+      ],
+      fromService: true,
+      gotIt: {'term\nA\nd3\n9'},
+    );
+    expect(m.recentDone.map((d) => d.id), ['term\nB\ns1', 'term\nA\nd1']);
+    expect(m.doneUnseen, 2);
   });
 }

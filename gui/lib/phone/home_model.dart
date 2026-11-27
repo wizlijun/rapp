@@ -4,8 +4,8 @@
 /// - waiting / session dropped / device offline / resource warning: only from [needs]. `MainState.needs` already
 ///   merges the two sources (this machine computes what it can; the center service only fills devices this machine has
 ///   no terminal list for), so the phone does not merge them a second time.
-/// - error / done-unseen: one rule for both sources. A device in [lists] uses its [TermRow]: `ps.state` is `error`, or
-///   `done` with `unread`. A device not in [lists] counts only when [fromService]; then [serviceSessions] rows count:
+/// - error / done-unseen: one rule for both sources. A device in [lists] uses its [TermRow]: `ps.state` is `error` or
+///   `done`, and `unread`. A device not in [lists] counts only when [fromService]; then [serviceSessions] rows count:
 ///   `state` is `error` / `done` and `seen` is missing or older than `at`.
 /// - message: only when [fromService]; `emit` rows of [serviceRows] with `level` ask / info / done, not `handled`,
 ///   and not followed by a `clear` with the same `key`.
@@ -18,6 +18,7 @@
 /// terminal's own unread can only be cleared by looking at it. An entry is `'<item id>\n<seq>'`, where seq is the
 /// program status `seq` (a terminal's `ps.seq`, a service session row's `seq`); an item without a seq (device
 /// offline, resource, message, dropped session, app) uses its id alone. A new seq brings the item back.
+/// The UI stores `HomeItem.gotItKey`. `recentDone` holds only the unseen done items that are shown.
 library;
 
 import '../hub_client.dart';
@@ -244,7 +245,6 @@ HomeModel buildHome({
 
   // 2. Error / done / working, from one list of candidates per terminal.
   final working = <WorkRow>[];
-  final doneAll = <DoneRow>[];
   var doneUnseen = 0;
 
   void candidate({
@@ -263,9 +263,6 @@ HomeModel buildHome({
     if (state == 'working') {
       working.add(WorkRow(id, program, device, since, progress: progress?.toDouble(), sessionKey: key));
       return;
-    }
-    if (state == 'done') {
-      doneAll.add(DoneRow(id, program, device, msg.isEmpty ? '做完了' : msg, since, sessionKey: key));
     }
     if (!unseen || taken.contains(id)) return;
     final isErr = state == 'error';
@@ -298,7 +295,7 @@ HomeModel buildHome({
       candidate(
         id: 'term\n${e.key}\n${r.id}',
         state: ps.state,
-        unseen: ps.state == 'error' || (ps.state == 'done' && r.unread),
+        unseen: (ps.state == 'error' || ps.state == 'done') && r.unread,
         program: ps.app ?? r.fg ?? '',
         dev: e.key,
         msg: ps.msg ?? '',
@@ -375,7 +372,11 @@ HomeModel buildHome({
   });
   final items = [for (final x in indexed) x.$1];
   working.sort((a, b) => a.since.compareTo(b.since));
-  doneAll.sort((a, b) => b.at.compareTo(a.at));
+  // 做完没看的 (H7): the unseen done items that show, newest first.
+  final doneAll = [
+    for (final i in items)
+      if (i.kind == HomeKind.done) DoneRow(i.id, i.program, i.device, i.line, i.since, sessionKey: i.sessionKey),
+  ]..sort((a, b) => b.at.compareTo(a.at));
   return HomeModel(
     items,
     items.where((i) => i.kind == HomeKind.waiting).length,
