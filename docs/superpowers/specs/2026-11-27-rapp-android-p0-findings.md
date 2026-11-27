@@ -1,6 +1,10 @@
 # rApp 安卓平板 P0 探查结果
 
-规格：`2026-11-27-rapp-android-tablet-design.md` §14.1。计划：`../plans/2026-11-27-rapp-android-p0-probe.md`。做完一项填一项。
+规格：`2026-11-27-rapp-android-tablet-design.md` §14.1。计划：`../plans/2026-11-27-rapp-android-p0-probe.md`。日期 2026-11-27，八项都有结论。
+
+三个目标：模拟器 34（AOSP 14）、模拟器 36（google_apis 16）、平板（实机，HONOR ROD2-W09，Android 16，MagicOS 10）。证据文件（`p0/*.txt`、截图）都在 scratchpad，不进仓库，探查结束时删掉；截图只用文字说明。
+
+探查结束时：探查包从两个模拟器和平板上都卸掉（身份密钥和 relay 密钥随之删除）；拷出来的 relay 配置删掉；平板上唯一临时改过的设置（充电时保持唤醒）改回原值。所以下面所有「留给实机」「等用户」的项，都要等 P1 的第一个包装上以后再做，不在探查包上做。
 
 ## 工具和镜像
 
@@ -22,25 +26,35 @@
 | 系统镜像 36 | `system-images;android-36;google_apis;arm64-v8a`，Pkg.Revision=7 |
 | Rust | rustc 1.99.1；target `aarch64-linux-android` |
 | cargo-ndk | 4.1.2 |
+| AVD | `rapp-p0-34`、`rapp-p0-36`：`pixel_tablet`，2560x1600，`hw.keyboard=yes`，`hw.ramSize=4096` |
+| Gradle 设置 | `gui/android/gradle.properties` 里有 Flutter 模板加的 `android.newDsl=false`、`android.builtInKotlin=false`（AGP 9 的新 DSL 和内置 Kotlin 都关着）；P1 建工程时照留，升 AGP 时再看 |
+
+**磁盘（探查结束时）：**
+- Android SDK（`~/Library/Android/sdk`）11 GB：系统镜像 5.9、NDK 2.8、emulator 1.2、build-tools 0.37、platforms 0.26、cmdline-tools 0.16、cmake 0.09（GB）。
+- 两个 AVD（`~/.android/avd`）11 GB。
+- `~/.gradle` 3.3 GB。
+- openjdk@21 约 331 MB；Rust 的安卓 target 和 cargo-ndk 很小。
+
+工具和两个 AVD 都留着，给 P1 用。
 
 ## 总表
 
-| # | 看什么 | 结论（过 / 没过 / 部分 / 没测） | 规格要不要改 | 日期 |
+| # | 看什么 | 结论 | 没过的部分：走规格哪条退路，或留给实机哪一条 | 规格 |
 |---|---|---|---|---|
-| 1 | 工具和空壳 | 过（两个模拟器都能装、能启动、截图有 `rApp P0 shell`；36 上第一次截图撞上 System UI 无响应弹框，再试后正常） | 不用 | 2026-11-27 |
-| 2 | `.so` | 过（九个名字都导出、四个 `LOAD` 段都是 `0x4000`、11.3 MB / strip 后 7.5 MB；依赖全部直接编过） | §6.2 小改：hub 的四个函数不用 `#[used] static` 就能导出 | 2026-11-27 |
-| 3 | 进程内 hub 和网络 | 过（两个模拟器都起得来 hub、出接入引导；放进 relay 和 key、加上这台 Mac 后在线；默认和只有 IPv4 两种状态下 relay 都解析成 `::ffff:` 映射并连上。relay 是 IPv4 字面地址，域名解析没测到；真 IPv6 一半模拟器上测不了，留给实机） | §6.1 小改（`AI_V4MAPPED` 那个问题不用回答）；§6.5 的 `systemOpen` 要安卓通道；§14.6 加一条 | 2026-11-27 |
-| 4 | 进程内会话、节流 | 过，模拟器 36 的打字除外（门禁两轮在模拟器 34、模拟器 36、平板实机上都过：慢速 200 ms 时 `p0 fps` 平均 4.4–4.7，traffic `frames` 平均 28.9–29.6，后 6 次减前 6 次的 PSS 是 −10.6 / −5.9 / −7.9 MB（1 MB = 1000 dumpsys KB），都在 40 MB 以内；P0Moving 的动画面、颜色在 34、36、平板上都过；TextEdit 打 `p0probe` 在 34、平板上过，**在 36 上不稳：重复 7 次，`input text 'p0probe'` 3 次里到齐 2 次，逐键 `input keyevent` 3 次里到齐 1 次，另一串 `a1abba` 1 次到齐；少字 3 次，其中有截图的 2 次（A 第 1 次、B 第 2 次）写作条里已经少了；B 第 3 次没有截图**（第 4 节「模拟器 36 打字重复测量」；没用真键盘测过）；打字都经写作条发出；**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（桌面会话）；会话自己断的原因是 hub 的 64 KiB 行上限，探查里绕过后会话撑过 250 s） | 待定；hub 读到超过 64 KiB 的回复行（`watch_load` 首行）就丢整条连接，这段是 main 上的共用代码；会话因此断开只在探查的进程内会话里见过，桌面没测；绕过后，建流时首行已超上限（Mac 服务起来约 52 分钟以后，量到的区间是 51.5–55 分钟）余力就到不了安卓控制端，早于这个时间建流就到得了；Mac 服务重启后从头算 | 2026-11-27 |
-| 5 | 键盘和触控板 | 部分过。计划里的过关条件（Ctrl+C/V 在空白区到得了 App，`isControlPressed` 为真）在 34、36 上**过**（`uinput`，内核级，`ctrl=1`）；**平板（实机）上这一项没做，等用户用真键盘按**：键到得了，但 `input keycombination` 的字母 `metaState` 为 0、平板上 `uinput` 被拒，注入显示不了修饰键状态，真机上的过关没有确认。文本框有焦点、软键盘打开时（36 上重做）Ctrl+C/V/A/Z/X 都到、`ctrl=1`；原先「到不了」是点歪了位置（没点进文本框），结论撤回，Ctrl+SPACE 和单按字母的现象原因没查明。Meta 组合都被系统拿走，到不了 App。滚轮 `PointerScrollEvent kind=mouse`，34、36、平板都有；触控板双指和捏合模拟器上测不出，平板上没触控板，留给实机 | §14.6 加第 9 条（已加，含用户的一分钟真键盘检查） | 2026-11-27 |
-| 6 | 语音 | 部分过：三个目标按规格 §11 手算都是「不能用」（34 符合要求；36 走规则 4、平板走规则 4）；**36 按住说话没出字**：普通一段收到 `ready`、`begin`、`error 7`，`rms` 有动静（5 次、最大 10.0），识别器报没检测到语音；设备上下载 `cmn-Hans-CN` 后仍报 `error 13`；分段值给 `Long` 时 36 的识别器拒绝了（日志 `ignoring EXTRA_SEGMENTED_SESSION`），改给 `int` 后日志里不再拒绝，但只来过一个空的 `segment`，`rms` 停在 -2.0，分段结果能否收到、热词有没有效果**没测**；**平板（实机）** 六次（普通 ×3、分段 ×2、热词）每次 `force-stop` 后重开，都没有任何回调（没有 `ready`/`error`/`end`），无法判断分段、热词 | 要改：规则 2 靠的在线 `checkRecognitionSupport` 在 36 和平板上都报 14，实际走不到；语言标签是 `cmn-Hans-CN` 不是 `zh-CN`；「有默认识别器就按能用」被平板直接推翻（见「规格要改的地方」） | 2026-11-27 |
-| 7 | 自己装自己 | 部分过：两个模拟器过（`versionCode` 9001 → 9002，`canInstall` 起点是否、开开关后是；装完 App 被杀、没自己重启（34 上没查到「打开」通知，36 没查）；`success` 回调没观察到，页面也观察不了（进程死了，日志在内存里）；数据文件和开关都还在；装完缓存里的包还在）；哈希不对的四个条件在 34 和平板上都过；**平板（实机）装不下去：荣耀多出安全检测、`已了解…` 勾选、锁屏密码三层，密码不能替用户输，没做，等用户** | §13.2 第 4 步已改（装完不重启）；§13.2 加一句荣耀的多层确认（见「规格要改的地方」） | 2026-11-27 |
-| 8 | 数字 | 部分过：强制 relay 的 fps 没量；APK、`.so` 大小只量了模拟器 34 的包，模拟器 36 和平板没量（装的是同一个 APK）。量了的（大小只量了模拟器 34 的包，单位 MiB，1 MiB = 1,048,576 字节：APK 28.15；三个 `.so` 分别 7.88 / 11.04 / 7.18；34 上没开会话时 PSS 约 86.7 MiB，开着静态 2560×1600 桌面会话时 6 次平均约 215.2 MiB。Task 4G 的 PSS 单位是 MB = 1000 dumpsys KB：模拟器 36 没会话 89.1、静态单应用会话（TextEdit）158.6；平板没会话 209.0、静态单应用会话 445.7。release 动画面 30 s 平均 `p0 fps`：平板 26.1（屏幕 60 Hz）；模拟器 34 是 26.0、模拟器 36 是 25.1（模拟器，只作参考）。「静态」单应用会话里每秒仍到 3–7 帧，PSS 6 次之间摆动大，平均数只作大概） | 待定 | 2026-11-27 |
+| 1 | 工具和空壳 | **过**。两个模拟器都能装、能启动，截图里是 `rApp P0 shell`。36 上第一次截图撞上「System UI isn't responding」弹框，等一会儿再试正常 | — | §4.5 已改成装完的样子 |
+| 2 | `.so` | **过**。九个名字都导出；四个 `LOAD` 段都是 `0x4000`；11.3 MB，strip 后 7.5 MB；依赖全部直接编过 | — | §6.2 已改：不用 `#[used] static`；闸的顺序和忘了 ack 的后果；hub-ffi 自己包 `catch_unwind` |
+| 3 | 进程内 hub 和网络 | **过**。两个模拟器都起得来 hub、出接入引导；放进 relay 和 key、在设备页按 ID 加上这台 Mac 后在线；「默认」和「只有 IPv4」两种状态下 relay 都解析成 `::ffff:` 映射地址并连上 | relay 存的是 IPv4 字面地址，**域名解析没有拿到**；模拟器上没有全局 IPv6。两样都留给实机，在 P1 第一个包上做（§14.6 第 8、15 条） | §6.1 已改（库按名字传；`AI_V4MAPPED` 的问题不用回答）；§6.5 `systemOpen` 要安卓通道；§14.2 验收加「按 ID 添加」 |
+| 4 | 进程内会话、节流 | **过，模拟器 36 的打字没过**。门禁两轮（对照、慢速 200 ms）在模拟器 34、模拟器 36、平板上都过：慢速时 `p0 fps` 平均 4.4–4.7，traffic `frames` 平均 28.9–29.6；后 6 次减前 6 次的 PSS 是 −10.6 / −5.9 / −7.9 MB，都在 40 MB 以内。P0Moving 的动画面、颜色三台都对。TextEdit 打 `p0probe`：34、平板上到齐；**36 上重复 7 次，到齐 4 次、少字 3 次**（第 4 节「模拟器 36 打字重复测量」），有截图的 2 次在 rApp 的写作条里就已经少了。打字经写作条发出，这一点只凭截图。**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（桌面会话）；其余都是单应用会话，因为桌面会话会把用户自己的会话顶掉。hub 读到超过 64 KiB 的回复行（`watch_load` 首行，Mac 服务起来约 52 分钟以后，量到的区间 51.5–55 分钟）就丢整条连接，会话跟着断；探查里绕过后会话撑过 250 s | 36 的少字：用真键盘和软键盘各打一段，留给实机（§14.6 第 11 条）。64 KiB 行上限：共用代码，main 上没修，记进 `tasks/todo.md`「安卓平板」，P1 接会话前修 | §6.2 规矩 1 已补 |
+| 5 | 键盘和触控板 | **部分过**。过关条件（Ctrl+C/V 在空白区到得了 App，`isControlPressed` 为真）在 34、36 上**过**（`uinput`，内核级，`ctrl=1`）。**平板上没确认，等用户用真键盘按**：键到得了，但 `input keycombination` 发的字母 `metaState` 为 0，平板上 `uinput` 被拒，注入显示不了修饰键状态。36 上文本框有焦点、软键盘打开时 Ctrl+C/V/A/Z/X 都到、`ctrl=1`；36 上原先「到不了」是点在了文本框外，34 和平板的文本框没有重测。Meta 组合都被系统拿走。滚轮是 `PointerScrollEvent kind=mouse`，三台都有 | 平板的 Ctrl+C/V：蓝牙键盘的一分钟检查，在 P1 第一个包上做（§14.6 第 9 条）。触控板双指和捏合：模拟器上测不出，平板没有触控板（§14.6 第 9 条）。Ctrl+SPACE、文本框里单按字母：原因没查明（§14.6 第 14 条） | §14.6 第 9 条已改 |
+| 6 | 语音 | **部分过**。三个目标按 §11 的规则手算都是「不能用」：34 没有识别器（规则 3，正是 34 的过关条件）；36 和平板的 `checkRecognitionSupport` 报 14（规则 4）。**哪里都没有拿到中文字**：36 在线识别收到 `ready`、`begin`、`error 7`（没检测到语音），设备上下载 `cmn-Hans-CN` 后报 `error 13`；分段的静音时长给 `Long` 时 36 的识别器拒绝，给 `int` 不再拒绝，但只来过一个空的 `segment`；平板六次按住说话（普通 ×3、分段 ×2、热词）都没有任何回调。分段结果、热词效果都没有拿到 | 按 U6 的退路：判成不能用，按钮不出现（§11 规则 3、4）。平板上真人对着平板说话：留给实机（§14.6 第 5、13 条） | §11 已改（语言标签、超时、异常、`int`、规则 4、找识别器）；「按下去没回调」的处理是建议 2 |
+| 7 | 自己装自己 | **部分过**。两个模拟器过：`versionCode` 9001 → 9002；`canInstall` 起点是否，开开关后是；装完 App 被杀、没有自己重启；数据文件和开关都还在。`success` 回调没观察到（进程死了）。哈希不对的四个条件在 34 和平板上都过。**平板上没装完，等用户**：荣耀多出安全检测、「已了解…」勾选、锁屏密码三层，密码不能替用户输 | 平板上走完一遍、输锁屏密码：留给实机，在 P1 第一个包上做（§14.6 第 7、10 条） | §13.2 第 4 步已改（装完不重启）；荣耀三层是建议 1，「装完回到桌面」的提示是建议 3 |
+| 8 | 数字 | **部分过**。release APK 29.5 MB（29,522,135 字节），三个 `.so` 8.26 / 11.58 / 7.53 MB（MB = 10⁶ 字节）；三台装的是同一个构建。PSS（MB = 1000 dumpsys KB）：模拟器 34 没会话 88.8、开着静态 2560×1600 桌面会话 220.4；模拟器 36 没会话 89.1、静态单应用会话 158.6；平板没会话 209.0、静态单应用会话 445.7。release 动画面 30 s 平均 `p0 fps`：平板 26.1（屏幕 60 Hz），模拟器 34 26.0、模拟器 36 25.1（只作参考）。「静态」会话每秒仍到 3–7 帧，PSS 摆动大，平均数只作大概 | 强制走 relay 的帧率没量：留给实机（§14.6 第 12 条） | 不用改 |
 
 ## 1 工具和空壳
 
 日期 2026-11-27。
 
-**模拟器。** `pixel_tablet` 设备存在，直接用，没有替换。两个 AVD：`rapp-p0-34`（AOSP 14，不带 Google）、`rapp-p0-36`（Android 16，带 Google API）。`config.ini` 里改成 `hw.keyboard=yes`、`hw.ramSize=4096`（avdmanager 默认是 `no` 和 `2G`）。两个都是 2560x1600、横屏起来：`adb shell wm size` 都是 `Physical size: 2560x1600`；`ro.build.version.sdk` 分别是 34、36（release 14、16）；abi `arm64-v8a`。34 上没有任何带 google 的包；36 上有 `com.google.android.gms`。两个镜像都是 arm64，在 Apple 芯片上能起来（34 上 `sys.boot_completed` 约 22 秒）。
+**模拟器。** `pixel_tablet` 设备存在，直接用，没有替换。两个 AVD：`rapp-p0-34`（AOSP 14，不带 Google）、`rapp-p0-36`（Android 16，带 Google API）。`config.ini` 里改成 `hw.keyboard=yes`、`hw.ramSize=4096`（avdmanager 默认是 `no` 和 `2G`）。两个都是 2560x1600、横屏起来：`adb shell wm size` 都是 `Physical size: 2560x1600`；`ro.build.version.sdk` 分别是 34、36（release 14、16）；abi `arm64-v8a`。34 上没有任何带 google 的包；36 上有 `com.google.android.gms`。两个镜像都是 arm64，在 Apple 芯片上能起来。
 
 **空壳。** `gui/lib/main_p0_shell.dart` 只显示 `rApp P0 shell` 和 `Platform.operatingSystemVersion`。`flutter build apk --debug -t lib/main_p0_shell.dart --target-platform android-arm64` 出 81 MB 的调试 APK。两个模拟器各装一次、用 `am start -n com.rapphub.rapp/.MainActivity` 启动、`screencap` 截图（图在 scratchpad，不进仓库）：
 - API 34：白底，中间大字 `rApp P0 shell`，下面一行小字 `sdk_phone64_arm64-userdebug 14 UE1A.230829.036.A1 11228894 test-keys`；底部是平板的任务栏。`logcat -d -s flutter AndroidRuntime` 里只有两行 flutter 的 Impeller（OpenGLES）和 Dart VM service 信息，没有 FATAL。
@@ -50,13 +64,37 @@
 **这一步碰到的坑（P1 的人会再碰到）：**
 1. **`flutter create` 会改写 `gui/.metadata`**：它把原来的 linux/macos/windows 三条迁移记录丢了，只留 android。我把原文件还原后手工加了一条 android 记录。它还会生成 `gui/test/widget_test.dart`（引用不存在的 `MyApp`），已删除。它也会改 `gui/pubspec.lock`，已还原。
 2. **JDK。** `sdkmanager`/`avdmanager` 在 JDK 27 上正常。Gradle 9.1.0 不认 JDK 27（`flutter create` 末尾的提示就是这个），所以装了 `brew install openjdk@21`，之后所有 `flutter build` 都在命令前设 `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home`。没有动 Flutter 全局配置。`brew install openjdk@21` 顺带升级了 8 个依赖库（brotli、fontconfig、glib、harfbuzz、jpeg-turbo、lz4、zstd、little-cms2）。
-3. **下载非常慢，要绕代理。** 这台 Mac 的 TUN + fake-ip 代理让 `dl.google.com` 只有约 1–160 KB/s，Gradle 的 100+ MB 下载一直超时；直连物理网卡（DoH 解析 + 绑定 en0）能到 10–17 MB/s。做法：在 scratchpad 里起一个只监听 127.0.0.1 的小 CONNECT 代理（Python，DoH 解析真实 IP，socket 绑 en0），然后 `sdkmanager --proxy=http --proxy_host=127.0.0.1 --proxy_port=18123`，Gradle 用 `JAVA_TOOL_OPTIONS="-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=18123 -Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=18123 -Dhttp.nonProxyHosts=localhost|127.0.0.1"`。Maven Central（Cloudflare）走这条路也只有约 150 KB/s，首次 `flutter build apk` 总共用了约 40 分钟（含一次因代理空闲超时设置过短而断流重来）。依赖缓存好之后再编会快很多。`sdkmanager` 下载的是 SDK 本体 + 两个镜像 + NDK，约 11 GB 在 `~/Library/Android/sdk`。
+3. **下载非常慢，要绕代理（只在这台 Mac 上需要：它开着 TUN + fake-ip 代理；没有这种代理的机器直接下就行）。** 这台 Mac 的代理让 Google 的下载服务器只有约 1–160 KB/s，Gradle 的 100+ MB 下载一直超时；直连物理网卡（DoH 解析 + 绑定 en0）能到 10–17 MB/s。做法：在 scratchpad 里起一个只监听 127.0.0.1 的小 CONNECT 代理（Python，DoH 解析真实 IP，socket 绑 en0），然后 `sdkmanager --proxy=http --proxy_host=127.0.0.1 --proxy_port=18123`，Gradle 用 `JAVA_TOOL_OPTIONS="-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=18123 -Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=18123 -Dhttp.nonProxyHosts=localhost|127.0.0.1"`。Maven Central（Cloudflare）走这条路也只有约 150 KB/s，首次 `flutter build apk` 总共用了约 40 分钟（含一次因代理空闲超时设置过短而断流重来）。依赖缓存好之后再编会快很多。
 4. **Flutter 生成的 `.gitignore` 忽略了 `gradlew`、`gradlew.bat`、`gradle-wrapper.jar`**；它们每次 `flutter build` 会重新生成，不进仓库。
 5. AGP 在第一次构建时自己装了 build-tools 36.0.0 和 CMake 3.22.1，不用手动装。
 
-**磁盘：** Android SDK 11 GB（含两个镜像、NDK），两个 AVD 1.6 GB，`~/.gradle` 2.8 GB，openjdk@21 331 MB；Rust target 和 cargo-ndk 很小。
+6. **Gradle 设置。** Flutter 模板在 `gui/android/gradle.properties` 里加了 `android.newDsl=false`、`android.builtInKotlin=false`。P1 建工程时照留；以后升 AGP 时再看能不能去掉。
+
+**用到的命令**（和计划第 1 项的命令一致；P1 照着来，`JAVA_HOME` 指 openjdk@21；这台 Mac 上 `sdkmanager` 另加上面第 3 条的 `--proxy` 参数）：
+
+```bash
+export ANDROID_HOME=~/Library/Android/sdk
+SDKM=$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
+AVDM=$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager
+yes | $SDKM --licenses
+$SDKM "platforms;android-36" "ndk;28.2.13676358" "emulator" \
+  "system-images;android-34;default;arm64-v8a" "system-images;android-36;google_apis;arm64-v8a"
+~/.cargo/bin/rustup target add aarch64-linux-android
+~/.cargo/bin/cargo install cargo-ndk --locked
+$AVDM create avd -n rapp-p0-34 -k "system-images;android-34;default;arm64-v8a" -d pixel_tablet
+$AVDM create avd -n rapp-p0-36 -k "system-images;android-36;google_apis;arm64-v8a" -d pixel_tablet
+# 两个 config.ini：hw.keyboard=yes、hw.ramSize=4096；一次只开一台
+$ANDROID_HOME/emulator/emulator -avd rapp-p0-34 -no-snapshot -no-boot-anim
+~/development/flutter/bin/flutter create --platforms=android --org com.rapphub --project-name rapp gui
+cd gui && ~/development/flutter/bin/flutter build apk --debug -t lib/main_p0_shell.dart --target-platform android-arm64
+adb install -r build/app/outputs/flutter-apk/app-debug.apk
+adb shell am start -n com.rapphub.rapp/.MainActivity
+```
+
+**磁盘：** 见文首「工具和镜像」。
 
 **结论：过。** 空壳在 API 34（AOSP 14）和 API 36（Google APIs）两个 2560x1600 平板模拟器上都能装、能启动、能显示，没有崩溃。
+
 ## 2 `.so`
 
 日期 2026-11-27。探查分支 `probe/android-p0`，提交 7b9c99c7（挪代码）、9f1e9ff1（新 crate）。
@@ -66,11 +104,11 @@
 
 **`rapp-android-ffi`。** `rust/android-ffi`，`[lib] name = "rapp_android"`，`crate-type = ["cdylib"]`；依赖 `rapp-hub-ffi`、`rapp-client-core`（路径）、`libc` 0.2.191、`serde_json`（按计划加了，lib 里没用到，没有警告）；测试依赖 `flate2` 1.1.11。`rust/Cargo.toml` 只在 `members` 里加了 `"android-ffi"`，`Cargo.lock` 只多了这个 crate 的一段。
 - 先写测试：`cargo test -p rapp-android-ffi` 编译失败（16 个错误，函数和 `Gate`/`GateWriter` 都不存在）。
-- 实现后 4 条测试全过（约 0.32 s）：计划里的三条，外加一条「帧没 ack 时 close，kind 2 仍只来一次且在最后，`send` 非 UTF-8 返回 -2」。故意改坏（帧不关闸、kind 2 发两次）四条全失败，再改回。之后又加了「发 kind 2 前等正在进行的 sink 调用做完」（见下），最终版连跑 4 次都过。
+- 实现后 4 条测试全过（约 0.32 s）：`gate_holds_the_next_packet_until_ack`、`close_releases_a_writer_stuck_on_the_gate`、`session_over_loopback_ends_with_kind_2_exactly_once`（kind 2 只来一次、在最后），外加 `close_on_an_unacked_frame_still_ends_with_kind_2_once`（帧没 ack 时 close，kind 2 仍只来一次且在最后，`send` 非 UTF-8 返回 -2）。故意改坏（帧不关闸、kind 2 发两次）四条全失败，再改回。之后又加了「发 kind 2 前等正在进行的 sink 调用做完」（见下），最终版连跑 4 次都过。
 - `cargo test -p rapp-android-ffi -p rapp-client-core` 全过；`cargo clippy -p rapp-android-ffi -- -D warnings` 干净。加 `--all-targets` 时测试里有一处 `manual_c_str_literals`，已改成 `c"…"`，之后也干净。
 - **和计划的一处不同：关闸在交给 sink 之前。** 计划写「等闸开 → 交给 sink → 是帧就关闸」。如果先交再关，Dart 可能在关闸之前就 ack 了，这个 ack 会丢、会话永远卡住。所以 `pass` 在同一把锁里等开、关闸，然后才调 sink。另外线程结束时先把闸作废并等正在进行的那次 sink 调用做完，再发 kind 2，保证 kind 2 之后不会再有回调。
 - **最后一帧不 ack，会话就结束不了**（读代码和测试看到的行为）：闸关着时，`serve` 最后那条 `disconnected` 事件和 kind 2 都排在闸后面，要等 ack 或 `rapp_session_close` 才出来。所以 Dart 一侧（§6.3）每一帧都要 ack，丢掉的帧也要。
-- **积压时多出一张旧帧**：`Output` 的写线程先从队列里取出下一个包（是帧就先展开、拷进包里），然后才卡在闸上。所以积压时 ack 之后先到的是这张已经拿出来的帧，然后才是最新的一张，和管道写满时一样，多一张过时的帧。第 4 项量延迟时要记住这一点。
+- **积压时多出一张旧帧**：`Output` 的写线程先从队列里取出下一个包（是帧就先展开、拷进包里），然后才卡在闸上。所以积压时 ack 之后先到的是这张已经拿出来的帧，然后才是最新的一张，和管道写满时一样，多一张过时的帧。量延迟时要算上这一张。
 - **回调可能比 `rapp_session_open` 返回得早**：会话线程在 `open` 返回号码之前就可能用这个号码调 sink（事件，启动 JSON 不对时连 kind 2 都可能先到）。用 `NativeCallable.listener` 是排队投递，没问题，但 Dart 一侧不能假定先拿到号码再收消息。
 - sink 收到的内存是 `libc::malloc` 来的，`rapp_session_free` 就是 `libc::free`。**每一帧会多拷一次**：`Output` 把画面展开进它自己的 `pixels`，再写给写入端，写入端把这些字节 `memcpy` 进 malloc 来的包（`android-ffi/src/lib.rs:117–121` 的 `Body::fill`）。2560×1600 时每帧约 16 MB（2560×1600×4 = 16,384,000 字节）。第 4 项量数字时算上这一次。对过 Flutter SDK：`NativeFinalizerFunction` 是 `Void Function(Pointer<Void> token)`，`asTypedList(len, finalizer:)` 不给 `token` 时用指针本身，和计划说的一致。
 
@@ -137,7 +175,17 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 
 **还没看的：** 这个 `.so` 还没在模拟器里加载过（第 3、4 项做）。`trace.rs` 仍按进程号开 `worker-{pid}.log`，进程内多个会话会写同一个文件（P1 再处理）。hub-ffi 那四个函数本身没包 `catch_unwind`（现有代码，原样导出），hub 里一恐慌安卓进程就退出，见「规格要改的地方」。规格 §6.2 规矩 5（Windows 门禁上要编得过）P0 没验，探查分支不过那道门禁；P1 合并前在 Windows 机器上看。
 
+**P1 接手时要改的（读代码看到的，探查里没改）：**
+- `rapp_session_open` 先起线程、后把会话放进表（拿着表锁起线程，线程自己的移除会等这次放入），所以 sink 可能在 `open` 返回号码之前就被调。`open` 的文档注释要写明这一点。
+- `serve` 恐慌时（`catch_unwind` 接住），它的输出写线程可能没被 join，线程漏掉。闸作废以后它不会再调 sink，但线程本身还在。
+- `rapp_session_send` 恐慌时返回 -1，和「没有这个会话」混在一起，调用方分不出来。
+- `serde_json` 写进了依赖，lib 里没用到，可以去掉。
+- `rapp_session_close` 的注释说 kind 2「在返回之前」到，但它只等 2 s；线程更慢时 kind 2 在返回之后才到。注释要照实写。
+- `gate_holds_the_next_packet_until_ack` 靠 `sleep(200 ms)` 判断「还卡着」，机器忙时可能误报。
+- hub-ffi 的四个函数要自己包 `catch_unwind`（规格 §6.2 规矩 2 已改）。
+
 **结论：过。** `.so` 编得出来，九个名字都在导出表里，四个 `LOAD` 段都按 `0x4000` 对齐，现有会话测试条数不变、全过。
+
 ## 3 进程内 hub 和网络
 
 日期 2026-11-27。探查分支 `probe/android-p0`，提交 81ec88d9。两台模拟器先后各做一遍（`rapp-p0-34`、`rapp-p0-36`，一次只开一台，36 冷启动后等 90 秒再装）。relay 的主机、key、设备 id 在本页一律写成 `relay`、`KEY`、`ID`；看 `hub.log`、`logcat`、`ip` 输出时都先过一个替换这三样的过滤器。
@@ -155,7 +203,7 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 - 两台都起来了：`hub.log` 只有 `hub_start`（version 0.15.58）、`ports`、`ports_asked` 三行 info；`logcat` 里没有 `hub 起不来`。`files/rapp/local/` 下生成 `device.crt`、`device.key`、只有 `id` 的 `service.json`（0600）。
 - **第一次出的是全景，不是接入引导。** 原因：`PlatformCaps.forOs('android')` 落进桌面的默认项（`hasService`、`hasTray`……，`hubInProcess` 是 false），`MainWindow._needsAccess` 要 `caps.hubInProcess`。探查里在 `mainAndroid()` 开头写 `caps = const PlatformCaps(hubInProcess: true)` 绕过（没改 `platform_caps.dart`）。之后两台都出接入引导（「接入点」「key」「接入」）。
 - **`stderr` 到不了 logcat。** `main_ios.dart` 的 `_log` 用 `stderr.writeln`，安卓上这些字一行也看不到，「`logcat -s flutter` 里没有 `hub 起不来`」这一条就验不了。改成 `debugPrint` 后出现在 `flutter` 标签下。
-- **坑：`adb install -r` 后卡在启动画面。** 34 上把第 1 节的空壳 APK 用 `install -r` 覆盖成正式 APK，启动后一直是启动画面，`logcat` 有 `E flutter: Could not prepare isolate`、`Could not create root isolate`、`Could not launch engine`，Dart 一行没跑。`adb uninstall com.rapphub.rapp` 再装就好了。修正轮（同日）在 34 上又碰到一次，这次前面多一行 `Can't load Kernel binary: Invalid kernel binary: Indicated size is invalid`，查到了原因：debug 包第一次启动时把 `kernel_blob.bin` 解到 `app_flutter/flutter_assets/`，那里的文件只有 8,388,608 字节（APK 里是 47,973,912），是上一轮解到一半模拟器就关了。删掉 `app_flutter/flutter_assets` 和 `app_flutter/res_timestamp-*` 再启动就好，不用卸载。只有 debug 包这样（release 包是 AOT，不解 kernel），P1 不用管。
+- **坑：`adb install -r` 后卡在启动画面。** 34 上把第 1 节的空壳 APK 用 `install -r` 覆盖成正式 APK，启动后一直是启动画面，`logcat` 有 `E flutter: Could not prepare isolate`、`Could not create root isolate`、`Could not launch engine`，Dart 一行没跑。`adb uninstall com.rapphub.rapp` 再装就好了。第二次在 34 上碰到时，前面多一行 `Can't load Kernel binary: Invalid kernel binary: Indicated size is invalid`，查到了原因：debug 包第一次启动时把 `kernel_blob.bin` 解到 `app_flutter/flutter_assets/`，那里的文件只有 8,388,608 字节（APK 里是 47,973,912），是上一次解到一半模拟器就关了。删掉 `app_flutter/flutter_assets` 和 `app_flutter/res_timestamp-*` 再启动就好，不用卸载。只有 debug 包这样（release 包是 AOT，不解 kernel）。P1 开发时在模拟器上碰到「卡在启动画面」，先看是不是这个：`kernel_blob.bin` 比 APK 里的小，就删掉这两样重启。
 
 **第 4 步：放进 relay 和 key。**
 - 这台 Mac 的数据根是 `~/rapp`（没有 `RAPP_HOME`，没有指针文件）。`jq '{relay, key}' ~/rapp/local/service.json > <scratchpad>/p0-service.json`，`chmod 600`。
@@ -192,15 +240,23 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 - `resolve_for(dual)` 不靠它：先普通解析，有 IPv4 地址且有 IPv4 路由就自己拼 `::ffff:a.b.c.d`。计划里说的「按 IPv4 解析、自己拼 `::ffff:`」的那一支**本来就在 `resolve_for` 里**，安卓走的就是这一支，不用另加。
 - `dns.google` 解析出 `198.18.2.250`：这是 Mac 上 TUN + fake-ip 代理的假地址（198.18.0.0/15），模拟器的 DNS 经 Mac 转发。不影响 relay（relay 是字面地址）。
 - 换回正式包冷启动（强制 relay）：两台在两种状态下都是 `route … path:"relay" result:"ok"`、`presence online:true`，界面上这台 Mac 在线。「只有 IPv4」下连 `::1` 都没有，hub 的双栈 UDP 套接字照样连上了 relay。
-- 日志证据（scratchpad，不进仓库，都已过过滤器）：「只有 IPv4」是 `p0/t3-hub-v4only-{34,36}.txt`；「默认」是修正轮补的 `p0/t3-hub-default-{34,36}.txt`——各自冷开机（`emulator -avd rapp-p0-3x -no-snapshot-load -no-audio`，36 开机后等 90 秒），确认 `/proc/sys/net/ipv6/conf/all/disable_ipv6` 是 0、`ip -o addr` 和上表「默认」一样，`adb install -r t3-main.apk`，`am start -W -n com.rapphub.rapp/.MainActivity`，等 25–40 秒，再 `run-as com.rapphub.rapp cat …/files/rapp/logs/hub.log | mask.sh`，从这次的 `hub_start` 起存下来。两份都是 `hub_start`、`ports`、`route path:"relay" result:"ok"`、`presence online:true`、`ports_asked answered:1`，`grep -c -E '"lvl":"(warn|error)"'` 都是 0。
+- 日志证据（scratchpad，不进仓库，都已过过滤器）：「只有 IPv4」是 `p0/t3-hub-v4only-{34,36}.txt`；「默认」是 `p0/t3-hub-default-{34,36}.txt`——各自冷开机（`emulator -avd rapp-p0-3x -no-snapshot-load -no-audio`，36 开机后等 90 秒），确认 `/proc/sys/net/ipv6/conf/all/disable_ipv6` 是 0、`ip -o addr` 和上表「默认」一样，`adb install -r t3-main.apk`，`am start -W -n com.rapphub.rapp/.MainActivity`，等 25–40 秒，再 `run-as com.rapphub.rapp cat …/files/rapp/logs/hub.log | mask.sh`，从这次的 `hub_start` 起存下来。两份都是 `hub_start`、`ports`、`route path:"relay" result:"ok"`、`presence online:true`、`ports_asked answered:1`，`grep -c -E '"lvl":"(warn|error)"'` 都是 0。
 - **双栈的真 IPv6 一半测不了**：「默认」状态没有全局 IPv6 地址，relay 也是 IPv4 字面地址。真 IPv6、只有 IPv6 的网络（NAT64，靠 `getaddrinfo_v6` 拿 DNS64 合成的 AAAA 那一支，这次没走到）留给实机，已加进规格 §14.6。
 
 截图（scratchpad，不进仓库）：`p0-t3-access-setup-{34,36}.png`（接入引导）、`p0-t3-online-{34,36}.png`（lan 在线）、`p0-t3-online-relay-{34,36}.png`、`p0-t3-online-v4only-{34,36}.png`、`p0-t3-resolve-{default,v4only}-{34,36}.png`。
 
-**结论：过。** hub 在安卓进程里起得来、读得懂数据根、出接入引导；放进 relay 和 key、加上这台 Mac 后，两台模拟器在「默认」和「只有 IPv4」两种状态下都把 relay 解析成 `::ffff:` 映射地址并经 relay 连上。注意这台 Mac 存的 relay 是 IPv4 字面地址，**relay 的域名解析这次没测到**；真 IPv6 和只有 IPv6 的网络也留给实机。
+**结论：过。** hub 在安卓进程里起得来、读得懂数据根、出接入引导；放进 relay 和 key、加上这台 Mac 后，两台模拟器在「默认」和「只有 IPv4」两种状态下都把 relay 解析成 `::ffff:` 映射地址并经 relay 连上。注意这台 Mac 存的 relay 是 IPv4 字面地址，**relay 的域名解析没有拿到**；真 IPv6 和只有 IPv6 的网络也留给实机（规格 §14.6 第 8、15 条）。
+
+**P1 接手时要改的（读代码看到的）：**
+- `rust/net/src/quic.rs:271` 的注释写「Only the iOS hub uses them」，现在安卓也用，要改。
+- `gui/lib/p0/p0_pages.dart:61` 的 `relayHost` 遇到没加方括号的 IPv6 字面地址，会在最后一个冒号处截断。只在探查页里用，P1 不带过去。
+- `rust/android-ffi/src/lib.rs:371` 的 `anyhow_text` 只是包了一层 `to_string`，可以直接用 `to_string`。只在探查函数 `rapp_p0_resolve` 里用。
+
 ## 4 进程内会话
 
-**状态：过，模拟器 36 的打字除外。** 门禁两轮（对照、慢速 200 ms）在模拟器 34、模拟器 36、平板实机上都做了，都过，见本节末「Task 4G」。36 上 TextEdit 打 `p0probe` 不稳：先后 7 次 `p0probe`（`input text` 4 次、逐键 3 次）里 4 次少一个字符（`p0robe`、`pprobe`），逐键输入也少，不只是 `adb shell input text`；少的字在写作条里就没有了；34、平板上打字过。**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（续做 1 的 `p0/t4e-desktop-static-34.png`，桌面会话）；36 和平板只看了 P0Moving 的画面在动、颜色对，没有和 Mac 屏幕逐处对照。之后探查不再开桌面会话，因为用户正通过桌面会话在用这台 Mac。下面续做、续做 2 里写「没做」的，都由 Task 4G 补上了（强制 relay 的 fps 除外，按安排不量）。
+**状态：过，模拟器 36 的打字没过。** 门禁两轮（对照、慢速 200 ms）在模拟器 34、模拟器 36、平板上都过，见本节「第四次测量」。36 上 TextEdit 打 `p0probe` 不稳：先后 7 次（`input text` 4 次、逐键 3 次）里 4 次少一个字符（`p0robe`、`pprobe`），逐键输入也少，不只是 `adb shell input text`；有截图的几次，少的字在写作条里就没有了；34、平板上打字过。**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（第二次测量的 `p0/t4e-desktop-static-34.png`，桌面会话）；36 和平板只看了 P0Moving 的画面在动、颜色对，没有和 Mac 屏幕逐处对照。到 Mac 的会话从第三次测量起都是单应用会话：桌面会话一次只能一个人开，开了会把用户自己正在用的桌面会话顶掉。强制 relay 的 fps 四次测量都没量。
+
+本节有四次测量：第一次（模拟器 34，桌面会话和单应用会话）、第二次（模拟器 34，查会话为什么断、加绕过）、第三次（模拟器 34，画面源换成 P0Moving）、第四次（模拟器 34、模拟器 36、平板，门禁和打字），外加模拟器 36 的打字重复测量。
 
 做法：`gui/lib/embed/session_ffi.dart`（新）接 `rapp-android-ffi` 的 `rapp_session_open/send/ack/close/free`。帧包用 `asTypedList(finalizer: rapp_session_free)` 零拷贝交给 Dart。`ackedPackets` 是 `async*`：交出一个帧包，等 `slow`，再 `ack`。这样消费方暂停时不 ack，Rust 的闸也就不放下一帧。`SessionWorker.ffi` 和 `LinuxSessionPort.ffi` 是这两个共用文件里新加的构造函数，旧路径不动。`main_android.dart` 用 `LinuxSessionPort.ffi('librapp_android.so', downloads: () => '<数据根>/files/transfers', slow: P0_SLOW_MS)`。日志每秒打一行 `p0 fps=N`，traffic 事件打 `p0 traffic frames=N`。
 
@@ -216,7 +272,7 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 - ack 顺序；
 - 消费方暂停时不 ack；
 - `slow` 生效；
-- `slowNow` 每帧重新读（续做时加的，见下）。
+- `slowNow` 每帧重新读（见下「慢速开关改成运行时读」）。
 
 先红后绿（`flutter test test/session_ffi_test.dart`）。
 
@@ -233,24 +289,24 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 | 单应用会话打字 | 过，但不是直接打进文稿：`adb shell input tap 1200 700` 后 `adb shell input text 'p0probe'` 进的是 rApp 自己的写作条。按回车（`adb shell input keyevent 66`）后发到 Mac，TextEdit 文稿里出现 `p0probe`，标题变成 Edited。之后没存盘就关掉了 | `p0/t4-type-34.png`（字在写作条）、`p0/t4-type2-34.png`、`p0/t4-p0probe-34.png`（字在文稿里） |
 | 会话稳定性 | **release 包里会话自己断**：三次里两次在 18 s、10 s 后断，安卓侧报 `host disconnected: failed to fill whole buffer`（`client-core/src/protocol.rs:352` 的 `read_exact` 读到 EOF），Mac 侧记 `session_end reason "connection lost"`。断之前那一秒 `p0 fps` 还有 14–15，不是闸卡住。点「重连」能连回来。第三次开了 91 s，是我 `am force-stop` 结束的。debug 包两次各开了 115 s、79 s，Mac 侧结束原因也记的是 `connection lost`，当时是不是我结束的没有记下来 | `p0/t4-textedit-disconnect-34.png` |
 
-**第一次停下的原因：** 每次会话结束（自己断开也算），Mac 上的 rApp 都会在 10 s 后自动锁屏（`service.log` 里 `auto_lock`）。锁上以后要用户输入密码。另外，打开桌面会话会把另一台设备正开着的桌面会话顶掉（`session_end reason "taken over"`）。
+**第一次测量停在这里的原因：** 每次会话结束（自己断开也算），Mac 上的 rApp 都会在 10 s 后自动锁屏（`service.log` 里 `auto_lock`）。锁上以后要用户输入密码。另外，打开桌面会话会把另一台设备正开着的桌面会话顶掉（`session_end reason "taken over"`）。
 
-### 续做（2026-11-27 下午，模拟器 34，无窗口模式 `emulator -avd rapp-p0-34 -no-window -no-audio`）
+### 第二次测量（2026-11-27 下午，模拟器 34，无窗口模式 `emulator -avd rapp-p0-34 -no-window -no-audio`）
 
 **会话自己断的原因（查清了）。** Mac 回 `watch_load` 的第一行带满 1 小时的历史（720 个点），超过 `rapp_net::line::MAX_LINE`（`rust/net/src/line.rs:11`，64 KiB），读行报 `line longer than 64 KiB`。`rust/hub/src/link.rs` 的 `request()` 把这当成连接坏了：缓存连接那支没有专门处理、落到 `forget`，新连接那支走 `forget_if_dead`。连接一丢，这条连接上的会话全断，安卓侧看到的就是 `failed to fill whole buffer`、Mac 侧是 `connection lost`。查法：debug 包加诊断日志（改动 `p0/t4d-diag.diff`），在 hub.log 里看到这行报错，紧跟着连接被丢、会话结束。
 
 哪些是确定的：
-- 回复行太长就丢连接，这段是 main 上的共用代码。探查分支岔出去以后，main 上 `rust/net`、`rust/hub` 没有新提交；回复实测 75,125 字节，上限 65,536（续做 2）。
+- 回复行太长就丢连接，这段是 main 上的共用代码。探查分支岔出去以后，main 上 `rust/net`、`rust/hub` 没有新提交；回复实测 75,125 字节，上限 65,536（第三次测量）。
 - 连接丢了、会话跟着断，只在这个探查的进程内会话里见过。
 - 桌面版的会话在自己的进程里、有自己的连接，那边什么都没测。
 
 探查里的绕过（补丁表 `link.rs` 那行）：连接还开着、错误是 `line longer than` 时，只把错误交回去、记一行 `p0_keep_link`，不丢连接。绕过后 hub.log 里只有大约每分钟一行 `p0_keep_link`，没有反复重连。两次会话都撑过 250 s：桌面会话 256 s（被另一台设备顶掉才结束），单应用会话 251 s（我 `am force-stop` 结束）。**真修法应在 main 的共用代码里**：要么 `watch_load` 的首行别带那么多历史、或拆行，要么读行上限对这个回复放宽；不管哪种，「回复太长」都不该丢整条连接。
 
-**绕过留下没修的：** 它只保住了连接，`watch_load` 照样失败，大约每分钟一次。余力（负载）数据要等真修法。
+**绕过留下没修的：** 它只保住了连接；首行超上限时 `watch_load` 照样失败，大约每分钟重试一次。余力（负载）数据要等真修法。
 
-**更正（Task 4G）：** 上面原来写的「余力一直到不了安卓控制端」不对。首行的长短跟着 Mac 服务的运行时长涨：历史最多 720 个点（1 小时），点少的时候首行在上限以内，余力是到得了的。Task 4G 里 Mac 服务 08:02:39Z 起来，用 `scratchpad/tools/load-size.py`（只读连本机 IPC，发 `{"cmd":"load","history":true}`）量首行：08:54:10Z 是 65,477 字节、618 个点（还在 65,536 以内）；08:57:40Z 是 69,651 字节、660 个点（超了）（`p0/t4g-load-size.txt`，事后从终端输出抄下来的）。算一下：08:54:10Z 离服务起来 3,091 s（51.5 分钟）、618 个点，08:57:40Z 离起来 3,301 s（55.0 分钟）、660 个点，都是每 5.00 s 一个点；两次之间每多一个点多 4,174 / 42 ≈ 99 字节，所以 619 个点就约 65,576 字节、超过 65,536。撞上限大约在服务起来 **52 分钟**（约 619–620 个点），量到的能确定的区间是 51.5–55 分钟。历史存在服务进程的内存里（`rust/service/src/load/rules.rs` 的 `ring: VecDeque`，最多 `KEEP = 720` 个），Mac 服务一重启历史就清空、这 52 分钟从头算：09:47:12Z Mac rApp 自动升级（见下面「Mac 自动升级」）就是一次重启（这条是读代码得出的，重启后没再量首行）。`watch_load` 是一条流：只有建流时的第一行带历史，之后每行只是一个点（**读代码推断**：hub 一侧 `rust/hub/src/load.rs` 的 `follow` 先交第一行再循环读；service 一侧 `rust/service/src/load/serve.rs:59` 注释写第一行是回复，之后每个采样一行。没在新起的服务上实测过）。所以看的是**建流那一刻**的历史长短：平板的 hub 在 08:3x 起来、那时首行还短，09:02:36Z 全景里仍看得到余力一行（`p0/t4g-tab-ov.png`，「内存 剩 27%」）；34、36 在 09:14–09:26Z 才连上，首行已超上限，看不到。结论：建流时 Mac 服务起来不到约 52 分钟，余力到得了、之后一直在；晚于这个时间建流就到不了，每分钟重试一次也一样失败，要等真修法。
+**余力什么时候到得了。** 首行的长短跟着 Mac 服务的运行时长涨：历史最多 720 个点（1 小时），点少的时候首行在上限以内，余力是到得了的。第四次测量时 Mac 服务 08:02:39Z 起来，用 `scratchpad/tools/load-size.py`（只读连本机 IPC，发 `{"cmd":"load","history":true}`）量首行：08:54:10Z 是 65,477 字节、618 个点（还在 65,536 以内）；08:57:40Z 是 69,651 字节、660 个点（超了）（`p0/t4g-load-size.txt`，事后从终端输出抄下来的）。算一下：08:54:10Z 离服务起来 3,091 s（51.5 分钟）、618 个点，08:57:40Z 离起来 3,301 s（55.0 分钟）、660 个点，都是每 5.00 s 一个点；两次之间每多一个点多 4,174 / 42 ≈ 99 字节（按两份原始记录各自的点算，每点约 100 和约 103 字节；所以每点在 99–103 字节之间），所以 619 个点就约 65,576 字节、超过 65,536。撞上限大约在服务起来 **52 分钟**（约 619–620 个点），量到的能确定的区间是 51.5–55 分钟。历史存在服务进程的内存里（`rust/service/src/load/rules.rs` 的 `ring: VecDeque`，最多 `KEEP = 720` 个），Mac 服务一重启历史就清空、这 52 分钟从头算：09:47:12Z Mac rApp 自动升级（见下面「Mac 自动升级」）就是一次重启（这条是读代码得出的，重启后没再量首行）。`watch_load` 是一条流：只有建流时的第一行带历史，之后每行只是一个点（**读代码推断**：hub 一侧 `rust/hub/src/load.rs` 的 `follow` 先交第一行再循环读；service 一侧 `rust/service/src/load/serve.rs:59` 注释写第一行是回复，之后每个采样一行。没在新起的服务上实测过）。所以看的是**建流那一刻**的历史长短：平板的 hub 在 08:3x 起来、那时首行还短，09:02:36Z 全景里仍看得到余力一行（`p0/t4g-tab-ov.png`，「内存 剩 27%」）；34、36 在 09:14–09:26Z 才连上，首行已超上限，看不到。结论：建流时 Mac 服务起来不到约 52 分钟，余力到得了、之后一直在；晚于这个时间建流就到不了，每分钟重试一次也一样失败，要等真修法。
 
-**慢速开关改成运行时读。** `ackedPackets` 加了 `slowNow`，每帧重新读；`FfiSession` 每秒用 libc 的 `__system_property_get` 读一次系统属性 `debug.rapp.p0_slow_ms`。这样同一个包、同一个会话里，`adb -s emulator-5554 shell setprop debug.rapp.p0_slow_ms 200` 和 `… 0` 就能在慢速和对照之间切换，不用重装、不用断会话（断会话会触发 Mac 自动锁屏）。日志在切换时打 `p0 slow=Nms`。新测试先红后绿：`p0/t4c-red.txt`、`p0/t4c-green.txt`。
+**慢速开关改成运行时读。** `ackedPackets` 加了 `slowNow`，每帧重新读；`FfiSession` 每秒用 libc 的 `__system_property_get` 读一次系统属性 `debug.rapp.p0_slow_ms`。这样同一个包、同一个会话里，`adb -s <目标> shell setprop debug.rapp.p0_slow_ms 200` 和 `… 0` 就能在慢速和对照之间切换，不用重装、不用断会话（断会话会触发 Mac 自动锁屏）。日志在切换时打 `p0 slow=Nms`。新测试先红后绿：`p0/t4c-red.txt`、`p0/t4c-green.txt`。
 
 **release 包（带绕过）上量到的：**
 
@@ -260,13 +316,13 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 | 动的画面（Mac 上一个 Terminal 窗口每 30 ms 打一行时间，无声、没下载东西） | 画面跟着动；截图那一秒 `p0 fps=15` | `p0/t4e-moving-34.png` |
 | 静态桌面会话时的 PSS | 见第 8 节 | `p0/t4e-static-34.txt` |
 
-**门禁（第 6 步）：续做里没做，BLOCKED（后来由 Task 4G 做完，见本节末）。** 对照那一轮（`debug.rapp.p0_slow_ms=0`）开始后约 4 分钟，用户在另一台设备上把这台 Mac 的桌面会话拿回去了（Mac `service.log` 06:47:44Z `session_end reason "taken over"`），从第 10 个采样起 PSS 掉到约 95 MB。按规矩这一轮整轮作废（`p0/t4e-ctl-34.txt`，不引用里面的数），不拼接。桌面会话一次只能一个人开，用户正在用，再顶回去会打断用户，所以没再开。试过单应用会话（Terminal）代替：它跟着用户在 Mac 上聚焦的那个 Terminal 窗口走，`p0 fps` 只有 0–6，不是能控制的动画面，不能当门禁的画面源（`p0/t4e-term-34.png`、`p0/t4e-term-moving-34.png`）。慢速一轮、release 30 s 平均 fps、强制 relay 的 fps 都**没量**。
+**门禁：这一次没做完（第四次测量做完了，见本节末）。** 对照那一轮（`debug.rapp.p0_slow_ms=0`）开始后约 4 分钟，用户在另一台设备上把这台 Mac 的桌面会话拿回去了（Mac `service.log` 06:47:44Z `session_end reason "taken over"`），从第 10 个采样起 PSS 掉到约 95 MB。按规矩这一轮整轮作废（`p0/t4e-ctl-34.txt`，不引用里面的数），不拼接。桌面会话一次只能一个人开，用户正在用，再顶回去会打断用户，所以没再开。试过单应用会话（Terminal）代替：它跟着用户在 Mac 上聚焦的那个 Terminal 窗口走，`p0 fps` 只有 0–6，不是能控制的动画面，不能当门禁的画面源（`p0/t4e-term-34.png`、`p0/t4e-term-moving-34.png`）。这一次慢速一轮、release 30 s 平均 fps、强制 relay 的 fps 都**没量**。
 
-**界面上看到的问题（P1 留意）：** 会话断开后，画面中间的「重连 / 结束会话」框里，「结束会话」点了没反应，只能点左上角总览按钮离开。重现：模拟器 34、release 包，开一个单应用会话，让它断开（续做 1 里是会话自己断），在断开框里点「结束会话」（`adb -s emulator-5554 shell input tap` 点了几次），画面不变。同一个框里的「重连」是好的（续做 2 里 Mac 上的 app 退出后点「重连」，会话重新开了起来）。
+**界面上看到的问题（P1 留意）：** 会话断开后，画面中间的「重连 / 结束会话」框里，「结束会话」点了没反应，只能点左上角总览按钮离开。重现：模拟器 34、release 包，开一个单应用会话，让它断开（第二次测量里是会话自己断），在断开框里点「结束会话」（`adb -s <目标> shell input tap` 点了几次），画面不变。同一个框里的「重连」是好的（第三次测量里 Mac 上的 app 退出后点「重连」，会话重新开了起来）。第四次测量里 36 上也一样（见下「Mac 自动升级」）。Mac 锁着时，会话里显示「远程电脑已锁屏：输入系统密码」；探查里没用过这个输入。
 
-**续做里的锁屏和顶掉次数：** 自动锁屏 1 次（06:27:40Z，绕过之前那次会话断开后）；我顶掉别人的桌面会话 2 次（06:27:16Z、06:43:28Z）；我的会话被别人顶掉 1 次（06:47:44Z）。
+**第二次测量的锁屏和顶掉次数：** 自动锁屏 1 次（06:27:40Z，绕过之前那次会话断开后）；我顶掉别人的桌面会话 2 次（06:27:16Z、06:43:28Z）；我的会话被别人顶掉 1 次（06:47:44Z）。
 
-### 续做 2（2026-11-27 16:15 起，模拟器 34；画面源换成单应用会话）
+### 第三次测量（2026-11-27 16:15 起，模拟器 34；画面源换成单应用会话）
 
 **画面源。** 自己编的 AppKit app（源码和包都在 scratchpad 的 `moving/`，不进仓库）：
 - bundle id `com.rapp.p0moving`，常规激活策略；
@@ -295,33 +351,33 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 
 教训：只要 Mac 上没有别的会话，探查结束自己的会话就会锁屏。所以要重开画面源，得先开一个新会话再关旧的。
 
-**没做**（Mac 锁着；除强制 relay 的 fps 外，后来都由 Task 4G 做了，见本节末；36 的打字做了但不稳，偶尔少一个字符）：
+**这一次没做**（Mac 锁着；除强制 relay 的 fps 外，第四次测量都做了；36 的打字做了但不稳，见第四次测量）：
 - 门禁两轮（对照、慢速 200 ms）；
 - release 30 s 平均 fps；
 - 强制 relay 的 fps；
 - 模拟器 36 的画面、门禁和 TextEdit 打字。
 
-**`watch_load` 的证据。** 用 `adb -s emulator-5554 root` 后执行 `adb -s emulator-5554 shell grep p0_keep_link /data/data/com.rapphub.rapp/files/rapp/logs/hub.log`，再过打码脚本，拿到的一行：
+**`watch_load` 的证据。** 用 `adb -s <目标> root` 后执行 `adb -s <目标> shell grep p0_keep_link /data/data/com.rapphub.rapp/files/rapp/logs/hub.log`，再过打码脚本，拿到的一行：
 
 ```
 {"ts":"2026-11-27T07:21:52.834Z","err":"line longer than 64 KiB","ev":"p0_keep_link","lvl":"info","op":"watch_load"}
 ```
 
 - 34 的 hub.log 里含 `line longer` 的行共 19 行，都是 `watch_load` 撞上的，大约每分钟一行：
-  - 4 行 `p0_quiet_err` `"op":"WatchLoad"`：续做 1 的诊断包，绕过之前；
+  - 4 行 `p0_quiet_err` `"op":"WatchLoad"`：第二次测量的诊断包，绕过之前；
   - 10 行 `p0_keep_link` 不带 op：绕过后、加 op 之前的包；
   - 5 行 `p0_keep_link` `"op":"watch_load"`：这次的包。
-- 回复有多大：在 Mac 上只读地连本机 IPC，发 `{"cmd":"load","history":true}`，首行回复 75,125 字节，里面 720 个历史点（每个约 100 字节），而上限 `MAX_LINE` 是 65,536（`p0/t4f-load-size.txt`）。
+- 回复有多大：在 Mac 上只读地连本机 IPC，发 `{"cmd":"load","history":true}`，首行回复 75,125 字节，里面 720 个历史点（每个约 100 字节；各次量的在 99–103 字节之间），而上限 `MAX_LINE` 是 65,536（`p0/t4f-load-size.txt`）。
 - 别的请求都没撞上。
 
-**锁屏和顶掉次数（续做 2）：** 自动锁屏 1 次（07:29:32Z，我造成的，见上）；顶掉别人 0 次；被顶掉 0 次；和用户抢焦点 5 次（07:25:44–07:25:52Z，见上）。
+**第三次测量的锁屏和顶掉次数：** 自动锁屏 1 次（07:29:32Z，我造成的，见上）；顶掉别人 0 次；被顶掉 0 次；和用户抢焦点 5 次（07:25:44–07:25:52Z，见上）。
 
-### Task 4G（2026-11-27 17:33 起：模拟器 34、模拟器 36、平板实机）
+### 第四次测量（2026-11-27，模拟器 34、模拟器 36、平板；时间见各表，UTC）
 
 **怎么做的。**
 - 包：probe `d2706c7e` 不带 `P0_PAGE` 的 release 包（`p0/t4g-release.apk`），三台都装的这一个。
 - 平板：荣耀 ROD2-W09，Android 16，USB 连 Mac，没改任何设置。模拟器无窗口跑（`-no-window -no-audio`）。
-- 画面源只用单应用会话，没开桌面会话：动画面是续做 2 的 P0Moving（`com.rapp.p0moving`），打字用 TextEdit 的一个空白文档。
+- 画面源只用单应用会话，没开桌面会话：动画面是第三次测量的 P0Moving（`com.rapp.p0moving`），打字用 TextEdit 的一个空白文档。
 - Mac 上的 rApp 先是 0.15.64，09:47:11Z 自己升到了 0.15.66（见下面「Mac 自动升级」）。门禁、30 s fps、平板的画面和打字、平板的两个 PSS 都是 0.15.64 时量的；模拟器 36 的打字和静态 PSS 是 0.15.66 时量的。
 
 **A 画面和打字**
@@ -330,24 +386,24 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 |---|---|---|---|---|
 | P0Moving 的动画面、颜色 | 模拟器 36 | 色块在动，颜色对。强制 relay 和局域网各看了一次 | 过 | `p0/t4g-moving-36-relay.png`、`p0/t4g-moving-36.png` |
 | 同上 | 平板（实机） | 色块在动，颜色对，局域网 | 过 | `p0/t4g-moving-tab.png` |
-| TextEdit 里打 `p0probe` | 模拟器 36 | 点文档会弹出写作条。`adb -s emulator-5554 shell input text 'p0probe'` 进了写作条，回车（keyevent 66）只在写作条里换行、不发送，点写作条的发送按钮才发到 Mac。字到了 Mac 的文档里，但**少了第二个 p**：osascript 读回来是 `p0robe` 加一个换行（`od -c`：`p 0 r o b e \n`），截图里文档那行也是 `p0robe`，两者一致。少的这个字是在 `input text` 送键、写作条收字、还是发到 Mac 这几段里丢的，没查明（经过见表下） | 没过（少一个字符；重复测量见表下） | `p0/t4g-p0probe-36.png` |
+| TextEdit 里打 `p0probe` | 模拟器 36 | 点文档会弹出写作条。`adb -s <目标> shell input text 'p0probe'` 进了写作条，回车（keyevent 66）只在写作条里换行、不发送，点写作条的发送按钮才发到 Mac。字到了 Mac 的文档里，但**少了第二个 p**：osascript 读回来是 `p0robe` 加一个换行（`od -c`：`p 0 r o b e \n`），截图里文档那行也是 `p0robe`，两者一致。少的这个字是在 `input text` 送键、写作条收字、还是发到 Mac 这几段里丢的，没查明（经过见表下） | 没过（少一个字符；重复测量见表下） | `p0/t4g-p0probe-36.png` |
 | 同上 | 平板（实机） | 要绕开拼音输入法，经过见表下。文档显示 `p0probe`，osascript 读到的也是 | 过 | `p0/t4g-p0probe-tab.png`、`p0/t4g-tab-x1.png` |
 
 **模拟器 36 打字的经过（UTC）。**
 - 09:43:14Z 用 osascript 把文档清空。09:46:14Z 在 36 上开 TextEdit 单应用会话。
-- 第一次：09:46:42Z 点文档（`input tap 1200 700`），`input text 'p0probe'`，3 s 后截图、读文档；09:47:13Z keyevent 66，读回来只有换行（空文档）；09:47:36Z 点发送按钮，09:47:51Z 起每 5 s 读一次共 6 次，都是空的。这一次正赶上 09:47:11Z Mac 服务重启（下面「Mac 自动升级」），没到 Mac。截图文件被后面覆盖了，这一次写作条里是什么没有留证据。
+- 第一次：09:46:42Z 点文档（`input tap 1200 700`），`input text 'p0probe'`，3 s 后截图、读文档；09:47:13Z keyevent 66，读回来只有换行（空文档）；09:47:36Z 点发送按钮，09:47:51Z 起每 5 s 读一次共 6 次，都是空的。这一次正赶上 09:47:11Z Mac 服务重启（下面「Mac 自动升级」），没到 Mac。这一次写作条里是什么没有留证据：据做测量时的记录，截图文件被后面的截图覆盖了，这一点没有别的证据。
 - 09:48:54Z 点「重连」，TextEdit 会话重新开起来。
 - 第二次（唯一到了 Mac 的一次）：09:49:18Z 点文档，等 1.5 s，`input text 'p0probe'`，等 1 s，点发送按钮，之后每 2 s 读一次文档，09:49:24Z 读到 `p0robe` 加换行；读完才截图，就是现在的 `p0/t4g-p0probe-36.png`，显示 `p0robe`。截图和读回来的是同一次，不是画面慢了一帧。
 - 第二次没在点发送前截写作条，所以不知道写作条里是不是已经少了 p。
 - 不重做：要开到 Mac 的会话，而 Mac 现在锁着。
 
-**模拟器 36 打字重复测量（UTC 2026-11-27，局域网，TextEdit 单应用会话，空白文档）。** 每次的做法：点文档，输入，keyevent 66，点写作条的发送按钮，用 osascript 读文档并经 `od -c` 保存。读回来的末尾是 `\n \n \n` 三个换行。已知的来源：osascript 读文档自己带一个换行（清空后读回来是单独一个 `\n`），keyevent 66 在写作条里换一行；第三个换行从哪来没查明。4G 那次没按 keyevent 66，读回来只有一个换行，和这个说法不矛盾。输入法状态：A 第 2 次起，输入时 `mInputShown=true`、输入前 `false`；A 第 1 次文件里只记了一个 `false`（发送之后）；`show_ime_with_hard_keyboard` 是 1。没改任何设置。各项依据：脚本 `tools/t4t-run.sh` 里的点击坐标（`1200 400`）、发送按钮坐标（`1945 791`）和文本证据里的起止时间（10:53:38Z–10:54:57Z）只覆盖 A 第 2 次起；A 第 1 次点文档用的是 `input tap 1200 700`、点发送按钮，这两点只来自当时敲的命令，没有文本记录，没有起止时间；release 包来自装的 `t4g-release.apk`，「局域网」是截图上会话栏的标注。
+**模拟器 36 打字重复测量（UTC 2026-11-27，局域网，TextEdit 单应用会话，空白文档）。** 每次的做法：点文档，输入，keyevent 66，点写作条的发送按钮，用 osascript 读文档并经 `od -c` 保存。读回来的末尾是 `\n \n \n` 三个换行。已知的来源：osascript 读文档自己带一个换行（清空后读回来是单独一个 `\n`），keyevent 66 在写作条里换一行；第三个换行从哪来没查明。上面「第二次」那次没按 keyevent 66，读回来只有一个换行，和这个说法不矛盾。输入法状态：A 第 2 次起，输入时 `mInputShown=true`、输入前 `false`；A 第 1 次文件里只记了一个 `false`（发送之后）；`show_ime_with_hard_keyboard` 是 1。没改任何设置。各项依据：脚本 `tools/t4t-run.sh` 里的点击坐标（`1200 400`）、发送按钮坐标（`1945 791`）和文本证据里的起止时间（10:53:38Z–10:54:44Z）只覆盖 A 第 2 次起；A 第 1 次点文档用的是 `input tap 1200 700`、点发送按钮，这两点只来自当时敲的命令，没有文本记录，没有起止时间；release 包来自装的 `t4g-release.apk`，「局域网」是截图上会话栏的标注。
 
 | 组 | 命令 | 次数 | 到齐 | 少字的几次读回来是 |
 |---|---|---|---|---|
-| A | `adb -s emulator-5554 shell input text 'p0probe'` | 3 | 2 | 第 1 次 `p 0 r o b e`（少第二个 p）。发送前的截图 `t4t-a1-typed.png`，写作条里已经是 `p0robe` |
-| B | `adb -s emulator-5554 shell input keyevent KEYCODE_P KEYCODE_0 KEYCODE_P KEYCODE_R KEYCODE_O KEYCODE_B KEYCODE_E`（逐键） | 3 | 1 | 第 2、3 次都是 `p p r o b e`（少 `0`）；第 2 次发送前截图 `t4t-e36-b2-typed.png` 上，写作条里已经是 `pprobe`，输入法候选栏有 `pprobe`、`p0robe`（只凭这张截图）；第 3 次没有截图 |
-| C | `adb -s emulator-5554 shell input text 'a1abba'` | 1 | 1 | 没少：`a 1 a b b a` |
+| A | `adb -s <目标> shell input text 'p0probe'` | 3 | 2 | 第 1 次 `p 0 r o b e`（少第二个 p）。发送前的截图 `t4t-a1-typed.png`，写作条里已经是 `p0robe` |
+| B | `adb -s <目标> shell input keyevent KEYCODE_P KEYCODE_0 KEYCODE_P KEYCODE_R KEYCODE_O KEYCODE_B KEYCODE_E`（逐键） | 3 | 1 | 第 2、3 次都是 `p p r o b e`（少 `0`）；第 2 次发送前截图 `t4t-e36-b2-typed.png` 上，写作条里已经是 `pprobe`，输入法候选栏有 `pprobe`、`p0robe`（只凭这张截图）；第 3 次没有截图 |
+| C | `adb -s <目标> shell input text 'a1abba'` | 1 | 1 | 没少：`a 1 a b b a` |
 
 结论只到这里：
 - 少字不止出在 `adb shell input text`：逐键输入 3 次里也少了 2 次。
@@ -355,6 +411,7 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 - 少的是 `0` 或第二个 `p`，不是固定位置，也不是每次都少。`a1abba` 只有 1 次，不能说它不少。
 - 用的是 `adb` 注入，不是真键盘，真键盘会不会少字没测。34 和平板上的那几次没有重复。
 - 原因没查明：可能在 `adb` 注入本身、写作条收字或模拟器输入法（B 第 2 次候选栏里有 `p0robe`、`pprobe`），这几段没有分开测。
+- 不是 Mac 那边挡了输入：Mac 的日志里这段时间有两行 `input_blocked`，都在 A 第 3 次里（10:53:49Z、10:53:56Z，用户当时在 Mac 上操作），而 A 第 3 次是到齐的。少字的几次都不在这两个时刻：会话 10:52:47Z 开起来到 10:53:49Z 之间没有 `input_blocked`，B 组里也没有。
 
 证据：`p0/t4t-e36-a1.txt`、`t4t-e36-a2.txt`、`t4t-e36-a3.txt`、`t4t-e36-b1.txt`、`t4t-e36-b2.txt`、`t4t-e36-b3.txt`、`t4t-e36-c1.txt`（读回来的 `od -c`、`mInputShown`、`show_ime_with_hard_keyboard`、起止时间）；截图 `t4t-a1-typed.png`、`t4t-a1-enter.png`、`t4t-e36-b2-typed.png` 等。
 
@@ -401,10 +458,21 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 
 **Mac 自动升级。** 09:47:09Z Mac 上的 rApp 下载了 0.15.66，09:47:11Z 服务停下，09:47:12Z 新版本起来（`update_applied` 0.15.64 → 0.15.66）。所有会话都以 `service stopped` 结束，包括我的 P0Moving 和 TextEdit，也包括几个不是我开的终端会话和一个桌面会话。所以 09:47:11Z–09:48:54Z 之间 Mac 上一个会话都没有，这不是我关的；Mac 没锁。36 上显示 `host disconnected: failed to fill whole buffer`。断开的卡片上点「结束会话」和「再点一次确认」都没用（和上面「界面上看到的问题」一样）；点「重连」，再从 ⋯ 结束就可以了。第一次在 36 上打字正赶上这次重启，丢了；重连后又打了一次（TextEdit 会话 09:48:54Z 开），这次到了 Mac，但收到的是 `p0robe`（见上面「模拟器 36 打字的经过」）。
 
-**锁屏和顶掉次数（Task 4G）。**
+**第四次测量的锁屏和顶掉次数。**
 - 自动锁屏 1 次，是最后一次关会话：09:55:14Z 关掉模拟器 36，09:55:44Z 它的 TextEdit 会话 `connection lost`，09:55:54Z `auto_lock`。这一次按安排接受。
 - 中间没锁过。
 - 顶掉别人 0 次；我自己两台之间互相顶掉 1 次（见上）；和用户抢焦点 0 次。
+
+**P1 接手时要改的（读代码看到的，探查里没改）：**
+- `watch_load` 首行超过 64 KiB：探查的绕过 `keeps_link`（`rust/hub/src/link.rs:983`）是按错误文字 `line longer than` 判断的，不能带进 main。真修法在共用代码里：这条回复放宽或去掉读行上限，或者首行分块发；不管哪种，回复太长都不该丢整条连接。已记进 `tasks/todo.md`「安卓平板」。
+- 回车在写作条里：模拟器 36 上 keyevent 66 只在写作条里换行，要点发送按钮才发；平板上回车直接发。P1 做外接键盘时，两边都要试回车是发送还是换行。
+- `gui/test/session_ffi_test.dart` 靠 40 ms、80 ms 的真等待判断先后，机器忙时可能误报；改用 `fake_async`。
+- `FfiSession` 本身没有测试（现在只测了 `ackedPackets`）。
+- `_FfiSessionWorker` 先把 pid 存成 0，再用 getter 改成会话 id（`gui/lib/embed/session_worker.dart:152`、`:156`），直接传 id 就行。
+- `LinuxSessionPort` 的 `_ffiLibrary`、`_ffiSlow`（`gui/lib/embed/linux_session_port.dart:62-66`）只在构造时赋值，可以是 `final`。
+- `p0SlowFromProperty` 每秒重新打开一次 `libc.so`（`gui/lib/embed/session_ffi.dart:42`）。探查用的，P1 不带过去。
+- `_traffic` 跳过大于 200 字节的包（`gui/lib/embed/session_ffi.dart:172`），traffic 事件变长就数不到。探查用的，P1 不带过去。
+- hub-ffi 的四个函数要自己包 `catch_unwind`（见第 2 节）。
 
 ## 5 键盘和触控板
 
@@ -414,7 +482,7 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 
 **两种注入，结果不一样，先看这个：**
 
-- `adb shell input keycombination 113 31`（CTRL_LEFT + C）：这个命令发出的字母键事件 `metaState` 是 0。Flutter 先收到 Ctrl 按下（`ctrl=1`），随后一个 Ctrl 抬起，再收到字母键，此时 `ctrl=0`；物理键 ID 是 `0x11000000xx` 这种「Key with ID」，不是 HID 用法码。那个「Ctrl 抬起」查了引擎源码：Android 嵌入层 `KeyEmbedderResponder.java` 的 `synchronizePressingKey`（由 `handleEventImpl` 对每个修饰键调用）以**事件自带的 `getMetaState()`** 为准，记录里 Ctrl 还按着而事件的 `metaState` 说没按，就在字母键之前合成一个 Ctrl 抬起事件（该函数开头注释：让修饰键状态与「真实状态」一致）。所以看到的现象和源码一致；这是读源码得出的，没有用别的办法单独验证。结论：`keycombination` 的字母键行 `ctrl=0` 是注入工具的限制，不能当作「平台丢了修饰键」，也不能当作「真键盘会这样」。
+- `adb shell input keycombination 113 31`（CTRL_LEFT + C）：这个命令发出的字母键事件 `metaState` 是 0。Flutter 先收到 Ctrl 按下（`ctrl=1`），随后一个 Ctrl 抬起，再收到字母键，此时 `ctrl=0`；物理键 ID 是 `0x11000000xx` 这种「Key with ID」，不是 HID 用法码。那个「Ctrl 抬起」查了引擎源码：Android 嵌入层 `KeyEmbedderResponder.java` 的 `synchronizePressingKey`（由 `handleEventImpl` 对每个修饰键调用）以**事件自带的 `getMetaState()`** 为准，记录里 Ctrl 还按着而事件的 `metaState` 说没按，会合成一个 Ctrl 抬起事件（该函数开头注释：让修饰键状态与「真实状态」一致）。这一条只读了源码，没有跟踪运行：合成事件发生在字母键之前，是从看到的事件顺序和源码对上推断的，没有单独验证。结论：`keycombination` 的字母键行 `ctrl=0` 是注入工具的限制，不能当作「平台丢了修饰键」，也不能当作「真键盘会这样」。
 - `adb shell uinput`（只在模拟器上用）：注册一个虚拟键盘，发内核级的 `EV_KEY`，修饰键状态是真的，物理键是 HID 用法码（`Key C(0x70006)`）。命令格式是一行行 JSON：`register`（`configuration` 里类型 100 = 事件类型、101 = 键码，键码是 Linux 的：LEFTCTRL 29、LEFTMETA 125、C 46…）、`delay`、`inject`（字段名是 `events`，不是 `data`）。**平板上不用 `uinput`**（权限层拒绝，没试别的办法），所以平板上的「ctrl=1」只能靠真键盘，见下。
 
 **结果（每个键单列；「平板（实机）」是真机，其余两台是模拟器；全部是注入，不是用户手按的）：**
@@ -444,11 +512,11 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 | Meta + TAB、Meta + ENTER | 34、36、平板（实机） | 没到 | 回到桌面（启动器在前台）；34 上 Meta + TAB 复测也是启动器在前台 |
 | Meta 单按 | 34、36、平板（实机） | 没到（App 里没有 `Meta` 的行） | 34：回桌面；36：启动器搜索框弹出并拿走窗口焦点；平板：回桌面（我随后重新拉起 App） |
 
-**文本框有焦点时（修复 1 重做；原先的行作废）：**
+**文本框有焦点时（只在 36 上测）：**
 
-原先文本框那几行**没有按任务书的条件做**：软键盘从头到尾没开（`mInputShown=false`），而且在 36 上点的位置落在文本框上方的空隙里，文本框并没有拿到焦点（34 和平板用的是同一个点击公式，没有逐台核对）。那几行「Ctrl+字母到不了 `HardwareKeyboard`」的结论撤回，其中「改用 `Shortcuts`/`Actions`」的建议也一并删除（`HardwareKeyboard` 的处理器先于焦点树，事件到不了处理器，`Shortcuts` 也看不到，这个建议本身不成立）。
+第一次测文本框时，软键盘从头到尾没开（`mInputShown=false`），而且在 36 上点的位置落在文本框上方的空隙里，文本框并没有拿到焦点（34 和平板用的是同一个点击公式，没有逐台核对）。那次的结果不算，下面是 36 上按条件测的；34 和平板的文本框没有再测。另外，「改用 `Shortcuts`/`Actions`」这个办法不成立：`HardwareKeyboard` 的处理器先于焦点树，事件到不了处理器，`Shortcuts` 也看不到。
 
-重做在 36 上（`uinput` 虚拟键盘；`settings put secure show_ime_with_hard_keyboard 1`，只在模拟器上设；点在文本框里，`dumpsys input_method` 确认 `mInputShown=true`，截图里软键盘在）。每步单独注入，逐步读 `p0 key`（证据 `p0/t5f-e36-text-order.txt`）：
+36 上的这一次（`uinput` 虚拟键盘；`settings put secure show_ime_with_hard_keyboard 1`，只在模拟器上设；点在文本框里，`dumpsys input_method` 确认 `mInputShown=true`，截图里软键盘在）。每步单独注入，逐步读 `p0 key`（证据 `p0/t5f-e36-text-order.txt`）：
 
 | 步骤 | 结果 |
 |---|---|
@@ -456,20 +524,20 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 | 2 Ctrl + C | 到：`Key C` 按下 `ctrl=1`，抬起 |
 | 3 Ctrl + SPACE | 只到 `Control Left`，空格没到（输入法拿走，和平板上空白区的现象一样） |
 | 4 Ctrl + C（再按） | 到，`ctrl=1` |
-| 5 单按 c（无 Ctrl） | 没有 `p0 key` 行，文本框里也看不到字（原因没查；大概是输入法接走了，没有验证） |
+| 5 单按 c（无 Ctrl） | 没有 `p0 key` 行；文本框里也看不到字（这一点只凭截图）。原因没查；大概是输入法接走了，没有验证 |
 | 6 Ctrl + C（再按） | 到，`ctrl=1` |
 | 7 Ctrl + V、8 Ctrl + A、9 Ctrl + Z、10 Ctrl + X | 各自都到，`ctrl=1` |
 
 结论：软键盘打开、文本框有焦点时，`uinput` 注入的 Ctrl+C/V/A/Z/X 都到了 `HardwareKeyboard` 的处理器，`ctrl=1`；上面的顺序（Ctrl 单按、Ctrl+SPACE、单按字母之后）没有影响。「先发一个普通键」这一步在这台 36 上用不着（步骤 5、6 已经是「普通键之后再 Ctrl+C」，照常到）。
 
-原先「一行都没有」的现象能复现，条件是点在文本框外的空隙里（`p0/t5f-e36-text-miss.txt`：点 y=770，Ctrl+C、Ctrl+V 都没有任何 `p0 key` 行，包括 `Control Left`）。为什么那种状态下连 Ctrl 单独的事件都没有、而当时 Ctrl+SPACE、Ctrl+ENTER 却到了，**原因没查明**。
+第一次测文本框时「一行都没有」的现象能复现，条件是点在文本框外的空隙里（`p0/t5f-e36-text-miss.txt`：点 y=770，Ctrl+C、Ctrl+V 都没有任何 `p0 key` 行，包括 `Control Left`）。为什么那种状态下连 Ctrl 单独的事件都没有、而当时 Ctrl+SPACE、Ctrl+ENTER 却到了，**原因没查明**。
 
-没做到的部分：平板和 34 上的文本框没有重做（平板不用 `uinput`，也不改它的设置；真键盘按键是否到文本框，留给实机真键盘复测）。「原因没查明，留给实机真键盘复测」适用于 Ctrl+SPACE、单按字母这两处。
+没做到的部分：平板和 34 上的文本框没有再测（平板不用 `uinput`，也不改它的设置；真键盘按键是否到文本框，留给实机真键盘检查，规格 §14.6 第 9、14 条）。Ctrl+SPACE、单按字母这两处原因没查明，同一次检查里看。
 
 **过关判定（规格 §14.1）：** Ctrl+C 和 Ctrl+V 在焦点于空白区时到得了 App，并且 `isControlPressed` 为真：
 
 - 34、36：**过**（`uinput`，内核级，修饰键状态是真的）。这是计划里的过关条件，两个模拟器都满足。
-- 平板（实机）：**没做，等用户（要用真键盘按）**。键到得了 App（`Control Left` 和字母都到），但 `keycombination` 发的字母 `metaState` 为 0，平板上 `uinput` 又被权限层拒绝（没有 root），所以注入没法显示修饰键状态。**真机上的这一项过关没有得到确认。**用户的一分钟检查：把配对的蓝牙键盘接上，打开探查包的 keys 页（已装在平板上），在空白区点一下，按 Ctrl+C、Ctrl+V，读屏幕上的行：字母行 `ctrl=1` 为过。已写进规格 §14.6 第 9 条。
+- 平板（实机）：**没做，等用户（要用真键盘按）**。键到得了 App（`Control Left` 和字母都到），但 `keycombination` 发的字母 `metaState` 为 0，平板上 `uinput` 又被权限层拒绝（没有 root），所以注入没法显示修饰键状态。**真机上的这一项过关没有得到确认。**用户的一分钟检查：把配对的蓝牙键盘接上，在 App 里有焦点的空白处点一下，按 Ctrl+C、Ctrl+V，看 `isControlPressed`：字母键到达时为真即过。探查包已从平板上卸掉，这项检查在 P1 的第一个包上做（P1 的包里要留一个能读出这一行的地方，比如日志）。已写进规格 §14.6 第 9 条。
 - 没有为此换设计。
 
 **Meta 几行（规格 U8）：** 三个目标上 Meta 的组合都到不了 App（系统先拿走了），所以 `_remoteKey` 里 `isMetaPressed` 丢弃的那条路径在这里根本走不到。保留着不碍事。
@@ -482,18 +550,18 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 - 平板上刚点完取焦点后，第一批 `keycombination` 有时一个字都不到 App；先发一个普通键（探查里用 `KEYCODE_SHIFT_RIGHT`）再发组合，之后就稳了。原因没查。
 - 平板的显示是横的 3000×1920，`wm size` 却报 1920×3000；点击坐标要用截图的 PNG 尺寸。模拟器 36 同理：横向 2560×1600，文本框在屏幕约 y=880，不是屏幕的 48% 处。
 
-**滚轮和触控板（修复 1：`Listener` 改成 `HitTestBehavior.translucent` 后重测，探查包是 probe `a20bdbf9` 的 keys 页）：**
+**滚轮和触控板（`Listener` 是 `HitTestBehavior.translucent`，空白处的事件也收；探查包是 probe `a20bdbf9` 的 keys 页）：**
 
 | 项 | 镜像 | Flutter 收到的 | 来源 |
 |---|---|---|---|
 | 鼠标滚轮竖向滚一格 | 36、平板（实机） | `p0 ptr scroll kind=mouse delta=-0.0,192.0`，即 `PointerScrollEvent`，`kind` 是 mouse | 注入（`adb shell input mouse scroll <x> <y> --axis VSCROLL,-3`）；36 上复测还是一样 |
 | 鼠标滚轮 | 36 | 同上：`uinput` 虚拟鼠标滚轮 +3 得 `delta=-0.0,-192.0`，-3 得 `delta=-0.0,192.0` | `uinput` 虚拟鼠标 |
 | 鼠标滚轮 | 34 | 同上：+3 得 `delta=-0.0,-192.0`，-3 得 `delta=-0.0,192.0`（`input` 没有 `scroll` 子命令，所以用 `uinput` 虚拟鼠标；证据 `p0/t5f-e34-ptr.txt`） | `uinput` 虚拟鼠标 |
-| 触控板双指滚动 | 34、36 | 改成 `translucent` 后复测，仍然没收到任何 `p0 ptr`。`uinput` 虚拟触控板系统认了（`dumpsys input`：`Classes: TOUCH \| TOUCH_MT \| TOUCHPAD \| EXTERNAL`），Flutter 没有事件 | 注入。**模拟器上测不了，留给实机** |
+| 触控板双指滚动 | 34、36 | 没收到任何 `p0 ptr`（`translucent` 前后各试过）。`uinput` 虚拟触控板系统认了（`dumpsys input`：`Classes: TOUCH \| TOUCH_MT \| TOUCHPAD \| EXTERNAL`），Flutter 没有事件 | 注入。**模拟器上测不了，留给实机** |
 | 触控板捏合 | 34、36 | 同上，没有任何事件 | 注入。**模拟器上测不了，留给实机** |
 | 触控板双指滚动、捏合 | 平板（实机） | 没做，等用户：平板上不能用 `uinput`；这台机器上也没有触控板（`dumpsys input` 里只有蓝牙鼠标、键盘和触摸屏） | 没做 |
 
-触控板这一项，修复 1 里又试了一次（`translucent` 之后，36 和 34 各一次，两指同向滚动和两指张开），还是没有事件。不排除是我的事件序列不对；结论只是「这种方式没测出来」。§14.6 第 9 条已加，要在有触控板的实机上看 Flutter 收到 `PointerPanZoom*` 还是 `PointerScrollEvent`。
+触控板这一项，`translucent` 之后 36 和 34 各试了一次（两指同向滚动和两指张开），还是没有事件。不排除是我的事件序列不对；结论只是「这种方式没测出来」。§14.6 第 9 条已加，要在有触控板的实机上看 Flutter 收到 `PointerPanZoom*` 还是 `PointerScrollEvent`。
 
 ## 6 语音
 
@@ -516,7 +584,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 
 ### 6.2 说话
 
-麦克风：36 用 `adb emu avd hostmicon`，`say -v Tingting` 在 Mac 上读，Mac 输出音量 47、未静音，没动；平板自己的麦克风听 Mac 的扬声器，`adb shell input swipe` 按住按钮 14 秒。普通一段说「今天下午三点开会」；分段说两句，中间停 3 秒；热词说「打开 rApp」。每次都先 `am force-stop` 再重新打开页面；除了普通 3（它先调了 `support`，`support` 自己会建一个识别器再销毁，日志 `t6f-tab-plain3support-log.txt` 里有它的 `Connection to speech recognition service lost, but no #startListening has been invoked yet`），每次说话只用一个识别器。探查页没有单独的 `rms` 事件（简报里列了）：`onRmsChanged` 只计数，次数和最大值放在 `ready`/`begin`/`error`/`end` 等事件上。
+麦克风：36 用 `adb emu avd hostmicon`，`say -v Tingting` 在 Mac 上读，Mac 输出音量 47、未静音，没动；平板自己的麦克风听 Mac 的扬声器，`adb shell input swipe` 按住按钮 14 秒。普通一段说「今天下午三点开会」；分段说两句，中间停 3 秒；热词说「打开 rApp」。每次都先 `am force-stop` 再重新打开页面；除了普通 3（它先调了 `support`，`support` 自己会建一个识别器再销毁，日志 `t6f-tab-plain3support-log.txt` 里有它的 `Connection to speech recognition service lost, but no #startListening has been invoked yet`），每次说话只用一个识别器。探查页没有单独的 `rms` 事件（计划里列了）：`onRmsChanged` 只计数，次数和最大值放在 `ready`/`begin`/`error`/`end` 等事件上。
 
 「第一轮」指最早的一批运行（`p0/t6-*`，没有 `rms` 计数，36 的几次是在 Mac 锁屏时跑的）；「第一次测量」指分段值还是 `Long` 的那一版（`p0/t6f-*`）；「第二次测量」指改成 `int` 的那一版（`p0/t6g-*`）。
 
@@ -541,7 +609,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 
 第二次测量（36，20:18:29–20:20:12；Mac 未锁屏：Mac 的服务日志 `t6-mac-lock-times.txt` 里 20:16:14 解锁、20:22:40 才自动锁上（文件里是 UTC，加 9 小时），每次也用 `tools/locked` 查过）。两次在线运行（分段 `int`、普通一段）的 `rms` 都只有 1 次、停在 -2.0，包括和第一次测量普通一段设置相同的那次（那次是 5 次、最大 10.0）：Mac 没锁，这两次声音却没进识别器，原因不明，没有查出来。设备上那次不一样：`start` 后约 0.12 s 就 `error 13`，没有 `ready`，`rms` 0，没开始收音。请求是否被接受只看日志，不依赖声音：
 - 分段 `int`：见上，请求被接受，`rms` 1 次 -2.0，没有声音进入的证据。
-- 设备上 `cmn-Hans-CN`：`error 13`、`end`，之后没有 `ready`，松手时没有 `error 5`，日志里也没有 `no preceding #startListening`（`p0/t6g-e36-ondevice-cmn.txt`、`-log.txt`）：`stop` 只在会话还在时才调 `stopListening` 之后，`error 5` 没再出现。`error 5` 的原因：`stop` 在会话已经结束后又调了 `stopListening()`，是探查页自己引起的，不是识别器的行为。
+- 设备上 `cmn-Hans-CN`：`error 13`、`end`，之后没有 `ready`，松手时没有 `error 5`，日志里也没有 `no preceding #startListening`（`p0/t6g-e36-ondevice-cmn.txt`、`-log.txt`）：`stop` 改成只在会话还在时才调 `stopListening` 以后，`error 5` 不再出现。`error 5` 的原因：`stop` 在会话已经结束后又调了 `stopListening()`，是探查页自己引起的，不是识别器的行为。
 - 普通一段又跑了一次（`p0/t6g-e36-plain.txt`）：`rms` 1 次 -2.0，`error 7`，同样没有声音进入的证据。
 
 36 上没有拿到任何中文字。第一次测量里普通一段 `rms` 5 次、最大 10.0，识别器给的是「没有检测到语音」；其余在线的几次（第一次测量的分段、热词，第二次测量的分段、普通一段）`rms` 都停在 -2.0，不能当成「分段/热词没效果」的证据。第一轮（Mac 当时锁屏、没有 `rms`）的 36 结果不再引用。
@@ -564,11 +632,17 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 - 判「能不能用」的调用：`SpeechRecognizer.isRecognitionAvailable(context)`、`isOnDeviceRecognitionAvailable(context)`（API 33）、`checkRecognitionSupport(intent, executor, RecognitionSupportCallback)`，intent 是 `ACTION_RECOGNIZE_SPEECH` + `EXTRA_LANGUAGE`。在线识别器用 `createSpeechRecognizer(context)`，设备上的用 `createOnDeviceSpeechRecognizer(context)`（没有设备上识别器时抛 `UnsupportedOperationException`，要 try/catch）。
 - `checkRecognitionSupport` 在没有识别服务时回调**一直不来**，要自己加超时（探查用了 10 秒）。
 - 清单要 `RECORD_AUDIO` 和 `<queries><intent><action android:name="android.speech.RecognitionService"/></intent></queries>`（探查里加了，没做不加的对比）。
-- 默认识别服务的包名：`Settings.Secure.getString(contentResolver, "voice_recognition_service")`，两个有识别服务的目标上都是 `包名/类名`。
+- 默认识别服务的包名：探查里读了 `Settings.Secure` 的 `voice_recognition_service`，两个有识别服务的目标上都是 `包名/类名`。这是没写进文档的隐藏键，P1 不用它；P1 用 `packageManager.queryIntentServices(Intent(RecognitionService.SERVICE_INTERFACE), 0)` 找识别服务（规格 §11 已改）。
 - 分段：`EXTRA_SEGMENTED_SESSION` 的值写 `EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS`，同一 intent 里再用 `putExtra(…, 2000)` 给 `int`，**不能给 `Long`**：36 的 Google 识别器按 `int` 读，给 `Long` 会读成 0 并忽略分段（原样日志见 6.2）。给 `int` 时 36 的识别器接受（日志里没有拒绝），但还没有收到过带文字的 `segment`（只有一个空的），所以「识别器支持分段」没有确证；P1 要在能出字的机器上再验，`segment` 不来时按规格走「一段结束手还按着就立刻开下一段」。
 - 热词 `EXTRA_BIASING_STRINGS`：没报错，效果没测（`rms` 停在 -2.0）。
 - 识别器的建法（**没有被任何一次保存的运行验证过**）：本探查的写法是一种模式一个 `SpeechRecognizer`、复用、开始前 `cancel()`、只在 `error 11` 时销毁重建；每次运行都是新进程里的 `run: 1`，也没有出现过 `error 11`，销毁重建那条路径没跑过；复用那条至多在一次运行里走到过：`download` 会建好设备上识别器却不增加 `run`，之后同一次页面里的设备上 `start` 走的是复用分支（先 `cancel()`），很可能就是第一次测量的设备上 `cmn-Hans-CN` 那次，它的事件顺序怪（先 `error`、`end`，然后才 `ready`）。所以复用这个设计没有验证过，P1 不要照抄。
 - 探查页的一个缺口，P1 不要照抄：`run`、`rms` 次数、`rmsMax` 是在回调到达时从页面的全局变量里读的，不是开始时捕获的；复用同一个识别器时，上一轮迟到的回调会被算进新一轮。`listening` 标志也是一个全局变量，不是每次运行、每个识别器各一个：上一轮迟到的回调可能把它清掉，新一轮的 `stop` 就跳过 `stopListening()`；`startListening` 抛异常时它会一直是 `true`；`download` 改了 `current` 却不动它。
+- 探查页的其他缺口（读代码看到的，P1 不要照抄）：
+  - `support`：先设了 10 s 超时，`checkRecognitionSupport` 之后再抛异常时，`catch` 里又回一次，同一个调用可能回两次。
+  - `support` 的 intent 只带了 `EXTRA_LANGUAGE`（`zh-CN`），没带 `EXTRA_LANGUAGE_MODEL`；`start` 的 intent 带了。P1 两处一样带上。
+  - `onEndOfSegmentedSession` 发单独的 `segmentsEnd`，再发 `end`（`MainActivity.kt:250`）。P1 照这样：分段结束是单独的事件，不要用带占位文字的 `final` 顶替。
+  - 没有麦克风权限时，`start` 弹出权限请求、回 `permission-requested` 就结束了；用户同意后要再按一次。P1 要让这个回答走 `error` 事件或明确的结果，不要让 Dart 一侧以为录音已经开始。
+  - `gui/test/p0_speech_test.dart` 只测了 Dart 一侧的原样转发。Kotlin 一侧的计数、识别器复用没有测试，也没有「按下 → `start`、松开 → `stop`」的测试。
 - 看到的错误码，及在哪些保存的文件里、已知的原因（文件名按 grep 核过）：
   - 14（`ERROR_CANNOT_CHECK_SUPPORT`，`support` 在线路径）：第一轮（36、平板：`t6-e36-probe-support.txt`、`t6-tab-probe-support.txt`、`t6-tab-support.txt`）和第一次测量（`t6f-e36-support-after-download.txt`、`t6f-tab-plain3support.txt`）；第二次测量没有调 `support`，没有证据。
   - 7（`ERROR_NO_MATCH`）：36 上在线识别，第一轮、第一次测量、第二次测量都有；日志里是 `NO_SPEECH_DETECTED`（`t6f-e36-plain-log.txt`）。
@@ -577,7 +651,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
   - 11（`ERROR_SERVER_DISCONNECTED`）：只在第一轮见过，36（`t6-e36-hotwords.txt`）和平板（`t6-tab-plain2.txt`）都有；当时的探查页在创建前先 `destroy`，可能就是原因，之后的两次测量没有再出现，没验证。
   - 5（`ERROR_CLIENT`）：第一轮 36（`t6-e36-ondevice.txt`、`t6-e36-hotwords.txt`）和第一次测量 36 设备上（`t6f-e36-ondevice-cmn.txt`）都出现过；第一次测量那次，日志里有 `stopListening called with no preceding #startListening`，说明是探查页的 `stop` 在会话已结束后又调了 `stopListening()`，是页面自己引起的；第一轮的两次原因没查。加了 `listening` 判断之后，第二次测量没再出现（那次只有 `error 13` 后直接松手，没有别的事件）。
 - 识别时的时间（第一次测量，36，普通一段、分段、热词三次；`ready`、`begin` 从 `start` 事件起算，`error 7` 从松手 `up` 起算）：`ready` 0.027–0.038 s（从 `start -> started` 那行算是 0.026–0.037 s），`begin` 0.86–0.91 s，`error 7` 0.26–0.80 s；从按下 `down` 算 `ready` 约 0.029–0.041 s；没有结果，没有可量的首字时间。
-- 国行平板（荣耀）：`probe` 有识别服务，`onDevice` 假，`support` 报 14，识别没有任何回调（六次）。规格 §11 写的「国行平板上多半走到第 3 条」不准确：这台平板按手算走的是规则 4（`support` 报 14），结论同样是不能用。
+- 国行平板（荣耀）：`probe` 有识别服务，`onDevice` 假，`support` 报 14，识别没有任何回调（六次）。规格 §11 原来写的「国行平板上多半走到第 3 条」不准确：这台平板按手算走的是规则 4（`support` 报 14），结论同样是不能用（规格 §11 已改）。
 
 ## 7 自己装自己
 
@@ -589,7 +663,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 |---|---|---|
 | 模拟器 34（Android 14，AOSP） | 9001 → **9002** | **过** |
 | 模拟器 36（Android 16，google_apis） | 9001 → **9002** | **过** |
-| 平板（实机，HONOR ROD2-W09，Android 16，MagicOS 10） | 停在 9001 | **没做，等用户**：装的最后一步要输入锁屏密码，不能替用户输 |
+| 平板（实机，HONOR ROD2-W09，Android 16，MagicOS 10） | 停在 9001 | **没装完**：装的最后一步要输入锁屏密码，不能替用户输；留给实机，在 P1 第一个包上做（规格 §14.6 第 10 条） |
 
 ### 7.1 干净安装、开开关、装（Step 2）
 
@@ -601,16 +675,18 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 | 模拟器 34 | 点「下载并安装」，系统确认 | 对话框 `Do you want to update this app?`，按钮 `CANCEL` / `UPDATE`（不是「安装」：同包名的升级，不弹权限清单） | 页面先收到 `pending`（code -1） | — |
 | 模拟器 34 | 先点 `CANCEL` 试一次 | 页面收到 `cancelled`，code 3，message `INSTALL_FAILED_ABORTED: User rejected permissions`；这一遍之后没有列缓存；缓存里 `rapp.apk` 的存在只在后面那次成功安装之后列过（`t7-e34-step2.txt`） | `t7-e34-cancel-event.txt` | 取消这条路通 |
 | 模拟器 34 | 再下载，点 `UPDATE` | 对话框消失，桌面出现，App 不在 | 2 秒后 `pidof` 为空，之后 12 秒一直空；`versionCode=9002` | **过** |
-| 模拟器 36 | 同上，`canInstall` 起点也是 `否`；设置页标题 `Install unknown apps`，开关 `Allow from this source`，说明文字同 34（同样是当时从界面树读的，文本文件里没有，只有截图 `t7-e36-2-settings.png`） | 开开关后 `appops` = `allow`，页面 `canInstall: 是` | 对话框 `Do you want to update this app?`，`Cancel` / `Update`；文本证据（`t7-e36-confirm-screen.txt`）里抓到的系统界面只有这个更新确认框；没有看到别的界面，包括没有看到 Play Protect 的（截图 `t7-e36-4-confirm.png` 也只有这个框），但没有专门去查 Play Protect | 是 |
+| 模拟器 36 | 同上，`canInstall` 起点也是 `否`；设置页标题 `Install unknown apps`，开关 `Allow from this source`，说明文字同 34（同样是当时从界面树读的，文本文件里没有，只有截图 `t7-e36-2-settings.png`） | 开开关后 `appops` = `allow`，页面 `canInstall: 是` | 对话框 `Do you want to update this app?`，`Cancel` / `Update`。文本证据：`t7-e36-confirm-screen.txt` 里抓到的系统界面只有这个更新确认框，没有别的界面，也没有 Play Protect 的。截图 `t7-e36-4-confirm.png` 是另一份证据，里面也只有这个框。没有专门去查 Play Protect | 是 |
 | 模拟器 36 | 点 `Update` | 桌面（Nexus Launcher），App 不在 | `pidof` 空 12 秒；`versionCode=9002` | **过** |
 | 平板（实机） | `adb install p0-old.apk`（不弹任何东西），启动 | 页面 `versionCode: 9001`、`canInstall: 否` | `appops` = `No operations. Default mode: default` | 是 |
 | 平板 | 点「去设置」 | 标题 `安装外部来源应用`，行 `rapp 版本 0.15.58`，开关行 `允许安装应用`，说明 `设备和个人数据更容易受到从未知来源获取应用的攻击。对于因使用这些应用而造成的设备损坏或数据丢失，您同意自行承担全部责任。` | — | 是（本包那一页） |
 | 平板 | 开开关 | 点**文字行不起作用**，要点右边的开关本身（0.15.58 那页行里的开关节点在 `uiautomator` 里没有文字）；开后没有二次弹框 | `appops` = `REQUEST_INSTALL_PACKAGES: allow`；返回后页面 `canInstall: 是` | 是 |
 | 平板 | 点「下载并安装」 | 先是荣耀自己的安装页，`rapp 版本 0.15.58 来自“rapp”`，转圈 `安全检测中…`，底部提示 `外部来源应用检查需要联网并启用系统管家，帮助识别潜在风险`（只是提示，没去改设置）；几秒后变成橙色警告 `未经荣耀安全审核 / 该应用未上架，未经荣耀应用市场安全审核，请谨慎安装。`，有一个未勾的选项 `已了解此应用未经荣耀应用市场检测，可能存在风险。`、一个 `用过该应用的还喜欢`、`取消`、`继续安装`（截图里是灰的，勾选项之前；只看了截图，没抓文本）（右上角一个设置齿轮，没动） | 页面收到 `pending` | — |
-| 平板 | 勾选项，点 `继续安装` | 弹出系统的验证框：`输入锁屏密码继续安装应用`，输入区提示 `密码共 6 位`，只有一个 `取消` | 这时 `versionCode` 仍 9001，`pidof` 不变 | **没做，等用户**：不输密码，点了 `取消` |
+| 平板 | 勾选项，点 `继续安装` | 弹出系统的验证框：`输入锁屏密码继续安装应用`，输入区提示 `密码共 6 位`，只有一个 `取消` | 这时 `versionCode` 仍 9001，`pidof` 不变 | **没装完**：不输密码，点了 `取消` |
 | 平板 | `取消` 回到荣耀安装页，再点 `取消` | 回到探查页 | 页面收到 `cancelled`，code 3，message 同 34（`INSTALL_FAILED_ABORTED: User rejected permissions`）；`versionCode=9001`，标记文件还在 | 取消这条路通 |
 
-用户要做的：在平板上走一遍「下载并安装 → 勾 `已了解…` → `继续安装` → 输锁屏密码」，看 `versionCode` 变 9002、App 是被杀还是自己起来。装之前先 `adb reverse tcp:8765 tcp:8765` 并在 `p0/serve` 里起服务（或让我再跑一遍，只缺那一步输入）。
+留给实机的：探查结束时探查包已从平板卸掉，这一遍在 P1 第一个包上做（规格 §14.6 第 10 条）：在平板上走一遍「下载并安装 → 勾 `已了解…` → `继续安装` → 输锁屏密码」，看 `versionCode` 变新、App 是被杀还是自己起来。
+
+平板上的「安装外部来源应用」开关是这次测的时候打开的；卸掉探查包后这项授权跟着没了（`appops` 回到默认），P1 第一个包要重新打开。
 
 ### 7.2 装完之后 App 怎么样了（不作过关线）
 
@@ -649,35 +725,49 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 5. 数据在：标记文件在 `files/` 里，升级后还在，开关也还在，无需迁移。
 6. **`canInstall` 要在回前台时重读**：用户开了开关回来，页面用 `AppLifecycleState.resumed` 刷新就够，不需要轮询。
 7. **平板上还会有荣耀的三层界面**（见 7.4）：「更新」前要提示用户「会让你勾一个已了解、再输锁屏密码」；没有锁屏密码的机器是什么样没测。
-8. 清单要有 `REQUEST_INSTALL_PACKAGES` 和只放行 `localhost`、`127.0.0.1` 的网络安全配置（探查里已写好）；P1 里从 GitHub 下载是 https，不要把明文放开。
+8. 清单要有 `REQUEST_INSTALL_PACKAGES` 和网络安全配置（探查里已写好）。这两样在正式包里也生效，不只是调试包。网络安全配置只对 `localhost`、`127.0.0.1` 放行明文：探查里给的是本机文件服务，P1 里给的是本机的 AI 整理（规格 §6.4）；P1 里真正的下载走 https，不要把明文放开到别的地址。
+9. 探查代码里的缺口（读代码看到的，P1 不要照抄）：
+   - 接安装结果的广播接收器在 `configureFlutterEngine` 里注册、`onDestroy` 里注销，只跟着 Activity 活。P1 放进清单里的接收器或一个服务。
+   - `installApk` 里 `openWrite` 或 `copyTo` 抛异常时，没有 `abandon()` 安装会话。
+   - 91 MB 的拷贝在 UI 线程上做。
+   - Dart 的 `HttpClient` 没设超时。
+   - 下载出错时，没先关 `sink` 就删文件。
+   - 哈希已对上、`install()` 却抛异常时，文件留着不删。
+   - 测试只有哈希对和哈希不对两种；没有测非 200、下载中断、`install()` 抛异常。
 
 ### 7.6 和规格 §13.2 第 4 步
 
-规格原来写「装完 App 被系统重启」。两个模拟器上看到的是：App 被杀，**没有**重启，也没有提示，要用户点图标。已把规格里这句改成观察到的样子（平板没验证到这一步）。
+规格原来写「装完 App 被系统重启」。两个模拟器上看到的是：App 被杀，**没有**重启，也没有提示，要用户点图标。已把规格里这句改成观察到的样子（平板没验证到这一步）（规格 §13.2、§14.1 第 7 条已改）。
 
 ## 8 数字
 
-**状态：部分过。** release 30 s fps、模拟器 36、平板实机的 PSS 由 Task 4G 补上了，见本节末「Task 4G」；没量的：强制 relay 的 fps（按安排不量），模拟器 36 和平板上的 APK、`.so` 大小。大小只量了模拟器 34 的 release 包（续做时重编的带绕过的包，和上午那个差 1,072 字节，都是 `librapp_android.so` 多出来的）。
+**状态：部分过。** 大小、PSS、release 30 s fps 都量了；没量的只有强制走 relay 的 fps，留给实机（规格 §14.6 第 12 条）。大小只量了模拟器 34 上的 release 包；PSS 和 fps 三台都量了。
 
-- release APK：`flutter build apk --release --target-platform android-arm64`，大小 29,522,135 字节（28.15 MiB）。本节 MiB = 1,048,576 字节；`dumpsys meminfo` 的 KB 是 1,024 字节。
+**本节的 MB：** 文件大小 MB = 10⁶ 字节；PSS 的 MB = 1000 个 `dumpsys meminfo` 的 KB（dumpsys 的 KB 是 1,024 字节）。
+
+### 大小（模拟器 34 上的 release 包）
+
+- release APK：`flutter build apk --release --target-platform android-arm64`，29,522,135 字节（29.5 MB）。这是带 hub 64 KiB 绕过（第 4 节）的包，比不带绕过的包大 1,072 字节，多出来的都在 `librapp_android.so` 里。
 - `unzip -lv` 看三个 `.so`（都是 Stored，不压缩）：
 
-  | `.so` | 字节 |
-  |---|---:|
-  | `libapp.so` | 8,258,448 |
-  | `libflutter.so` | 11,579,920 |
-  | `librapp_android.so` | 7,530,064 |
+  | `.so` | 字节 | MB |
+  |---|---:|---:|
+  | `libapp.so` | 8,258,448 | 8.26 |
+  | `libflutter.so` | 11,579,920 | 11.58 |
+  | `librapp_android.so` | 7,530,064 | 7.53 |
 
-- 测 PSS 用 `adb -s emulator-5554 shell dumpsys meminfo com.rapphub.rapp | grep 'TOTAL PSS'`，每 10 s 一次共 6 次（`scratchpad/tools/sample.sh <out> 6 10`）。
-- 没开会话、停在总览页（`am force-stop` 后重新启动、等 40 s）：89633、89512、88344、87640、87684、89900 KB，平均 88786 KB（约 86.7 MiB）。上午那个包同样量法：平均 90862 KB。证据 `p0/t4e-nosession-34.txt`（文件里的 `p0 fps` 行是 force-stop 之前那个进程留在 logcat 里的，不算）、`p0/t4-pss-nosession-34.txt`。
-- 开着静态 2560×1600 桌面会话（路由自动，局域网）：191609、323376、193956、192720、226652、193968 KB，平均 220380 KB（约 215.2 MiB）。6 次里有两次尖峰（323376、226652），其余 4 次 191609–193968 KB（约 187.1–189.4 MiB）。证据 `p0/t4e-static-34.txt`。
-- release 动画面 30 s 平均 `p0 fps`（模拟器，只作参考）：续做 2 时**没量**，原因见第 4 节续做 2：对照那一轮被打扰作废，之后 Mac 锁了屏。作废那一轮里单秒的 `p0 fps` 是 21–29（帧 2560×1664），只能算看到过，不算量过。Task 4G 量了，见本节末。强制走 relay 的 fps：**没量**（Task 4G 也按安排不量）。
-- 续做 2 的包（fps 行带帧大小、超长行日志带 op）：`p0/t4f-release.apk` 29,544,999 字节；`libapp.so` 8,258,448、`libflutter.so` 11,579,920、`librapp_android.so` 7,552,928 字节（都是 Stored）。证据 `p0/t4f-sizes.txt`。
+- 后来给 fps 行加上帧大小、给超长行日志加上请求名的包：APK 29,544,999 字节（29.5 MB）；`libapp.so`、`libflutter.so` 不变，`librapp_android.so` 7,552,928 字节（7.55 MB）。证据 `p0/t4f-sizes.txt`。
 - 大小证据 `p0/t4e-sizes.txt`。
 
-### Task 4G
+### 模拟器 34 上的 PSS
 
-大小没重量（三台装的都是 `p0/t4g-release.apk`）。**本小节的 MB = 1000 个 dumpsys KB**（dumpsys 的 KB 是 1,024 字节），和本节上面的 MiB 不同。
+- 命令：`adb -s <目标> shell dumpsys meminfo com.rapphub.rapp | grep 'TOTAL PSS'`，每 10 s 一次共 6 次（`scratchpad/tools/sample.sh <out> 6 10`）。
+- 没开会话、停在总览页（`am force-stop` 后重新启动、等 40 s）：89633、89512、88344、87640、87684、89900 KB，平均 88786 KB（88.8 MB）。不带绕过的包同样量法：平均 90862 KB（90.9 MB）。证据 `p0/t4e-nosession-34.txt`（文件里的 `p0 fps` 行是 force-stop 之前那个进程留在 logcat 里的，不算）、`p0/t4-pss-nosession-34.txt`。
+- 开着静态 2560×1600 桌面会话（路由自动，局域网）：191609、323376、193956、192720、226652、193968 KB，平均 220380 KB（220.4 MB）。6 次里有两次尖峰（323376、226652），其余 4 次 191609–193968 KB（191.6–194.0 MB）。证据 `p0/t4e-static-34.txt`。
+
+### 三台的 fps 和 PSS
+
+三台装的都是同一个 release 包 `p0/t4g-release.apk`，大小没有再量。
 
 **release 动画面 30 s 平均 `p0 fps`。**
 - 条件：`debug.rapp.p0_slow_ms=0`，P0Moving，帧 `2576x1680`，路由自动（局域网）。
@@ -721,32 +811,42 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 | `linux_session_port.dart` 里没改、安卓上空转的：`rapp/linux` 通道（`init`、剪贴板、detach 的 `nativeFrame` / `nativeWindows` / `focus`），`reveal` 的 `xdg-open`，`_traceStream` 读 `RAPP_STREAM_TRACE_DIR`，`downloads` 默认值读 `Platform.environment` | 没改。异常都已被接住；`downloads` 由入口传 | 第 4 项桌面会话不需要它们 | §6.3 `SessionHost`：P1 给安卓换成安卓通道（剪贴板、打开文件），去掉 detach 和 trace |
 | `main_android.dart` `_log` 用 `debugPrint` | 不用 `stderr.writeln` | 安卓上 stderr 到不了 logcat | 安卓入口的日志（或写文件） |
 | `gui/android/.../MainActivity.kt` | `rapp/android` 通道：`paths`（`filesDir`、`cacheDir`）、`deviceName`（写死 `rApp P0 探查`） | 数据根和设备名 | 安卓平台通道；`deviceName` P1 取真名（`Settings.Global.DEVICE_NAME` 之类） |
-| `gui/android/app/src/main/AndroidManifest.xml` | `INTERNET`、`ACCESS_NETWORK_STATE`、`allowBackup="false"` | 连网；身份密钥不进备份 | §6.4 Kotlin 壳的清单（还差 `dataExtractionRules`、网络安全配置） |
+| `gui/android/app/src/main/AndroidManifest.xml` | `INTERNET`、`ACCESS_NETWORK_STATE`、`allowBackup="false"` | 连网；身份密钥不进备份 | §6.4 Kotlin 壳的清单（留下；还差 `dataExtractionRules`） |
 | `gui/lib/embed/session_ffi.dart` `ackedPackets(slowNow:)`、`p0SlowFromProperty()`、`FfiSession._readSlow()`、`_count` 里的 `_size` | ack 前的等待每帧读 `slowNow()`；每秒从系统属性 `debug.rapp.p0_slow_ms` 读一次（`__system_property_get`）；属性没设或不是数字时用 `main_android.dart` 的 `P0_SLOW_MS`。`p0 fps` 行带上帧头里的宽高（`size=WxH`） | 同一个会话里切换慢速和对照，不断会话（断了 Mac 会自动锁屏） | 不进 P1（探查用）；ack 本身属于 §6.3 `SessionLink` |
-| `rust/hub/src/link.rs` `request()` 两处 + 新函数 `keeps_link`、`op_name` | 连接还开着、错误是 `line longer than` 时只交回错误、记 `p0_keep_link`（带请求名 `op`），不 `forget` / `forget_if_dead` | `watch_load` 首行超 64 KiB 时 hub 丢整条连接（第 4 节续做）。丢连接这段是所有平台共用的 hub 代码；会话因此全断只在探查的进程内会话里见过，桌面没测 | 不属于 §6.3 的任何安卓接口，**不进 P1，真修法在 main**（共用的 hub：`rust/hub`、`rust/net`、service 的 `watch_load` 回复）。撞上的只有 `watch_load`，首行 75,125 字节（第 4 节续做 2）。绕过之后，建流时 `watch_load` 首行若已超上限（Mac 服务起来约 52 分钟以后，历史点超过约 619 个；服务重启后从头算），就约每分钟失败一次，余力到不了安卓控制端；建流时历史还短就到得了、之后一直在（第 4 节「更正」）。要等真修法 |
+| `rust/hub/src/link.rs` `request()` 两处 + 新函数 `keeps_link`、`op_name` | 连接还开着、错误是 `line longer than` 时只交回错误、记 `p0_keep_link`（带请求名 `op`），不 `forget` / `forget_if_dead` | `watch_load` 首行超 64 KiB 时 hub 丢整条连接（第 4 节第二次测量）。丢连接这段是所有平台共用的 hub 代码；会话因此全断只在探查的进程内会话里见过，桌面没测 | 不属于 §6.3 的任何安卓接口，**不进 P1，真修法在 main**（共用的 hub：`rust/hub`、`rust/net`、service 的 `watch_load` 回复）。撞上的只有 `watch_load`，首行 75,125 字节（第 4 节第三次测量）。绕过之后，建流时 `watch_load` 首行若已超上限（Mac 服务起来约 52 分钟以后，历史点超过约 619 个；服务重启后从头算），就约每分钟失败一次，余力到不了安卓控制端；建流时历史还短就到得了、之后一直在（第 4 节「余力什么时候到得了」）。要等真修法，记在 `tasks/todo.md`「安卓平板」 |
 | `rust/net/src/quic.rs` `pub use sys::getaddrinfo_v6;` | 公开给探查函数 | `rapp_p0_resolve` 要单独看这一支 | 不进 P1（探查用） |
 | `rust/android-ffi` `rapp_p0_resolve`；`Cargo.toml` 加 `rapp-net`、`tokio` | 返回 `getaddrinfo_v6` 和 `resolve_for(dual)` 两行 | 第 3 项的解析探查 | 不进 P1（探查用） |
-| `gui/lib/p0/p0_pages.dart` | `P0_PAGE=resolve` 页；`P0_PAGE=keys` 页（`KeysPage`、`formatKeyEvent`、`formatPointerEvent`）；`speech`、`install` 占位 | 探查页 | 不进 P1 |
+| `gui/lib/p0/p0_pages.dart` | `P0_PAGE=resolve` 页；`P0_PAGE=keys` 页（`KeysPage`、`formatKeyEvent`、`formatPointerEvent`）；`P0_PAGE=speech` 页（`SpeechPage`）；`P0_PAGE=install` 页（`InstallPage`） | 探查页 | 页面不进 P1 |
+| `p0_pages.dart` `p0DownloadAndInstall` | 下载到 `<cache>/update/rapp.apk`，对 SHA-256，对上才调 `install`；出错或不对就删文件 | 第 7 项 | P1 更新器的下载、校验一段可以从这里改起；第 7 节 7.5 第 9 条列的缺口要补 |
+| `gui/android/.../MainActivity.kt` 安装部分 | `canInstall`、`openInstallSettings`、`installApk`（`PackageInstaller` 会话）、`versionInfo`；系统结果以 `install` 事件回 Dart：`pending`、`success`、`cancelled`、`failure` | 第 7 项 | §13.2 更新器的安卓通道（留下；接收器要挪出 Activity，见 7.5 第 9 条） |
+| `gui/android/app/src/main/AndroidManifest.xml` `REQUEST_INSTALL_PACKAGES`、`android:networkSecurityConfig` | 自己装自己的权限；网络安全配置 | 第 7 项 | 两样都留下（规格 §6.4）。网络安全配置只放行 `localhost`、`127.0.0.1` 的明文，正式包里也生效 |
+| `gui/android/app/src/main/res/xml/network_security_config.xml`（新） | 只对 `localhost`、`127.0.0.1` 放行明文 | 第 7 项探查从本机 http 下载 | 留下：P1 里本机的 AI 整理（`localhost:28001`）要它（规格 §6.4）；真正的下载走 https |
+| `gui/test/p0_install_test.dart`（新） | 两个测试：哈希对就调 `install`、传文件路径；哈希不对不调 `install`、文件被删 | `p0DownloadAndInstall` | 跟着下载、校验那段进 P1，再补非 200、下载中断、`install` 抛异常 |
+| `gui/android/.../MainActivity.kt` 语音部分 | `rapp/p0speech` 通道：`probe`、`support`、`start`、`stop`；每种模式一个识别器、复用；事件带实例号和 `rms` 计数 | 第 6 项 | §11 的安卓语音通道可以从这里改起；第 6 节 6.3 列的缺口要补；实例号、`rms` 计数是探查用的 |
+| `AndroidManifest.xml` `RECORD_AUDIO`、`<queries>`（`android.speech.RecognitionService`） | 录音权限；Android 11 起不声明就看不到识别服务 | 第 6 项 | 留下（规格 §6.4 已写） |
+| `gui/test/p0_speech_test.dart`（新） | Dart 一侧原样转发通道的回答和事件 | `SpeechPage` 的通道 | 不进 P1；P1 的语音要有 Kotlin 一侧的测试 |
+| `gui/test/session_ffi_test.dart`（新） | 四个测试：每帧 ack 一次且只在取下一包时；暂停的消费者不 ack；慢速时 ack 前先等；`slowNow` 每帧重读 | `FfiSession` 的 ack | ack 那两个进 P1，改用 `fake_async`；慢速那两个是探查用的 |
+| `gui/android/gradle.properties` | Flutter 模板生成的 `android.newDsl=false`、`android.builtInKotlin=false`，没改 | 模板这样出（第 1 节） | 留下，跟着 Flutter 模板走 |
 | `gui/test/p0_keys_test.dart`（新） | 两个测试：键行里有 `ctrl=1 meta=0 …`；指针行 `scroll`、`panzoom-end`，按下事件返回 null | `keys` 页的格式化函数 | 不进 P1 |
 | `scripts/p0-android-so.sh` | `cargo ndk` 出 `.so`、拷进 `jniLibs` | 每次改 Rust 后重编 | P1 的构建脚本（`build-android.sh` 之类） |
 
 ## 规格要改的地方
 
-- §6.2：说 hub 的四个函数可能要 `#[used] static` 才进 `.so` 的导出表。实测 `pub use rapp_hub_ffi::{…}` 就够了（第 2 节）。
-- 带闸写入端的顺序：应是「等闸开、关闸（是帧时）、交给 sink」，不是「交给 sink 再关闸」，否则 ack 可能先到而丢掉（第 2 节）。
-- §6.2 规矩 2（恐慌不能穿过 FFI）要落到 `rapp-hub-ffi` 自己身上：在它的四个 `extern "C"` 函数（`hub-ffi/src/lib.rs` 第 40、121、128、145 行）里包 `catch_unwind`，P1 做，iOS 一起受益。`rapp-android-ffi` 按规格只能 `pub use`、不能写同名转调，自己包不了。
-- §6.2 规矩 1 已写「做成图片或决定丢掉之后就 ack」。补一句后果：忘了 ack（哪怕是丢掉的帧），会话就永远结束不了，`disconnected` 和 kind 2 都不会来（第 2 节）。
-- §6.1：「构造时传入库」改成「入口传库名，`null` 是 `process()`」：`DynamicLibrary` 传不进 `Isolate.run`，`_stopOffThread` 只能按名字重新打开（第 3 节）。
-- §6.1「安卓的 C 库对 `AI_V4MAPPED` 的支持不确定」这个问题**不用回答**：三个 `mod sys` 里的 `getaddrinfo_v6` 都不会返回映射地址（unix 用 `AF_UNSPEC` 调 `getaddrinfo`、丢掉映射地址；Windows 用 `to_socket_addrs`、同样丢掉；其他平台直接 `None`），映射地址只由 `resolve_for` 自己用 `mapped()` 拼，安卓就走这一支，不用另加（第 3 节）。这次也没测出 bionic 对 `AI_V4MAPPED` 怎么处理。真正要实机回答的是：只有 IPv6 的网络（NAT64/DNS64）上，`getaddrinfo_v6` 能不能拿到合成的地址（§14.6 第 8 条）。
-- §6.5：`'android'` 那一项写了 `systemOpen: true`，但 `systemOpen` 的四处用法（`main_window.dart:43`、`term_stage.dart:50`、`local_section.dart:43`、`data_section.dart:54`）都走 `iosChannel`。要么给安卓接一个通道，要么先不开。
-- 接入引导之后：放进 relay 和 key，主机不会自己出现，要在设备页按 ID 添加（和 iPad 一样）。§14 的验收步骤里「看到这台 Mac 在线」之前要写上这一步（第 3 节）。
-- §14.6 加一条：双栈的真 IPv6（全局地址、只有 IPv6 的网络）模拟器上测不了，实机上连一次 relay（已加）。
-- §14.6 第 9 条（已加）：触控板双指滚动、捏合在模拟器上测不了；平板上 Ctrl+C/V 的 `isControlPressed` 要用户用真键盘按一次（P0 里平板只能注入，没证实）。文本框里的 Ctrl 快捷键：软键盘打开时 36 上到得了 `HardwareKeyboard`（第 5 节），先前「到不了」的说法已撤回。
-- §13.2 第 4 步（第 7 项，已改一句）：装完 App 是被系统杀掉、不会自己重启（模拟器 34、36 都是；「打开」通知只在 34 上查过），写成「装完 App 被系统杀掉，用户再点图标；更新器靠下次启动时的 `versionCode` 判断成败」（第 7 节）。
-- 建议（待用户定，没改规格）：§13.2 的流程和文案要为荣耀的三层确认留位置：安全检测、必须勾的 `已了解…`、锁屏密码。这影响「在 App 里点一下就更新」的说法；平板上没走完，用户走一遍后再定（第 7 节）。
-- 安卓入口的日志不能用 `stderr`（logcat 看不到），用 `debugPrint` 或写文件。
-- §14.6 加一条（P1 待查）：`adb shell input text` 快速送字时会不会少字。`input text 'p0probe'` 在模拟器 36 上到 Mac 的是 `p0robe`，平板上拼音候选里也少了同一个 p；34 上没少。36 上重复测量，`input text` 3 次里少 1 次，逐键 `input keyevent` 3 次里少 2 次，有截图的两次，少的字在写作条里就没有了。要查清是 `adb` 注入、写作条收字还是模拟器输入法丢的，真键盘也要测（第 4 节「模拟器 36 打字重复测量」）。
-- §11 规则 2 靠 `checkRecognitionSupport` 问「在线是否支持中文」：模拟器 36 和平板上它都报 14（`ERROR_CANNOT_CHECK_SUPPORT`），规则 4 又把 14 判成不能用，所以规则 2 在这两个目标上走不通。不要改成「有默认识别器就按能用」：平板有默认识别器（`com.hihonor.magicvoice`），按下去五次一个回调都没有，这正是反例。建议（待定）：把「按下去之后超过一定时间没有 `ready`/`begin`」也当作不能用，给提示；这一条只有平板一个样本。
-- §11 规则 1 的语言字符串：36 的 `supported` 里中文写作 `cmn-Hans-CN`、`cmn-Hant-TW`，没有 `zh-CN`；比较时要认 `cmn-Hans-CN`（以及 `zh-CN`、`zh-Hans-CN`）。
-- §11：`createOnDeviceSpeechRecognizer` 在没有设备上识别器时抛 `UnsupportedOperationException`，要先用 `isOnDeviceRecognitionAvailable` 挡住或 try/catch；`checkRecognitionSupport` 没有识别服务时回调不来，要加超时（第 6 节）。
-- §11：识别器报 `error 12`（`LANGUAGE_NOT_SUPPORTED`）时，规格没说怎么处理；设备上识别器没装中文时是这个码，下载语言包后在 36 上又见到 `error 13`（`ERROR_LANGUAGE_UNAVAILABLE`）。两个都应该和「不能用」同样处理或提示用户去装语言包。
+不碰 U1–U8、也不改用户看到的东西的，已直接改进规格，改过的段落末尾标了（P0 结果 §n）：
+
+- §4.5：改成装完的样子：各工具的版本、两个镜像和 AVD、Rust 目标、磁盘；`gui/android/` 只在探查分支上（第 1 节）。
+- §6.1：库由入口按名字传，`null` 是 `process()`；`AI_V4MAPPED` 的问题不用回答，安卓不用单独一支（第 3 节）。
+- §6.2：规矩 1 补上写入端的顺序（等闸开、关闸、交给 sink）和忘了 ack 的后果；规矩 2 写明 `rapp-hub-ffi` 自己包 `catch_unwind`；`pub use` 就进导出表，不用 `#[used]` 静态量（第 2 节）。
+- §6.4：清单加 `<queries>`（识别服务）；网络安全配置和安装权限在正式包里也生效；日志用 `debugPrint` 或写文件，不用 `stderr`（第 3、6、7 节）。
+- §6.5：`systemOpen` 的四处用法都走 `iosChannel`，先给安卓接通道再开这一位（第 3 节）。
+- §11：中文按语言前缀认（`cmn-Hans-CN`）；用 `queryIntentServices` 找识别服务；`checkRecognitionSupport` 加超时；挡住 `UnsupportedOperationException`；查和开始用同样的 intent；分段静音时长给 `int`；分段结束是单独事件；`error 12`、`13` 走现有的错误处理；「多半走到第 3 条」改成平板走的是第 4 条（第 6 节）。
+- §13.2 第 4 步：装完 App 被杀、不会自己重启，成败看下次启动的 `versionCode`；先落盘、删缓存的包；接收器不跟着 Activity；出错 `abandon()`；拷贝不在 UI 线程（第 7 节）。
+- §14.1 第 7 项：过关线改成「装上（App 被杀，用户再点图标）」（第 7 节）。
+- §14.2 验收：「全景看到设备」之前加「在设备页按 ID 添加主机」（第 3 节）。
+- §14.6：第 7、8、9 条改了，第 9 条的检查改在 P1 第一个包上做；新加第 10–15 条：平板走完自己装自己、打字少字、强制 relay 帧率、真人说话、文本框里的真键盘、relay 域名解析（第 3–8 节）。
+
+改用户看到的东西的，没改规格，等用户定：
+
+1. 建议 1：§13.2 的更新流程和「更新」旁的文案，为厂商多出的确认留位置：荣耀平板上要过安全检测、勾「已了解此应用未经荣耀应用市场检测，可能存在风险。」、再输锁屏密码，更新前先告诉用户「会让你勾一项、再输锁屏密码」；原因：平板上点「下载并安装」之后多出这三层，最后一层是 `输入锁屏密码继续安装应用`（第 7 节 7.4），而规格现在只写了系统弹一个确认；不改的后果：用户以为点一下就更新，中途看到橙色的「未经荣耀安全审核」和密码框，会以为出错或不敢继续，更新停在半路。
+2. 建议 2：§11 加一条：按下语音按钮后几秒内（比如 3 s）既没有 `ready` 也没有 `begin`，这一次就当失败结束，给一句提示（比如「这台设备的语音识别没有回应，请用输入法上的语音键」），并记下来，下次启动时判成不能用、按钮不出现；原因：平板有默认识别器（`com.hihonor.magicvoice`），六次按住说话一个回调都没有（第 6 节）；只靠 `checkRecognitionSupport` 判断，遇到说支持却不回调的识别器就会漏过去；也不能改成「有默认识别器就按能用」，这台平板正是反例；只有这一个样本；不改的后果：在这样的机器上按钮出现、按了没反应，正是 U6 要避免的「按了没反应的按钮」。
+3. 建议 3：§13.2 在「更新」按钮旁写一句「装完会回到桌面，请再打开 rApp」；原因：装成的两台模拟器上，用户点系统的确认后 App 立刻被杀，不会自己起来，也没看到「打开」提示（第 7 节 7.2）；不改的后果：用户点完更新只看到桌面，以为 App 崩了或更新失败。
