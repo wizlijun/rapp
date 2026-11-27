@@ -1707,3 +1707,21 @@ P0 探查已完成（2026-11-27），结论见 `docs/superpowers/specs/2026-11-2
 - [ ] 13 真人对着平板按住说话：有没有回调，按钮该不该出现
 - [ ] 14 真键盘在文本框里：Ctrl+空格、单按字母、Ctrl+C/V
 - [ ] 15 relay 写成域名时能解析、能连上
+
+## 手机第一版（V1a 探查、V1b 计划）
+
+总览 `docs/superpowers/plans/2026-11-27-rapp-phone-v1-kickoff.md`。用户 2026-11-27 说"全部做完，中途不用问我"，下面"代定的"是按推荐定的，用户看过再确认或改。
+
+代定的（用户确认或改）：
+
+- [ ] 探查 4-1：加设备间消息 `reply_term`，`capabilities` 加 `reply: true`，不涨协议号
+- [ ] 探查 4-2：「允许 / 拒绝」由手机按已有的 app 配置换成键再发（(a)）。和规格 §7.4.8 不一致，规格要跟着改，或者以后改成 A 端换
+- [ ] 探查 4-3：留 `typed` 保护
+- [ ] 探查 4-4：会话状态里加能力位，老 holder 开的会话事先不显示按钮
+- [ ] 探查 1：600 不改；`FormSwitch` 加"不在 `resumed` 时不切形态，回前台再判"（V1b 计划 Task 4 执行时补），防抖先 250 ms
+
+要真机的（用户动手）：
+
+- [ ] 探查 1：Duo 开合十次、生命周期、hub，操作单在 `docs/superpowers/measurements/2026-11-27-rapp-phone-v1a-1-duo.md` 末尾；探查包已编好在 `.worktrees/phone-v1a-1/gui/build/ios/ipa/`，会盖掉 Duo 上的正式版，测完下次发版装回
+- [ ] 探查 4-5：验收第 3 条，A 上真 Claude Code 弹权限提示，手机点「允许」，A 的窗口大小和 B 的画面不变
+- 探查分支 `probe/phone-v1a-1` 和 worktree `.worktrees/phone-v1a-1` 留到真机数字填完
