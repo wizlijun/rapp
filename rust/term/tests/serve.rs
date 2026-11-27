@@ -1178,3 +1178,63 @@ async fn open_with_shell_and_from_uses_request_shell_and_source_cwd() {
     end_all(&dir).await;
     w.stop().await;
 }
+
+/// A worker whose launcher, asked `--front <tty>`, writes the tty to `front.txt` and fails while `front-fail` is
+/// there.
+async fn front_worker() -> (Worker, std::path::PathBuf) {
+    let dir = short_dir();
+    let log = dir.path().join("log");
+    std::fs::create_dir(&log).unwrap();
+    let script = dir.path().join("launch.sh");
+    let body = format!(
+        "#!/bin/sh\nd='{}'\n[ \"$1\" = --front ] || exit 1\nprintf '%s' \"$2\" > \"$d/front.txt\"\n\
+         [ -e \"$d/front-fail\" ] && exit 1\nexit 0\n",
+        log.display()
+    );
+    std::fs::write(&script, body).unwrap();
+    std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+    (Worker::start_with(dir, None, None, Some(&script)).await, log)
+}
+
+#[tokio::test]
+async fn front_raises_the_holders_tty() {
+    let (w, log) = front_worker().await;
+    let _win = Window::start(&w.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
+    let id = id_of(&w.pty_dir(), "t").await;
+    assert_eq!(w.ask(json!({"op": "front", "term": id})).await, [json!({"ok": true})]);
+    let tty = pty::wait_status(&w.pty_dir(), "t").await.tty.expect("a window has a tty");
+    assert_eq!(std::fs::read_to_string(log.join("front.txt")).unwrap(), tty);
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn front_of_an_unknown_term_is_not_found() {
+    let (w, log) = front_worker().await;
+    let _win = Window::start(&w.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
+    let id = id_of(&w.pty_dir(), "t").await;
+    let key = id.trim_start_matches("term:pty:").to_string();
+    for term in ["term:pty:nope".to_string(), format!("term:tmux:{key}"), format!("term:pty@srv:{key}"), "x".into()] {
+        assert_eq!(w.ask(json!({"op": "front", "term": term})).await, [json!({"error": "not-found"})], "{term}");
+    }
+    assert!(!log.join("front.txt").exists(), "no launcher ran");
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn front_that_finds_no_tab_is_not_found() {
+    let (w, log) = front_worker().await;
+    std::fs::write(log.join("front-fail"), "").unwrap();
+    let _win = Window::start(&w.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
+    let id = id_of(&w.pty_dir(), "t").await;
+    assert_eq!(w.ask(json!({"op": "front", "term": id})).await, [json!({"error": "not-found"})]);
+    assert!(log.join("front.txt").exists(), "the launcher was asked");
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn front_with_terminals_off_is_refused() {
+    let w = Worker::start(Some(r#"{"allow":false}"#)).await;
+    let v = w.ask(json!({"op": "front", "term": "term:pty:x"})).await;
+    assert!(v[0]["error"].is_string() && v[0]["error"] != "not-found", "{v:?}");
+    w.stop().await;
+}

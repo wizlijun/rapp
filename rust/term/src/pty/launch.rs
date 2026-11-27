@@ -273,6 +273,77 @@ const TERMINAL_TAB: &str = r#"on run argv
 end run
 "#;
 
+/// Bring the Terminal tab on the tty in item 1 to the front: its window un-minimized and first, the tab selected,
+/// Terminal active. Answers `front` when it found the tab; anything else means there is no such tab.
+const TERMINAL_FRONT: &str = r#"on run argv
+	set wanted to item 1 of argv
+	if not (application "Terminal" is running) then return "none"
+	tell application "Terminal"
+		repeat with w in windows
+			repeat with t in tabs of w
+				try
+					if (tty of t) is wanted then
+						try
+							set miniaturized of w to false
+						end try
+						set selected of t to true
+						set index of w to 1
+						activate
+						return "front"
+					end if
+				end try
+			end repeat
+		end repeat
+	end tell
+	return "none"
+end run
+"#;
+
+/// Why [`front`] did not bring a tab forward.
+#[derive(Debug, PartialEq)]
+pub enum FrontRefused {
+    /// No Terminal tab is on that tty (another terminal app, or Terminal is not running).
+    NotFound,
+    /// macOS is asking whether rApp may control Terminal.
+    Consent,
+    /// This platform cannot bring a window forward.
+    Unsupported,
+}
+
+impl FrontRefused {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FrontRefused::NotFound => "not-found",
+            FrontRefused::Consent => "consent",
+            FrontRefused::Unsupported => "unsupported",
+        }
+    }
+}
+
+/// Bring the Terminal tab on `tty` to the front. A test launcher is run as `<launch_with> --front <tty>`: it
+/// succeeding means found.
+pub fn front(tty: &str, launch_with: Option<&Path>) -> Result<(), FrontRefused> {
+    let limit = Duration::from_secs(10);
+    if let Some(p) = launch_with {
+        let mut c = Command::new(p);
+        c.arg("--front").arg(tty);
+        return bounded_command(&mut c, limit).map(|_| ()).map_err(|_| FrontRefused::NotFound);
+    }
+    if !cfg!(target_os = "macos") {
+        return Err(FrontRefused::Unsupported);
+    }
+    // Asked first: the script would only hang on the prompt.
+    if super::consent::asking() {
+        return Err(FrontRefused::Consent);
+    }
+    let mut c = Command::new("osascript");
+    c.arg("-e").arg(TERMINAL_FRONT).arg(tty);
+    match bounded_command(&mut c, limit) {
+        Ok(out) if String::from_utf8_lossy(&out).trim() == "front" => Ok(()),
+        _ => Err(FrontRefused::NotFound),
+    }
+}
+
 /// The process name a window rapp opened holds: `rapp-term run`.
 const HOLDER: &str = "rapp-term";
 
@@ -473,6 +544,20 @@ mod tests {
         let _ = std::fs::remove_file(&out);
         assert!(status.success());
     }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_terminal_front_script_compiles() {
+        let out = std::env::temp_dir().join(format!("rapp-front-{}.scpt", std::process::id()));
+        let status = Command::new("osacompile").arg("-o").arg(&out).arg("-e").arg(TERMINAL_FRONT)
+            .stdout(Stdio::null()).stderr(Stdio::inherit()).status().unwrap();
+        let _ = std::fs::remove_file(&out);
+        assert!(status.success());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_cannot_front() { assert_eq!(front("/dev/pts/1", None), Err(FrontRefused::Unsupported)); }
 
     #[cfg(target_os = "macos")]
     #[test]
