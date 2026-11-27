@@ -1650,3 +1650,9 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 直接挂载至已发布的 [v0.15.64](https://github.com/wizlijun/rapp/releases/tag/v0.15.64) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
 - [x] 对齐 macOS `0.15.64`（`fix/quick-row-minors`：`QuickSync.suspend()` 在暂停或重连时放下已关连接、改动待下条连接再发，以及 `常用语▾` / `按键▾` 菜单内拒发项仅在菜单内说明而不污染后方 `KeyBar` 的 `phrase-hint`）：在 `gui/test/embed/phrase_strip_cmds_test.dart` 补充 Linux 桌面端 `常用语▾` 与 `按键▾` 拒发项仅展示 `menu-hint` 且不残留 `phrase-hint` 测试，并在 `scripts/package-linux.sh` 恢复打包时由 Flutter 3.50 SDK 重解析出的 `gui/pubspec.lock`（避免与 macOS 提交的旧版 Flutter `pubspec.lock` 往复覆写，同时继续拦截任何源码/CMake 改动）；全工作区 20 个 crate 与 3,823 项 Flutter 测试全部通过。
 - [x] `v0.15.64`（源码 `631b6645`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json` 含 `v0.15.63` 与 `v0.15.64` 全部 6 项资产、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01564-parity.md`。
+
+## Linux 0.15.65 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 直接挂载至已发布的 [v0.15.65](https://github.com/wizlijun/rapp/releases/tag/v0.15.65) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.65`（`fix/quick-prefs-safety`：读不了且挪不开的 `quick.json` 或更新版本 `v > 1` 写的 `quick.json` 绝不覆盖、启动时未存上的 `lastSaveError` 照常在 `MainState.hint` 提示、以及 `rapp-center` `prefs.json` 重启测试轮询窗口放宽至 10 秒）：在 `gui/test/quick/quick_save_hint_test.dart` 补充 `TargetPlatform.linux` 桌面端回归用例；全工作区 20 个 crate `clippy -- -D warnings`、`rapp-center --test prefs`（13/13）与 Flutter 3,819 项测试全部通过。
+- [x] `v0.15.65`（源码 `2e514b7e`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致。详见 `docs/superpowers/plans/2026-11-27-linux-01565-parity.md`。
