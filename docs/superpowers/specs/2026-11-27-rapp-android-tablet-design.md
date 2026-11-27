@@ -1,7 +1,7 @@
 # rApp 安卓平板版设计
 
 日期：2026-11-27
-状态：用户已核对（2026-11-27），待写计划
+状态：用户已核对（2026-11-27），P0 计划已写，待执行
 分支：`docs/android-tablet-design`
 相关规格：iPad 和 Duo（`2026-11-17-rapp-ipad-duo-design.md`，下文叫「iPad 规格」）、Windows（`2026-11-26-rapp-windows-design.md`，下文叫「Windows 规格」）、iOS 内置输入法（`2026-11-20-rapp-ios-rime-ime-design.md`）
 
@@ -198,7 +198,7 @@ Flutter 界面（共用）
 
 librapp_android.so（Rust）
   ├─ rapp-hub-ffi 的四个函数
-  └─ 会话的四个函数 → rapp-client-core::session
+  └─ 会话的五个函数 → rapp-client-core::session
 ```
 
 接口和类的名字是建议，最后以先落地的那一方为准（见 §14.3 和 Windows 的 C 段怎么对）。
@@ -239,10 +239,12 @@ pub use rapp_hub_ffi::{rapp_hub_start, rapp_hub_send, rapp_hub_free_line, rapp_h
 #[no_mangle] pub extern "C" fn rapp_session_ack(id: u64);
 /// 结束会话，等它的线程退出（最多 2 秒）。
 #[no_mangle] pub extern "C" fn rapp_session_close(id: u64);
-/// 归还 sink 收到的内存。
-#[no_mangle] pub unsafe extern "C" fn rapp_session_free(ptr: *mut u8, len: usize);
+/// 归还 sink 收到的内存（libc 的 malloc 分配的）。只收指针一个参数：Dart 的收尾函数只带一个参数。
+#[no_mangle] pub unsafe extern "C" fn rapp_session_free(ptr: *mut c_void);
 
-/// kind：0 是事件（JSON），1 是帧（24 字节帧头 + BGRA），2 是会话结束。
+/// kind：0 是事件，1 是帧，2 是会话结束（ptr 空、len 0，每个会话恰好一次，是最后一次回调）。
+/// 0 和 1 时 ptr 指向的内容和管道里的一个包一模一样：第一个字节是 0 或 1，
+/// 后面是事件的 JSON 或「24 字节帧头 + BGRA」。这样 Dart 的读循环两条路共用，帧不用拷贝。
 type Sink = extern "C" fn(id: u64, kind: u8, ptr: *mut u8, len: usize);
 ```
 
@@ -254,7 +256,7 @@ type Sink = extern "C" fn(id: u64, kind: u8, ptr: *mut u8, len: usize);
 4. 会话线程连的还是 `127.0.0.1:<port>`，和子进程时一样，hub 不用知道有区别。
 5. 这个 crate 在 Mac 上也能编、能测（对着本机回环起一个假的 A），进 `cargo test --workspace` 和 clippy。Windows 的门禁上它也要能编；编不过就用 `cfg` 把内容在 Windows 上置空，不要把它移出 workspace。
 
-`pub use` 重新导出的 `#[no_mangle]` 函数会不会真的出现在 `.so` 的导出表里，P0 用 `llvm-nm -D` 看；没有就改成四个转调的薄函数。
+`pub use` 重新导出的 `#[no_mangle]` 函数会不会真的出现在 `.so` 的导出表里，P0 用 `llvm-nm -D` 看；没有就在这个 crate 里用一个 `#[used]` 的静态量引用这四个函数。不能写四个同名的转调函数，名字会和 `rapp-hub-ffi` 里的撞。
 
 ### 6.3 会话端口（Dart）
 
@@ -550,7 +552,7 @@ build-android.sh [debug|release] [--install <序列号>]
 
 ### 14.1 P0 探查
 
-一次性的分支 `probe/android-p0`，代码不合并，只把结果写成 `docs/superpowers/specs/2026-11-xx-rapp-android-p0-findings.md` 并回来改这份规格。
+一次性的分支 `probe/android-p0`，代码不合并，只把结果写成 `docs/superpowers/specs/2026-11-27-rapp-android-p0-findings.md` 并回来改这份规格。计划：`docs/superpowers/plans/2026-11-27-rapp-android-p0-probe.md`。
 
 | # | 看什么 | 过关 |
 |---|---|---|
