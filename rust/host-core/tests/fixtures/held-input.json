@@ -1,0 +1,285 @@
+[
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "code" : 55,
+          "op" : "press_key"
+        },
+        {
+          "code" : 55,
+          "op" : "release_key"
+        },
+        {
+          "button" : "left",
+          "op" : "press_button"
+        },
+        {
+          "button" : "left",
+          "op" : "release_button"
+        },
+        {
+          "op" : "drain"
+        }
+      ]
+    },
+    "name" : "pairs leave nothing held",
+    "out" : [
+      null,
+      null,
+      null,
+      null,
+      {
+        "buttons" : [
+
+        ],
+        "keys" : [
+
+        ]
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "code" : 55,
+          "op" : "press_key"
+        },
+        {
+          "button" : "right",
+          "op" : "press_button"
+        },
+        {
+          "op" : "drain"
+        },
+        {
+          "op" : "drain"
+        }
+      ]
+    },
+    "name" : "held key and button come back once",
+    "out" : [
+      null,
+      null,
+      {
+        "buttons" : [
+          "right"
+        ],
+        "keys" : [
+          55
+        ]
+      },
+      {
+        "buttons" : [
+
+        ],
+        "keys" : [
+
+        ]
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "code" : 0,
+          "op" : "press_key"
+        },
+        {
+          "code" : 0,
+          "op" : "press_key"
+        },
+        {
+          "code" : 0,
+          "op" : "press_key"
+        },
+        {
+          "op" : "drain"
+        },
+        {
+          "code" : 0,
+          "op" : "press_key"
+        },
+        {
+          "code" : 0,
+          "op" : "release_key"
+        },
+        {
+          "op" : "drain"
+        }
+      ]
+    },
+    "name" : "repeated down counts once",
+    "out" : [
+      null,
+      null,
+      null,
+      {
+        "buttons" : [
+
+        ],
+        "keys" : [
+          0
+        ]
+      },
+      null,
+      null,
+      {
+        "buttons" : [
+
+        ],
+        "keys" : [
+
+        ]
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "code" : 55,
+          "op" : "press_key"
+        },
+        {
+          "code" : 3,
+          "op" : "press_key"
+        },
+        {
+          "code" : 12,
+          "op" : "press_key"
+        },
+        {
+          "op" : "drain"
+        }
+      ]
+    },
+    "name" : "drain is sorted and complete",
+    "out" : [
+      null,
+      null,
+      null,
+      {
+        "buttons" : [
+
+        ],
+        "keys" : [
+          3,
+          12,
+          55
+        ]
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "button" : "left",
+          "op" : "release_button"
+        },
+        {
+          "op" : "drain"
+        }
+      ]
+    },
+    "name" : "dropped button is not tracked",
+    "out" : [
+      null,
+      {
+        "buttons" : [
+
+        ],
+        "keys" : [
+
+        ]
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "button" : "right",
+          "op" : "press_button"
+        },
+        {
+          "button" : "left",
+          "op" : "press_button"
+        },
+        {
+          "code" : 65535,
+          "op" : "press_key"
+        },
+        {
+          "code" : 1,
+          "op" : "press_key"
+        },
+        {
+          "op" : "drain"
+        }
+      ]
+    },
+    "name" : "both buttons come back left first",
+    "out" : [
+      null,
+      null,
+      null,
+      null,
+      {
+        "buttons" : [
+          "left",
+          "right"
+        ],
+        "keys" : [
+          1,
+          65535
+        ]
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "code" : 9,
+          "op" : "release_key"
+        },
+        {
+          "code" : 10,
+          "op" : "press_key"
+        },
+        {
+          "code" : 9,
+          "op" : "release_key"
+        },
+        {
+          "op" : "drain"
+        }
+      ]
+    },
+    "name" : "release of a key never pressed",
+    "out" : [
+      null,
+      null,
+      null,
+      {
+        "buttons" : [
+
+        ],
+        "keys" : [
+          10
+        ]
+      }
+    ]
+  }
+]

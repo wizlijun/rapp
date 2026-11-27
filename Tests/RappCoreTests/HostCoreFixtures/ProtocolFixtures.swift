@@ -18,12 +18,19 @@ final class ProtocolFixtures: XCTestCase {
     static let title200: String = String(repeating: "e\u{301}", count: 66)
         + String(repeating: "🇨🇳", count: 67) + String(repeating: "👨‍👩‍👧", count: 67)
 
-    static let windows256: [WindowInfo] = (1...256).map { i in
-        WindowInfo(id: UInt32(i), parent: i == 1 ? 0 : 1, kind: WindowKind(rawValue: UInt8(i % 7))!,
-                   resizable: i % 2 == 0, focused: i == 1,
-                   rect: CanvasRect(x: Float(i), y: -Float(i) / 4, w: 100 + Float(i), h: 50.5),
-                   titleBar: i % 3 == 0 ? 0 : 28, title: "窗口 \(i)")
-    }
+    static let windows256: [WindowInfo] = {
+        var out: [WindowInfo] = []
+        for i in 1...256 {
+            let f = Float(i)
+            let parent: UInt32 = i == 1 ? 0 : 1
+            let kind: WindowKind = WindowKind(rawValue: UInt8(i % 7))!
+            let rect = CanvasRect(x: f, y: -f / 4, w: 100 + f, h: 50.5)
+            let titleBar: Float = i % 3 == 0 ? 0 : 28
+            out.append(WindowInfo(id: UInt32(i), parent: parent, kind: kind, resizable: i % 2 == 0,
+                                  focused: i == 1, rect: rect, titleBar: titleBar, title: "窗口 \(i)"))
+        }
+        return out
+    }()
 
     static let samples: [Message] = {
         var rng = HostRNG(seed: 2)

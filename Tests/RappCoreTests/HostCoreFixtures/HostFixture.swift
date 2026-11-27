@@ -41,7 +41,8 @@ enum HostFixture {
         }
         let old = [UInt8](data)
         guard old != bytes else { return }
-        let at = zip(old, bytes).firstIndex { $0 != $1 } ?? min(old.count, bytes.count)
+        let common = min(old.count, bytes.count)
+        let at = (0..<common).first { old[$0] != bytes[$0] } ?? common
         XCTFail("fixture \(name) differs at byte \(at) (file \(old.count) bytes, now \(bytes.count)); "
             + "if the Swift change is intended, regenerate with RAPP_WRITE_FIXTURES=1", file: file, line: line)
     }

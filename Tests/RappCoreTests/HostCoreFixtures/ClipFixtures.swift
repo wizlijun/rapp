@@ -126,7 +126,8 @@ final class ClipFixtures: XCTestCase {
         cases.append(Self.c("constants", ["fn": "constants"], [
             "max_clip_text": maxClipText, "max_clip_files": maxClipFiles, "inline_paste_limit": inlinePasteLimit,
             "chunk_size": chunkSize, "max_side_connections": maxSideConnections, "retry_delays": retryDelays,
-            "type_file_url": typeFileURL, "type_png": typePNG, "type_tiff": typeTIFF, "type_utf8_text": typeUTF8Text,
+            "type_file_url": RappCore.typeFileURL, "type_png": RappCore.typePNG, "type_tiff": RappCore.typeTIFF,
+            "type_utf8_text": RappCore.typeUTF8Text,
             "restore_delay": PasteSession.restoreDelay, "clip_capacity": ClipStore.capacity,
         ] as [String: Any]))
         F.check("clip-rules.json", F.cases(cases))

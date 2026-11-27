@@ -1,0 +1,501 @@
+[
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "name" : "Mac mini",
+          "op" : "set",
+          "port" : 50001
+        },
+        {
+          "op" : "name",
+          "port" : 50001
+        },
+        {
+          "op" : "name",
+          "port" : 50002
+        }
+      ]
+    },
+    "name" : "announced name is found by port",
+    "out" : [
+      1,
+      "Mac mini",
+      null
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "name" : "a",
+          "op" : "set",
+          "port" : 1
+        },
+        {
+          "name" : "b",
+          "op" : "set",
+          "port" : 1
+        },
+        {
+          "op" : "name",
+          "port" : 1
+        }
+      ]
+    },
+    "name" : "a later name for the port replaces the earlier one",
+    "out" : [
+      1,
+      1,
+      "b"
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "name" : "n1",
+          "op" : "set",
+          "port" : 1
+        },
+        {
+          "name" : "n2",
+          "op" : "set",
+          "port" : 2
+        },
+        {
+          "name" : "n3",
+          "op" : "set",
+          "port" : 3
+        },
+        {
+          "name" : "n4",
+          "op" : "set",
+          "port" : 4
+        },
+        {
+          "name" : "n5",
+          "op" : "set",
+          "port" : 5
+        },
+        {
+          "name" : "n6",
+          "op" : "set",
+          "port" : 6
+        },
+        {
+          "name" : "n7",
+          "op" : "set",
+          "port" : 7
+        },
+        {
+          "name" : "n8",
+          "op" : "set",
+          "port" : 8
+        },
+        {
+          "name" : "n9",
+          "op" : "set",
+          "port" : 9
+        },
+        {
+          "name" : "n10",
+          "op" : "set",
+          "port" : 10
+        },
+        {
+          "name" : "n11",
+          "op" : "set",
+          "port" : 11
+        },
+        {
+          "name" : "n12",
+          "op" : "set",
+          "port" : 12
+        },
+        {
+          "name" : "n13",
+          "op" : "set",
+          "port" : 13
+        },
+        {
+          "name" : "n14",
+          "op" : "set",
+          "port" : 14
+        },
+        {
+          "name" : "n15",
+          "op" : "set",
+          "port" : 15
+        },
+        {
+          "name" : "n16",
+          "op" : "set",
+          "port" : 16
+        },
+        {
+          "name" : "n17",
+          "op" : "set",
+          "port" : 17
+        },
+        {
+          "op" : "name",
+          "port" : 1
+        },
+        {
+          "op" : "name",
+          "port" : 2
+        },
+        {
+          "op" : "name",
+          "port" : 17
+        }
+      ]
+    },
+    "name" : "only the newest sixteen are kept",
+    "out" : [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      16,
+      null,
+      "n2",
+      "n17"
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "name" : "n1",
+          "op" : "set",
+          "port" : 1
+        },
+        {
+          "name" : "n2",
+          "op" : "set",
+          "port" : 2
+        },
+        {
+          "name" : "n3",
+          "op" : "set",
+          "port" : 3
+        },
+        {
+          "name" : "n4",
+          "op" : "set",
+          "port" : 4
+        },
+        {
+          "name" : "n5",
+          "op" : "set",
+          "port" : 5
+        },
+        {
+          "name" : "n6",
+          "op" : "set",
+          "port" : 6
+        },
+        {
+          "name" : "n7",
+          "op" : "set",
+          "port" : 7
+        },
+        {
+          "name" : "n8",
+          "op" : "set",
+          "port" : 8
+        },
+        {
+          "name" : "n9",
+          "op" : "set",
+          "port" : 9
+        },
+        {
+          "name" : "n10",
+          "op" : "set",
+          "port" : 10
+        },
+        {
+          "name" : "n11",
+          "op" : "set",
+          "port" : 11
+        },
+        {
+          "name" : "n12",
+          "op" : "set",
+          "port" : 12
+        },
+        {
+          "name" : "n13",
+          "op" : "set",
+          "port" : 13
+        },
+        {
+          "name" : "n14",
+          "op" : "set",
+          "port" : 14
+        },
+        {
+          "name" : "n15",
+          "op" : "set",
+          "port" : 15
+        },
+        {
+          "name" : "n16",
+          "op" : "set",
+          "port" : 16
+        },
+        {
+          "name" : "again",
+          "op" : "set",
+          "port" : 1
+        },
+        {
+          "name" : "n17",
+          "op" : "set",
+          "port" : 17
+        },
+        {
+          "op" : "name",
+          "port" : 1
+        },
+        {
+          "op" : "name",
+          "port" : 2
+        }
+      ]
+    },
+    "name" : "renaming a port makes it the newest",
+    "out" : [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      16,
+      16,
+      "again",
+      null
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "name" : "",
+          "op" : "set",
+          "port" : 9
+        },
+        {
+          "op" : "name",
+          "port" : 9
+        }
+      ]
+    },
+    "name" : "an empty name is kept as given",
+    "out" : [
+      1,
+      ""
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "name" : "客厅的 Mac",
+          "op" : "set",
+          "port" : 0
+        },
+        {
+          "name" : "x",
+          "op" : "set",
+          "port" : 65535
+        },
+        {
+          "op" : "name",
+          "port" : 0
+        },
+        {
+          "op" : "name",
+          "port" : 65535
+        }
+      ]
+    },
+    "name" : "port zero and the top port, Chinese name",
+    "out" : [
+      1,
+      2,
+      "客厅的 Mac",
+      "x"
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "name" : "n1",
+          "op" : "set",
+          "port" : 1
+        },
+        {
+          "name" : "n2",
+          "op" : "set",
+          "port" : 2
+        },
+        {
+          "name" : "n3",
+          "op" : "set",
+          "port" : 3
+        },
+        {
+          "name" : "n4",
+          "op" : "set",
+          "port" : 4
+        },
+        {
+          "name" : "n5",
+          "op" : "set",
+          "port" : 5
+        },
+        {
+          "name" : "n6",
+          "op" : "set",
+          "port" : 6
+        },
+        {
+          "name" : "n7",
+          "op" : "set",
+          "port" : 7
+        },
+        {
+          "name" : "n8",
+          "op" : "set",
+          "port" : 8
+        },
+        {
+          "name" : "n9",
+          "op" : "set",
+          "port" : 9
+        },
+        {
+          "name" : "n10",
+          "op" : "set",
+          "port" : 10
+        },
+        {
+          "name" : "n11",
+          "op" : "set",
+          "port" : 11
+        },
+        {
+          "name" : "n12",
+          "op" : "set",
+          "port" : 12
+        },
+        {
+          "name" : "n13",
+          "op" : "set",
+          "port" : 13
+        },
+        {
+          "name" : "n14",
+          "op" : "set",
+          "port" : 14
+        },
+        {
+          "name" : "n15",
+          "op" : "set",
+          "port" : 15
+        },
+        {
+          "name" : "n16",
+          "op" : "set",
+          "port" : 16
+        },
+        {
+          "name" : "n17",
+          "op" : "set",
+          "port" : 17
+        },
+        {
+          "name" : "n18",
+          "op" : "set",
+          "port" : 18
+        },
+        {
+          "op" : "name",
+          "port" : 1
+        },
+        {
+          "op" : "name",
+          "port" : 2
+        },
+        {
+          "op" : "name",
+          "port" : 3
+        },
+        {
+          "op" : "name",
+          "port" : 18
+        }
+      ]
+    },
+    "name" : "eighteen names drop the two oldest",
+    "out" : [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      16,
+      16,
+      null,
+      null,
+      "n3",
+      "n18"
+    ]
+  }
+]

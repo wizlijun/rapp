@@ -1,0 +1,1666 @@
+[
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 50,
+          "width" : 100,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 800,
+          "width" : 600,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 800,
+          "width" : 1000,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "largest under max",
+    "out" : {
+      "miss" : null,
+      "pick" : {
+        "depth" : 1,
+        "rect" : {
+          "height" : 800,
+          "width" : 600,
+          "x" : 0,
+          "y" : 0
+        },
+        "share" : 0.59999999999999998
+      }
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 50,
+          "width" : 100,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 100,
+          "width" : 200,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "all small",
+    "out" : {
+      "miss" : "small",
+      "pick" : null
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "empty chain",
+    "out" : {
+      "miss" : "small",
+      "pick" : null
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 800,
+          "width" : 950,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 800,
+          "width" : 1000,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "only huge",
+    "out" : {
+      "miss" : "large",
+      "pick" : null
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 5000,
+          "width" : 600,
+          "x" : 0,
+          "y" : -2000
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "tall container intersected first",
+    "out" : {
+      "miss" : null,
+      "pick" : {
+        "depth" : 0,
+        "rect" : {
+          "height" : 800,
+          "width" : 600,
+          "x" : 0,
+          "y" : 0
+        },
+        "share" : 0.59999999999999998
+      }
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 800,
+          "width" : 600,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 800,
+          "width" : 600,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "tie takes outer",
+    "out" : {
+      "miss" : null,
+      "pick" : {
+        "depth" : 1,
+        "rect" : {
+          "height" : 800,
+          "width" : 600,
+          "x" : 0,
+          "y" : 0
+        },
+        "share" : 0.59999999999999998
+      }
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 800,
+          "width" : 230,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "min width",
+    "out" : {
+      "miss" : "small",
+      "pick" : null
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 150,
+          "width" : 1000,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "min height",
+    "out" : {
+      "miss" : "small",
+      "pick" : null
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 800,
+          "width" : 600,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "depth capped at 40 (41 levels)",
+    "out" : {
+      "miss" : "small",
+      "pick" : null
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 10,
+          "width" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 800,
+          "width" : 600,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 800,
+          "width" : 700,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "41 levels, the 40th counts",
+    "out" : {
+      "miss" : null,
+      "pick" : {
+        "depth" : 39,
+        "rect" : {
+          "height" : 800,
+          "width" : 600,
+          "x" : 0,
+          "y" : 0
+        },
+        "share" : 0.59999999999999998
+      }
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 500,
+          "width" : 240,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "share exactly 15%",
+    "out" : {
+      "miss" : null,
+      "pick" : {
+        "depth" : 0,
+        "rect" : {
+          "height" : 500,
+          "width" : 240,
+          "x" : 0,
+          "y" : 0
+        },
+        "share" : 0.14999999999999999
+      }
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 499,
+          "width" : 240,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "share just under 15%",
+    "out" : {
+      "miss" : "small",
+      "pick" : null
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 501,
+          "width" : 240,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "share just over 15%",
+    "out" : {
+      "miss" : null,
+      "pick" : {
+        "depth" : 0,
+        "rect" : {
+          "height" : 501,
+          "width" : 240,
+          "x" : 0,
+          "y" : 0
+        },
+        "share" : 0.15029999999999999
+      }
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 800,
+          "width" : 850,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "share exactly 85%",
+    "out" : {
+      "miss" : "large",
+      "pick" : null
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 800,
+          "width" : 849,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "share just under 85%",
+    "out" : {
+      "miss" : null,
+      "pick" : {
+        "depth" : 0,
+        "rect" : {
+          "height" : 800,
+          "width" : 849,
+          "x" : 0,
+          "y" : 0
+        },
+        "share" : 0.84899999999999998
+      }
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 800,
+          "width" : 851,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "share just over 85%",
+    "out" : {
+      "miss" : "large",
+      "pick" : null
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 160,
+          "width" : 240,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 400,
+        "width" : 500
+      }
+    },
+    "name" : "240x160 in 500x400",
+    "out" : {
+      "miss" : null,
+      "pick" : {
+        "depth" : 0,
+        "rect" : {
+          "height" : 160,
+          "width" : 240,
+          "x" : 0,
+          "y" : 0
+        },
+        "share" : 0.192
+      }
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 160,
+          "width" : 239,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 400,
+        "width" : 500
+      }
+    },
+    "name" : "239x160 in 500x400",
+    "out" : {
+      "miss" : "small",
+      "pick" : null
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 159,
+          "width" : 240,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 400,
+        "width" : 500
+      }
+    },
+    "name" : "240x159 in 500x400",
+    "out" : {
+      "miss" : "small",
+      "pick" : null
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 200,
+          "width" : 250,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 300,
+          "width" : 400,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 600,
+          "width" : 500,
+          "x" : 100,
+          "y" : 100
+        },
+        {
+          "height" : 800,
+          "width" : 900,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "four candidates",
+    "out" : {
+      "miss" : null,
+      "pick" : {
+        "depth" : 2,
+        "rect" : {
+          "height" : 600,
+          "width" : 500,
+          "x" : 100,
+          "y" : 100
+        },
+        "share" : 0.375
+      }
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 300,
+          "width" : 300,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 500,
+          "width" : 500,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 800,
+          "width" : 860,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 800,
+          "width" : 1000,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "four candidates, later larger huge",
+    "out" : {
+      "miss" : null,
+      "pick" : {
+        "depth" : 1,
+        "rect" : {
+          "height" : 500,
+          "width" : 500,
+          "x" : 0,
+          "y" : 0
+        },
+        "share" : 0.3125
+      }
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 300,
+          "width" : 300,
+          "x" : 2000,
+          "y" : 0
+        },
+        {
+          "height" : 400,
+          "width" : 400,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "disjoint layer",
+    "out" : {
+      "miss" : null,
+      "pick" : {
+        "depth" : 1,
+        "rect" : {
+          "height" : 400,
+          "width" : 400,
+          "x" : 0,
+          "y" : 0
+        },
+        "share" : 0.20000000000000001
+      }
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 300,
+          "width" : 300,
+          "x" : 2000,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "only disjoint",
+    "out" : {
+      "miss" : "small",
+      "pick" : null
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 800,
+          "width" : 300,
+          "x" : 1000,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "touching edge",
+    "out" : {
+      "miss" : "small",
+      "pick" : null
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 300,
+          "width" : 300,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 0
+      }
+    },
+    "name" : "zero window",
+    "out" : {
+      "miss" : "small",
+      "pick" : null
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 600,
+          "width" : 500,
+          "x" : -100,
+          "y" : -50
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "negative origin",
+    "out" : {
+      "miss" : null,
+      "pick" : {
+        "depth" : 0,
+        "rect" : {
+          "height" : 550,
+          "width" : 400,
+          "x" : 0,
+          "y" : 0
+        },
+        "share" : 0.27500000000000002
+      }
+    }
+  },
+  {
+    "in" : {
+      "chain" : [
+        {
+          "height" : 700.70000000000005,
+          "width" : 400.30000000000001,
+          "x" : 0.5,
+          "y" : 0.25
+        }
+      ],
+      "fn" : "panel",
+      "window" : {
+        "height" : 800,
+        "width" : 1000
+      }
+    },
+    "name" : "fractional",
+    "out" : {
+      "miss" : null,
+      "pick" : {
+        "depth" : 0,
+        "rect" : {
+          "height" : 700.70000000000005,
+          "width" : 400.30000000000001,
+          "x" : 0.5,
+          "y" : 0.25
+        },
+        "share" : 0.35061276250000001
+      }
+    }
+  },
+  {
+    "in" : {
+      "display" : {
+        "height" : 875,
+        "width" : 1440,
+        "x" : 0,
+        "y" : 25
+      },
+      "fn" : "window_rect",
+      "global" : {
+        "height" : 10,
+        "width" : 10,
+        "x" : 110,
+        "y" : 85
+      },
+      "window" : {
+        "h" : 300,
+        "w" : 400,
+        "x" : 100,
+        "y" : 50
+      }
+    },
+    "name" : "window rect",
+    "out" : {
+      "height" : 10,
+      "width" : 10,
+      "x" : 10,
+      "y" : 10
+    }
+  },
+  {
+    "in" : {
+      "display" : {
+        "height" : 1080,
+        "width" : 1920,
+        "x" : -1920,
+        "y" : 0
+      },
+      "fn" : "window_rect",
+      "global" : {
+        "height" : 40,
+        "width" : 300,
+        "x" : -1800,
+        "y" : 120
+      },
+      "window" : {
+        "h" : 600,
+        "w" : 800,
+        "x" : 20.5,
+        "y" : 30.25
+      }
+    },
+    "name" : "window rect second display",
+    "out" : {
+      "height" : 40,
+      "width" : 300,
+      "x" : 99.5,
+      "y" : 89.75
+    }
+  },
+  {
+    "in" : {
+      "fn" : "window_tiles",
+      "report" : {
+        "changed" : [
+          0,
+          24,
+          145
+        ],
+        "copy_bounds" : {
+          "height" : 128,
+          "width" : 2000,
+          "x" : 0,
+          "y" : 0
+        },
+        "full" : false,
+        "height" : 1200,
+        "region" : {
+          "h" : 600,
+          "w" : 800,
+          "x" : 0,
+          "y" : 0
+        },
+        "width" : 1600
+      },
+      "window" : {
+        "h" : 300,
+        "w" : 400,
+        "x" : 0,
+        "y" : 0
+      }
+    },
+    "name" : "retina",
+    "out" : {
+      "changed" : [
+        {
+          "height" : 32,
+          "width" : 32,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "copy_bounds" : {
+        "height" : 64,
+        "width" : 400,
+        "x" : 0,
+        "y" : 0
+      },
+      "full" : false,
+      "total" : 108
+    }
+  },
+  {
+    "in" : {
+      "fn" : "window_tiles",
+      "report" : {
+        "changed" : [
+
+        ],
+        "copy_bounds" : {
+          "height" : 10,
+          "width" : 10,
+          "x" : 90,
+          "y" : 90
+        },
+        "full" : true,
+        "height" : 100,
+        "region" : {
+          "h" : 100,
+          "w" : 100,
+          "x" : 0,
+          "y" : 0
+        },
+        "width" : 100
+      },
+      "window" : {
+        "h" : 50,
+        "w" : 50,
+        "x" : 0,
+        "y" : 0
+      }
+    },
+    "name" : "copy bounds outside",
+    "out" : {
+      "changed" : [
+
+      ],
+      "copy_bounds" : null,
+      "full" : true,
+      "total" : 1
+    }
+  },
+  {
+    "in" : {
+      "fn" : "window_tiles",
+      "report" : {
+        "changed" : [
+          0
+        ],
+        "copy_bounds" : null,
+        "full" : true,
+        "height" : 100,
+        "region" : {
+          "h" : 100,
+          "w" : 100,
+          "x" : 0,
+          "y" : 0
+        },
+        "width" : 0
+      },
+      "window" : {
+        "h" : 50,
+        "w" : 50,
+        "x" : 0,
+        "y" : 0
+      }
+    },
+    "name" : "zero width",
+    "out" : {
+      "changed" : [
+
+      ],
+      "copy_bounds" : null,
+      "full" : true,
+      "total" : 0
+    }
+  },
+  {
+    "in" : {
+      "fn" : "window_tiles",
+      "report" : {
+        "changed" : [
+          0
+        ],
+        "copy_bounds" : null,
+        "full" : false,
+        "height" : 100,
+        "region" : {
+          "h" : 100,
+          "w" : 0,
+          "x" : 0,
+          "y" : 0
+        },
+        "width" : 100
+      },
+      "window" : {
+        "h" : 50,
+        "w" : 50,
+        "x" : 0,
+        "y" : 0
+      }
+    },
+    "name" : "zero region",
+    "out" : {
+      "changed" : [
+
+      ],
+      "copy_bounds" : null,
+      "full" : false,
+      "total" : 0
+    }
+  },
+  {
+    "in" : {
+      "fn" : "window_tiles",
+      "report" : {
+        "changed" : [
+          0,
+          1,
+          15,
+          16,
+          17,
+          40,
+          159,
+          160,
+          1000
+        ],
+        "copy_bounds" : {
+          "height" : 100,
+          "width" : 40,
+          "x" : 960,
+          "y" : 500
+        },
+        "full" : false,
+        "height" : 600,
+        "region" : {
+          "h" : 300,
+          "w" : 500,
+          "x" : 16,
+          "y" : 24
+        },
+        "width" : 1000
+      },
+      "window" : {
+        "h" : 200,
+        "w" : 300,
+        "x" : 40,
+        "y" : 64
+      }
+    },
+    "name" : "edge tiles, offset window, index past end",
+    "out" : {
+      "changed" : [
+        {
+          "height" : 32,
+          "width" : 32,
+          "x" : 8,
+          "y" : -8
+        },
+        {
+          "height" : 32,
+          "width" : 32,
+          "x" : 232,
+          "y" : 24
+        }
+      ],
+      "copy_bounds" : null,
+      "full" : false,
+      "total" : 54
+    }
+  },
+  {
+    "in" : {
+      "fn" : "window_tiles",
+      "report" : {
+        "changed" : [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "copy_bounds" : {
+          "height" : 70,
+          "width" : 130,
+          "x" : 0,
+          "y" : 0
+        },
+        "full" : false,
+        "height" : 70,
+        "region" : {
+          "h" : 70,
+          "w" : 130,
+          "x" : 100,
+          "y" : 100
+        },
+        "width" : 130
+      },
+      "window" : {
+        "h" : 800,
+        "w" : 1000,
+        "x" : 0,
+        "y" : 0
+      }
+    },
+    "name" : "scale 1, window larger than region",
+    "out" : {
+      "changed" : [
+        {
+          "height" : 64,
+          "width" : 64,
+          "x" : 100,
+          "y" : 100
+        },
+        {
+          "height" : 64,
+          "width" : 64,
+          "x" : 164,
+          "y" : 100
+        },
+        {
+          "height" : 64,
+          "width" : 2,
+          "x" : 228,
+          "y" : 100
+        },
+        {
+          "height" : 6,
+          "width" : 64,
+          "x" : 100,
+          "y" : 164
+        },
+        {
+          "height" : 6,
+          "width" : 64,
+          "x" : 164,
+          "y" : 164
+        },
+        {
+          "height" : 6,
+          "width" : 2,
+          "x" : 228,
+          "y" : 164
+        }
+      ],
+      "copy_bounds" : {
+        "height" : 70,
+        "width" : 130,
+        "x" : 100,
+        "y" : 100
+      },
+      "full" : false,
+      "total" : 6
+    }
+  },
+  {
+    "in" : {
+      "fn" : "window_tiles",
+      "report" : {
+        "changed" : [
+
+        ],
+        "copy_bounds" : {
+          "height" : 10,
+          "width" : 10,
+          "x" : 50,
+          "y" : 0
+        },
+        "full" : false,
+        "height" : 100,
+        "region" : {
+          "h" : 100,
+          "w" : 100,
+          "x" : 0,
+          "y" : 0
+        },
+        "width" : 100
+      },
+      "window" : {
+        "h" : 50,
+        "w" : 50,
+        "x" : 0,
+        "y" : 0
+      }
+    },
+    "name" : "copy bounds touching",
+    "out" : {
+      "changed" : [
+
+      ],
+      "copy_bounds" : null,
+      "full" : false,
+      "total" : 1
+    }
+  }
+]

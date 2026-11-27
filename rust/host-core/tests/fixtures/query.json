@@ -1,0 +1,388 @@
+[
+  {
+    "in" : {
+      "fn" : "coalescer",
+      "steps" : [
+        {
+          "job" : "k1",
+          "kind" : "keyboard",
+          "op" : "submit"
+        },
+        {
+          "op" : "finish"
+        }
+      ]
+    },
+    "name" : "idle runs at once",
+    "out" : [
+      "k1",
+      null
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "coalescer",
+      "steps" : [
+        {
+          "job" : "p1",
+          "kind" : "pointer",
+          "op" : "submit"
+        },
+        {
+          "job" : "p2",
+          "kind" : "pointer",
+          "op" : "submit"
+        },
+        {
+          "job" : "p3",
+          "kind" : "pointer",
+          "op" : "submit"
+        },
+        {
+          "op" : "finish"
+        },
+        {
+          "op" : "finish"
+        }
+      ]
+    },
+    "name" : "newer pointer replaces pending pointer",
+    "out" : [
+      "p1",
+      null,
+      null,
+      "p3",
+      null
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "coalescer",
+      "steps" : [
+        {
+          "job" : "p1",
+          "kind" : "pointer",
+          "op" : "submit"
+        },
+        {
+          "job" : "k1",
+          "kind" : "keyboard",
+          "op" : "submit"
+        },
+        {
+          "job" : "p2",
+          "kind" : "pointer",
+          "op" : "submit"
+        },
+        {
+          "job" : "f1",
+          "kind" : "follow",
+          "op" : "submit"
+        },
+        {
+          "op" : "finish"
+        },
+        {
+          "op" : "finish"
+        },
+        {
+          "op" : "finish"
+        },
+        {
+          "op" : "finish"
+        }
+      ]
+    },
+    "name" : "pointer does not replace keyboard",
+    "out" : [
+      "p1",
+      null,
+      null,
+      null,
+      "k1",
+      "p2",
+      "f1",
+      null
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "coalescer",
+      "steps" : [
+        {
+          "job" : "k1",
+          "kind" : "keyboard",
+          "op" : "submit"
+        },
+        {
+          "job" : "k2",
+          "kind" : "keyboard",
+          "op" : "submit"
+        },
+        {
+          "op" : "finish"
+        },
+        {
+          "op" : "finish"
+        },
+        {
+          "job" : "f1",
+          "kind" : "follow",
+          "op" : "submit"
+        }
+      ]
+    },
+    "name" : "idle again after drain",
+    "out" : [
+      "k1",
+      null,
+      "k2",
+      null,
+      "f1"
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "coalescer",
+      "steps" : [
+        {
+          "op" : "finish"
+        },
+        {
+          "op" : "finish"
+        },
+        {
+          "job" : "p1",
+          "kind" : "pointer",
+          "op" : "submit"
+        },
+        {
+          "op" : "finish"
+        }
+      ]
+    },
+    "name" : "finish while idle",
+    "out" : [
+      null,
+      null,
+      "p1",
+      null
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "coalescer",
+      "steps" : [
+        {
+          "job" : "f0",
+          "kind" : "follow",
+          "op" : "submit"
+        },
+        {
+          "job" : "f1",
+          "kind" : "follow",
+          "op" : "submit"
+        },
+        {
+          "job" : "k1",
+          "kind" : "keyboard",
+          "op" : "submit"
+        },
+        {
+          "job" : "f2",
+          "kind" : "follow",
+          "op" : "submit"
+        },
+        {
+          "op" : "finish"
+        },
+        {
+          "op" : "finish"
+        },
+        {
+          "op" : "finish"
+        }
+      ]
+    },
+    "name" : "follow then keyboard order",
+    "out" : [
+      "f0",
+      null,
+      null,
+      null,
+      "k1",
+      "f2",
+      null
+    ]
+  },
+  {
+    "in" : {
+      "budget" : 0.050000000000000003,
+      "fn" : "deadline",
+      "now" : 10,
+      "start" : 10
+    },
+    "name" : "deadline at start",
+    "out" : {
+      "expired" : false,
+      "remaining" : 0.050000000000000711
+    }
+  },
+  {
+    "in" : {
+      "budget" : 0.050000000000000003,
+      "fn" : "deadline",
+      "now" : 10.02,
+      "start" : 10
+    },
+    "name" : "deadline shrinks",
+    "out" : {
+      "expired" : false,
+      "remaining" : 0.030000000000001137
+    }
+  },
+  {
+    "in" : {
+      "budget" : 0.050000000000000003,
+      "fn" : "deadline",
+      "now" : 10.050000000000001,
+      "start" : 10
+    },
+    "name" : "deadline at end",
+    "out" : {
+      "expired" : true,
+      "remaining" : null
+    }
+  },
+  {
+    "in" : {
+      "budget" : 0.050000000000000003,
+      "fn" : "deadline",
+      "now" : 10.0495,
+      "start" : 10
+    },
+    "name" : "deadline under 1 ms",
+    "out" : {
+      "expired" : true,
+      "remaining" : null
+    }
+  },
+  {
+    "in" : {
+      "budget" : 0.050000000000000003,
+      "fn" : "deadline",
+      "now" : 11,
+      "start" : 10
+    },
+    "name" : "deadline after",
+    "out" : {
+      "expired" : true,
+      "remaining" : null
+    }
+  },
+  {
+    "in" : {
+      "budget" : 0.050000000000000003,
+      "fn" : "deadline",
+      "now" : 10.06,
+      "start" : 10
+    },
+    "name" : "deadline expired",
+    "out" : {
+      "expired" : true,
+      "remaining" : null
+    }
+  },
+  {
+    "in" : {
+      "budget" : 0.050000000000000003,
+      "fn" : "deadline",
+      "now" : 10.01,
+      "start" : 10
+    },
+    "name" : "deadline not expired",
+    "out" : {
+      "expired" : false,
+      "remaining" : 0.040000000000000924
+    }
+  },
+  {
+    "in" : {
+      "budget" : 0.002,
+      "fn" : "deadline",
+      "now" : 0.001,
+      "start" : 0
+    },
+    "name" : "deadline exactly 1 ms",
+    "out" : {
+      "expired" : false,
+      "remaining" : 0.001
+    }
+  },
+  {
+    "in" : {
+      "budget" : 0.050000000000000003,
+      "fn" : "deadline",
+      "now" : 9,
+      "start" : 10
+    },
+    "name" : "deadline before start",
+    "out" : {
+      "expired" : false,
+      "remaining" : 1.0500000000000007
+    }
+  },
+  {
+    "in" : {
+      "fn" : "kind",
+      "query" : {
+        "at" : null,
+        "kind" : "keyboard"
+      }
+    },
+    "name" : "query kind 0",
+    "out" : "keyboard"
+  },
+  {
+    "in" : {
+      "fn" : "kind",
+      "query" : {
+        "at" : {
+          "x" : 0,
+          "y" : 0
+        },
+        "kind" : "pointer"
+      }
+    },
+    "name" : "query kind 1",
+    "out" : "pointer"
+  },
+  {
+    "in" : {
+      "fn" : "kind",
+      "query" : {
+        "at" : {
+          "x" : 0,
+          "y" : 0
+        },
+        "kind" : "follow"
+      }
+    },
+    "name" : "query kind 2",
+    "out" : "follow"
+  },
+  {
+    "in" : {
+      "fn" : "kind",
+      "query" : {
+        "at" : {
+          "x" : 3,
+          "y" : 4
+        },
+        "kind" : "pointer"
+      }
+    },
+    "name" : "query kind 3",
+    "out" : "pointer"
+  }
+]

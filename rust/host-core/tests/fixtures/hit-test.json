@@ -1,0 +1,1179 @@
+[
+  {
+    "in" : {
+      "displays" : [
+
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : 100,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 20,
+          "name" : "Dock",
+          "pid" : 50
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "dock overlay looked through",
+    "out" : {
+      "calls" : 1,
+      "name" : "TextEdit",
+      "pid" : 100
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : 50,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 20,
+          "name" : "Dock",
+          "pid" : 50
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "dock bar covers",
+    "out" : {
+      "calls" : 1,
+      "name" : "Dock",
+      "pid" : 50
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : null,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 20,
+          "name" : "Dock",
+          "pid" : 50
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "failed hit looks through dock",
+    "out" : {
+      "calls" : 1,
+      "name" : "TextEdit",
+      "pid" : 100
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : 100,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 20,
+          "name" : "Dock",
+          "pid" : 50
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "Notes",
+          "pid" : 70
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "other app covers",
+    "out" : {
+      "calls" : 1,
+      "name" : "Notes",
+      "pid" : 70
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : null,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 0,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "Clear",
+          "pid" : 70
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 2000,
+          "name" : "Cursor",
+          "pid" : 70
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 100,
+            "width" : 100,
+            "x" : 900,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "Elsewhere",
+          "pid" : 70
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "invisible, cursor and missed skipped",
+    "out" : {
+      "calls" : 0,
+      "name" : "TextEdit",
+      "pid" : 100
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : null,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+
+      ]
+    },
+    "name" : "nothing",
+    "out" : {
+      "calls" : 0,
+      "name" : "nothing",
+      "pid" : 0
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : null,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 999,
+          "name" : "High",
+          "pid" : 70
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "layer 999 counts",
+    "out" : {
+      "calls" : 0,
+      "name" : "High",
+      "pid" : 70
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+
+      ],
+      "dock_pid" : null,
+      "fn" : "top_window_owner",
+      "hit" : 100,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 20,
+          "name" : "Dock",
+          "pid" : 50
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "no dock pid",
+    "out" : {
+      "calls" : 0,
+      "name" : "Dock",
+      "pid" : 50
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : null,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 300,
+            "width" : 400,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "Edge",
+          "pid" : 70
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "edge is outside",
+    "out" : {
+      "calls" : 0,
+      "name" : "TextEdit",
+      "pid" : 100
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : -1920,
+          "y" : 0
+        },
+        {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : null,
+      "point" : {
+        "x" : -10,
+        "y" : 10
+      },
+      "windows" : [
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : -1920,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "Left",
+          "pid" : 70
+        }
+      ]
+    },
+    "name" : "negative origin window",
+    "out" : {
+      "calls" : 1,
+      "name" : "Left",
+      "pid" : 70
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : 100,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 25,
+          "name" : "Prompt",
+          "pid" : 70
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "overlay looked through where the app is hit",
+    "out" : {
+      "calls" : 1,
+      "name" : "TextEdit",
+      "pid" : 100
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : 70,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 25,
+          "name" : "Prompt",
+          "pid" : 70
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "overlay covers where it is hit",
+    "out" : {
+      "calls" : 1,
+      "name" : "Prompt",
+      "pid" : 70
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : null,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 25,
+          "name" : "Prompt",
+          "pid" : 70
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "overlay covers when hit fails",
+    "out" : {
+      "calls" : 1,
+      "name" : "Prompt",
+      "pid" : 70
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : 100,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 1000,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 25
+          },
+          "layer" : 0,
+          "name" : "Prompt",
+          "pid" : 70
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "nearly full screen is overlay",
+    "out" : {
+      "calls" : 1,
+      "name" : "TextEdit",
+      "pid" : 100
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : 100,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 917,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "Prompt",
+          "pid" : 70
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "just under coverage is not overlay",
+    "out" : {
+      "calls" : 0,
+      "name" : "Prompt",
+      "pid" : 70
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : 100,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 0.40000000000000002,
+          "frame" : {
+            "height" : 200,
+            "width" : 300,
+            "x" : 300,
+            "y" : 200
+          },
+          "layer" : 8,
+          "name" : "HUD",
+          "pid" : 70
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "translucent hud",
+    "out" : {
+      "calls" : 1,
+      "name" : "TextEdit",
+      "pid" : 100
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : null,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 200,
+            "width" : 300,
+            "x" : 300,
+            "y" : 200
+          },
+          "layer" : 0,
+          "name" : "Notes",
+          "pid" : 70
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "small opaque covers without asking",
+    "out" : {
+      "calls" : 0,
+      "name" : "Notes",
+      "pid" : 70
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : 100,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 20,
+          "name" : "Dock",
+          "pid" : 50
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 25,
+          "name" : "Prompt",
+          "pid" : 70
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "hit test once",
+    "out" : {
+      "calls" : 1,
+      "name" : "TextEdit",
+      "pid" : 100
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : 71,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 25,
+          "name" : "Prompt",
+          "pid" : 70
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "Notes",
+          "pid" : 71
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "third process overlay",
+    "out" : {
+      "calls" : 1,
+      "name" : "Notes",
+      "pid" : 71
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 1920,
+          "y" : 0
+        }
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : 100,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 1080,
+            "width" : 3840,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "Wide",
+          "pid" : 70
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "display holding the point wide",
+    "out" : {
+      "calls" : 1,
+      "name" : "TextEdit",
+      "pid" : 100
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 1920,
+          "y" : 0
+        }
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : 100,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 1080,
+            "width" : 960,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "Half",
+          "pid" : 70
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "display holding the point half",
+    "out" : {
+      "calls" : 0,
+      "name" : "Half",
+      "pid" : 70
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 0,
+          "width" : 0,
+          "x" : 400,
+          "y" : 300
+        },
+        {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : 100,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "Big",
+          "pid" : 70
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "zero-size display",
+    "out" : {
+      "calls" : 1,
+      "name" : "TextEdit",
+      "pid" : 100
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 1,
+          "width" : 1,
+          "x" : 400,
+          "y" : 300
+        }
+      ],
+      "dock_pid" : 50,
+      "fn" : "top_window_owner",
+      "hit" : 100,
+      "point" : {
+        "x" : 400,
+        "y" : 300
+      },
+      "windows" : [
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "Big",
+          "pid" : 70
+        },
+        {
+          "alpha" : 1,
+          "frame" : {
+            "height" : 600,
+            "width" : 800,
+            "x" : 0,
+            "y" : 0
+          },
+          "layer" : 0,
+          "name" : "TextEdit",
+          "pid" : 100
+        }
+      ]
+    },
+    "name" : "1x1 display",
+    "out" : {
+      "calls" : 1,
+      "name" : "TextEdit",
+      "pid" : 100
+    }
+  }
+]

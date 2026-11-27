@@ -1,0 +1,2469 @@
+[
+  {
+    "in" : {
+      "change" : 10,
+      "fn" : "clips",
+      "steps" : [
+        {
+          "cc" : 11,
+          "front" : false,
+          "op" : "changed"
+        },
+        {
+          "cc" : 11,
+          "front" : true,
+          "op" : "changed"
+        },
+        {
+          "cc" : 12,
+          "front" : true,
+          "op" : "changed"
+        }
+      ]
+    },
+    "name" : "change while another app is frontmost is not recorded",
+    "out" : [
+      false,
+      false,
+      true
+    ]
+  },
+  {
+    "in" : {
+      "change" : 10,
+      "fn" : "clips",
+      "steps" : [
+        {
+          "cc" : 10,
+          "front" : false,
+          "op" : "changed"
+        },
+        {
+          "cc" : 11,
+          "front" : true,
+          "op" : "changed"
+        },
+        {
+          "cc" : 12,
+          "front" : true,
+          "op" : "changed"
+        }
+      ]
+    },
+    "name" : "change right after activation is not recorded",
+    "out" : [
+      false,
+      false,
+      true
+    ]
+  },
+  {
+    "in" : {
+      "change" : 0,
+      "fn" : "clips",
+      "steps" : [
+        {
+          "info" : {
+            "text" : "x",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "x",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "id" : 2,
+          "op" : "clip"
+        },
+        {
+          "info" : {
+            "text" : "y",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "x",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        }
+      ]
+    },
+    "name" : "consecutive duplicate text is not added twice",
+    "out" : [
+      1,
+      1,
+      null,
+      2,
+      3
+    ]
+  },
+  {
+    "in" : {
+      "change" : 1,
+      "fn" : "clips",
+      "steps" : [
+        {
+          "cc" : 2,
+          "op" : "own"
+        },
+        {
+          "cc" : 2,
+          "front" : true,
+          "op" : "changed"
+        },
+        {
+          "cc" : 3,
+          "front" : true,
+          "op" : "changed"
+        }
+      ]
+    },
+    "name" : "own writes are not recorded",
+    "out" : [
+      null,
+      false,
+      true
+    ]
+  },
+  {
+    "in" : {
+      "change" : 0,
+      "fn" : "clips",
+      "steps" : [
+        {
+          "info" : {
+            "text" : "0",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "1",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "2",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "3",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "4",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "5",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "6",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "7",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "8",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "9",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "10",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "11",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "12",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "13",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "14",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "15",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "16",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "17",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "18",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "19",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "20",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "21",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "22",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "23",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "24",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "25",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "26",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "27",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "28",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "29",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "30",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "31",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "32",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "33",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "34",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "35",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "36",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "37",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "38",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "39",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "40",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "41",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "42",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "43",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "44",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "45",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "46",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "47",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "48",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "49",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "50",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "id" : 1,
+          "op" : "clip"
+        },
+        {
+          "id" : 2,
+          "op" : "clip"
+        },
+        {
+          "id" : 51,
+          "op" : "clip"
+        },
+        {
+          "id" : 52,
+          "op" : "clip"
+        }
+      ]
+    },
+    "name" : "keeps fifty numbered from one",
+    "out" : [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      42,
+      43,
+      44,
+      45,
+      46,
+      47,
+      48,
+      49,
+      50,
+      51,
+      null,
+      {
+        "text" : "1",
+        "truncated" : false,
+        "type" : "text"
+      },
+      {
+        "text" : "50",
+        "truncated" : false,
+        "type" : "text"
+      },
+      null
+    ]
+  },
+  {
+    "in" : {
+      "change" : 0,
+      "fn" : "clips",
+      "steps" : [
+        {
+          "info" : {
+            "bytes" : 24,
+            "height" : 3,
+            "type" : "image",
+            "width" : 2
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "bytes" : 24,
+            "height" : 3,
+            "type" : "image",
+            "width" : 2
+          },
+          "op" : "add"
+        },
+        {
+          "id" : 1,
+          "op" : "clip"
+        },
+        {
+          "id" : 2,
+          "op" : "clip"
+        }
+      ]
+    },
+    "name" : "same image twice is two entries",
+    "out" : [
+      1,
+      2,
+      {
+        "bytes" : 24,
+        "height" : 3,
+        "type" : "image",
+        "width" : 2
+      },
+      {
+        "bytes" : 24,
+        "height" : 3,
+        "type" : "image",
+        "width" : 2
+      }
+    ]
+  },
+  {
+    "in" : {
+      "change" : 0,
+      "fn" : "clips",
+      "steps" : [
+        {
+          "info" : {
+            "text" : "x",
+            "truncated" : false,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "x",
+            "truncated" : true,
+            "type" : "text"
+          },
+          "op" : "add"
+        },
+        {
+          "id" : 2,
+          "op" : "clip"
+        }
+      ]
+    },
+    "name" : "truncated flag makes text differ",
+    "out" : [
+      1,
+      2,
+      {
+        "text" : "x",
+        "truncated" : true,
+        "type" : "text"
+      }
+    ]
+  },
+  {
+    "in" : {
+      "change" : 0,
+      "fn" : "clips",
+      "steps" : [
+        {
+          "info" : {
+            "files" : [
+              {
+                "bytes" : 3,
+                "name" : "a.txt"
+              },
+              {
+                "bytes" : 9,
+                "name" : "报告.pdf"
+              }
+            ],
+            "type" : "files"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "bytes" : 7,
+            "type" : "data",
+            "uti" : "com.adobe.pdf"
+          },
+          "op" : "add"
+        },
+        {
+          "info" : {
+            "text" : "文件太多（不支持）",
+            "type" : "unsupported"
+          },
+          "op" : "add"
+        },
+        {
+          "id" : 1,
+          "op" : "clip"
+        },
+        {
+          "id" : 2,
+          "op" : "clip"
+        },
+        {
+          "id" : 3,
+          "op" : "clip"
+        }
+      ]
+    },
+    "name" : "other kinds",
+    "out" : [
+      1,
+      2,
+      3,
+      {
+        "files" : [
+          {
+            "bytes" : 3,
+            "name" : "a.txt"
+          },
+          {
+            "bytes" : 9,
+            "name" : "报告.pdf"
+          }
+        ],
+        "type" : "files"
+      },
+      {
+        "bytes" : 7,
+        "type" : "data",
+        "uti" : "com.adobe.pdf"
+      },
+      {
+        "text" : "文件太多（不支持）",
+        "type" : "unsupported"
+      }
+    ]
+  },
+  {
+    "in" : {
+      "change" : 4,
+      "fn" : "clips",
+      "steps" : [
+        {
+          "cc" : 4,
+          "front" : true,
+          "op" : "changed"
+        },
+        {
+          "cc" : 5,
+          "front" : true,
+          "op" : "changed"
+        },
+        {
+          "cc" : 5,
+          "front" : true,
+          "op" : "changed"
+        },
+        {
+          "cc" : 6,
+          "front" : false,
+          "op" : "changed"
+        },
+        {
+          "cc" : 7,
+          "front" : true,
+          "op" : "changed"
+        }
+      ]
+    },
+    "name" : "same change count twice is not new",
+    "out" : [
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "slots",
+      "limit" : 4,
+      "steps" : [
+        {
+          "op" : "take"
+        },
+        {
+          "op" : "take"
+        },
+        {
+          "op" : "take"
+        },
+        {
+          "op" : "take"
+        },
+        {
+          "op" : "take"
+        },
+        {
+          "op" : "release"
+        },
+        {
+          "op" : "take"
+        }
+      ]
+    },
+    "name" : "limit four",
+    "out" : [
+      true,
+      true,
+      true,
+      true,
+      false,
+      null,
+      true
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "slots",
+      "limit" : 1,
+      "steps" : [
+        {
+          "op" : "release"
+        },
+        {
+          "op" : "release"
+        },
+        {
+          "op" : "take"
+        },
+        {
+          "op" : "take"
+        }
+      ]
+    },
+    "name" : "release below zero is floored",
+    "out" : [
+      null,
+      null,
+      true,
+      false
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "slots",
+      "limit" : 0,
+      "steps" : [
+        {
+          "op" : "take"
+        },
+        {
+          "op" : "release"
+        },
+        {
+          "op" : "take"
+        }
+      ]
+    },
+    "name" : "limit zero",
+    "out" : [
+      false,
+      null,
+      false
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "name" : "src.bin",
+          "op" : "source",
+          "seed" : 1,
+          "size" : 614400
+        },
+        {
+          "names" : [
+            "src.bin"
+          ],
+          "op" : "file_clip",
+          "sources" : [
+            "src.bin"
+          ]
+        },
+        {
+          "clip" : 1,
+          "file" : 0,
+          "offset" : 0,
+          "op" : "fetch"
+        },
+        {
+          "clip" : 1,
+          "file" : 0,
+          "offset" : 262144,
+          "op" : "fetch"
+        },
+        {
+          "clip" : 1,
+          "file" : 0,
+          "offset" : 614400,
+          "op" : "fetch"
+        }
+      ]
+    },
+    "name" : "fetch resumes from offset",
+    "out" : [
+      null,
+      1,
+      {
+        "chunks" : [
+          262144,
+          262144,
+          90112
+        ],
+        "position" : 0,
+        "total" : 614400,
+        "transfer" : {
+          "bytes" : 614400,
+          "dir" : "a_to_b",
+          "kind" : 2,
+          "name" : "src.bin"
+        }
+      },
+      {
+        "chunks" : [
+          262144,
+          90112
+        ],
+        "position" : 262144,
+        "total" : 614400,
+        "transfer" : {
+          "bytes" : 614400,
+          "dir" : "a_to_b",
+          "kind" : 2,
+          "name" : "src.bin"
+        }
+      },
+      {
+        "chunks" : [
+
+        ],
+        "position" : 614400,
+        "total" : 614400,
+        "transfer" : {
+          "bytes" : 614400,
+          "dir" : "a_to_b",
+          "kind" : 2,
+          "name" : "src.bin"
+        }
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "info" : {
+            "bytes" : 1000,
+            "height" : 1,
+            "type" : "image",
+            "width" : 1
+          },
+          "op" : "bytes_clip",
+          "seed" : 2,
+          "size" : 1000
+        },
+        {
+          "clip" : 1,
+          "file" : 0,
+          "offset" : 0,
+          "op" : "fetch"
+        },
+        {
+          "clip" : 1,
+          "file" : 1,
+          "offset" : 0,
+          "op" : "fetch"
+        },
+        {
+          "clip" : 1,
+          "file" : 0,
+          "offset" : 1000,
+          "op" : "fetch"
+        },
+        {
+          "clip" : 1,
+          "file" : 0,
+          "offset" : 1001,
+          "op" : "fetch"
+        }
+      ]
+    },
+    "name" : "fetch of image from memory",
+    "out" : [
+      1,
+      {
+        "chunks" : [
+          1000
+        ],
+        "position" : 0,
+        "total" : 1000,
+        "transfer" : {
+          "bytes" : 1000,
+          "dir" : "a_to_b",
+          "kind" : 1,
+          "name" : null
+        }
+      },
+      {
+        "error" : "unknown clip"
+      },
+      {
+        "chunks" : [
+
+        ],
+        "position" : 1000,
+        "total" : 1000,
+        "transfer" : {
+          "bytes" : 1000,
+          "dir" : "a_to_b",
+          "kind" : 1,
+          "name" : null
+        }
+      },
+      {
+        "error" : "unknown clip"
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "info" : {
+            "bytes" : 300000,
+            "type" : "data",
+            "uti" : "com.adobe.pdf"
+          },
+          "op" : "bytes_clip",
+          "seed" : 3,
+          "size" : 300000
+        },
+        {
+          "clip" : 1,
+          "file" : 0,
+          "offset" : 10,
+          "op" : "fetch"
+        }
+      ]
+    },
+    "name" : "fetch of data from memory",
+    "out" : [
+      1,
+      {
+        "chunks" : [
+          262144,
+          37846
+        ],
+        "position" : 10,
+        "total" : 300000,
+        "transfer" : {
+          "bytes" : 300000,
+          "dir" : "a_to_b",
+          "kind" : 3,
+          "name" : null
+        }
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "op" : "text_clip",
+          "text" : "x"
+        },
+        {
+          "clip" : 99,
+          "file" : 0,
+          "offset" : 0,
+          "op" : "fetch"
+        },
+        {
+          "clip" : 1,
+          "file" : 0,
+          "offset" : 0,
+          "op" : "fetch"
+        }
+      ]
+    },
+    "name" : "fetch of unknown clip fails",
+    "out" : [
+      1,
+      {
+        "error" : "unknown clip"
+      },
+      {
+        "error" : "unknown clip"
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "name" : "src.bin",
+          "op" : "source",
+          "seed" : 4,
+          "size" : 10
+        },
+        {
+          "names" : [
+            "src.bin"
+          ],
+          "op" : "file_clip",
+          "sources" : [
+            "src.bin"
+          ]
+        },
+        {
+          "clip" : 1,
+          "file" : 0,
+          "offset" : 11,
+          "op" : "fetch"
+        },
+        {
+          "clip" : 1,
+          "file" : 1,
+          "offset" : 0,
+          "op" : "fetch"
+        },
+        {
+          "clip" : 1,
+          "file" : 0,
+          "offset" : 10,
+          "op" : "fetch"
+        }
+      ]
+    },
+    "name" : "fetch offset past total fails",
+    "out" : [
+      null,
+      1,
+      {
+        "error" : "unknown clip"
+      },
+      {
+        "error" : "unknown clip"
+      },
+      {
+        "chunks" : [
+
+        ],
+        "position" : 10,
+        "total" : 10,
+        "transfer" : {
+          "bytes" : 10,
+          "dir" : "a_to_b",
+          "kind" : 2,
+          "name" : "src.bin"
+        }
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "name" : "src.bin",
+          "op" : "source",
+          "seed" : 5,
+          "size" : 100
+        },
+        {
+          "names" : [
+            "src.bin"
+          ],
+          "op" : "file_clip",
+          "sources" : [
+            "src.bin"
+          ]
+        },
+        {
+          "hex" : "01",
+          "name" : "src.bin",
+          "op" : "append"
+        },
+        {
+          "clip" : 1,
+          "file" : 0,
+          "offset" : 0,
+          "op" : "fetch"
+        }
+      ]
+    },
+    "name" : "fetch of changed file fails",
+    "out" : [
+      null,
+      1,
+      null,
+      {
+        "error" : "file changed"
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "name" : "gone.bin",
+          "op" : "source",
+          "seed" : 6,
+          "size" : 5
+        },
+        {
+          "names" : [
+            "gone.bin"
+          ],
+          "op" : "file_clip",
+          "sources" : [
+            "gone.bin"
+          ]
+        },
+        {
+          "name" : "gone.bin",
+          "op" : "remove"
+        },
+        {
+          "clip" : 1,
+          "file" : 0,
+          "offset" : 0,
+          "op" : "fetch"
+        }
+      ]
+    },
+    "name" : "fetch of a removed file fails",
+    "out" : [
+      null,
+      1,
+      null,
+      {
+        "error" : "file changed"
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "name" : "one.bin",
+          "op" : "source",
+          "seed" : 7,
+          "size" : 3
+        },
+        {
+          "name" : "two.bin",
+          "op" : "source",
+          "seed" : 8,
+          "size" : 4
+        },
+        {
+          "names" : [
+            "shown.bin"
+          ],
+          "op" : "file_clip",
+          "sources" : [
+            "one.bin",
+            "two.bin"
+          ]
+        },
+        {
+          "clip" : 1,
+          "file" : 0,
+          "offset" : 0,
+          "op" : "fetch"
+        },
+        {
+          "clip" : 1,
+          "file" : 1,
+          "offset" : 0,
+          "op" : "fetch"
+        }
+      ]
+    },
+    "name" : "fetch uses the announced name, else the file's",
+    "out" : [
+      null,
+      null,
+      1,
+      {
+        "chunks" : [
+          3
+        ],
+        "position" : 0,
+        "total" : 3,
+        "transfer" : {
+          "bytes" : 3,
+          "dir" : "a_to_b",
+          "kind" : 2,
+          "name" : "shown.bin"
+        }
+      },
+      {
+        "chunks" : [
+          4
+        ],
+        "position" : 0,
+        "total" : 4,
+        "transfer" : {
+          "bytes" : 4,
+          "dir" : "a_to_b",
+          "kind" : 2,
+          "name" : "two.bin"
+        }
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "op" : "data",
+          "seed" : 9,
+          "size" : 307200
+        },
+        {
+          "item" : 1,
+          "kind" : 2,
+          "name" : "app.log",
+          "op" : "put",
+          "total" : 307200,
+          "uti" : ""
+        },
+        {
+          "from" : 0,
+          "item" : 1,
+          "op" : "write",
+          "to" : 102400
+        },
+        {
+          "op" : "listing"
+        },
+        {
+          "item" : 1,
+          "kind" : 2,
+          "name" : "app.log",
+          "op" : "put",
+          "total" : 307200,
+          "uti" : ""
+        },
+        {
+          "from" : 102400,
+          "item" : 1,
+          "op" : "write",
+          "to" : 307200
+        },
+        {
+          "item" : 1,
+          "op" : "received"
+        },
+        {
+          "op" : "listing"
+        }
+      ]
+    },
+    "name" : "put resumes with have",
+    "out" : [
+      null,
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 307200,
+          "dir" : "b_to_a",
+          "kind" : 2,
+          "name" : "app.log"
+        }
+      },
+      {
+        "done" : false,
+        "have" : 102400
+      },
+      [
+        "app.log.rapp-part"
+      ],
+      {
+        "have" : 102400,
+        "transfer" : {
+          "bytes" : 307200,
+          "dir" : "b_to_a",
+          "kind" : 2,
+          "name" : "app.log"
+        }
+      },
+      {
+        "done" : true,
+        "have" : 307200
+      },
+      {
+        "file" : "app.log"
+      },
+      [
+        "app.log"
+      ]
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "item" : 1,
+          "kind" : 2,
+          "name" : "a.txt",
+          "op" : "put",
+          "total" : 3,
+          "uti" : ""
+        },
+        {
+          "hex" : "010203",
+          "item" : 1,
+          "op" : "write_hex"
+        },
+        {
+          "item" : 1,
+          "kind" : 2,
+          "name" : "a.txt",
+          "op" : "put",
+          "total" : 3,
+          "uti" : ""
+        },
+        {
+          "item" : 1,
+          "op" : "received"
+        }
+      ]
+    },
+    "name" : "put of complete item reports have equals total",
+    "out" : [
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 3,
+          "dir" : "b_to_a",
+          "kind" : 2,
+          "name" : "a.txt"
+        }
+      },
+      {
+        "done" : true,
+        "have" : 3
+      },
+      {
+        "have" : 3,
+        "transfer" : {
+          "bytes" : 3,
+          "dir" : "b_to_a",
+          "kind" : 2,
+          "name" : "a.txt"
+        }
+      },
+      {
+        "file" : "a.txt"
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "item" : 1,
+          "kind" : 2,
+          "name" : "a.txt",
+          "op" : "put",
+          "total" : 10,
+          "uti" : ""
+        },
+        {
+          "hex" : "010203",
+          "item" : 1,
+          "op" : "write_hex"
+        },
+        {
+          "item" : 1,
+          "kind" : 2,
+          "name" : "a.txt",
+          "op" : "put",
+          "total" : 20,
+          "uti" : ""
+        },
+        {
+          "op" : "listing"
+        }
+      ]
+    },
+    "name" : "put with different total starts over",
+    "out" : [
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 10,
+          "dir" : "b_to_a",
+          "kind" : 2,
+          "name" : "a.txt"
+        }
+      },
+      {
+        "done" : false,
+        "have" : 3
+      },
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 20,
+          "dir" : "b_to_a",
+          "kind" : 2,
+          "name" : "a.txt"
+        }
+      },
+      [
+        "a.txt.rapp-part"
+      ]
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "item" : 1,
+          "kind" : 2,
+          "name" : "a.txt",
+          "op" : "put",
+          "total" : 10,
+          "uti" : ""
+        },
+        {
+          "hex" : "010203040506",
+          "item" : 1,
+          "op" : "write_hex"
+        },
+        {
+          "item" : 1,
+          "kind" : 2,
+          "name" : "a.txt",
+          "op" : "put",
+          "total" : 4,
+          "uti" : ""
+        },
+        {
+          "op" : "listing"
+        },
+        {
+          "hex" : "09090909",
+          "item" : 1,
+          "op" : "write_hex"
+        },
+        {
+          "item" : 1,
+          "op" : "received"
+        },
+        {
+          "op" : "listing"
+        }
+      ]
+    },
+    "name" : "put whose total is smaller than the part starts from 0",
+    "out" : [
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 10,
+          "dir" : "b_to_a",
+          "kind" : 2,
+          "name" : "a.txt"
+        }
+      },
+      {
+        "done" : false,
+        "have" : 6
+      },
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 4,
+          "dir" : "b_to_a",
+          "kind" : 2,
+          "name" : "a.txt"
+        }
+      },
+      [
+        "a.txt.rapp-part"
+      ],
+      {
+        "done" : true,
+        "have" : 4
+      },
+      {
+        "file" : "a.txt"
+      },
+      [
+        "a.txt"
+      ]
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "name" : "app.log",
+          "op" : "preexisting",
+          "text" : "old"
+        },
+        {
+          "item" : 1,
+          "kind" : 2,
+          "name" : "../app.log",
+          "op" : "put",
+          "total" : 2,
+          "uti" : ""
+        },
+        {
+          "hex" : "0102",
+          "item" : 1,
+          "op" : "write_hex"
+        },
+        {
+          "item" : 1,
+          "op" : "received"
+        },
+        {
+          "op" : "listing"
+        }
+      ]
+    },
+    "name" : "put names are safe and unique",
+    "out" : [
+      null,
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 2,
+          "dir" : "b_to_a",
+          "kind" : 2,
+          "name" : "app.log"
+        }
+      },
+      {
+        "done" : true,
+        "have" : 2
+      },
+      {
+        "file" : "app (2).log"
+      },
+      [
+        "app (2).log",
+        "app.log"
+      ]
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 10,
+      "steps" : [
+        {
+          "item" : 1,
+          "kind" : 0,
+          "name" : "",
+          "op" : "put",
+          "total" : 11,
+          "uti" : ""
+        },
+        {
+          "item" : 2,
+          "kind" : 0,
+          "name" : "",
+          "op" : "put",
+          "total" : 6,
+          "uti" : ""
+        },
+        {
+          "hex" : "e4bda0e5a5bd",
+          "item" : 2,
+          "op" : "write_hex"
+        },
+        {
+          "item" : 2,
+          "op" : "received"
+        }
+      ]
+    },
+    "name" : "put text in memory and limit",
+    "out" : [
+      {
+        "error" : "too large"
+      },
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 6,
+          "dir" : "b_to_a",
+          "kind" : 0,
+          "name" : null
+        }
+      },
+      {
+        "done" : true,
+        "have" : 6
+      },
+      {
+        "text" : "你好"
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 10,
+      "steps" : [
+        {
+          "item" : 1,
+          "kind" : 0,
+          "name" : "",
+          "op" : "put",
+          "total" : 4,
+          "uti" : ""
+        },
+        {
+          "hex" : "61ffe4bd",
+          "item" : 1,
+          "op" : "write_hex"
+        },
+        {
+          "item" : 1,
+          "op" : "received"
+        }
+      ]
+    },
+    "name" : "put text that is not UTF-8",
+    "out" : [
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 4,
+          "dir" : "b_to_a",
+          "kind" : 0,
+          "name" : null
+        }
+      },
+      {
+        "done" : true,
+        "have" : 4
+      },
+      {
+        "text" : "a��"
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "item" : 1,
+          "kind" : 1,
+          "name" : "",
+          "op" : "put",
+          "total" : 2,
+          "uti" : ""
+        },
+        {
+          "hex" : "010203",
+          "item" : 1,
+          "op" : "write_hex"
+        },
+        {
+          "hex" : "0102",
+          "item" : 1,
+          "op" : "write_hex"
+        },
+        {
+          "item" : 1,
+          "op" : "received"
+        }
+      ]
+    },
+    "name" : "write beyond total fails",
+    "out" : [
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 2,
+          "dir" : "b_to_a",
+          "kind" : 1,
+          "name" : null
+        }
+      },
+      {
+        "error" : "too large"
+      },
+      {
+        "done" : true,
+        "have" : 2
+      },
+      {
+        "image" : "0102"
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "item" : 1,
+          "kind" : 3,
+          "name" : "",
+          "op" : "put",
+          "total" : 2,
+          "uti" : "com.x"
+        },
+        {
+          "item" : 1,
+          "op" : "received"
+        },
+        {
+          "hex" : "01",
+          "item" : 1,
+          "op" : "write_hex"
+        },
+        {
+          "item" : 1,
+          "op" : "received"
+        },
+        {
+          "hex" : "02",
+          "item" : 1,
+          "op" : "write_hex"
+        },
+        {
+          "item" : 1,
+          "op" : "received"
+        }
+      ]
+    },
+    "name" : "received is nil until complete",
+    "out" : [
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 2,
+          "dir" : "b_to_a",
+          "kind" : 3,
+          "name" : null
+        }
+      },
+      null,
+      {
+        "done" : false,
+        "have" : 1
+      },
+      null,
+      {
+        "done" : true,
+        "have" : 2
+      },
+      {
+        "data" : "0102",
+        "uti" : "com.x"
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "item" : 1,
+          "kind" : 2,
+          "name" : "app.log",
+          "op" : "put",
+          "total" : 4,
+          "uti" : ""
+        },
+        {
+          "hex" : "0101",
+          "item" : 1,
+          "op" : "write_hex"
+        },
+        {
+          "item" : 2,
+          "kind" : 2,
+          "name" : "app.log",
+          "op" : "put",
+          "total" : 2,
+          "uti" : ""
+        },
+        {
+          "hex" : "0202",
+          "item" : 2,
+          "op" : "write_hex"
+        },
+        {
+          "hex" : "0101",
+          "item" : 1,
+          "op" : "write_hex"
+        },
+        {
+          "item" : 2,
+          "op" : "received"
+        },
+        {
+          "item" : 1,
+          "op" : "received"
+        },
+        {
+          "op" : "listing"
+        }
+      ]
+    },
+    "name" : "second item with same name does not share interrupted part",
+    "out" : [
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 4,
+          "dir" : "b_to_a",
+          "kind" : 2,
+          "name" : "app.log"
+        }
+      },
+      {
+        "done" : false,
+        "have" : 2
+      },
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 2,
+          "dir" : "b_to_a",
+          "kind" : 2,
+          "name" : "app.log"
+        }
+      },
+      {
+        "done" : true,
+        "have" : 2
+      },
+      {
+        "done" : true,
+        "have" : 4
+      },
+      {
+        "file" : "app (2).log"
+      },
+      {
+        "file" : "app.log"
+      },
+      [
+        "app (2).log",
+        "app.log"
+      ]
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "item" : 1,
+          "kind" : 4,
+          "name" : "x",
+          "op" : "put",
+          "total" : 1,
+          "uti" : ""
+        },
+        {
+          "item" : 1,
+          "op" : "received"
+        }
+      ]
+    },
+    "name" : "unsupported put is refused",
+    "out" : [
+      {
+        "error" : "not supported"
+      },
+      null
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "item" : 1,
+          "kind" : 2,
+          "name" : "empty.txt",
+          "op" : "put",
+          "total" : 0,
+          "uti" : ""
+        },
+        {
+          "item" : 1,
+          "op" : "received"
+        },
+        {
+          "op" : "listing"
+        },
+        {
+          "hex" : "",
+          "item" : 1,
+          "op" : "write_hex"
+        }
+      ]
+    },
+    "name" : "zero-byte file is complete at once",
+    "out" : [
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 0,
+          "dir" : "b_to_a",
+          "kind" : 2,
+          "name" : "empty.txt"
+        }
+      },
+      {
+        "file" : "empty.txt"
+      },
+      [
+        "empty.txt"
+      ],
+      {
+        "done" : true,
+        "have" : 0
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "item" : 1,
+          "kind" : 0,
+          "name" : "",
+          "op" : "put",
+          "total" : 0,
+          "uti" : ""
+        },
+        {
+          "item" : 1,
+          "op" : "received"
+        },
+        {
+          "hex" : "",
+          "item" : 1,
+          "op" : "write_hex"
+        },
+        {
+          "item" : 1,
+          "op" : "received"
+        }
+      ]
+    },
+    "name" : "zero-byte text",
+    "out" : [
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 0,
+          "dir" : "b_to_a",
+          "kind" : 0,
+          "name" : null
+        }
+      },
+      {
+        "text" : ""
+      },
+      {
+        "done" : true,
+        "have" : 0
+      },
+      {
+        "text" : ""
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "item" : 1,
+          "kind" : 2,
+          "name" : "a.bin",
+          "op" : "put",
+          "total" : 5,
+          "uti" : ""
+        },
+        {
+          "hex" : "01",
+          "item" : 1,
+          "op" : "write_hex"
+        },
+        {
+          "item" : 1,
+          "kind" : 3,
+          "name" : "a.bin",
+          "op" : "put",
+          "total" : 5,
+          "uti" : "com.x"
+        },
+        {
+          "op" : "listing"
+        }
+      ]
+    },
+    "name" : "a new kind for the same item discards the part",
+    "out" : [
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 5,
+          "dir" : "b_to_a",
+          "kind" : 2,
+          "name" : "a.bin"
+        }
+      },
+      {
+        "done" : false,
+        "have" : 1
+      },
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 5,
+          "dir" : "b_to_a",
+          "kind" : 3,
+          "name" : null
+        }
+      },
+      [
+
+      ]
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "transfers",
+      "limit" : 268435456,
+      "steps" : [
+        {
+          "item" : 1,
+          "kind" : 2,
+          "name" : ".hidden",
+          "op" : "put",
+          "total" : 1,
+          "uti" : ""
+        },
+        {
+          "hex" : "01",
+          "item" : 1,
+          "op" : "write_hex"
+        },
+        {
+          "item" : 2,
+          "kind" : 2,
+          "name" : "a:b.txt",
+          "op" : "put",
+          "total" : 1,
+          "uti" : ""
+        },
+        {
+          "hex" : "02",
+          "item" : 2,
+          "op" : "write_hex"
+        },
+        {
+          "item" : 3,
+          "kind" : 2,
+          "name" : "",
+          "op" : "put",
+          "total" : 1,
+          "uti" : ""
+        },
+        {
+          "hex" : "03",
+          "item" : 3,
+          "op" : "write_hex"
+        },
+        {
+          "item" : 4,
+          "kind" : 2,
+          "name" : "dir/",
+          "op" : "put",
+          "total" : 1,
+          "uti" : ""
+        },
+        {
+          "hex" : "04",
+          "item" : 4,
+          "op" : "write_hex"
+        },
+        {
+          "item" : 5,
+          "kind" : 2,
+          "name" : "README",
+          "op" : "put",
+          "total" : 1,
+          "uti" : ""
+        },
+        {
+          "hex" : "05",
+          "item" : 5,
+          "op" : "write_hex"
+        },
+        {
+          "item" : 6,
+          "kind" : 2,
+          "name" : "README",
+          "op" : "put",
+          "total" : 1,
+          "uti" : ""
+        },
+        {
+          "hex" : "06",
+          "item" : 6,
+          "op" : "write_hex"
+        },
+        {
+          "item" : 1,
+          "op" : "received"
+        },
+        {
+          "item" : 2,
+          "op" : "received"
+        },
+        {
+          "item" : 3,
+          "op" : "received"
+        },
+        {
+          "item" : 4,
+          "op" : "received"
+        },
+        {
+          "item" : 5,
+          "op" : "received"
+        },
+        {
+          "item" : 6,
+          "op" : "received"
+        },
+        {
+          "op" : "listing"
+        }
+      ]
+    },
+    "name" : "file name rules on the way in",
+    "out" : [
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 1,
+          "dir" : "b_to_a",
+          "kind" : 2,
+          "name" : "hidden"
+        }
+      },
+      {
+        "done" : true,
+        "have" : 1
+      },
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 1,
+          "dir" : "b_to_a",
+          "kind" : 2,
+          "name" : "ab.txt"
+        }
+      },
+      {
+        "done" : true,
+        "have" : 1
+      },
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 1,
+          "dir" : "b_to_a",
+          "kind" : 2,
+          "name" : "file"
+        }
+      },
+      {
+        "done" : true,
+        "have" : 1
+      },
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 1,
+          "dir" : "b_to_a",
+          "kind" : 2,
+          "name" : "dir"
+        }
+      },
+      {
+        "done" : true,
+        "have" : 1
+      },
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 1,
+          "dir" : "b_to_a",
+          "kind" : 2,
+          "name" : "README"
+        }
+      },
+      {
+        "done" : true,
+        "have" : 1
+      },
+      {
+        "have" : 0,
+        "transfer" : {
+          "bytes" : 1,
+          "dir" : "b_to_a",
+          "kind" : 2,
+          "name" : "README"
+        }
+      },
+      {
+        "done" : true,
+        "have" : 1
+      },
+      {
+        "file" : "hidden"
+      },
+      {
+        "file" : "ab.txt"
+      },
+      {
+        "file" : "file"
+      },
+      {
+        "file" : "dir"
+      },
+      {
+        "file" : "README"
+      },
+      {
+        "file" : "README (2)"
+      },
+      [
+        "README",
+        "README (2)",
+        "ab.txt",
+        "dir",
+        "file",
+        "hidden"
+      ]
+    ]
+  }
+]

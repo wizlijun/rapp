@@ -1002,7 +1002,9 @@ final class PacingFixtures: XCTestCase {
             b.offer(b.random(32, 32, mode: .gray4, seed: UInt32(2 + k)))
             if k % 30 == 29 { b.tick(); b.stats() }
         }
-        XCTAssertEqual(b.sent.count, 2, "one frame in flight, the rest held")
+        // The first frame is acked after 10 ms, so the cap is 2 (1 + ceil(30 fps × 10 ms),
+        // SendPacer.swift:49) until the oldest frame has waited past base + 0.1 s; then it is 1.
+        XCTAssertEqual(b.sent.count, 3, "one acked, the cap of two in flight, the rest held")
         b.ack()
         out.append(b)
 
