@@ -44,7 +44,15 @@ class _PhoneShellState extends State<PhoneShell> with UnlockAsks<PhoneShell> {
     if (caps.hubInProcess) {
       _s.hub?.addListener(_onAccess);
       _s.hub?.access().then((_) {}, onError: (_) {});
-      _onAccess();
+      // An answer already in: the first frame shows the right page, and the relay flag (it notifies MainState's
+      // listeners, who may be building right now) is set after that frame.
+      _access = _s.hub?.lastAccess;
+      final a = _access;
+      if (a != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _s.setRelaySet(a.hasKey);
+        });
+      }
     }
   }
 

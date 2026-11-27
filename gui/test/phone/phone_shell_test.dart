@@ -276,5 +276,32 @@ void main() {
       expect(tester.getSize(find.descendant(of: find.byType(AccessSetup), matching: find.byType(ConstrainedBox)).first).width, lessThanOrEqualTo(480));
       expect(tester.takeException(), isNull);
     });
+
+    // The hub answered `access` before the shell came up: the shell takes it on its first frame, and the relay
+    // flag (which notifies MainState's listeners) is set after that frame, not while the tree builds.
+    testWidgets('known access under a listening root sets the relay after the frame', (tester) async {
+      size(tester, 390, 844);
+      addTearDown(tester.view.reset);
+      t = FakeTransport();
+      final hub = HubClient(t);
+      t.emit({'event': 'access', 'relay': 'r', 'has_key': true, 'name': 'iPhone'});
+      await tester.runAsync(flush);
+      expect(hub.lastAccess, isNotNull);
+      s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port = FakeSessionPort(), unlockStore: UnlockStore(supported: false, memory: false));
+      nav = PhoneNav(s);
+      expect(s.relaySet, isFalse);
+      await tester.pumpWidget(ListenableBuilder(
+        listenable: s,
+        builder: (_, _) => MaterialApp(
+          theme: themeDataFor(RappTheme.matrix),
+          home: phoneFormSwitch(state: s, nav: nav, data: DataDir(tmp.path), pad: (_) => const SizedBox()),
+        ),
+      ));
+      expect(tester.takeException(), isNull);
+      await tester.pump();
+      expect(s.relaySet, isTrue);
+      expect(find.byType(AccessSetup), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
   });
 }
