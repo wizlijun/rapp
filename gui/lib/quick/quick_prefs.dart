@@ -201,7 +201,8 @@ class QuickPrefs extends ChangeNotifier {
   Map<String, Usage> _others = const {};
   final Map<String, int> _at;
 
-  /// Per doc, the lowest `at` a local change may take: the service's `at` + 1 (spec §10.3), set by the sync.
+  /// Per doc, the lowest `at` a local change may take: the service's `at` + 1 (spec §10.3), set by the sync (from
+  /// quick-sync.json's `synced` at its start, then from each copy it hears of).
   final Map<String, int> floor = {};
 
   /// Told the doc's name after each local change (not after [adopt]): the sync sends it.
@@ -346,7 +347,8 @@ class QuickPrefs extends ChangeNotifier {
   void _commit(List<String> names) {
     final now = _clock().millisecondsSinceEpoch;
     for (final n in names) {
-      _at[n] = max(now, floor[n] ?? 0);
+      // Above the doc's own `at` too: a clock behind the one that wrote it (or one that went back) still moves it on.
+      _at[n] = max(max(now, floor[n] ?? 0), (_at[n] ?? 0) + 1);
     }
     _cleaned = null;
     _save();

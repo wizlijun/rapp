@@ -111,14 +111,14 @@ class World {
   }
 
   /// Every doc of [prefs] on [link] and marked synced in quick-sync.json under [store], `at` 100.
-  void inStep(FakeLink link, {String store = 's1'}) {
+  void inStep(FakeLink link, {String store = 's1', int at = 100}) {
     for (final n in quickDocNames) {
-      prefs.adopt(n, QuickDoc(100, prefs.docOf(n).data));
-      link.docs[n] = QuickDoc(100, prefs.docOf(n).data);
+      prefs.adopt(n, QuickDoc(at, prefs.docOf(n).data));
+      link.docs[n] = QuickDoc(at, prefs.docOf(n).data);
     }
     File('$dir/quick-sync.json').writeAsStringSync(jsonEncode({
       'store': store,
-      'synced': {for (final n in quickDocNames) n: 100},
+      'synced': {for (final n in quickDocNames) n: at},
       'others': {},
     }));
     sync.dispose();
@@ -519,6 +519,26 @@ void main() {
       a.flushMicrotasks();
       expect(w.sync.status, QuickSyncStatus.synced);
       expect(w.prefs.others['dev-b']!['k:search']![today], 7);
+    });
+  });
+
+  test('an edit on a device whose clock is behind the last sync is still pushed', () {
+    fakeAsync((a) {
+      final w = World(a);
+      final link = FakeLink();
+      // Last synced at a time an hour ahead of this clock (another device's clock); then a restart: inStep makes a
+      // new QuickSync over quick-sync.json, and the floor the old one had in memory is gone.
+      final ahead = t0 + const Duration(hours: 1).inMilliseconds;
+      w.inStep(link, at: ahead);
+      w.prefs.floor.clear();
+      w.sync.dispose();
+      w.sync = w.make();
+      expect(w.prefs.floor['stars'], ahead + 1, reason: 'the floor comes back from quick-sync.json');
+      w.prefs.toggleStar('k:search'); // while not attached yet
+      expect(w.prefs.atOf('stars'), greaterThan(ahead));
+      w.attach(link);
+      expect(link.puts.map((p) => p.name), ['stars']);
+      expect(link.docs['stars']!.data, ['k:search']);
     });
   });
 }

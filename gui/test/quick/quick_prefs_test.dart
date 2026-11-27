@@ -67,6 +67,20 @@ void main() {
     expect(back.stars, ['k:search']);
     expect(back.phrases.map(refOf), q.phrases.map(refOf));
   });
+  test('at only ever grows', () {
+    var t = DateTime.fromMillisecondsSinceEpoch(1000);
+    final q = QuickPrefs.migrate(defaultStripItems, clock: () => t);
+    // Adopted from a device whose clock runs ahead; this clock is behind it and no floor is known (after a restart).
+    q.adopt('stars', const QuickDoc(9000, ['k:mode']));
+    q.toggleStar('k:search');
+    expect(q.atOf('stars'), greaterThan(9000));
+    final was = q.atOf('stars');
+    q.toggleStar('k:bg');
+    expect(q.atOf('stars'), greaterThan(was), reason: 'the same ms again');
+    t = DateTime.fromMillisecondsSinceEpoch(500); // the clock went back
+    q.toggleStar('k:clear');
+    expect(q.atOf('stars'), greaterThan(was + 1));
+  });
   test('deleting an action drops its star and its layout cell', () {
     final q = QuickPrefs.migrate(const [])
       ..setKeys([...builtinKeyActions, KeyAction('u1', label: 'X', chord: Chord.parse('ctrl+x')!)])
@@ -258,7 +272,7 @@ void main() {
     expect(q.usage, {
       'k:mode': {'2026-11-27': 2},
     });
-    expect(q.atOf('usage'), t.millisecondsSinceEpoch);
+    expect(q.atOf('usage'), t.millisecondsSinceEpoch + 1); // two changes in the same ms: the second goes 1 above
   });
   test('setOthers keeps the other devices\' counts and notifies', () {
     final q = QuickPrefs.migrate(const []);

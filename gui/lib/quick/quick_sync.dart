@@ -397,7 +397,11 @@ class QuickSync extends ChangeNotifier {
       if (synced is Map) {
         for (final n in quickDocNames) {
           final v = synced[n];
-          if (v is int && v >= 0) _synced[n] = v;
+          if (v is int && v >= 0) {
+            _synced[n] = v;
+            // A change made before the next attach must go above it, or it reads as already synced (§10.3).
+            if (v > 0) prefs.floor[n] = max(prefs.floor[n] ?? 0, v + 1);
+          }
         }
       }
       final others = j['others'];
