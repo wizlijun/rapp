@@ -2,6 +2,30 @@
   {
     "assets": [
       {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.60/latest.json",
+        "name": "latest.json",
+        "size": 752
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.60/rapp-0.15.60-macos-arm64.zip",
+        "name": "rapp-0.15.60-macos-arm64.zip",
+        "size": 26181310
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.60/rapp-0.15.60.pkg",
+        "name": "rapp-0.15.60.pkg",
+        "size": 26163683
+      }
+    ],
+    "draft": false,
+    "html_url": "https://github.com/wizlijun/rapp/releases/tag/v0.15.60",
+    "prerelease": false,
+    "published_at": "2026-11-27T04:29:46Z",
+    "tag_name": "v0.15.60"
+  },
+  {
+    "assets": [
+      {
         "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.59/latest.json",
         "name": "latest.json",
         "size": 645
