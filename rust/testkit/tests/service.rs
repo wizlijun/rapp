@@ -431,6 +431,7 @@ async fn open_echo(conn: &quinn::Connection) -> (rapp_net::quic::BiStream, Strin
 async fn logs_who_connected_what_they_opened_and_how_it_ended() {
     let a = service().await;
     let home = a.home.path();
+    assert_eq!(ipc_once(&a.svc, home, json!({"cmd":"set_auto_lock","on":false})).await["ok"], true);
     let ep = b_endpoint();
     let (_c, r) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":"wrong-pw","name":"mbp"})).await;
     assert_eq!(r["ok"], false);
