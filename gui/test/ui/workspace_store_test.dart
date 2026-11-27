@@ -8,7 +8,7 @@ void main() {
   late Directory dir;
   setUp(() => dir = Directory.systemTemp.createTempSync('ws'));
   tearDown(() {
-    Process.runSync('chmod', ['755', dir.path]);
+    if (!Platform.isWindows) Process.runSync('chmod', ['755', dir.path]);
     dir.deleteSync(recursive: true);
   });
 

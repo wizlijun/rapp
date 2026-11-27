@@ -1499,13 +1499,16 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] `rust/term/tests/cli.rs`、`pty.rs`、`serve.rs`、`shell_hook.rs`（整个文件）—— E 段做完时打开
 - [ ] `rust/term/src/pty/fg.rs::tests::status_roundtrips_without_new_fields` —— E 段做完时打开
 - [ ] `rust/term/src/pty/view.rs::tests::viewers_are_counted` —— E 段做完时打开
-- [ ] `rust/term/src/pty/shell.rs::tests::install_rewrites_on_version_change` —— E 段做完时打开
+- [ ] `rust/term/src/pty/shell.rs::tests::install_rewrites_on_version_change`、`zsh_launch_sets_zdotdir_and_keeps_old`、`zsh_launch_without_old_zdotdir_sets_no_rapp_zdotdir`、`bash_launch_drops_login_flag`、`fish_launch_quotes_path` —— E 段做完时打开
 - [ ] `rust/update/src/apply.rs::tests::exdev_copy_with_failed_delete_keeps_bundle_whole` —— G 段做完时打开（Windows 上只读目录挡不住删里面的文件，要换个挡法）
 - [ ] `services/state/src/disk.rs::tests::files_are_private`、`loose_modes_are_made_private` —— rapp-state 在 Windows 上自己设私有时打开（现在靠继承 `<数据根>\local` 的访问列表；哪一段做还没定，最晚 G 段打包 rapp-state 之前）
 - [ ] `rust/service/src/load/disks.rs::tests::hung_disk_is_unreadable_and_others_still_come` —— 不跟某一段走：要两块文件系统，等有两块盘的 Windows 测试机再写 Windows 版
 - [ ] `rust/service/src/load/disks.rs::tests::a_symlink_across_file_systems_is_the_target`、`a_symlink_does_not_change_the_mount` —— 不跟某一段走：Windows 上建符号链接要管理员或开发者模式；要测就改用目录联接（junction）
 - [ ] `rust/conn/tests/relay.rs::rotate_key_closes_every_device_with_code_4`、`requests_after_a_key_change_say_key_changed`、`an_open_relayed_stream_says_key_changed_after_a_rotate` —— 不跟某一段走：中继的管理接口只在 unix 上有（这三个靠 `rapp_relay::admin::issue_key` 换钥匙；中继本身不在 Windows 上跑，Windows 上的 `admin` 只有同名的空壳）
 - [ ] `rust/testkit/tests/key_change.rs::service_stops_and_says_key_changed_after_rotate`、`a_new_key_reconnects_with_the_same_id`、`a_wrong_new_key_says_bad_key`、`hub_presence_says_key_changed_and_stops_dialing`、`hub_reports_key_changed`（连同只给它们用的 `rotate`、`audit_events`、`hex`）—— 不跟某一段走：中继的管理接口只在 unix 上有（同上）。要在 Windows 上测换钥匙，得先给测试一个不经管理接口换钥匙的办法
+- [ ] `gui/test/data_relocate_test.dart::copy: missing or empty folder; keeps modes and .git; old root untouched`、`dot-dot paths are resolved before comparing` 与 `gui/test/data_section_test.dart::relocate a change restarts the service, moves the hub and the state` —— C 段做完时打开（规格 §10.6：`data_relocate.dart` 的 `cp -Rp` 换成不依赖外部命令的复制）
+- [ ] `gui/test/embed/linux_session_port_test.dart` 里用 `cat` 假进程的 10 条测试、`gui/test/embed/session_worker_test.dart`（整个文件）—— C 段做完时打开（接上 Windows 会话端口和 `SessionWorker` 时把测试假进程改成跨平台写法）
+- [ ] `gui/test/embed/linux_speech_test.dart::LinuxSpeechChannel python3 subprocess fixtures` —— H 段做完时打开（接上 Windows 语音 `rapp-speech.exe` 时打开）
 
 ## Windows 版 A 段（地基）（计划 `docs/superpowers/plans/2026-11-26-rapp-windows-a-foundation.md`，分支 `feat/windows-foundation`）
 
@@ -1518,13 +1521,13 @@ macOS、Linux、Duo、iPad 各一遍。
 - A 段做完后，一台 Windows 机器能：编出全部 Rust crate（`rapp-relay`、`rapp-host-linux`、`rapp-client-gtk`、`rapp-hub-ffi` 除外）、跑过测试和 clippy（`scripts\check-windows.ps1`）、编出 Flutter 界面、用 `scripts\stage-windows.ps1` 摆出开发用的版本目录、从 `bin\rapp.exe` 启动界面、当控制端连别的设备。
 - 还不能：当被控端（没有 `rapp-host`，D 段）、开文本终端（E 段）、自己升级（G 段）、有监督程序和系统服务（`rapp-svc`，C 段）、语音（H 段）、安装包（G 段）。
 - **给 Linux session 的发现**（规格 §6.1、§19.3 第 14 条）：`rust/service/src/workers.rs` 的 `permissions()` 没有把 `applications` 留下，`capabilities()` 读到的永远是“没有”，所以 Linux 被控端一直对外报不能开单个 app，控制端不显示它的 app 入口（`gui/lib/ui/device_apps.dart:16` 等四处）。有意还是漏了，由 Linux 的 session 判断；Windows 这次没有改它。
-- **要在实机上看的**（未验证）：
-  - [ ] 1. 中文用户名（带空格）的账户下：`<数据根>\local` 的访问权限只有本人、SYSTEM、Administrators；数据根搬到 D 盘以后还是这样（规格 §13.2 的验收）。
-  - [ ] 2. `cmd`、Windows PowerShell 5.1、Windows Terminal 里 `rapp --help` 的中文都不乱码（规格 §8.2【未验证】）。
-  - [ ] 3. 从没有窗口的上级启动 `rapp-service` 再连一次：全程没有黑窗口闪过。
-  - [ ] 4. `rapp-service --supervised`：上级关掉它的标准输入后 5 秒内退出，退出码 0；上级被强行结束也一样。
-  - [ ] 5. 同一个登录会话里启动第二个 `rapp-service`：立刻退出，第一个不受影响；远程桌面的会话里另起一个不算“第二个”。
-  - [ ] 6. Server 2022 云主机（没有显卡）上 `scripts\check-windows.ps1 -Build` 也是绿的。
+- **要在实机上看的**（2026-11-27 在 `W11-L` 实测复核）：
+  - [x] 1. 含中文与空格的数据根路径（`C:\...\张 三_...\rapp`）及迁到 `D:` 盘（`D:\...\张 三_...\rapp`）下：`<数据根>\local` 与其中文件经 `icacls` 核实继承已断开，访问权限只有当前用户、`NT AUTHORITY\SYSTEM`、`BUILTIN\Administrators`（注：`W11-L` 系统登录账户名为 `newuser`，通过 `RAPP_HOME` 测含中文空格路径；真中文系统账户名可后续顺手再看一眼）。
+  - [x] 2. `cmd`（UTF-8 页）、Windows PowerShell 5.1、PowerShell 里 `rapp --help` 的中文均正常无乱码。
+  - [x] 3. 从没有窗口的上级启动 `rapp-service` 并多次连 IPC `status`：`MainWindowHandle=0`，全程没有黑窗口闪过。
+  - [x] 4. `rapp-service --supervised`：上级关掉它的标准输入后 52 ms 退出、退出码 0；上级被强行结束（`Stop-Process -Force`）后 24 ms 退出、退出码 0；不带 `--supervised` 时关掉标准输入仍保持运行。
+  - [ ] 5. 同一个登录会话里启动第二个 `rapp-service`：已在 `W11-L` 核实 49 ms 退出（退出码 0，`already running for this user`），第一个不受影响；远程桌面另一会话独立运行待测 `S2` 时一并核实。
+  - [ ] 6. Server 2022 云主机（没有显卡）上 `scripts\check-windows.ps1 -Build` 也是绿的（暂无 `S22-C` 机器）。
 - Windows 上暂时关着的测试单列在上面的「Windows 版：现在在 Windows 上关着的测试」。
 
 ## Windows B 段（主机核心）（计划 `docs/superpowers/plans/2026-11-26-rapp-windows-b-host-core.md`，分支 `feat/windows-host-core`，2026-11-27）

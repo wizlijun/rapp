@@ -111,7 +111,7 @@ void main() {
     expect(read('$root/README.md').startsWith(readmeMarker), isTrue);
     expect(read('$root/.gitignore'), dataGitignore);
     expect(read('$root/agent/README.md'), agentReadme);
-    expect(mode('$root/local'), '700');
+    if (!Platform.isWindows) expect(mode('$root/local'), '700');
   });
 
   test('gui.json is not copied when the old id is not a plain id', () {
@@ -154,8 +154,10 @@ void main() {
     expect(File('$root/local/ipc.token').existsSync(), isFalse);
     expect(Directory('$root/local/previous').existsSync(), isFalse);
     expect(read('$root/local/migrated-from').trim(), legacy);
-    expect(mode('$root/local/service.json'), '600');
-    expect(mode('$root/local/hosts.json'), '600');
+    if (!Platform.isWindows) {
+      expect(mode('$root/local/service.json'), '600');
+      expect(mode('$root/local/hosts.json'), '600');
+    }
   });
 
   test('second run is a no-op', () {

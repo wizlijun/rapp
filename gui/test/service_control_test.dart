@@ -89,9 +89,10 @@ void main() {
       expect(await controller().run(ServiceAction.start), isNull);
       expect(calls, ['systemctl --user daemon-reload', 'systemctl --user enable --now rapp-service.service']);
       final unit = File(linuxServiceUnitPath(env)).readAsStringSync();
+      final escapedTmp = tmp.path.replaceAll(r'\', r'\\');
       expect(unit, contains('ExecStart=:/usr/bin/env -- "/portable/rapp-service"'));
-      expect(unit, contains('Environment="RAPP_HOME=${tmp.path}/custom data"'));
-      expect(unit, contains('Environment="XDG_CONFIG_HOME=${tmp.path}/config"'));
+      expect(unit, contains('Environment="RAPP_HOME=$escapedTmp/custom data"'));
+      expect(unit, contains('Environment="XDG_CONFIG_HOME=$escapedTmp/config"'));
       expect(unit, contains('UMask=0077'));
       expect(unit, contains('WantedBy=default.target'));
     });

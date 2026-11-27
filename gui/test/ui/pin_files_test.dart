@@ -22,7 +22,7 @@ void main() {
     final d = DataDir(root.path);
     Directory(d.clipboardDir).createSync(recursive: true);
     Directory(d.filesClipboardDir).createSync(recursive: true);
-    final a = '${d.clipboardDir}/20261113-090507-a.md';
+    final a = '${d.clipboardDir}${Platform.pathSeparator}20261113-090507-a.md';
     File(a).writeAsStringSync('x');
     File('${d.clipboardDir}/.x').writeAsStringSync('x');
     File('${d.clipboardDir}/b.md.tmp').writeAsStringSync('x');

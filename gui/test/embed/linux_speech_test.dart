@@ -159,6 +159,7 @@ void main() {
     );
   }
 
+  group('LinuxSpeechChannel python3 subprocess fixtures', () {
   test('each Linux recording receives the current learned hotwords', () async {
     final c = await channel('''
 print(json.dumps({'event':'ready'}),flush=True)
@@ -414,4 +415,5 @@ print(json.dumps({'event':'final','text':'hello world'}),flush=True)
       },
     );
   }
+  }, skip: Platform.isWindows ? 'H 段做完时打开' : null);
 }

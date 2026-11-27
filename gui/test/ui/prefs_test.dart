@@ -13,7 +13,7 @@ void main() {
   setUp(() => tmp = Directory.systemTemp.createTempSync('rapp_prefs'));
   tearDown(() {
     try {
-      Process.runSync('chmod', ['-R', '700', tmp.path]);
+      if (!Platform.isWindows) Process.runSync('chmod', ['-R', '700', tmp.path]);
       tmp.deleteSync(recursive: true);
     } catch (_) {}
   });
@@ -182,7 +182,11 @@ void main() {
     expect(UiPrefs.load(d).theme, RappTheme.avatar);
   });
   test('save into a read-only dir throws FileSystemException', () {
-    Process.runSync('chmod', ['500', tmp.path]);
+    if (Platform.isWindows) {
+      Directory('${tmp.path}/gui.json').createSync();
+    } else {
+      Process.runSync('chmod', ['500', tmp.path]);
+    }
     expect(() => UiPrefs().save(tmp.path), throwsA(isA<FileSystemException>()));
   });
   test('first round-trips, defaults to device, and keeps the old fields', () {

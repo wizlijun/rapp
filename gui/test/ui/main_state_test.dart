@@ -56,9 +56,17 @@ void main() {
     s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs());
   });
 
-  tearDown(() {
-    Process.runSync('chmod', ['755', tmp.path]);
-    tmp.deleteSync(recursive: true);
+  tearDown(() async {
+    if (!Platform.isWindows) Process.runSync('chmod', ['755', tmp.path]);
+    for (var i = 0; i < 10; i++) {
+      try {
+        tmp.deleteSync(recursive: true);
+        return;
+      } on PathAccessException {
+        if (i == 9) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+    }
   });
 
   test('quickAutoHide: null pref is on for macOS, off for iOS', () {
@@ -619,11 +627,15 @@ void main() {
     });
 
     test('an unwritable dir keeps the data in memory and says why', () {
-      Process.runSync('chmod', ['555', tmp.path]);
+      if (Platform.isWindows) {
+        File('${tmp.path}/shared').writeAsStringSync('x');
+      } else {
+        Process.runSync('chmod', ['555', tmp.path]);
+      }
       s.toggleFavorite('111', 'x', 'X');
       expect(s.isFavorite('111', 'x'), true);
       expect(s.hint, startsWith('项目和常用没有保存：'));
-      expect(File('${tmp.path}/shared/workspace.json').existsSync(), false);
+      if (!Platform.isWindows) expect(File('${tmp.path}/shared/workspace.json').existsSync(), false);
     });
   });
 
@@ -4789,7 +4801,7 @@ void main() {
     });
 
     test('restored pins load at start', () {
-      final f = File('${tmp.path}/clipboard/20261113-090507-a.md');
+      final f = File('${tmp.path}/clipboard${Platform.pathSeparator}20261113-090507-a.md');
       env((a, t, port, st) {
         a.flushMicrotasks();
         final e = st.resources.clips.single;

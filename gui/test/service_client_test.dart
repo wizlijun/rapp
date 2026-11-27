@@ -440,7 +440,7 @@ void main() {
       await old.start();
       final m2 = ServiceMonitor(readToken: () async => 'tok-lb2', port: old.port, retry: const Duration(milliseconds: 50));
       m2.start();
-      await until(() => m2.status != null);
+      await until(() => m2.status != null && m2.labelsUnsupported);
       expect((m2.labels, m2.labelsUnsupported), (null, true));
       await m2.refresh();
       expect(old.received.where((r) => r['cmd'] == 'labels'), hasLength(1));
@@ -570,6 +570,7 @@ void main() {
       final m = ServiceMonitor(readToken: () async => 'tok-ss', port: svc.port, retry: const Duration(milliseconds: 50));
       m.start();
       await until(() => m.status != null);
+      await until(() => svc.received.any((r) => r['cmd'] == 'watch_load'));
       svc.replies['state'] = {'ok': true, 'on': true, 'port': 8102};
       expect(await m.stateService(to: '111111111', on: true), {'ok': true, 'on': true, 'port': 8102});
       expect(svc.received.last, {'cmd': 'state', 'to': '111111111', 'on': true});
@@ -602,6 +603,7 @@ void main() {
       final m = ServiceMonitor(readToken: () async => 'tok-r2', port: svc.port, retry: const Duration(milliseconds: 50));
       m.start();
       await until(() => m.status != null);
+      await until(() => svc.received.any((r) => r['cmd'] == 'watch_load'));
       await m.share(to: '123456789', ports: [8000]);
       expect(svc.received.last, {'cmd': 'share', 'to': '123456789', 'ports': [8000]});
       await m.share(ports: [22, 80], note: 'n', allow: ['ab']);

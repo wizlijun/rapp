@@ -855,5 +855,5 @@ void englishFirstTests() {
       });
       expect(out.take(3), ['key:0:true', 'select_input:', 'key:0:true']);
     });
-  });
+  }, skip: Platform.isWindows ? 'C 段做完时打开' : null);
 }

@@ -8,6 +8,10 @@ import 'package:rapp/embed/session_port.dart';
 import 'linux_session_port_test.dart' as wire;
 
 void main() {
+  if (!Platform.isLinux) {
+    test('Linux native GTK detach is Linux-only', () {}, skip: 'Linux-only (rapp/linux GTK detach)');
+    return;
+  }
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
   const channel = MethodChannel('rapp/linux');
   test('closing during pending native detach removes the native session', () async {

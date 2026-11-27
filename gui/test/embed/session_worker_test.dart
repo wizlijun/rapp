@@ -4,6 +4,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_worker.dart';
 
 void main() {
+  if (Platform.isWindows) {
+    test('SessionWorker subprocess tests on Windows', () {}, skip: 'C 段做完时打开');
+    return;
+  }
   late Directory temp;
   Future<String> fixture(String body) async {
     final file = File('${temp.path}/worker.py');

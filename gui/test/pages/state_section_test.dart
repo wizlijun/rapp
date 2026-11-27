@@ -144,7 +144,10 @@ void main() {
     expect(find.text('数据目录'), findsOneWidget);
     await t.tap(find.text('关'));
     await t.pump();
-    final mode = File('${dir.path}/state.json').statSync().mode & 0x1ff;
-    expect(mode, 0x180);
+    expect(File('${dir.path}/state.json').existsSync(), isTrue);
+    if (!Platform.isWindows) {
+      final mode = File('${dir.path}/state.json').statSync().mode & 0x1ff;
+      expect(mode, 0x180);
+    }
   });
 }

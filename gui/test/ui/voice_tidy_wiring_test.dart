@@ -76,7 +76,17 @@ void main() {
     File('${d.deviceDir('dev1')}/device.json').writeAsStringSync('{"name":"bruce-tablet"}');
     api = _FakeApi();
   });
-  tearDown(() => tmp.deleteSync(recursive: true));
+  tearDown(() async {
+    for (var i = 0; i < 10; i++) {
+      try {
+        tmp.deleteSync(recursive: true);
+        return;
+      } on PathAccessException {
+        if (i == 9) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+    }
+  });
 
   // Twice: a done send's wait (tidySettle zero here) is a timer of its own. The words come out at once
   // (tidyRevealMax zero).
@@ -347,6 +357,7 @@ void main() {
     st.tidyOf(sid).sendNow();
     st.currentRemote!.composer.done(1, null);
     await until(() => lines().length == 1);
+    await settle();
     st.dispose();
     final (again, _) = await start();
     expect(again.currentRemote!.composer.draftText, isNot(contains(long)));

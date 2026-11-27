@@ -28,7 +28,7 @@ void main() {
   late Directory dir;
   setUp(() => dir = Directory.systemTemp.createTempSync('apps'));
   tearDown(() {
-    Process.runSync('chmod', ['755', dir.path]);
+    if (!Platform.isWindows) Process.runSync('chmod', ['755', dir.path]);
     dir.deleteSync(recursive: true);
   });
 
@@ -143,7 +143,11 @@ void main() {
   });
 
   test('a save that fails keeps the change in memory and reports it', () {
-    Process.runSync('chmod', ['555', dir.path]);
+    if (Platform.isWindows) {
+      Directory('${dir.path}/apps.json').createSync();
+    } else {
+      Process.runSync('chmod', ['555', dir.path]);
+    }
     final s = AppProfileStore(dir.path);
     var told = 0;
     s.addListener(() => told++);
@@ -154,11 +158,19 @@ void main() {
   });
 
   test('a later good save clears the save problem', () {
-    Process.runSync('chmod', ['555', dir.path]);
+    if (Platform.isWindows) {
+      Directory('${dir.path}/apps.json').createSync();
+    } else {
+      Process.runSync('chmod', ['555', dir.path]);
+    }
     final s = AppProfileStore(dir.path);
     s.addRule('a', 'A', const WindowRule(action: RuleAction.hide));
     expect(s.problem, appsSaveProblem);
-    Process.runSync('chmod', ['755', dir.path]);
+    if (Platform.isWindows) {
+      Directory('${dir.path}/apps.json').deleteSync();
+    } else {
+      Process.runSync('chmod', ['755', dir.path]);
+    }
     s.addRule('b', 'B', const WindowRule(action: RuleAction.hide));
     expect(s.problem, isNull);
   });

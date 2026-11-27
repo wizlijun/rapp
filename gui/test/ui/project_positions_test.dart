@@ -74,11 +74,15 @@ void main() {
   });
 
   test('save into a read-only dir throws FileSystemException', () {
-    Process.runSync('chmod', ['500', tmp.path]);
+    if (Platform.isWindows) {
+      Directory('${tmp.path}/$positionsFile').createSync();
+    } else {
+      Process.runSync('chmod', ['500', tmp.path]);
+    }
     expect(
       () => ProjectPositions({'p': ProjectPosition(last: '1/a')}).save(tmp.path),
       throwsA(isA<FileSystemException>()),
     );
-    Process.runSync('chmod', ['700', tmp.path]);
+    if (!Platform.isWindows) Process.runSync('chmod', ['700', tmp.path]);
   });
 }

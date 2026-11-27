@@ -120,7 +120,7 @@ void main() {
       addTearDown(() => d.deleteSync(recursive: true));
       expect(findBinary('rapp-hub', d.path, 'macos'), isNull);
       File('${d.path}/rapp-hub').writeAsStringSync('');
-      expect(findBinary('rapp-hub', d.path, 'macos'), '${d.path}/rapp-hub');
+      expect(findBinary('rapp-hub', d.path, 'macos'), '${d.path}${Platform.pathSeparator}rapp-hub');
       File('${d.path}/rapp-hub.exe').writeAsStringSync('');
       // The .exe suffix follows the target OS; the separator follows the host.
       expect(findBinary('rapp-hub', d.path, 'windows'), '${d.path}${Platform.pathSeparator}rapp-hub.exe');

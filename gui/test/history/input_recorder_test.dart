@@ -37,7 +37,17 @@ void main() {
     port = FakeSessionPort();
   });
 
-  tearDown(() => tmp.deleteSync(recursive: true));
+  tearDown(() async {
+    for (var i = 0; i < 10; i++) {
+      try {
+        tmp.deleteSync(recursive: true);
+        return;
+      } on PathAccessException {
+        if (i == 9) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+    }
+  });
 
   InputRecorder recorder() => InputRecorder(
       data: () => data, enabled: () => enabled, recordsApp: (a) => !appsOff.contains(a), log: logs.add);
@@ -197,12 +207,12 @@ void main() {
       BlockChip(3, 'a.pdf', kind: 'file', bytes: 5, name: 'a.pdf'),
     ]);
     a.composer.done(4, null);
-    await until(() => lines().length == 1);
+    await until(() => lines().length == 1 && written.length == 1);
     await send(a, '第二段');
     a.composer.done(1, null);
     await send(b, '第三段');
     b.composer.done(1, null);
-    await until(() => lines().length == 3);
+    await until(() => lines().length == 3 && written.length == 3);
     final l = lines();
     expect(l.length, 3);
     expect(written.length, 3);

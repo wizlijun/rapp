@@ -130,7 +130,7 @@ void main() {
       expect(File(pointer).readAsStringSync(), '$to\n');
       expect(find.text('数据目录已改到 $to，服务已重启'), findsOneWidget);
       await t.pumpWidget(const SizedBox());
-    });
+    }, skip: Platform.isWindows);
 
     testWidgets('RAPP_HOME set: no buttons, a note', (t) async {
       await pumpIt(t, e: {...env, 'RAPP_HOME': from});
