@@ -27,7 +27,7 @@ class FormSwitch extends StatefulWidget {
     this.entered,
     this.waiting,
     this.isWaiting,
-  });
+  }) : assert(settle >= const Duration(milliseconds: 100), 'F11: back on the Pad the settle adds to the 300 ms policy');
 
   final MainState state;
   final WidgetBuilder pad, phone;
@@ -80,7 +80,12 @@ class _FormSwitchState extends State<FormSwitch> with WidgetsBindingObserver {
       // The first frame takes the form at once.
       _size = size;
       _form = formOf(size);
-      if (_form == UiForm.phone) _fold();
+      // Its side effects wait for the frame to end: listeners of MainState rebuild above this widget (F13).
+      if (_form == UiForm.phone) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _form == UiForm.phone) _fold();
+        });
+      }
       return;
     }
     if (size == _size) return;

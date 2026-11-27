@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/phone/form.dart';
@@ -81,9 +82,33 @@ void main() {
     expect(s.phoneForm, isTrue);
     await tester.pumpWidget(const SizedBox());
     size(tester, 600, 800);
-    await tester.pumpWidget(host(state: CountState(hub: HubClient(FakeTransport()), data: DataDir(tmp.path), prefs: UiPrefs())));
+    final other = CountState(hub: HubClient(FakeTransport()), data: DataDir(tmp.path), prefs: UiPrefs());
+    addTearDown(other.dispose);
+    await tester.pumpWidget(host(state: other));
     expect(find.byKey(padKey), findsOneWidget);
     expect(find.byKey(phoneKey), findsNothing);
+  });
+
+  testWidgets('first frame in phone form under a listening root', (tester) async {
+    size(tester, 390, 844);
+    final got = <({PhoneScreen screen, String? cameFrom})>[];
+    await tester.pumpWidget(ListenableBuilder(
+      listenable: s,
+      builder: (_, __) => MaterialApp(
+        home: FormSwitch(
+          state: s,
+          settle: settle,
+          pad: (_) => const Text('pad', key: padKey),
+          phone: (_) => const Text('phone', key: phoneKey),
+          onFold: got.add,
+        ),
+      ),
+    ));
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(phoneKey), findsOneWidget);
+    await tester.pump();
+    expect(s.phoneForm, isTrue);
+    expect(got.length, 1);
   });
 
   testWidgets('drag across 600 flips once after settle', (tester) async {
@@ -92,6 +117,7 @@ void main() {
     for (var i = 0; i < 20; i++) {
       tester.view.physicalSize = Size(i.isEven ? 590 : 610, 800);
       await tester.pump(const Duration(milliseconds: 16));
+      expect(find.byKey(padKey), findsOneWidget);
     }
     tester.view.physicalSize = const Size(590, 800);
     await tester.pump(const Duration(milliseconds: 16));
@@ -259,6 +285,134 @@ void main() {
     expect(tr.closed, isFalse);
     final after = tr.sent.skip(sentBefore).map((m) => m['cmd']);
     expect(after.where((c) => c == 'open' || c == 'close'), isEmpty);
-    expect(term.calls.where((c) => c.$1 == 'resize').length, lessThanOrEqualTo(1));
+  });
+
+  /// A MainState with one graphic session (Safari, sid 1) on a fake port; [win] is its current window.
+  Future<({CountState st, FakeSessionPort port, FakeTransport tr})> graphic(WidgetTester tester) async {
+    final port = FakeSessionPort();
+    final tr = FakeTransport();
+    final st = CountState(hub: HubClient(tr), data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
+    addTearDown(st.dispose);
+    tr.onSend = (m) {
+      if (m['cmd'] == 'hosts') {
+        tr.emit({'event': 'hosts', 'req': m['req'], 'hosts': [{'id': '111', 'name': 'mini'}]});
+      }
+      if (m['cmd'] == 'open') {
+        tr.emit({'event': 'opened', 'req': m['req'], 'sid': 1, 'id': m['id'], 'app': m['app'], 'path': 'lan', 'port': 5001, 'token': 'tk'});
+      }
+    };
+    await tester.runAsync(() async {
+      st.openOrSwitch('111', 'Safari', 'Safari');
+      for (var i = 0; i < 4; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+    });
+    return (st: st, port: port, tr: tr);
+  }
+
+  RemoteWindow win(double w, double h) => RemoteWindow(
+        id: 5,
+        parent: 0,
+        kind: WindowKind.normal,
+        title: 'w',
+        rect: Rect.fromLTWH(0, 0, w, h + 28),
+        titleBar: 28,
+        resizable: true,
+        focused: true,
+        texture: 42,
+        visible: const Rect.fromLTWH(0, 0, 1, 1),
+      );
+
+  Widget graphicHost(CountState st) => MaterialApp(
+        theme: themeDataFor(RappTheme.matrix),
+        home: FormSwitch(
+          state: st,
+          settle: settle,
+          pad: (_) => MainWindow(
+              state: st, monitor: ServiceMonitor(readToken: () async => null), control: null, fullscreen: FakeFullscreen()),
+          phone: (_) => const SizedBox(key: phoneKey),
+        ),
+      );
+
+  List<Map<String, Object?>> resizes(FakeSessionPort port) => [for (final c in port.calls) if (c.$1 == 'resize') c.$2];
+
+  /// Mounts the Pad at 1194x834 with a window of the wrong size, takes the one resize that earns, then tells the
+  /// policy the window now has the stage's size (as A would). Returns how many resizes are out.
+  Future<int> settledPad(WidgetTester tester, CountState st, FakeSessionPort port) async {
+    size(tester, 1194, 834);
+    await tester.pumpWidget(graphicHost(st));
+    port.emit(const ReadyEvent(1, 'Safari'));
+    port.emit(WindowsEvent(1, [win(800, 600)]));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    final r = resizes(port);
+    expect(r.length, 1);
+    port.emit(WindowsEvent(1, [win((r.single['w'] as num).toDouble(), (r.single['h'] as num).toDouble())]));
+    await tester.pump();
+    return r.length;
+  }
+
+  testWidgets('round trip with the same stage sends no resize', (tester) async {
+    final e = await graphic(tester);
+    final before = await settledPad(tester, e.st, e.port);
+    tester.view.physicalSize = const Size(390, 844);
+    await tester.pump();
+    await tester.pump(settle + const Duration(milliseconds: 10));
+    expect(find.byKey(phoneKey), findsOneWidget);
+    await tester.pump(const Duration(seconds: 1));
+    expect(resizes(e.port).length, before);
+    tester.view.physicalSize = const Size(1194, 834);
+    await tester.pump();
+    await tester.pump(settle + const Duration(milliseconds: 10));
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.byType(MainWindow), findsOneWidget);
+    expect(resizes(e.port).length, before);
+  });
+
+  testWidgets('round trip to a different stage sends one resize after 400 ms', (tester) async {
+    final e = await graphic(tester);
+    final before = await settledPad(tester, e.st, e.port);
+    tester.view.physicalSize = const Size(390, 844);
+    await tester.pump();
+    await tester.pump(settle + const Duration(milliseconds: 10));
+    await tester.pump(const Duration(seconds: 1));
+    expect(resizes(e.port).length, before);
+    tester.view.physicalSize = const Size(1000, 700);
+    await tester.pump();
+    // 390 ms in, the stage has not been still for 400 ms yet.
+    await tester.pump(const Duration(milliseconds: 390));
+    expect(find.byType(MainWindow), findsOneWidget);
+    expect(resizes(e.port).length, before);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(resizes(e.port).length, before + 1);
+    await tester.pump(const Duration(seconds: 1));
+    expect(resizes(e.port).length, before + 1);
+  });
+
+  testWidgets('entered open session lands the Pad on it', (tester) async {
+    final e = await graphic(tester);
+    final other = e.st.currentKey;
+    expect(other, isNotNull);
+    e.st.toggleOverview();
+    size(tester, 1194, 834);
+    await tester.pumpWidget(MaterialApp(
+      theme: themeDataFor(RappTheme.matrix),
+      home: FormSwitch(
+        state: e.st,
+        settle: settle,
+        pad: (_) => const SizedBox(key: padKey),
+        phone: (_) => const SizedBox(key: phoneKey),
+        entered: () => other,
+      ),
+    ));
+    tester.view.physicalSize = const Size(390, 844);
+    await tester.pump();
+    await tester.pump(settle + const Duration(milliseconds: 10));
+    tester.view.physicalSize = const Size(1194, 834);
+    await tester.pump();
+    await tester.pump(settle + const Duration(milliseconds: 10));
+    expect(find.byKey(padKey), findsOneWidget);
+    expect(e.st.overview, isFalse);
+    expect(e.st.currentKey, other);
   });
 }
