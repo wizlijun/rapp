@@ -1646,7 +1646,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-host-core"
-version = "0.15.57"
+version = "0.15.58"
 dependencies = [
  "anyhow",
  "icu_normalizer",
