@@ -1,4 +1,5 @@
-//! The entry: one listener, the paths every builtin shares (`/v1/health`, `/v1/watch`), and each
+//! The entry: one listener, the paths every builtin shares (`/v1/health`, `/v1/routes`,
+//! `/v1/watch`), each builtin under its prefix (`/<name>/v1/…`), and each
 //! builtin's loading, saving and background work.
 
 use std::convert::Infallible;
@@ -190,19 +191,43 @@ struct Entry {
 
 async fn route(e: &Entry, req: Request<Incoming>) -> Response<Body> {
     let path = req.uri().path().to_string();
-    let entry_path = matches!(path.as_str(), "/v1/health" | "/v1/watch");
-    if entry_path {
+    if matches!(path.as_str(), "/v1/health" | "/v1/routes" | "/v1/watch") {
         if req.method() != Method::GET {
             return reply(StatusCode::METHOD_NOT_ALLOWED, json!({"error": "method not allowed"}));
         }
         return match path.as_str() {
-            "/v1/health" => reply(StatusCode::OK, json!({"name": "rapp-state", "v": 1})),
+            "/v1/health" => reply(StatusCode::OK, health()),
+            "/v1/routes" => reply(StatusCode::OK, e.routes()),
             _ => get_watch(&e.cx),
         };
     }
-    match e.blocks.iter().find(|m| m.b.name() == "state") {
-        Some(m) => m.b.handle(&m.cx, req, &path).await,
-        None => reply(StatusCode::NOT_FOUND, json!({"error": "not found"})),
+    // The old paths at the root stay the state block's for good.
+    let (name, rest) = if path.starts_with("/v1/") { ("state", path.as_str()) } else { prefixed(&path) };
+    match e.blocks.iter().find(|m| m.b.name() == name) {
+        Some(m) if rest.starts_with("/v1/") => m.b.handle(&m.cx, req, rest).await,
+        _ => reply(StatusCode::NOT_FOUND, json!({"error": "not found"})),
+    }
+}
+
+/// `/<name>/<rest>` → `(name, "/<rest>")`, the first segment as it is (no case folding, no
+/// normalising). Anything else gives a name no builtin has.
+fn prefixed(path: &str) -> (&str, &str) {
+    match path.strip_prefix('/').and_then(|p| p.find('/').map(|i| (&p[..i], &p[i..]))) {
+        Some((name, rest)) if !name.is_empty() => (name, rest),
+        _ => ("", ""),
+    }
+}
+
+/// `name` stays `rapp-state` for what checks it today (the outbox, the app).
+fn health() -> Value {
+    json!({"name": "rapp-state", "service": "rapp-center", "v": 2, "routes": true})
+}
+
+impl Entry {
+    fn routes(&self) -> Value {
+        let routes: Vec<Value> =
+            self.blocks.iter().map(|m| json!({"name": m.b.name(), "kind": "builtin", "v": m.b.version()})).collect();
+        json!({ "routes": routes })
     }
 }
 

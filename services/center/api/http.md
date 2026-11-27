@@ -2,9 +2,15 @@
 
 JSON over HTTP/1.1 on 127.0.0.1. Errors: `{"error": "..."}`.
 
+Every state path below also answers under the `/state` prefix, such as `/state/v1/queue`; the
+paths at the root stay for good. The watch is only `/v1/watch` (it carries every builtin's
+changes). What else the service has is in `GET /v1/routes` (`api/routes.md`).
+
 ## GET /v1/health
 
-200 `{"name":"rapp-state","v":1}`
+200 `{"name":"rapp-state","service":"rapp-center","v":2,"routes":true}`
+
+`name` stays `rapp-state` for what checks it; `routes: true` says `GET /v1/routes` is there.
 
 Unknown paths: 404 `{"error":"not found"}`.
 

@@ -47,7 +47,7 @@ async fn request(addr: SocketAddr, method: &str, path: &str, body: &str) -> (u16
 #[tokio::test]
 async fn health_says_who_it_is() {
     let addr = start(Config::default()).await;
-    assert_eq!(get(addr, "/v1/health").await, (200, json!({"name":"rapp-state","v":1})));
+    assert_eq!(get(addr, "/v1/health").await, (200, json!({"name":"rapp-state","service":"rapp-center","v":2,"routes":true})));
     assert_eq!(get(addr, "/nope").await, (404, json!({"error":"not found"})));
 }
 
