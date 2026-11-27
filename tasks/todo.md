@@ -1579,3 +1579,9 @@ macOS、Linux、Duo、iPad 各一遍。
   - [ ] ③ 设置里显示的名字是「中心服务」
   - [ ] ④ 另一台装旧版 app 的设备连这台，状态照常显示
   - [ ] ⑤ 回滚到旧版后，中心服务是关的，队列是空的（已知后果：旧版只认 `services.json` 的 `state` 键和 `local/state/`。升级后改过开关的话，键已经换成 `center`，旧版就当它是关的；数据目录已经搬走，旧版只能从空队列开始。这些是 7 天内的临时数据，规格接受这个后果）
+
+## Linux 0.15.60 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 直接挂载至已发布的 [v0.15.60](https://github.com/wizlijun/rapp/releases/tag/v0.15.60) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.60`（`feat/center-g1` 中心服务 G1：`rapp-state` 改名 `rapp-center`）并修复两处 Linux 遗漏：在 `scripts/linux/rapp` 补齐 `rapp center [on|off]` 子命令转发至 `rapp-cli`（此前漏写会落入 `rapp-gui`；同步扩充 `scripts/test-linux-launcher.py`），并更新 `scripts/test-linux-bundle.py` 在隔离命名空间中端到端验证 `rapp center` 与 `rapp state` 输出一致、「中心服务」文案、`local/services.json` `center` 键、`local/center/` 目录、`GET /v1/health` v2、`GET /v1/routes` 及 `/state/v1/…` 前缀别名；全工作区 20 个 crate 与 3,649 项 Flutter 测试全部通过。
+- [x] `v0.15.60`（源码 `1f3c0d64`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01560-parity.md`。
