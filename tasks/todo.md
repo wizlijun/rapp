@@ -1503,9 +1503,9 @@ macOS、Linux、Duo、iPad 各一遍。
 
 现状（2026-11-27）：**在 Mac 上过了门禁**，测的是分支 `feat/windows-foundation` 的提交 `0b5bd91f`（合并 `main` 4b8c337d 之后）。草稿代码不用改就编过了：`cargo test --workspace --no-fail-fast` 1716 个过；`rapp-ports` 有一个用固定端口的测试 `every_map_stays_when_the_device_list_cannot_be_read` 在负载下挂了一次，单独重跑 5 次都过，这个 crate 分支没改。clippy `-D warnings` 干净；`swift test` 563 个过、0 个失败；`flutter analyze` 没问题；`flutter test` 3623 个过，`linux_detach_test.dart` 的 2 个失败是因为新 worktree 里没有 `rust/target/release/rapp-session`，补上这个文件后重跑也过了，跟分支无关。iOS：`rapp-hub-ffi` 对 `aarch64-apple-ios`（release）和 `aarch64-apple-ios-sim` 的 `cargo check` 都过。**Windows 门禁还没跑**，Linux 也没编：Mac 上交叉编译缺 C 头文件，`ring` 编不过。草稿笔记在 `docs/superpowers/plans/notes/2026-11-26-windows-a-draft-notes.md`，验证的人先看它的第 6、7 节。
 
-- **已合进本机 `main`，这次合并不发版。** `main` 的文件里只有 Mac 不编译的部分：`rust/host-windows/`、`rust/svc-windows/`（都不在 `rust/Cargo.toml` 的成员表里）、`scripts/check-windows.ps1`、`scripts/stage-windows.ps1`、`.gitattributes` 和文档。Mac 编译的文件和合并前一个字节都不差，所以不影响 macOS 和 iOS 发版。
-- **接线不在 `main` 的文件里。** 对已有 crate 的改动（约 55 个文件）在提交 `118b1f72` 里撤下了，它们在 `main` 的历史里。分支 `feat/windows-foundation` 上已经把这个提交还原好，验证的人直接在分支上编译、修。
-- **接线进 `main` 的条件**：Mac 门禁全绿，Windows 门禁（`scripts\check-windows.ps1`）全绿，再照常合并。那一次合并改的是共用代码，算 macOS 的改动。
+- **接线已合进本机 `main`（2026-11-27）。** 用户定的：Mac 门禁绿了就合，不等 Windows 门禁。对已有 crate 的改动（约 55 个文件）、`rust/host-windows/` 和 `rust/svc-windows/` 进成员表，都在 `main` 里了。这次合并改的是共用代码，算 macOS 的改动。
+- **Windows 那一支没验过。** `cfg(windows)` 里的代码在 Mac 上编不到，`scripts\check-windows.ps1` 一次都没跑过；`CLAUDE.md` 说这类代码要先过 Windows 门禁再合并，这一次是用户知情后放行的例外。Windows 机器装好后的第一件事就是在 `main` 上跑它，红了在 Windows 上修，按 `CLAUDE.md` 的 Windows 集成 session 推回来。
+- **Linux 那一支也没编过。** 动到 Linux 专有代码的只有 `rust/service/src/instance.rs`（加了几处 `#[cfg(target_os = "linux")]`，在 Linux 上不改变编进去的东西）和 testkit `service.rs` 里两处条件（Linux 上值不变）。Linux 的 session 下次合并 `origin/main` 时编一遍。
 
 - A 段做完后，一台 Windows 机器能：编出全部 Rust crate（`rapp-relay`、`rapp-host-linux`、`rapp-client-gtk`、`rapp-hub-ffi` 除外）、跑过测试和 clippy（`scripts\check-windows.ps1`）、编出 Flutter 界面、用 `scripts\stage-windows.ps1` 摆出开发用的版本目录、从 `bin\rapp.exe` 启动界面、当控制端连别的设备。
 - 还不能：当被控端（没有 `rapp-host`，D 段）、开文本终端（E 段）、自己升级（G 段）、有监督程序和系统服务（`rapp-svc`，C 段）、语音（H 段）、安装包（G 段）。
