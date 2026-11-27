@@ -732,7 +732,8 @@ void main() {
       await tester.pumpWidget(bar(tsess, width: 900));
       expect(ph('phrase-0'), findsOneWidget);
       expect(find.text('继续'), findsOneWidget);
-      expect(ph('phrases-all'), findsOneWidget);
+      expect(ph('quick-menu-keys'), findsOneWidget);
+      expect(ph('quick-menu-phrases'), findsOneWidget);
       expect(tester.getSize(find.byType(KeyBar)).height, 90);
       s.setPhraseStrip(false);
       await tester.pump();
@@ -749,11 +750,16 @@ void main() {
       expect(ph('phrase-0'), findsOneWidget);
     });
 
-    iosTest('no phrases: no strip', (tester) async {
+    iosTest('no phrases: the strip still shows, its two menus alone', (tester) async {
       s.setStripItems(const []);
-      expect(phraseStripShown(s, tsess), isFalse);
-      s.setStripItems(defaultPhrases);
+      s.setKeyActions(const []);
       expect(phraseStripShown(s, tsess), isTrue);
+      await tester.pumpWidget(bar(tsess, width: 900));
+      expect(ph('phrase-0'), findsNothing);
+      expect(ph('quick-menu-phrases'), findsOneWidget);
+      expect(tester.getSize(find.byType(KeyBar)).height, 90);
+      s.setPhraseStrip(false);
+      expect(phraseStripShown(s, tsess), isFalse);
     });
 
     for (final platform in [TargetPlatform.iOS, TargetPlatform.macOS, TargetPlatform.linux]) {
@@ -787,33 +793,36 @@ void main() {
       await tester.pump(phraseRepeatWindow);
     });
 
-    iosTest('long press: 移到最前 and 删除, nothing sent', (tester) async {
+    iosTest('long press: 打星 and 删除, nothing sent', (tester) async {
       await tester.pumpWidget(bar(tsess, width: 900));
       term.calls.clear();
       await tester.longPress(ph('phrase-1'));
       await tester.pumpAndSettle();
-      await tester.tap(ph('phrase-menu-first'));
+      await tester.tap(ph('phrase-menu-star'));
       await tester.pumpAndSettle();
-      expect((s.quick.phrases.first as Phrase).text, '确认');
-      await tester.longPress(ph('phrase-0'));
+      expect(s.quick.stars, ['p:${(s.quick.phrases[1] as Phrase).id}']);
+      expect(ph('phrase-0'), findsNothing, reason: 'a star: the row is the starred alone');
+      await tester.longPress(ph('phrase-1'));
       await tester.pumpAndSettle();
       await tester.tap(ph('phrase-menu-delete'));
       await tester.pumpAndSettle();
       expect((s.quick.phrases.first as Phrase).text, '继续');
       expect(s.quick.phrases, hasLength(_oldTen.length - 1));
+      expect(s.quick.stars, isEmpty);
+      expect(ph('phrase-0'), findsOneWidget);
       expect(term.calls.where((c) => c.$1 != 'composer'), isEmpty);
     });
 
-    iosTest('全部 ›: the whole list; a tap sends and closes it', (tester) async {
+    iosTest('常用语▾: the whole list; a tap sends and closes it', (tester) async {
       app.setProfile(const ResolvedProfile(phrases: true));
       await tester.pumpWidget(bar(app));
-      await tester.tap(ph('phrases-all'));
+      await tester.tap(ph('quick-menu-phrases'));
       await tester.pumpAndSettle();
-      expect(ph('phrases-all-9'), findsOneWidget);
+      expect(ph('menu-p-9'), findsOneWidget);
       port.calls.clear();
-      await tester.tap(ph('phrases-all-2'));
+      await tester.tap(ph('menu-p-2'));
       await tester.pumpAndSettle();
-      expect(ph('phrases-all-2'), findsNothing);
+      expect(ph('menu-p-2'), findsNothing);
       expect(port.calls.where((c) => c.$1 == 'composer_send').single.$2.toString(), contains('听你的'));
       await tester.pump(phraseRepeatWindow);
     });

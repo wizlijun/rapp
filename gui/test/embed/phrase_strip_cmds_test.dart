@@ -82,12 +82,18 @@ void main() {
       child: PhraseStrip(state: s, session: rs, port: rs == tsess ? term : port)));
   Finder ph(String id) => find.byKey(Key(id));
 
-  iosTest('claude in front: the first six are commands, with 「命令：」 semantics', (tester) async {
+  iosTest('claude in front: the commands come first, with 「命令：」 semantics', (tester) async {
     await tester.pumpWidget(strip(tsess));
+    // Nothing counted yet: the five commands lead the row, then the phrases; 搜历史 is a 按键动作 now, not among them.
     expect(find.descendant(of: ph('phrase-0'), matching: find.text('新对话')), findsOneWidget);
-    expect(find.descendant(of: ph('phrase-5'), matching: find.text('搜历史')), findsOneWidget);
-    expect(find.descendant(of: ph('phrase-6'), matching: find.text('继续')), findsOneWidget);
+    expect(find.descendant(of: ph('phrase-4'), matching: find.text('用量')), findsOneWidget);
+    expect(find.descendant(of: ph('phrase-5'), matching: find.text('继续')), findsOneWidget);
+    final xs = [for (var i = 0; i <= 5; i++) tester.getTopLeft(ph('phrase-$i')).dx];
+    expect(xs, [...xs]..sort());
+    expect(xs.first, tester.getTopLeft(ph('phrase-strip-list')).dx);
     expect(find.bySemanticsLabel('命令：新对话'), findsOneWidget);
+    expect(find.descendant(of: ph('phrase-strip-list'), matching: find.text('搜历史')), findsNothing,
+        reason: 'the key actions come after the phrases, out of sight at this width');
   });
 
   iosTest('back to the shell: commands go, the first is 继续, the bar is as high', (tester) async {
@@ -101,12 +107,18 @@ void main() {
     expect(keyBarHeightOf(s, tsess), h);
   });
 
-  iosTest('phraseStripShown: commands only show with a tool in front', (tester) async {
+  iosTest('phraseStripShown: commands only and no tool in front: the strip shows, its commands do not', (tester) async {
     s.setStripItems([for (final c in defaultStripItems.whereType<StripCmd>()) c]);
     fg('zsh', shell: true);
-    expect(phraseStripShown(s, tsess), isFalse);
+    expect(phraseStripShown(s, tsess), isTrue, reason: 'the two menus are of use alone (quick-row §5.1)');
+    await tester.pumpWidget(strip(tsess));
+    expect(find.text('新对话'), findsNothing);
+    expect(ph('quick-menu-phrases'), findsOneWidget);
     fg('claude');
+    s.setStripItems(List.of(s.quick.phrases)); // notify
+    await tester.pump();
     expect(phraseStripShown(s, tsess), isTrue);
+    expect(find.descendant(of: ph('phrase-0'), matching: find.text('新对话')), findsOneWidget);
   });
 
   iosTest('Codex without 新对话: grey, and a tap says so', (tester) async {
@@ -121,27 +133,31 @@ void main() {
     await tester.pump(const Duration(seconds: 5));
   });
 
-  iosTest('long press on a command: 编辑 · 移到最前 · 删除 only; 移到最前 and 删除 keep the order', (tester) async {
+  iosTest('long press on a command: 编辑 · 打星 · 删除 (移到最前 once starred); 打星 and 删除 keep the order', (tester) async {
     await tester.pumpWidget(strip(tsess));
     await tester.longPress(ph('phrase-2'));
     await tester.pumpAndSettle();
     expect(ph('phrase-menu-put'), findsNothing);
     expect(ph('phrase-menu-edit'), findsOneWidget);
-    await tester.tap(ph('phrase-menu-first'));
+    expect(ph('phrase-menu-first'), findsNothing);
+    await tester.tap(ph('phrase-menu-star'));
     await tester.pumpAndSettle();
-    expect((s.quick.phrases.first as StripCmd).id, 'compact');
-    expect((s.quick.phrases[1] as StripCmd).id, 'new');
-    await tester.longPress(ph('phrase-0'));
+    expect(s.quick.stars, ['p:compact']);
+    expect((s.quick.phrases.first as StripCmd).id, 'new', reason: 'a star leaves the list as it was');
+    await tester.longPress(ph('phrase-2'));
     await tester.pumpAndSettle();
+    expect(ph('phrase-menu-first'), findsOneWidget);
     await tester.tap(ph('phrase-menu-delete'));
     await tester.pumpAndSettle();
     expect((s.quick.phrases.first as StripCmd).id, 'new');
+    expect((s.quick.phrases[2] as StripCmd).id, 'resume');
     expect(s.quick.phrases.whereType<StripCmd>(), hasLength(4)); // five without 搜历史 (quick-row), one deleted
+    expect(s.quick.stars, isEmpty);
   });
 
-  iosTest('全部 ›: lists commands when a tool is recognised, none under zsh', (tester) async {
+  iosTest('常用语▾: lists commands when a tool is recognised, none under zsh', (tester) async {
     await tester.pumpWidget(strip(tsess));
-    await tester.tap(ph('phrases-all'));
+    await tester.tap(ph('quick-menu-phrases'));
     await tester.pumpAndSettle();
     expect(find.descendant(of: find.byType(ListTile), matching: find.text('新对话')), findsOneWidget);
     Navigator.of(tester.element(find.byType(ListTile).first)).pop();
@@ -149,7 +165,7 @@ void main() {
     fg('zsh', shell: true);
     s.setStripItems(List.of(s.quick.phrases));
     await tester.pump();
-    await tester.tap(ph('phrases-all'));
+    await tester.tap(ph('quick-menu-phrases'));
     await tester.pumpAndSettle();
     expect(find.descendant(of: find.byType(ListTile), matching: find.text('新对话')), findsNothing);
     expect(find.descendant(of: find.byType(ListTile), matching: find.text('继续')), findsOneWidget);
@@ -162,7 +178,8 @@ void main() {
     expect(find.descendant(of: ph('phrase-5'), matching: find.text('继续')), findsOneWidget); // 搜历史 is a 按键动作 now
   });
 
-  testWidgets('linux desktop KeyBar sends tool commands and Ctrl-R while preserving TextField caret', (tester) async {
+  testWidgets('linux desktop KeyBar sends tool commands, and Ctrl-R from the 搜历史 key action, while preserving TextField caret',
+      (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
     try {
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (c) async => null);
@@ -193,28 +210,34 @@ void main() {
       expect(ctl.selection, const TextSelection(baseOffset: 1, extentOffset: 3));
 
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 1050)));
-      // Claude Code: 搜历史 sends Ctrl-R over TermSessionPort.
-      await tester.tap(ph('phrase-5'));
+      // Claude Code: the 搜历史 key action (after the commands and phrases) sends Ctrl-R over TermSessionPort.
+      final list = find.descendant(of: ph('phrase-strip-list'), matching: find.byType(Scrollable));
+      await tester.scrollUntilVisible(ph('keyact-search'), 200, scrollable: list);
+      await tester.pump();
+      await tester.tap(ph('keyact-search'));
       await tester.pump();
       expect(term.calls.where((c) => c.$1 == 'keys').last.$2['keys'], ['Ctrl-R']);
       expect(focus.hasFocus, isTrue);
+      expect(ctl.selection, const TextSelection(baseOffset: 1, extentOffset: 3));
 
       await tester.pump(const Duration(seconds: 3));
-      // Antigravity (agy) on Linux: 搜历史 is unsupported -> greyed + hint; bash shell hides commands.
+      // Antigravity (agy) on Linux: 搜历史 is unsupported -> off the row, the next key action stays; bash hides commands.
       fg('agy');
       s.setStripItems(List.of(s.quick.phrases));
       await tester.pump();
-      await tester.tap(ph('phrase-5'));
-      await tester.pump();
-      expect(tester.widget<Text>(ph('phrase-hint')).data, 'Antigravity 没有这个命令');
-      await tester.pump(const Duration(seconds: 5));
+      expect(ph('keyact-search'), findsNothing);
+      expect(ph('keyact-mode'), findsOneWidget);
+      expect(focus.hasFocus, isTrue);
 
       fg('bash', shell: true);
       s.setStripItems(List.of(s.quick.phrases));
       await tester.pump();
       expect(find.text('新对话'), findsNothing);
-      expect(find.descendant(of: ph('phrase-6'), matching: find.text('继续')), findsOneWidget);
+      // No tool in front: the plain ⌃R is back, and first, since it was used once (the list changed, so it was re-counted).
+      await tester.scrollUntilVisible(ph('keyact-search'), -200, scrollable: list);
+      expect(tester.getTopLeft(ph('keyact-search')).dx, lessThan(tester.getTopLeft(ph('phrase-5')).dx));
       expect(focus.hasFocus, isTrue);
+      expect(ctl.selection, const TextSelection(baseOffset: 1, extentOffset: 3));
     } finally {
       tester.view.reset();
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null);

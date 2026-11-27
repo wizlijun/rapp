@@ -51,14 +51,11 @@ bool typedIntoPicture(MainState state, RemoteSession session, KeyEvent e) =>
     !session.composer.editorFocused &&
     state.voiceMouseHold != session.sid;
 
-/// Whether the 常用语条 tops the bar (phrases spec §2): 显示常用语条 on, something to show (a phrase, or a command with a
-/// tool in front), a text terminal or an app whose profile has 常用语条 on. Whether the quick area is folded is not its business.
-bool phraseStripShown(MainState state, RemoteSession session) {
-  final p = state.prefs;
-  if (!p.phraseStrip || !(_isTerm(state, session) || session.profile.phrases)) return false;
-  final l = state.quick.phrases;
-  return l.any((i) => i is Phrase) || (l.isNotEmpty && state.stripToolOf(session) != null);
-}
+/// Whether the 常用语条 tops the bar (phrases spec §2, quick-row spec §5.1): 显示常用语条 on, and a text terminal or an
+/// app whose profile has 常用语条 on. It need not have a chip to show: its two menus are of use alone. Whether the quick
+/// area is folded is not its business.
+bool phraseStripShown(MainState state, RemoteSession session) =>
+    state.prefs.phraseStrip && (_isTerm(state, session) || session.profile.phrases);
 
 /// How high the bar is, with the modes now on (the 常用语条 included).
 double keyBarHeightOf(MainState state, RemoteSession session) =>
