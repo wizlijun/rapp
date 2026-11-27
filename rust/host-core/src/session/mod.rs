@@ -13,6 +13,7 @@ mod hints;
 mod input;
 pub mod intake;
 pub mod server;
+#[allow(clippy::module_inception)] // `session::session::Session`, Swift's `Server` session
 pub mod session;
 mod side;
 pub mod tracker;

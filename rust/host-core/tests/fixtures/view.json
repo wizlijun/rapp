@@ -1,0 +1,794 @@
+[
+  {
+    "in" : {
+      "display" : {
+        "height" : 900,
+        "width" : 1440
+      },
+      "fn" : "view_region",
+      "view" : null,
+      "windows" : [
+        {
+          "focused" : false,
+          "id" : 1,
+          "kind" : 0,
+          "parent" : 0,
+          "rect" : {
+            "h" : 600,
+            "w" : 800,
+            "x" : 100,
+            "y" : 50
+          },
+          "resizable" : true,
+          "title" : "w1",
+          "title_bar" : 28
+        }
+      ]
+    },
+    "name" : "view none",
+    "out" : {
+      "h" : 608,
+      "w" : 808,
+      "x" : 96,
+      "y" : 48
+    }
+  },
+  {
+    "in" : {
+      "display" : {
+        "height" : 900,
+        "width" : 1440
+      },
+      "fn" : "view_region",
+      "view" : {
+        "rect" : {
+          "h" : 10,
+          "w" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        "window" : 0
+      },
+      "windows" : [
+        {
+          "focused" : false,
+          "id" : 1,
+          "kind" : 0,
+          "parent" : 0,
+          "rect" : {
+            "h" : 600,
+            "w" : 800,
+            "x" : 100,
+            "y" : 50
+          },
+          "resizable" : true,
+          "title" : "w1",
+          "title_bar" : 28
+        }
+      ]
+    },
+    "name" : "view window zero",
+    "out" : {
+      "h" : 608,
+      "w" : 808,
+      "x" : 96,
+      "y" : 48
+    }
+  },
+  {
+    "in" : {
+      "display" : {
+        "height" : 900,
+        "width" : 1440
+      },
+      "fn" : "view_region",
+      "view" : {
+        "rect" : {
+          "h" : 10,
+          "w" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        "window" : 99
+      },
+      "windows" : [
+        {
+          "focused" : false,
+          "id" : 1,
+          "kind" : 0,
+          "parent" : 0,
+          "rect" : {
+            "h" : 600,
+            "w" : 800,
+            "x" : 100,
+            "y" : 50
+          },
+          "resizable" : true,
+          "title" : "w1",
+          "title_bar" : 28
+        }
+      ]
+    },
+    "name" : "view unknown window",
+    "out" : {
+      "h" : 608,
+      "w" : 808,
+      "x" : 96,
+      "y" : 48
+    }
+  },
+  {
+    "in" : {
+      "display" : {
+        "height" : 900,
+        "width" : 1440
+      },
+      "fn" : "view_region",
+      "view" : {
+        "rect" : {
+          "h" : 120,
+          "w" : 160,
+          "x" : 200,
+          "y" : 100
+        },
+        "window" : 1
+      },
+      "windows" : [
+        {
+          "focused" : false,
+          "id" : 1,
+          "kind" : 0,
+          "parent" : 0,
+          "rect" : {
+            "h" : 600,
+            "w" : 800,
+            "x" : 100,
+            "y" : 50
+          },
+          "resizable" : true,
+          "title" : "w1",
+          "title_bar" : 28
+        }
+      ]
+    },
+    "name" : "view rect on canvas",
+    "out" : {
+      "h" : 128,
+      "w" : 168,
+      "x" : 296,
+      "y" : 176
+    }
+  },
+  {
+    "in" : {
+      "display" : {
+        "height" : 900,
+        "width" : 1440
+      },
+      "fn" : "view_region",
+      "view" : {
+        "rect" : {
+          "h" : 120,
+          "w" : 160,
+          "x" : 200,
+          "y" : 100
+        },
+        "window" : 1
+      },
+      "windows" : [
+        {
+          "focused" : false,
+          "id" : 1,
+          "kind" : 0,
+          "parent" : 0,
+          "rect" : {
+            "h" : 600,
+            "w" : 800,
+            "x" : 100,
+            "y" : 50
+          },
+          "resizable" : true,
+          "title" : "w1",
+          "title_bar" : 28
+        },
+        {
+          "focused" : false,
+          "id" : 2,
+          "kind" : 5,
+          "parent" : 1,
+          "rect" : {
+            "h" : 300,
+            "w" : 200,
+            "x" : 700,
+            "y" : 400
+          },
+          "resizable" : true,
+          "title" : "w2",
+          "title_bar" : 0
+        },
+        {
+          "focused" : false,
+          "id" : 3,
+          "kind" : 5,
+          "parent" : 5,
+          "rect" : {
+            "h" : 100,
+            "w" : 100,
+            "x" : 20,
+            "y" : 700
+          },
+          "resizable" : true,
+          "title" : "w3",
+          "title_bar" : 0
+        }
+      ]
+    },
+    "name" : "view takes child popups",
+    "out" : {
+      "h" : 528,
+      "w" : 608,
+      "x" : 296,
+      "y" : 176
+    }
+  },
+  {
+    "in" : {
+      "display" : {
+        "height" : 900,
+        "width" : 1440
+      },
+      "fn" : "view_region",
+      "view" : {
+        "rect" : {
+          "h" : 100,
+          "w" : 100,
+          "x" : 20,
+          "y" : 0
+        },
+        "window" : 1
+      },
+      "windows" : [
+        {
+          "focused" : false,
+          "id" : 1,
+          "kind" : 0,
+          "parent" : 0,
+          "rect" : {
+            "h" : 600,
+            "w" : 800,
+            "x" : -200,
+            "y" : 50
+          },
+          "resizable" : true,
+          "title" : "w1",
+          "title_bar" : 28
+        }
+      ]
+    },
+    "name" : "view off display",
+    "out" : {
+      "h" : 608,
+      "w" : 600,
+      "x" : 0,
+      "y" : 48
+    }
+  },
+  {
+    "in" : {
+      "display" : {
+        "height" : 900,
+        "width" : 1440
+      },
+      "fn" : "view_region",
+      "view" : {
+        "rect" : {
+          "h" : 100,
+          "w" : 200,
+          "x" : 150,
+          "y" : 0
+        },
+        "window" : 1
+      },
+      "windows" : [
+        {
+          "focused" : false,
+          "id" : 1,
+          "kind" : 0,
+          "parent" : 0,
+          "rect" : {
+            "h" : 600,
+            "w" : 800,
+            "x" : -200,
+            "y" : 50
+          },
+          "resizable" : true,
+          "title" : "w1",
+          "title_bar" : 28
+        }
+      ]
+    },
+    "name" : "view clipped to display",
+    "out" : {
+      "h" : 112,
+      "w" : 152,
+      "x" : 0,
+      "y" : 72
+    }
+  },
+  {
+    "in" : {
+      "display" : {
+        "height" : 900,
+        "width" : 1440
+      },
+      "fn" : "view_region",
+      "view" : {
+        "rect" : {
+          "h" : 10,
+          "w" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        "window" : 1
+      },
+      "windows" : [
+
+      ]
+    },
+    "name" : "view no windows",
+    "out" : null
+  },
+  {
+    "in" : {
+      "display" : {
+        "height" : 1,
+        "width" : 1
+      },
+      "fn" : "view_region",
+      "view" : {
+        "rect" : {
+          "h" : 10,
+          "w" : 10,
+          "x" : 0,
+          "y" : 0
+        },
+        "window" : 1
+      },
+      "windows" : [
+        {
+          "focused" : false,
+          "id" : 1,
+          "kind" : 0,
+          "parent" : 0,
+          "rect" : {
+            "h" : 600,
+            "w" : 800,
+            "x" : 100,
+            "y" : 50
+          },
+          "resizable" : true,
+          "title" : "w1",
+          "title_bar" : 28
+        }
+      ]
+    },
+    "name" : "view 1x1 display",
+    "out" : null
+  },
+  {
+    "in" : {
+      "display" : {
+        "height" : 900,
+        "width" : 1440
+      },
+      "fn" : "view_region",
+      "view" : {
+        "rect" : {
+          "h" : 0,
+          "w" : 0,
+          "x" : 0,
+          "y" : 0
+        },
+        "window" : 1
+      },
+      "windows" : [
+        {
+          "focused" : false,
+          "id" : 1,
+          "kind" : 0,
+          "parent" : 0,
+          "rect" : {
+            "h" : 600,
+            "w" : 800,
+            "x" : 100,
+            "y" : 50
+          },
+          "resizable" : true,
+          "title" : "w1",
+          "title_bar" : 28
+        }
+      ]
+    },
+    "name" : "view zero rect",
+    "out" : {
+      "h" : 608,
+      "w" : 808,
+      "x" : 96,
+      "y" : 48
+    }
+  },
+  {
+    "in" : {
+      "fn" : "view_for",
+      "rect" : {
+        "h" : 150,
+        "w" : 200,
+        "x" : 100,
+        "y" : 100
+      },
+      "window" : 0
+    },
+    "name" : "view for 0",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "view_for",
+      "rect" : {
+        "h" : 150,
+        "w" : 200,
+        "x" : 100,
+        "y" : 100
+      },
+      "window" : 1
+    },
+    "name" : "view for 1",
+    "out" : {
+      "rect" : {
+        "h" : 150,
+        "w" : 200,
+        "x" : 100,
+        "y" : 100
+      },
+      "window" : 1
+    }
+  },
+  {
+    "in" : {
+      "fn" : "view_for",
+      "rect" : {
+        "h" : 150,
+        "w" : 200,
+        "x" : 100,
+        "y" : 100
+      },
+      "window" : 7
+    },
+    "name" : "view for 7",
+    "out" : {
+      "rect" : {
+        "h" : 150,
+        "w" : 200,
+        "x" : 100,
+        "y" : 100
+      },
+      "window" : 7
+    }
+  },
+  {
+    "in" : {
+      "current" : {
+        "h" : 608,
+        "w" : 808,
+        "x" : 96,
+        "y" : 48
+      },
+      "display" : {
+        "height" : 900,
+        "width" : 1440
+      },
+      "fn" : "region_change",
+      "view" : {
+        "rect" : {
+          "h" : 150,
+          "w" : 200,
+          "x" : 100,
+          "y" : 100
+        },
+        "window" : 1
+      },
+      "windows" : [
+        {
+          "focused" : false,
+          "id" : 1,
+          "kind" : 0,
+          "parent" : 0,
+          "rect" : {
+            "h" : 600,
+            "w" : 800,
+            "x" : 100,
+            "y" : 50
+          },
+          "resizable" : true,
+          "title" : "w1",
+          "title_bar" : 28
+        }
+      ]
+    },
+    "name" : "change set view",
+    "out" : {
+      "h" : 152,
+      "w" : 200,
+      "x" : 200,
+      "y" : 176
+    }
+  },
+  {
+    "in" : {
+      "current" : {
+        "h" : 152,
+        "w" : 200,
+        "x" : 200,
+        "y" : 176
+      },
+      "display" : {
+        "height" : 900,
+        "width" : 1440
+      },
+      "fn" : "region_change",
+      "view" : {
+        "rect" : {
+          "h" : 150,
+          "w" : 200,
+          "x" : 100,
+          "y" : 100
+        },
+        "window" : 1
+      },
+      "windows" : [
+        {
+          "focused" : false,
+          "id" : 1,
+          "kind" : 0,
+          "parent" : 0,
+          "rect" : {
+            "h" : 600,
+            "w" : 800,
+            "x" : 100,
+            "y" : 50
+          },
+          "resizable" : true,
+          "title" : "w1",
+          "title_bar" : 28
+        },
+        {
+          "focused" : false,
+          "id" : 2,
+          "kind" : 5,
+          "parent" : 1,
+          "rect" : {
+            "h" : 200,
+            "w" : 300,
+            "x" : 400,
+            "y" : 120
+          },
+          "resizable" : true,
+          "title" : "w2",
+          "title_bar" : 0
+        }
+      ]
+    },
+    "name" : "change table with same view",
+    "out" : {
+      "h" : 208,
+      "w" : 504,
+      "x" : 200,
+      "y" : 120
+    }
+  },
+  {
+    "in" : {
+      "current" : {
+        "h" : 208,
+        "w" : 504,
+        "x" : 200,
+        "y" : 120
+      },
+      "display" : {
+        "height" : 900,
+        "width" : 1440
+      },
+      "fn" : "region_change",
+      "view" : {
+        "rect" : {
+          "h" : 150,
+          "w" : 200,
+          "x" : 100,
+          "y" : 100
+        },
+        "window" : 1
+      },
+      "windows" : [
+        {
+          "focused" : false,
+          "id" : 1,
+          "kind" : 0,
+          "parent" : 0,
+          "rect" : {
+            "h" : 600,
+            "w" : 800,
+            "x" : 100,
+            "y" : 50
+          },
+          "resizable" : true,
+          "title" : "w1",
+          "title_bar" : 28
+        },
+        {
+          "focused" : false,
+          "id" : 2,
+          "kind" : 5,
+          "parent" : 1,
+          "rect" : {
+            "h" : 200,
+            "w" : 300,
+            "x" : 400,
+            "y" : 120
+          },
+          "resizable" : true,
+          "title" : "w2",
+          "title_bar" : 0
+        }
+      ]
+    },
+    "name" : "change nothing new",
+    "out" : null
+  },
+  {
+    "in" : {
+      "current" : {
+        "h" : 152,
+        "w" : 200,
+        "x" : 200,
+        "y" : 176
+      },
+      "display" : {
+        "height" : 900,
+        "width" : 1440
+      },
+      "fn" : "region_change",
+      "view" : null,
+      "windows" : [
+        {
+          "focused" : false,
+          "id" : 1,
+          "kind" : 0,
+          "parent" : 0,
+          "rect" : {
+            "h" : 600,
+            "w" : 800,
+            "x" : 100,
+            "y" : 50
+          },
+          "resizable" : true,
+          "title" : "w1",
+          "title_bar" : 28
+        }
+      ]
+    },
+    "name" : "change window zero",
+    "out" : {
+      "h" : 608,
+      "w" : 808,
+      "x" : 96,
+      "y" : 48
+    }
+  },
+  {
+    "in" : {
+      "current" : null,
+      "display" : {
+        "height" : 900,
+        "width" : 1440
+      },
+      "fn" : "region_change",
+      "view" : {
+        "rect" : {
+          "h" : 150,
+          "w" : 200,
+          "x" : 100,
+          "y" : 100
+        },
+        "window" : 1
+      },
+      "windows" : [
+
+      ]
+    },
+    "name" : "change no region",
+    "out" : null
+  },
+  {
+    "in" : {
+      "current" : null,
+      "display" : {
+        "height" : 900,
+        "width" : 1440
+      },
+      "fn" : "region_change",
+      "view" : null,
+      "windows" : [
+        {
+          "focused" : false,
+          "id" : 1,
+          "kind" : 0,
+          "parent" : 0,
+          "rect" : {
+            "h" : 600,
+            "w" : 800,
+            "x" : 100,
+            "y" : 50
+          },
+          "resizable" : true,
+          "title" : "w1",
+          "title_bar" : 28
+        }
+      ]
+    },
+    "name" : "change from nil current",
+    "out" : {
+      "h" : 608,
+      "w" : 808,
+      "x" : 96,
+      "y" : 48
+    }
+  },
+  {
+    "in" : {
+      "current" : {
+        "h" : 900,
+        "w" : 1440,
+        "x" : 0,
+        "y" : 0
+      },
+      "display" : {
+        "height" : 900,
+        "width" : 1440
+      },
+      "fn" : "region_change",
+      "view" : {
+        "rect" : {
+          "h" : 150,
+          "w" : 200,
+          "x" : 100,
+          "y" : 100
+        },
+        "window" : 1
+      },
+      "windows" : [
+        {
+          "focused" : true,
+          "id" : 1,
+          "kind" : 0,
+          "parent" : 0,
+          "rect" : {
+            "h" : 900,
+            "w" : 1440,
+            "x" : 0,
+            "y" : 0
+          },
+          "resizable" : false,
+          "title" : "屏幕 1",
+          "title_bar" : 0
+        }
+      ]
+    },
+    "name" : "change desktop honours set view",
+    "out" : {
+      "h" : 160,
+      "w" : 208,
+      "x" : 96,
+      "y" : 96
+    }
+  }
+]

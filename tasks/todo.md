@@ -1471,12 +1471,20 @@ macOS、Linux、Duo、iPad 各一遍。
 用户：「快捷键盘 more 栏里去掉一个不常用的，增加一个 cmd+T 放在第三个，再插入一个单独的 cmd、单独的 Ctl 键，按下后是按下状态，等用户输入其他字符做组合输入。后面那些 ctrl 的组合键可以都去掉了。」用户定的：去掉 ⌥；第一行的 ⌃ 挪到第二行；终端里 ⌘ + 字母当 rApp 快捷键。设计 `docs/superpowers/specs/2026-11-27-rapp-bar-cmd-design.md`。
 
 - [x] 第一行 `Tab ⇧Tab Esc ⌃C ↑ ↓ ⌫ ⏎ ⋯ ⌄`，第二行 `⌘C ⌘V ⌘T ⌘ ⌃ ← →`（终端、应用一样）；⌘T 键在终端里走舞台的 ⌘T（等候卡片），在应用里发 ⌘T；终端里亮着的 ⌘ + 字母走舞台的 `termCommand`（C 复制、V 粘贴、T 新建、W 结束，其它不发）；收起第二行松开亮着的 ⌃ ⌘。⌃R 等留在常用语条命令里。收起松开、舞台 ⌘ 路径、⌘ 字母三处做过"去掉就失败"；flutter analyze 通过；全量只剩 `linux_detach_test` 2 条（main 上同样失败）
-- [ ] 1 iPad / 手机文本终端，点 ⋯：第二行从左到右是 ⌘C ⌘V ⌘T ⌘ ⌃ ← →，没有 ⌥ 和 ⌃O ⌃R ⌃T ⌃B ⌃L；第一行没有 ⌃
+- [ ] 1 iPad / 手机文本终端，点 ⋯：第二行从左到右是 ⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →，没有 ⌥ 和 ⌃O ⌃R ⌃T ⌃B ⌃L；第一行没有 ⌃
 - [ ] 2 终端里点 ⌘T：旁边开出新终端，等候卡片照常出现
 - [ ] 3 终端里点 ⌘（亮），再在写作版或实体键盘打 t：开新终端，⌘ 熄灭，终端里没有打进 t；打 w：问是否结束（能结束的设备上）；打 x：什么也没发生，⌘ 熄灭
 - [ ] 4 终端里点 ⌃（亮），打 r：发出 Ctrl-R（claude 里翻历史），⌃ 熄灭；双击 ⌃ 锁住，连打两个字母都是 Ctrl
 - [ ] 5 应用会话（如 Safari）里点 ⌘T：被控 Mac 上开新标签页；点 ⌘ 再打 l：地址栏选中
 - [ ] 6 ⌃ 或 ⌘ 亮着时再点 ⋯ 收起第二行：键熄灭，下一个字母照常打字（应用里被控 Mac 不再按着 ⌃/⌘）
+- [x] 追加（`feat/bar-pgup`）：第二行末尾 PgUp PgDn；终端普通屏幕翻 rApp 历史（一屏少一行），全屏程序里发给程序，⌃/⌘ 亮着照常发键，应用里发 116/121。快捷区和终端画面两处做过"去掉就失败"；全量只剩 `linux_detach_test` 2 条
+- [ ] 7 iPhone Duo / iPad 文本终端（shell 或 claude）里输出很多行后点 PgUp：往上翻一屏，能看到更早的输出，连点继续往上；点 PgDn 翻回去，到底回到最新
+- [ ] 8 终端里开 `less` 或 vim：PgUp/PgDn 由程序自己翻页
+- [ ] 9 应用会话（如 Safari）里点 PgUp/PgDn：网页上下翻一屏
+- [x] 追加（`feat/quick-one`）：去掉快捷区上的 ⌄（只从开关收起）；第一行 `Tab ⇧Tab Esc ⌃C ⌫ ⏎ ↑ ⋯`，第二行 `⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →`，↓ 对齐在 ↑ 下、→ 在 ⋯ 下；去掉方向键上滑和 Home/End。flutter analyze 通过；全量只剩 `linux_detach_test`（新 worktree 没有 `rapp-session`，main 上同样失败）
+- [ ] 10 iPhone Duo / iPad 上打开快捷区：快捷区上没有 ⌄；收起只能点输入块里的开关，收起后语音、输入旁边的开关还在，点它再打开
+- [ ] 11 点 ⋯：↓ 正好在 ↑ 下面，→ 在 ⋯ 下面，← 在 ↓ 左边；竖屏、横屏、iPad 都对齐
+- [ ] 12 方向键上没有角标；往上滑 ↑ 只发 ↑；按住 ← 连发
 
 ## Linux 0.15.55 版本跟随对齐与发布（2026-11-27）
 
@@ -1521,12 +1529,15 @@ macOS、Linux、Duo、iPad 各一遍。
 
 ## Windows B 段（主机核心）（计划 `docs/superpowers/plans/2026-11-26-rapp-windows-b-host-core.md`，分支 `feat/windows-host-core`，2026-11-27）
 
-现状（2026-11-27）：`rust/host-core` 加上 testkit 里的 `FakePlatform`、`fake-host-core` 都是草稿，**还没在任何机器上编译、没跑过测试**。
+现状（2026-11-27）：在 Mac 上编过、测过，**接线已合进本机 `main`**（用户定的：Mac 门禁绿了就合）。**没在 Windows 上跑过。**
 
-- **已合进本机 `main`，这次合并不发版。** `main` 的文件里只有 `rust/host-core/` 整个目录和文档；`host-core` 不在 `rust/Cargo.toml` 的成员表里，Mac 的门禁和打包看不到它。Mac 编译的文件和合并前一个字节都不差，所以不影响 macOS 和 iOS 发版。
-- **接线不在 `main` 的文件里。** 成员表那一行、`rust/testkit` 里的假平台和两组会话测试、`Tests/RappCoreTests/HostCoreFixtures/` 的 Swift 样本生成器，在提交 `6b27449b` 里撤下了，它们在 `main` 的历史里。分支 `feat/windows-host-core` 上已经把这个提交还原好，验证的人直接在分支上编译、修。
-- **接线进 `main` 的条件**：分支上 Mac 门禁全绿（先生成 Swift 样本：`RAPP_WRITE_FIXTURES=1 swift test --filter 'Fixtures/'`，再跑 `cargo test --workspace`），再照常合并。那一次合并是共用代码，算 macOS 的改动；macOS 版的行为不变，macOS 的被控端还是 Swift 的 `rapp-host`。
-- A、B 两段的接线都改 `rust/Cargo.toml` 的成员表和 `rust/testkit/tests/common/mod.rs`，后合的一方解冲突。
+- `main` 已合进分支（含 A 段接线 `5e39bb91`），成员表里 host-core、host-windows、svc-windows 都在。合并后的树上 Mac 门禁全绿：`cargo test --workspace`、clippy `-D warnings`、`swift test`、`flutter analyze`、`flutter test`（`linux_detach_test` 要先 `cargo build --release -p rapp-client-core --bin rapp-session`）。
+- Swift 样本（`30cdd17a`）全部对上，deflate 和 Swift 逐字节相同（`libz-sys` 原版 zlib，加了 `stock-zlib`）；会话测试 71 个、服务对接 2 个都过。修的地方和逐条原因见 `rust/host-core/PORTING.md` 和分支的提交记录；样本和生成器一个没改。
+- 交接文档 3.2 节剩下的四条：窗口移不动和保持唤醒失败的两行日志已照 Swift 补上（平台接口 `move_to` 返回 bool、`stay_awake` 返回 `Option<String>`，计划同一提交改了）；焦点日志里的控件角色、规则看到的语言、焦点区测试的 8 点误差三条认下，写进 `PORTING.md` 第 4 部分。
+- 接下来：Windows 机器装好后在 `main` 上跑 `scripts\check-windows.ps1`（A、B 两段的接线都在 `main` 里了，不用再到分支上做）。`host-core` 是共用代码，这次合并算 macOS 的改动；macOS 的被控端还是 Swift 的 `rapp-host`，安装包里不带 `host-core`，行为不变。
+- [ ] 计划 B 任务 19 步骤 4：用真的 Mac 控制端连 `fake-host-core` 走一遍。只能用户手工做，还没做。
+- [ ] 分块样本的缺口：把 `tile` 的 `MAX_CANDIDATES` 改成 1 或 2，样本测试照样过，样本里没有一帧用到一个以上滚动候选的例子。要补得给 Swift 生成器加例子再重新生成，由用户定补不补。
+- `wintable::STACK_STEP` 在 Rust 里没人用（Swift 那边是控制端发消息时用的），删不删都行，D 段顺手定。
 
 验证顺序见 `docs/superpowers/plans/notes/2026-11-26-windows-b3-draft-notes.md` §6。下面几项假平台演不出来，要等 D 段有了真的 Windows 平台再到实机上看。交接内容见 `rust/host-core/PORTING.md` 第 5 部分「B 段交接」。
 

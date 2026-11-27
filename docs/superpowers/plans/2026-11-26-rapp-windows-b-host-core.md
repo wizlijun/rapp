@@ -582,13 +582,13 @@ pub struct ClipSnapshot(pub Box<dyn std::any::Any + Send>);
 pub struct OpenedApp { pub id: String, pub name: String, pub pid: i32, pub regular: bool }
 
 pub trait TargetOps: Send { fn alive(&mut self) -> bool; fn name(&self) -> String; fn version(&self) -> Option<String>; fn pid(&self) -> i32; fn display(&mut self) -> DisplayInfo; fn activate(&mut self) -> bool; fn frontmost(&mut self) -> bool; }
-pub trait WindowOps: Send { fn list(&mut self) -> Vec<RawWindow>; fn screen(&mut self) -> Vec<ScreenWindow>; fn raise(&mut self, id: u32); fn close(&mut self, id: u32); fn move_to(&mut self, id: u32, origin: Point); fn resize(&mut self, id: u32, size: Size); fn opened_app(&mut self) -> Option<OpenedApp>; }
+pub trait WindowOps: Send { fn list(&mut self) -> Vec<RawWindow>; fn screen(&mut self) -> Vec<ScreenWindow>; fn raise(&mut self, id: u32); fn close(&mut self, id: u32); fn move_to(&mut self, id: u32, origin: Point) -> bool; fn resize(&mut self, id: u32, size: Size); fn opened_app(&mut self) -> Option<OpenedApp>; }
 pub trait Capture: Send { fn frame(&mut self, region: CanvasRect, density: f32, wait: Duration) -> Result<Option<Frame>, String>; }
 pub trait InputOps: Send { fn mouse(&mut self, kind: MouseKind, button: MouseButton, at: Point, click_count: u8); fn scroll(&mut self, at: Point, dx: f32, dy: f32); fn key(&mut self, key_code: u16, modifiers: u64, down: bool); fn text(&mut self, units: &[u16]); fn paste_key(&mut self); fn release(&mut self, keys: &[u16], buttons: &[MouseButton]); fn blocked_by(&mut self, at: Point) -> Option<String>; }
 pub trait InputSourceOps: Send { fn current(&mut self) -> Option<InputSource>; fn list(&mut self) -> Vec<InputSource>; fn select(&mut self, id: &str) -> bool; fn select_english(&mut self) -> bool; }
 pub trait ClipboardOps: Send { fn change_count(&mut self) -> i64; fn read(&mut self) -> Option<ClipRead>; fn write(&mut self, item: &ReceivedItem) -> Result<i64, String>; fn snapshot(&mut self) -> Option<ClipSnapshot>; fn restore(&mut self, s: ClipSnapshot) -> Option<i64>; }
 pub trait ControlOps: Send { fn focus_chain(&mut self, query: &Query, window: &RawWindow, deadline: QueryDeadline, clock: &dyn Clock) -> Result<Vec<Rect>, PanelMiss>; fn keyboard_changed(&mut self) -> bool; fn secure_focus(&mut self) -> bool; fn cover_at(&mut self, at: Point) -> Option<(i32 /* pid */, String /* id */, bool /* regular */)>; fn close_cover(&mut self, pid: i32, at: Point) -> bool; }
-pub trait LockOps: Send { fn locked(&mut self) -> bool; fn lock(&mut self) -> Option<String>; fn can_unlock(&self) -> bool; fn wake(&mut self); fn type_units(&mut self, units: &[u16]); fn press_return(&mut self); fn stay_awake(&mut self, on: bool); }
+pub trait LockOps: Send { fn locked(&mut self) -> bool; fn lock(&mut self) -> Option<String>; fn can_unlock(&self) -> bool; fn wake(&mut self); fn type_units(&mut self, units: &[u16]); fn press_return(&mut self); fn stay_awake(&mut self, on: bool) -> Option<String>; }
 
 // run.rs
 pub struct WorkerIo { pub stdin: Box<dyn BufRead + Send>, pub stdout: Box<dyn Write + Send>, pub stderr: Box<dyn Write + Send> }

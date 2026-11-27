@@ -124,7 +124,7 @@ pub fn parse_host_arguments(
     env: &dyn Fn(&str) -> Option<String>,
 ) -> Result<HostCommand, CodecError> {
     let subcommand = args.first().map(String::as_str).unwrap_or("");
-    let tail = if args.is_empty() { &args[..] } else { &args[1..] };
+    let tail = if args.is_empty() { args } else { &args[1..] };
     match subcommand {
         "list-apps" | "check" | "version" | "lock" => {
             let bare: &[&str] = if subcommand == "check" { &["--prompt"] } else { &[] };
@@ -530,7 +530,25 @@ pub struct ListedWindow {
 
 /// An approximation of Foundation's `localizedStandardCompare` (Finder order): runs of ASCII
 /// digits compare as numbers, everything else case-insensitively by lower-cased characters.
+/// Foundation forces an order between strings that are only equivalent (`.forcedOrdering`):
+/// at the first character that differs only in case, the lower-case one comes first
+/// ("alpha" before "Alpha", the `cli-events.json` fixture).
 fn standard_compare(a: &str, b: &str) -> Ordering {
+    primary_compare(a, b).then_with(|| {
+        for (x, y) in a.chars().zip(b.chars()) {
+            if x != y {
+                return match (x.is_lowercase(), y.is_lowercase()) {
+                    (true, false) => Ordering::Less,
+                    (false, true) => Ordering::Greater,
+                    _ => x.cmp(&y),
+                };
+            }
+        }
+        a.chars().count().cmp(&b.chars().count())
+    })
+}
+
+fn primary_compare(a: &str, b: &str) -> Ordering {
     fn runs(s: &str) -> Vec<(bool, String)> {
         let mut out: Vec<(bool, String)> = Vec::new();
         for c in s.chars() {

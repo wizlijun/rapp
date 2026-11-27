@@ -1,0 +1,682 @@
+[
+  {
+    "in" : {
+      "app" : "desktop:",
+      "fn" : "desktop_target"
+    },
+    "name" : "target desktop:",
+    "out" : {
+      "kind" : "main"
+    }
+  },
+  {
+    "in" : {
+      "app" : "desktop:69733382",
+      "fn" : "desktop_target"
+    },
+    "name" : "target desktop:69733382",
+    "out" : {
+      "id" : 69733382,
+      "kind" : "display"
+    }
+  },
+  {
+    "in" : {
+      "app" : "desktop:x",
+      "fn" : "desktop_target"
+    },
+    "name" : "target desktop:x",
+    "out" : null
+  },
+  {
+    "in" : {
+      "app" : "desktop:-1",
+      "fn" : "desktop_target"
+    },
+    "name" : "target desktop:-1",
+    "out" : null
+  },
+  {
+    "in" : {
+      "app" : "desktop:99999999999",
+      "fn" : "desktop_target"
+    },
+    "name" : "target desktop:99999999999",
+    "out" : null
+  },
+  {
+    "in" : {
+      "app" : "desktop:１",
+      "fn" : "desktop_target"
+    },
+    "name" : "target desktop:１",
+    "out" : null
+  },
+  {
+    "in" : {
+      "app" : "com.apple.Safari",
+      "fn" : "desktop_target"
+    },
+    "name" : "target com.apple.Safari",
+    "out" : null
+  },
+  {
+    "in" : {
+      "app" : "term:abc",
+      "fn" : "desktop_target"
+    },
+    "name" : "target term:abc",
+    "out" : null
+  },
+  {
+    "in" : {
+      "app" : "desktop:3",
+      "fn" : "desktop_target"
+    },
+    "name" : "target desktop:3",
+    "out" : {
+      "id" : 3,
+      "kind" : "display"
+    }
+  },
+  {
+    "in" : {
+      "app" : "desktop",
+      "fn" : "desktop_target"
+    },
+    "name" : "target desktop",
+    "out" : null
+  },
+  {
+    "in" : {
+      "app" : "desktop:+5",
+      "fn" : "desktop_target"
+    },
+    "name" : "target desktop:+5",
+    "out" : {
+      "id" : 5,
+      "kind" : "display"
+    }
+  },
+  {
+    "in" : {
+      "app" : "desktop:-0",
+      "fn" : "desktop_target"
+    },
+    "name" : "target desktop:-0",
+    "out" : {
+      "id" : 0,
+      "kind" : "display"
+    }
+  },
+  {
+    "in" : {
+      "app" : "desktop:4294967295",
+      "fn" : "desktop_target"
+    },
+    "name" : "target desktop:4294967295",
+    "out" : {
+      "id" : 4294967295,
+      "kind" : "display"
+    }
+  },
+  {
+    "in" : {
+      "app" : "desktop:4294967296",
+      "fn" : "desktop_target"
+    },
+    "name" : "target desktop:4294967296",
+    "out" : null
+  },
+  {
+    "in" : {
+      "app" : "desktop: 1",
+      "fn" : "desktop_target"
+    },
+    "name" : "target desktop: 1",
+    "out" : null
+  },
+  {
+    "in" : {
+      "app" : "desktop:007",
+      "fn" : "desktop_target"
+    },
+    "name" : "target desktop:007",
+    "out" : {
+      "id" : 7,
+      "kind" : "display"
+    }
+  },
+  {
+    "in" : {
+      "app" : "desktop:+",
+      "fn" : "desktop_target"
+    },
+    "name" : "target desktop:+",
+    "out" : null
+  },
+  {
+    "in" : {
+      "app" : "desktop:1 ",
+      "fn" : "desktop_target"
+    },
+    "name" : "target desktop:1 ",
+    "out" : null
+  },
+  {
+    "in" : {
+      "app" : "Desktop:1",
+      "fn" : "desktop_target"
+    },
+    "name" : "target Desktop:1",
+    "out" : null
+  },
+  {
+    "in" : {
+      "app" : "",
+      "fn" : "desktop_target"
+    },
+    "name" : "target ",
+    "out" : null
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 200,
+            "y" : 0
+          },
+          "id" : 3,
+          "main" : false,
+          "name" : "屏幕3"
+        },
+        {
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : -100,
+            "y" : 0
+          },
+          "id" : 2,
+          "main" : false,
+          "name" : "屏幕2"
+        },
+        {
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 0
+          },
+          "id" : 1,
+          "main" : true,
+          "name" : "屏幕1"
+        },
+        {
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 200,
+            "y" : -100
+          },
+          "id" : 4,
+          "main" : false,
+          "name" : "屏幕4"
+        }
+      ],
+      "fn" : "ordered_displays"
+    },
+    "name" : "ordered main then left then top",
+    "out" : [
+      {
+        "frame" : {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 0,
+          "y" : 0
+        },
+        "height" : 1080,
+        "id" : 1,
+        "main" : true,
+        "name" : "屏幕1",
+        "width" : 1920
+      },
+      {
+        "frame" : {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : -100,
+          "y" : 0
+        },
+        "height" : 1080,
+        "id" : 2,
+        "main" : false,
+        "name" : "屏幕2",
+        "width" : 1920
+      },
+      {
+        "frame" : {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 200,
+          "y" : -100
+        },
+        "height" : 1080,
+        "id" : 4,
+        "main" : false,
+        "name" : "屏幕4",
+        "width" : 1920
+      },
+      {
+        "frame" : {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 200,
+          "y" : 0
+        },
+        "height" : 1080,
+        "id" : 3,
+        "main" : false,
+        "name" : "屏幕3",
+        "width" : 1920
+      }
+    ]
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "frame" : {
+            "height" : 981.39999999999998,
+            "width" : 1512.5,
+            "x" : 0,
+            "y" : 0
+          },
+          "id" : 1,
+          "main" : true,
+          "name" : "屏幕1"
+        },
+        {
+          "frame" : {
+            "height" : 0.5,
+            "width" : 0.40000000000000002,
+            "x" : 1512.5,
+            "y" : 0
+          },
+          "id" : 2,
+          "main" : false,
+          "name" : "屏幕2"
+        }
+      ],
+      "fn" : "ordered_displays"
+    },
+    "name" : "ordered rounding",
+    "out" : [
+      {
+        "frame" : {
+          "height" : 981.39999999999998,
+          "width" : 1512.5,
+          "x" : 0,
+          "y" : 0
+        },
+        "height" : 981,
+        "id" : 1,
+        "main" : true,
+        "name" : "屏幕1",
+        "width" : 1513
+      },
+      {
+        "frame" : {
+          "height" : 0.5,
+          "width" : 0.40000000000000002,
+          "x" : 1512.5,
+          "y" : 0
+        },
+        "height" : 1,
+        "id" : 2,
+        "main" : false,
+        "name" : "屏幕2",
+        "width" : 0
+      }
+    ]
+  },
+  {
+    "in" : {
+      "displays" : [
+
+      ],
+      "fn" : "ordered_displays"
+    },
+    "name" : "ordered empty",
+    "out" : [
+
+    ]
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 0
+          },
+          "id" : 9,
+          "main" : false,
+          "name" : "屏幕9"
+        },
+        {
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 0
+          },
+          "id" : 5,
+          "main" : false,
+          "name" : "屏幕5"
+        },
+        {
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 0
+          },
+          "id" : 7,
+          "main" : true,
+          "name" : "屏幕7"
+        }
+      ],
+      "fn" : "ordered_displays"
+    },
+    "name" : "ordered same position by id",
+    "out" : [
+      {
+        "frame" : {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 0,
+          "y" : 0
+        },
+        "height" : 1080,
+        "id" : 7,
+        "main" : true,
+        "name" : "屏幕7",
+        "width" : 1920
+      },
+      {
+        "frame" : {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 0,
+          "y" : 0
+        },
+        "height" : 1080,
+        "id" : 5,
+        "main" : false,
+        "name" : "屏幕5",
+        "width" : 1920
+      },
+      {
+        "frame" : {
+          "height" : 1080,
+          "width" : 1920,
+          "x" : 0,
+          "y" : 0
+        },
+        "height" : 1080,
+        "id" : 9,
+        "main" : false,
+        "name" : "屏幕9",
+        "width" : 1920
+      }
+    ]
+  },
+  {
+    "in" : {
+      "computer" : "Mac mini",
+      "fn" : "desktop_title",
+      "number" : 2
+    },
+    "name" : "title Mac mini 2",
+    "out" : "Mac mini · 屏幕 2"
+  },
+  {
+    "in" : {
+      "computer" : " ",
+      "fn" : "desktop_title",
+      "number" : 1
+    },
+    "name" : "title   1",
+    "out" : "屏幕 1"
+  },
+  {
+    "in" : {
+      "computer" : "  书房 ",
+      "fn" : "desktop_title",
+      "number" : 3
+    },
+    "name" : "title   书房  3",
+    "out" : "书房 · 屏幕 3"
+  },
+  {
+    "in" : {
+      "computer" : "",
+      "fn" : "desktop_title",
+      "number" : 10
+    },
+    "name" : "title  10",
+    "out" : "屏幕 10"
+  },
+  {
+    "in" : {
+      "fn" : "desktop_table",
+      "height" : 982,
+      "title" : "屏幕 1",
+      "width" : 1512
+    },
+    "name" : "table 1512.0x982.0",
+    "out" : [
+      {
+        "focused" : true,
+        "id" : 1,
+        "kind" : 0,
+        "parent" : 0,
+        "rect" : {
+          "h" : 982,
+          "w" : 1512,
+          "x" : 0,
+          "y" : 0
+        },
+        "resizable" : false,
+        "title" : "屏幕 1",
+        "title_bar" : 0
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "desktop_table",
+      "height" : 1,
+      "title" : "Mac mini · 屏幕 2",
+      "width" : 1
+    },
+    "name" : "table 1.0x1.0",
+    "out" : [
+      {
+        "focused" : true,
+        "id" : 1,
+        "kind" : 0,
+        "parent" : 0,
+        "rect" : {
+          "h" : 1,
+          "w" : 1,
+          "x" : 0,
+          "y" : 0
+        },
+        "resizable" : false,
+        "title" : "Mac mini · 屏幕 2",
+        "title_bar" : 0
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "desktop_table",
+      "height" : 981.25,
+      "title" : "",
+      "width" : 1512.5
+    },
+    "name" : "table 1512.5x981.25",
+    "out" : [
+      {
+        "focused" : true,
+        "id" : 1,
+        "kind" : 0,
+        "parent" : 0,
+        "rect" : {
+          "h" : 981.25,
+          "w" : 1512.5,
+          "x" : 0,
+          "y" : 0
+        },
+        "resizable" : false,
+        "title" : "",
+        "title_bar" : 0
+      }
+    ]
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 200,
+            "y" : 0
+          },
+          "id" : 3,
+          "main" : false,
+          "name" : "屏幕3"
+        },
+        {
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : -100,
+            "y" : 0
+          },
+          "id" : 2,
+          "main" : false,
+          "name" : "屏幕2"
+        },
+        {
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 0
+          },
+          "id" : 1,
+          "main" : true,
+          "name" : "屏幕1"
+        },
+        {
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 200,
+            "y" : -100
+          },
+          "id" : 4,
+          "main" : false,
+          "name" : "屏幕4"
+        }
+      ],
+      "fn" : "desktop_entry"
+    },
+    "name" : "entry four",
+    "out" : {
+      "app" : "desktop:",
+      "displays" : [
+        {
+          "height" : 1080,
+          "id" : "1",
+          "main" : true,
+          "name" : "屏幕1",
+          "width" : 1920
+        },
+        {
+          "height" : 1080,
+          "id" : "2",
+          "main" : false,
+          "name" : "屏幕2",
+          "width" : 1920
+        },
+        {
+          "height" : 1080,
+          "id" : "4",
+          "main" : false,
+          "name" : "屏幕4",
+          "width" : 1920
+        },
+        {
+          "height" : 1080,
+          "id" : "3",
+          "main" : false,
+          "name" : "屏幕3",
+          "width" : 1920
+        }
+      ],
+      "name" : "桌面"
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+
+      ],
+      "fn" : "desktop_entry"
+    },
+    "name" : "entry none",
+    "out" : null
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "frame" : {
+            "height" : 1080,
+            "width" : 1920,
+            "x" : 0,
+            "y" : 0
+          },
+          "id" : 1,
+          "main" : true,
+          "name" : "内建显示器"
+        }
+      ],
+      "fn" : "desktop_entry"
+    },
+    "name" : "entry one",
+    "out" : {
+      "app" : "desktop:",
+      "displays" : [
+        {
+          "height" : 1080,
+          "id" : "1",
+          "main" : true,
+          "name" : "内建显示器",
+          "width" : 1920
+        }
+      ],
+      "name" : "桌面"
+    }
+  }
+]

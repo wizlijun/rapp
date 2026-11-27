@@ -2,6 +2,78 @@
   {
     "assets": [
       {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.58/latest.json",
+        "name": "latest.json",
+        "size": 606
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.58/rapp-0.15.58-macos-arm64.zip",
+        "name": "rapp-0.15.58-macos-arm64.zip",
+        "size": 26181170
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.58/rapp-0.15.58.pkg",
+        "name": "rapp-0.15.58.pkg",
+        "size": 26162847
+      }
+    ],
+    "draft": false,
+    "html_url": "https://github.com/wizlijun/rapp/releases/tag/v0.15.58",
+    "prerelease": false,
+    "published_at": "2026-11-27T01:27:09Z",
+    "tag_name": "v0.15.58"
+  },
+  {
+    "assets": [
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.57/latest.json",
+        "name": "latest.json",
+        "size": 751
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.57/rapp-0.15.57-macos-arm64.zip",
+        "name": "rapp-0.15.57-macos-arm64.zip",
+        "size": 26176688
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.57/rapp-0.15.57.pkg",
+        "name": "rapp-0.15.57.pkg",
+        "size": 26162135
+      }
+    ],
+    "draft": false,
+    "html_url": "https://github.com/wizlijun/rapp/releases/tag/v0.15.57",
+    "prerelease": false,
+    "published_at": "2026-11-27T01:15:34Z",
+    "tag_name": "v0.15.57"
+  },
+  {
+    "assets": [
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.56/latest.json",
+        "name": "latest.json",
+        "size": 1110
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.56/rapp-0.15.56-macos-arm64.zip",
+        "name": "rapp-0.15.56-macos-arm64.zip",
+        "size": 26176707
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.56/rapp-0.15.56.pkg",
+        "name": "rapp-0.15.56.pkg",
+        "size": 26159239
+      }
+    ],
+    "draft": false,
+    "html_url": "https://github.com/wizlijun/rapp/releases/tag/v0.15.56",
+    "prerelease": false,
+    "published_at": "2026-11-27T00:52:11Z",
+    "tag_name": "v0.15.56"
+  },
+  {
+    "assets": [
+      {
         "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.55/latest.json",
         "name": "latest.json",
         "size": 1003

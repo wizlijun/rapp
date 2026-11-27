@@ -71,7 +71,7 @@ pub fn raw_cases(name: &str) -> Vec<Case<serde_json::Value, serde_json::Value>> 
 
 /// Lower- or upper-case hex to bytes. Panics on bad input.
 pub fn unhex(s: &str) -> Vec<u8> {
-    assert!(s.len() % 2 == 0, "odd hex length");
+    assert!(s.len().is_multiple_of(2), "odd hex length");
     (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("bad hex")).collect()
 }
 

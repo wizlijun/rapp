@@ -301,7 +301,7 @@ impl Session {
         self.focus_windows(next);
         let mut main: Option<CanvasRect> = None;
         for w in next.iter().filter(|w| w.kind == WindowKind::Normal) {
-            if main.map_or(true, |m| w.rect.w * w.rect.h > m.w * m.h) {
+            if main.is_none_or(|m| w.rect.w * w.rect.h > m.w * m.h) {
                 main = Some(w.rect);
             }
         }
@@ -391,7 +391,7 @@ impl Session {
     /// The tracker's 0.1 s timer, and the platform's "the keyboard focus moved" poll (Swift's
     /// AX observer).
     pub(crate) fn focus_tick(&mut self) {
-        if self.ended || self.focus.as_ref().map_or(true, |p| p.stopped) {
+        if self.ended || self.focus.as_ref().is_none_or(|p| p.stopped) {
             return;
         }
         self.schedule(Timer::FocusTick, FOCUS_TICK_EVERY);
@@ -818,7 +818,7 @@ impl Session {
         }
         let Some(ops) = self.ops.as_ref() else { return };
         let target = ops.target.clone();
-        let text: Option<Shared<dyn TextReader>> = self.text_reader.take().map(|t| shared(t));
+        let text: Option<Shared<dyn TextReader>> = self.text_reader.take().map(shared);
         let latest = self.capture.as_ref().map(|c| c.latest.clone());
         let (rules_tx, rules_rx) = channel::<String>();
         let state = Arc::new(Mutex::new(StateShared::default()));

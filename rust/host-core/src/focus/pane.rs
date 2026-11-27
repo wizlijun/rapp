@@ -81,7 +81,7 @@ pub fn panel(chain: &[Rect], window: Size) -> Result<PanelPick, PanelMiss> {
         if share >= MAX_SHARE {
             continue;
         }
-        if best.map_or(true, |b| share >= b.share) {
+        if best.is_none_or(|b| share >= b.share) {
             best = Some(PanelPick { rect: r.unwrap_or(Rect::ZERO), depth: i as i64, share });
         }
     }
@@ -114,8 +114,8 @@ pub fn window_tiles(r: &EncodeReport, window: CanvasRect) -> WindowTiles {
     let oy = f64::from(r.region.y) - f64::from(window.y);
     let bounds = Rect::new(0.0, 0.0, f64::from(window.w), f64::from(window.h));
     let ts = TILE_SIZE;
-    let cols = (r.width + ts - 1) / ts;
-    let rows = (r.height + ts - 1) / ts;
+    let cols = r.width.div_ceil(ts);
+    let rows = r.height.div_ceil(ts);
     let tile_rect = |tx: usize, ty: usize| -> Rect {
         let x0 = tx * ts;
         let y0 = ty * ts;

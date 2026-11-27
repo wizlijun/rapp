@@ -1,7 +1,10 @@
-//! Test kit. `weaknet` is the lossy-network proxy. The rest of this file is the core of `measure-forward`: how long it takes to open a port forward through the local
+//! Test kit. `weaknet` is the lossy-network proxy; `fake_platform` and `host_harness` drive
+//! `rapp-host-core` in-process. The rest of this file is the core of `measure-forward`: how long it takes to open a port forward through the local
 //! service's IPC (`pipe`), and how long a first byte takes to come back from an echo port.
 //! The program in `src/bin/measure_forward.rs` only parses arguments and prints.
 
+pub mod fake_platform;
+pub mod host_harness;
 pub mod weaknet;
 
 use anyhow::{anyhow, bail, Result};

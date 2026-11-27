@@ -1,0 +1,176 @@
+[
+  {
+    "in" : null,
+    "name" : "types",
+    "out" : [
+      {
+        "case" : "hello",
+        "type" : 1
+      },
+      {
+        "case" : "ready",
+        "type" : 2
+      },
+      {
+        "case" : "error",
+        "type" : 3
+      },
+      {
+        "case" : "frame",
+        "type" : 4
+      },
+      {
+        "case" : "text",
+        "type" : 5
+      },
+      {
+        "case" : "key",
+        "type" : 6
+      },
+      {
+        "case" : "mouse",
+        "type" : 7
+      },
+      {
+        "case" : "scroll",
+        "type" : 8
+      },
+      {
+        "case" : "resize",
+        "type" : 9
+      },
+      {
+        "case" : "setStream",
+        "type" : 11
+      },
+      {
+        "case" : "windows",
+        "type" : 13
+      },
+      {
+        "case" : "focus",
+        "type" : 14
+      },
+      {
+        "case" : "close",
+        "type" : 15
+      },
+      {
+        "case" : "move",
+        "type" : 16
+      },
+      {
+        "case" : "menuBar",
+        "type" : 17
+      },
+      {
+        "case" : "menuPick",
+        "type" : 18
+      },
+      {
+        "case" : "clip",
+        "type" : 19
+      },
+      {
+        "case" : "paste",
+        "type" : 20
+      },
+      {
+        "case" : "pasted",
+        "type" : 21
+      },
+      {
+        "case" : "fetch",
+        "type" : 22
+      },
+      {
+        "case" : "put",
+        "type" : 23
+      },
+      {
+        "case" : "transferStart",
+        "type" : 24
+      },
+      {
+        "case" : "chunk",
+        "type" : 25
+      },
+      {
+        "case" : "inputBlocked",
+        "type" : 26
+      },
+      {
+        "case" : "frameAck",
+        "type" : 27
+      },
+      {
+        "case" : "weak",
+        "type" : 28
+      },
+      {
+        "case" : "inputSource",
+        "type" : 29
+      },
+      {
+        "case" : "selectInput",
+        "type" : 30
+      },
+      {
+        "case" : "ping",
+        "type" : 31
+      },
+      {
+        "case" : "pong",
+        "type" : 32
+      },
+      {
+        "case" : "saving",
+        "type" : 33
+      },
+      {
+        "case" : "screenLocked",
+        "type" : 34
+      },
+      {
+        "case" : "unlock",
+        "type" : 35
+      },
+      {
+        "case" : "focusRegion",
+        "type" : 36
+      },
+      {
+        "case" : "covered",
+        "type" : 37
+      },
+      {
+        "case" : "dismissCover",
+        "type" : 38
+      },
+      {
+        "case" : "appOpened",
+        "type" : 39
+      },
+      {
+        "case" : "secureFocus",
+        "type" : 40
+      },
+      {
+        "case" : "setView",
+        "type" : 41
+      },
+      {
+        "case" : "changed",
+        "type" : 42
+      },
+      {
+        "case" : "stateRules",
+        "type" : 43
+      },
+      {
+        "case" : "appState",
+        "type" : 44
+      }
+    ]
+  }
+]

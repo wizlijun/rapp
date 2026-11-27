@@ -55,6 +55,12 @@ pub(crate) fn swift_lowercased(s: &str) -> String {
     out
 }
 
+/// The string in NFC. Swift's `==` and `<` on `String` and `Character` compare canonically
+/// equivalent text as equal ("é" and "e\u{301}"); comparing the NFC forms does the same.
+pub(crate) fn nfc(s: &str) -> String {
+    icu_normalizer::ComposingNormalizerBorrowed::new_nfc().normalize(s).into_owned()
+}
+
 /// `Array(string)`: the string's Characters (extended grapheme clusters).
 fn characters(s: &str) -> Vec<&str> {
     s.graphemes(true).collect()
@@ -76,10 +82,10 @@ fn is_letter_or_number(c: &str) -> bool {
 /// (CJK) is a substring. Case-insensitive; lines are trimmed first.
 pub fn text_matches(patterns: &[String], lines: &[String]) -> bool {
     let lowered: Vec<String> =
-        lines.iter().map(|l| swift_lowercased(l.trim_matches(is_whitespace_or_newline))).collect();
+        lines.iter().map(|l| nfc(&swift_lowercased(l.trim_matches(is_whitespace_or_newline)))).collect();
     let ls: Vec<Vec<&str>> = lowered.iter().map(|l| characters(l)).collect();
     for p in patterns {
-        let lp = swift_lowercased(p);
+        let lp = nfc(&swift_lowercased(p));
         let pat = characters(&lp);
         if pat.is_empty() {
             continue;
@@ -366,7 +372,7 @@ fn is_ring(c: &Block, gw: usize) -> bool {
     let Some(hole) = largest_block(&holes, w, h) else { return false };
     let aspect = hole.w() as f64 / hole.h() as f64;
     let fill = hole.points.len() as f64 / (hole.w() * hole.h()) as f64;
-    aspect >= 0.7 && aspect <= 1.43 && fill >= 0.6 && fill < 0.88 && hole.w() as f64 >= 0.5 * w as f64
+    (0.7..=1.43).contains(&aspect) && (0.6..0.88).contains(&fill) && hole.w() as f64 >= 0.5 * w as f64
 }
 
 /// The shape in `rect` and how sure the guess is.
@@ -420,7 +426,7 @@ pub fn shape(image: &RuleImage, rect: RuleRect) -> (ShapeName, f64) {
     let h = k.h();
     let fill = k.points.len() as f64 / (w * h) as f64;
     let aspect = w as f64 / h as f64;
-    if !(aspect >= 0.7 && aspect <= 1.43) {
+    if !(0.7..=1.43).contains(&aspect) {
         return (ShapeName::Other, 0.0);
     }
     let centre = ((k.y0 + h / 2) * gw as i64 + (k.x0 + w / 2)) as usize;

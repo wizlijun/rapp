@@ -32,9 +32,14 @@ pub const TEST_PORTS: (u16, u16) = (29800, 100);
 /// `rapp-state` to the real state service. Windows: copies named `<name>.exe` (a symlink needs
 /// admin rights or developer mode there, and `bins::find` looks for the `.exe` name).
 pub fn bins() -> TempDir {
+    bins_with_host(env!("CARGO_BIN_EXE_fake-rapp-host"))
+}
+
+/// `bins()`, with `rapp-host` linked to `program` instead of the fake echo worker.
+pub fn bins_with_host(program: &str) -> TempDir {
     let dir = tempfile::tempdir().unwrap();
     for (name, target) in [
-        ("rapp-host", env!("CARGO_BIN_EXE_fake-rapp-host")),
+        ("rapp-host", program),
         ("rapp-client", env!("CARGO_BIN_EXE_fake-rapp-client")),
         ("rapp-term", env!("CARGO_BIN_EXE_fake-rapp-term")),
         ("rapp-state", env!("CARGO_BIN_EXE_test-rapp-state")),

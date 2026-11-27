@@ -163,6 +163,7 @@ impl FetchSource {
 
     /// Next chunk, or `None` at the end. A file that ends early, or any read error, is
     /// `file changed` (Swift throws that, or an I/O error that `SideConnection` turns into it).
+    #[allow(clippy::should_implement_trait)] // fallible, so not `Iterator::next`
     pub fn next(&mut self) -> Result<Option<Vec<u8>>, TransferError> {
         if self.position >= self.total {
             return Ok(None);
@@ -175,7 +176,7 @@ impl FetchSource {
             }
             FetchBody::File(file) => {
                 let mut buf = Vec::with_capacity(n);
-                file.by_ref()
+                Read::by_ref(file)
                     .take(n as u64)
                     .read_to_end(&mut buf)
                     .map_err(|_| TransferError::new("file changed"))?;

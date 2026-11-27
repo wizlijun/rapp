@@ -94,7 +94,7 @@ pub fn resume_offset(part_size: u64, total: u64) -> u64 {
 /// Keeps only the last `/` component, without `:` or leading dots; falls back to `file`
 /// (`safeFileName`). Windows applies `filename::portable_file_name` after this.
 pub fn safe_file_name(raw: &str) -> String {
-    let last = raw.split('/').filter(|p| !p.is_empty()).last().unwrap_or("");
+    let last = raw.split('/').rfind(|p| !p.is_empty()).unwrap_or("");
     let mut name = last.replace(':', "");
     while name.starts_with('.') {
         // Swift's `removeFirst()` drops one Character; a lone "." is one scalar.

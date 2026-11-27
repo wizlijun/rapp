@@ -131,6 +131,8 @@ impl DeflateStream {
     }
 }
 
+// Boxed on purpose: zlib keeps a pointer back to the stream, so it never moves until ended.
+#[allow(clippy::boxed_local)]
 fn end_deflate(mut strm: Box<z::z_stream>) {
     // SAFETY: an initialised deflate stream, ended once, then dropped.
     unsafe { z::deflateEnd(&mut *strm) };

@@ -4,6 +4,10 @@
 //! through `clock::Clock`, and the one `unsafe` block lives in `deflate.rs`.
 //! `tests/boundary.rs` enforces this.
 
+// Swift's `guard a < b` and `!(a >= b)` read as `!(a < b)` here, on purpose: they keep
+// Swift's answer when a value is NaN, which `partial_cmp` rewrites would have to restate.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
+
 // Encode and send (Tasks 1–6).
 pub mod clock;
 pub mod deflate;

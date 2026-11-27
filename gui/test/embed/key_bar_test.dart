@@ -1,5 +1,5 @@
 // The key bar (iOS input toggle, Task 2): the keys of keyBarRows drawn over a terminal or an app session, sticky ⌃ ⌥ ⌘,
-// repeat, swipe up, paste, and the latch kept in step with A.
+// repeat, paste, and the latch kept in step with A.
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -109,7 +109,7 @@ void main() {
   }
 
   group('terminal', () {
-    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌘C ⌘V ⌘T ⌘ ⌃ ← →
+    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →
     iosTest('tap Esc twice sends [Esc] twice', (tester) async {
       await tester.pumpWidget(bar(tsess));
       await tap(tester, 'esc');
@@ -198,6 +198,65 @@ void main() {
       expect(tsess.keyLatch.flags, 0);
     });
 
+    iosTest('PgUp / PgDn page the stage\'s own history (termPage) and send nothing', (tester) async {
+      s.prefs.keyBarMore = true;
+      final got = <bool>[];
+      tsess.termPage = (up) {
+        got.add(up);
+        return true;
+      };
+      await tester.pumpWidget(bar(tsess, width: 900));
+      await tap(tester, 'pgup');
+      await tap(tester, 'pgdn');
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(got, [true, false]);
+      expect(termKeys(), isEmpty);
+    });
+
+    iosTest('a key sent from the bar tells the stage (termSent, back to the latest); a page of history does not',
+        (tester) async {
+      s.prefs.keyBarMore = true;
+      var sent = 0;
+      tsess.termSent = () => sent++;
+      tsess.termPage = (_) => true;
+      await tester.pumpWidget(bar(tsess, width: 900));
+      await tap(tester, 'pgup');
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(sent, 0);
+      await tap(tester, 'enter');
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(sent, 1);
+    });
+
+    iosTest('PgUp in a full-screen program (termPage false) goes to it as PageUp', (tester) async {
+      s.prefs.keyBarMore = true;
+      tsess.termPage = (_) => false;
+      await tester.pumpWidget(bar(tsess, width: 900));
+      await tap(tester, 'pgup');
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(termKeys(), [
+        ['PageUp'],
+      ]);
+    });
+
+    iosTest('PgUp with ⌃ lit is a key for the program, not a page of history; ⌃ goes off', (tester) async {
+      s.prefs.keyBarMore = true;
+      var paged = 0;
+      tsess.termPage = (_) {
+        paged++;
+        return true;
+      };
+      await tester.pumpWidget(bar(tsess, width: 900));
+      await tap(tester, 'ctrl');
+      await tap(tester, 'pgup');
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(paged, 0);
+      expect(termKeys(), [
+        [termWire('PageUp', latchCtrl)],
+      ]);
+      expect(tsess.keyLatch.flags, 0);
+    });
+
     iosTest('⌘C calls onCopy', (tester) async {
       await tester.pumpWidget(bar(tsess, width: 900));
       await tap(tester, 'copy');
@@ -207,7 +266,7 @@ void main() {
   });
 
   group('app', () {
-    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌘C ⌘V ⌘T ⌘ ⌃ ← →
+    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →
     iosTest('⇧Tab sends key(48, latchShift); ⌃ then ↑ sends key(126, latchCtrl) after keyEvent(59, down)', (tester) async {
       await tester.pumpWidget(bar(app, width: 900));
       await tap(tester, 'stab');
@@ -227,6 +286,15 @@ void main() {
       await tester.pumpWidget(bar(app, width: 900));
       await tap(tester, 'cmdt');
       expect(appKeys(), [('key', 1, 17, latchCmd)]);
+    });
+
+    iosTest('PgUp / PgDn go to the app as key 116 / 121', (tester) async {
+      s.prefs.keyBarMore = true;
+      await tester.pumpWidget(bar(app, width: 900));
+      await tap(tester, 'pgup');
+      await tap(tester, 'pgdn');
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(appKeys(), [('key', 1, 116, 0), ('key', 1, 121, 0)]);
     });
 
     iosTest('⌘C sends key(8, latchCmd)', (tester) async {
@@ -346,16 +414,20 @@ void main() {
     });
   });
 
-  group('repeat and swipe', () {
-    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌘C ⌘V ⌘T ⌘ ⌃ ← →
-    iosTest('hold ← 400 ms then 160 ms: three Left', (tester) async {
+  group('repeat', () {
+    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →
+    iosTest('hold ← : one Left at once, then at 400 ms and every 80 ms after', (tester) async {
       await tester.pumpWidget(bar(tsess));
       final g = await tester.startGesture(tester.getCenter(k('left')));
+      expect(termKeys(), [
+        ['Left'],
+      ]);
       await tester.pump(const Duration(milliseconds: 400));
       await tester.pump(const Duration(milliseconds: 160));
       await g.up();
       await tester.pump();
       expect(termKeys(), [
+        ['Left'],
         ['Left'],
         ['Left'],
         ['Left'],
@@ -392,20 +464,11 @@ void main() {
         ['Ctrl-Left'],
         ['Ctrl-Left'],
         ['Ctrl-Left'],
+        ['Ctrl-Left'],
       ]);
     });
 
-    iosTest('once repeating, a later swipe up does not fire the alt on release', (tester) async {
-      await tester.pumpWidget(bar(tsess));
-      final g = await tester.startGesture(tester.getCenter(k('up')));
-      await tester.pump(const Duration(milliseconds: 400));
-      await g.moveBy(const Offset(0, -40));
-      await g.up();
-      await tester.pump(const Duration(milliseconds: 200));
-      expect(termKeys().every((e) => (e as List).single == 'Up'), isTrue);
-    });
-
-    iosTest('one click per press: a hold repeats without more, a swipe clicks once', (tester) async {
+    iosTest('one click per press: a hold repeats without more', (tester) async {
       await tester.pumpWidget(bar(tsess));
       await tap(tester, 'esc');
       expect(haptics.length, 1);
@@ -413,9 +476,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 560));
       await g.up();
       expect(haptics.length, 2);
-      final g2 = await tester.startGesture(tester.getCenter(k('up')));
-      await g2.moveBy(const Offset(0, -30));
-      await g2.up();
+      await tap(tester, 'up');
       expect(haptics.length, 3);
     });
 
@@ -431,30 +492,21 @@ void main() {
       await g.up();
     });
 
-    iosTest('swipe up on ↑ sends PageUp, not Up', (tester) async {
+    iosTest('a drag up on ↑ is still just ↑: no key hides behind a swipe', (tester) async {
       await tester.pumpWidget(bar(tsess));
       final g = await tester.startGesture(tester.getCenter(k('up')));
-      await g.moveBy(const Offset(0, -30));
+      await g.moveBy(const Offset(0, -40));
       await g.up();
       await tester.pump(const Duration(seconds: 1));
       expect(termKeys(), [
-        ['PageUp'],
-      ]);
-    });
-
-    iosTest('a short drag up (under 24) still sends the key', (tester) async {
-      await tester.pumpWidget(bar(tsess));
-      final g = await tester.startGesture(tester.getCenter(k('up')));
-      await g.moveBy(const Offset(0, -10));
-      await g.up();
-      expect(termKeys(), [
         ['Up'],
       ]);
+      expect(find.descendant(of: k('up'), matching: find.text('PgUp')), findsNothing);
     });
   });
 
   group('paste', () {
-    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌘C ⌘V ⌘T ⌘ ⌃ ← →
+    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →
     iosTest('⌘V sends the clipboard and leaves composer draft unchanged', (tester) async {
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (c) async {
         if (c.method == 'Clipboard.getData') return {'text': 'hello'};
@@ -492,6 +544,21 @@ void main() {
   });
 
   group('first row', () {
+    for (final width in [375.0, 900.0]) {
+      iosTest('at $width: ↓ stands under ↑ and → under ⋯, ← left of ↓, each as wide as the key above', (tester) async {
+        s.prefs.keyBarMore = true;
+        await tester.pumpWidget(bar(tsess, width: width));
+        Rect r(String id) => tester.getRect(k(id));
+        expect(r('down').center.dx, moreOrLessEquals(r('up').center.dx, epsilon: .01));
+        expect(r('down').width, moreOrLessEquals(r('up').width, epsilon: .01));
+        expect(r('right').center.dx, moreOrLessEquals(r('more').center.dx, epsilon: .01));
+        expect(r('down').top, greaterThan(r('up').bottom));
+        expect(r('left').right, lessThan(r('down').left));
+        expect(r('left').width, moreOrLessEquals(r('down').width, epsilon: .01));
+        expect(r('left').center.dy, r('down').center.dy);
+      });
+    }
+
     iosTest('⌫ is there without ⋯ and ⌃ is not: ⌃ (second row) then ⌫ sends Ctrl-Backspace', (tester) async {
       await tester.pumpWidget(bar(tsess));
       expect(s.prefs.keyBarMore, isFalse);
@@ -507,9 +574,11 @@ void main() {
       ]);
     });
 
-    iosTest('left to right: Tab ⇧Tab Esc ⌃C ↑ ↓ ⌫ ⏎ ⋯ ⌄', (tester) async {
+    iosTest('left to right: Tab ⇧Tab Esc ⌃C ⌫ ⏎ ↑ ⋯, no ⌄', (tester) async {
       await tester.pumpWidget(bar(tsess));
-      const order = ['tab', 'stab', 'esc', 'cc', 'up', 'down', 'bksp', 'enter', 'more', 'hide'];
+      expect(k('hide'), findsNothing);
+      expect(find.descendant(of: find.byType(KeyBar), matching: find.bySemanticsLabel('收起快捷区')), findsNothing);
+      const order = ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more'];
       final xs = [for (final id in order) tester.getCenter(k(id)).dx];
       for (var i = 1; i < xs.length; i++) {
         expect(xs[i], greaterThan(xs[i - 1]), reason: '${order[i]} is right of ${order[i - 1]}');
@@ -518,9 +587,10 @@ void main() {
       expect(ys.length, 1);
     });
 
-    iosTest('← → wait on the second row', (tester) async {
+    iosTest('← ↓ → wait on the second row', (tester) async {
       await tester.pumpWidget(bar(tsess));
       expect(k('left'), findsNothing);
+      expect(k('down'), findsNothing);
       expect(k('right'), findsNothing);
       await tap(tester, 'more');
       await tester.pump();
@@ -531,9 +601,9 @@ void main() {
       ]);
     });
 
-    iosTest('second row left to right: ⌘C ⌘V ⌘T ⌘ ⌃ ← →, on a terminal and on an app', (tester) async {
+    iosTest('second row left to right: ⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →, on a terminal and on an app', (tester) async {
       s.prefs.keyBarMore = true;
-      const order = ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'left', 'right'];
+      const order = ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'pgup', 'pgdn', 'left', 'down', 'right'];
       for (final rs in [tsess, app]) {
         await tester.pumpWidget(bar(rs, width: 900));
         final xs = [for (final id in order) tester.getCenter(k(id)).dx];
@@ -646,37 +716,6 @@ void main() {
       }
     });
 
-    iosTest('⌄ is the last key of the first row, ⋯ just before it', (tester) async {
-      await tester.pumpWidget(bar(tsess));
-      expect(k('hide'), findsOneWidget);
-      expect(k('more'), findsOneWidget);
-      expect(tester.getCenter(k('hide')).dx, greaterThan(tester.getCenter(k('more')).dx));
-      expect(tester.getCenter(k('hide')).dy, tester.getCenter(k('more')).dy);
-      expect(find.descendant(of: find.byType(KeyBar), matching: find.bySemanticsLabel('收起快捷区')), findsOneWidget);
-    });
-
-    iosTest('⌄ folds the 快捷区 of its kind: a terminal sets quick_hidden_term, Safari quick_hidden_app', (tester) async {
-      s.setQuickHidden(term: false, hidden: false); // apps start folded
-      await tester.pumpWidget(bar(tsess));
-      expect(s.prefs.quickHiddenTerm, isFalse);
-      await tap(tester, 'hide');
-      expect(s.prefs.quickHiddenTerm, isTrue);
-      expect(s.prefs.quickHiddenApp, isFalse);
-      expect(termKeys(), isEmpty);
-      await tester.pumpWidget(bar(app));
-      await tap(tester, 'hide');
-      expect(s.prefs.quickHiddenApp, isTrue);
-    });
-
-    iosTest('⌄ folds even with ⌃ lit and 打字后自动收起 off', (tester) async {
-      s.prefs.keyBarMore = true;
-      await tester.pumpWidget(bar(tsess));
-      s.setQuickAutoHide(false);
-      await tap(tester, 'ctrl');
-      await tap(tester, 'hide');
-      expect(s.prefs.quickHiddenTerm, isTrue);
-    });
-
     iosTest('the bar is as high as keyBarHeightOf says, even at zoom 1.75 widths', (tester) async {
       await tester.pumpWidget(bar(tsess, width: 1260));
       expect(tester.getSize(find.byType(KeyBar)).height, 54 + phraseStripHeight);
@@ -684,10 +723,6 @@ void main() {
       expect(k('more'), findsOneWidget);
     });
 
-    iosTest('an arrow shows its swipe-up label in the corner', (tester) async {
-      await tester.pumpWidget(bar(tsess));
-      expect(find.descendant(of: k('up'), matching: find.text('PgUp')), findsOneWidget);
-    });
   });
 
   group('常用语条', () {
@@ -911,14 +946,14 @@ void main() {
       }
     });
 
-    testWidgets('Linux: first row has 10 keys ending in ⋯ ⌄; second row has ⌘C ⌘V ⌘T ⌘ ⌃; ⌄ folds per kind', (tester) async {
+    testWidgets('Linux: first row has 8 keys ending in ↑ ⋯; second row has ⌘C ⌘V ⌘T ⌘ ⌃', (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.linux;
       try {
         tester.view.physicalSize = const Size(1000, 900);
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.reset);
         await tester.pumpWidget(bar(tsess, width: 720));
-        const first = ['tab', 'stab', 'esc', 'cc', 'up', 'down', 'bksp', 'enter', 'more', 'hide'];
+        const first = ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more'];
         final xs = [for (final id in first) tester.getCenter(k(id)).dx];
         for (var i = 1; i < xs.length; i++) {
           expect(xs[i], greaterThan(xs[i - 1]), reason: '${first[i]} right of ${first[i - 1]}');
@@ -939,18 +974,10 @@ void main() {
         expect(k('cd'), findsNothing);
         expect(k('cmdt'), findsOneWidget);
         expect(k('cmd'), findsOneWidget);
-        s.setQuickHidden(term: false, hidden: false);
-        s.setQuickAutoHide(false);
-        await tap(tester, 'ctrl');
-        await tap(tester, 'hide');
-        expect(s.prefs.quickHiddenTerm, isTrue);
-        expect(s.prefs.quickHiddenApp, isFalse);
         await tester.pumpWidget(bar(app, width: 720));
         port.calls.clear();
         await tap(tester, 'cmdt');
         expect(appKeys(), [('key', 1, 17, latchCmd)]);
-        await tap(tester, 'hide');
-        expect(s.prefs.quickHiddenApp, isTrue);
       } finally {
         debugDefaultTargetPlatformOverride = null;
       }

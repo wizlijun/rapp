@@ -172,8 +172,8 @@ impl ScrollDetector {
         let k: u64 = 0x9E37_79B9_7F4A_7C15;
         let word = |i: usize| u64::from_le_bytes(p[i..i + 8].try_into().expect("8 bytes"));
         let mut first: u64 = 0;
-        for i in 0..bpp {
-            first |= (p[i] as u64) << (8 * i as u64);
+        for (i, &b) in p[..bpp].iter().enumerate() {
+            first |= (b as u64) << (8 * i as u64);
         }
         let pattern = if bpp == 1 {
             first.wrapping_mul(0x0101_0101_0101_0101)

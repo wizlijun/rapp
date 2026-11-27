@@ -1,0 +1,484 @@
+[
+  {
+    "in" : {
+      "bound" : null,
+      "fn" : "resolve",
+      "requested" : "com.x"
+    },
+    "name" : "resolve 0",
+    "out" : {
+      "ok" : "com.x"
+    }
+  },
+  {
+    "in" : {
+      "bound" : "com.apple.Safari",
+      "fn" : "resolve",
+      "requested" : ""
+    },
+    "name" : "resolve 1",
+    "out" : {
+      "ok" : "com.apple.Safari"
+    }
+  },
+  {
+    "in" : {
+      "bound" : "com.apple.Safari",
+      "fn" : "resolve",
+      "requested" : "com.apple.Safari"
+    },
+    "name" : "resolve 2",
+    "out" : {
+      "ok" : "com.apple.Safari"
+    }
+  },
+  {
+    "in" : {
+      "bound" : "com.apple.Safari",
+      "fn" : "resolve",
+      "requested" : "com.x"
+    },
+    "name" : "resolve 3",
+    "out" : {
+      "error" : "this host shares com.apple.Safari"
+    }
+  },
+  {
+    "in" : {
+      "bound" : null,
+      "fn" : "resolve",
+      "requested" : ""
+    },
+    "name" : "resolve 4",
+    "out" : {
+      "ok" : ""
+    }
+  },
+  {
+    "in" : {
+      "bound" : "desktop:",
+      "fn" : "resolve",
+      "requested" : "desktop:"
+    },
+    "name" : "resolve 5",
+    "out" : {
+      "ok" : "desktop:"
+    }
+  },
+  {
+    "in" : {
+      "bound" : "desktop:",
+      "fn" : "resolve",
+      "requested" : "desktop:1"
+    },
+    "name" : "resolve 6",
+    "out" : {
+      "error" : "this host shares desktop:"
+    }
+  },
+  {
+    "in" : {
+      "bound" : "com.x",
+      "fn" : "resolve",
+      "requested" : "COM.X"
+    },
+    "name" : "resolve 7",
+    "out" : {
+      "error" : "this host shares com.x"
+    }
+  },
+  {
+    "in" : {
+      "bound" : "",
+      "fn" : "resolve",
+      "requested" : ""
+    },
+    "name" : "resolve 8",
+    "out" : {
+      "ok" : ""
+    }
+  },
+  {
+    "in" : {
+      "bound" : "",
+      "fn" : "resolve",
+      "requested" : "a"
+    },
+    "name" : "resolve 9",
+    "out" : {
+      "error" : "this host shares "
+    }
+  },
+  {
+    "in" : {
+      "bound" : "a",
+      "bundle_id" : "",
+      "expected" : "t",
+      "fn" : "check",
+      "token" : "x"
+    },
+    "name" : "check 0",
+    "out" : {
+      "error" : "bad token"
+    }
+  },
+  {
+    "in" : {
+      "bound" : "a",
+      "bundle_id" : "",
+      "expected" : "t",
+      "fn" : "check",
+      "token" : "t"
+    },
+    "name" : "check 1",
+    "out" : {
+      "ok" : "a"
+    }
+  },
+  {
+    "in" : {
+      "bound" : "a",
+      "bundle_id" : "b",
+      "expected" : "t",
+      "fn" : "check",
+      "token" : "t"
+    },
+    "name" : "check 2",
+    "out" : {
+      "error" : "this host shares a"
+    }
+  },
+  {
+    "in" : {
+      "bound" : "a",
+      "bundle_id" : "",
+      "expected" : "t",
+      "fn" : "check",
+      "token" : "u"
+    },
+    "name" : "check 3",
+    "out" : {
+      "error" : "bad token"
+    }
+  },
+  {
+    "in" : {
+      "bound" : "a",
+      "bundle_id" : "",
+      "expected" : "t",
+      "fn" : "check",
+      "token" : "tt"
+    },
+    "name" : "check 4",
+    "out" : {
+      "error" : "bad token"
+    }
+  },
+  {
+    "in" : {
+      "bound" : "a",
+      "bundle_id" : "",
+      "expected" : "tt",
+      "fn" : "check",
+      "token" : "t"
+    },
+    "name" : "check 5",
+    "out" : {
+      "error" : "bad token"
+    }
+  },
+  {
+    "in" : {
+      "bound" : "a",
+      "bundle_id" : "",
+      "expected" : "",
+      "fn" : "check",
+      "token" : ""
+    },
+    "name" : "check 6",
+    "out" : {
+      "ok" : "a"
+    }
+  },
+  {
+    "in" : {
+      "bound" : null,
+      "bundle_id" : "",
+      "expected" : "t",
+      "fn" : "check",
+      "token" : ""
+    },
+    "name" : "check 7",
+    "out" : {
+      "error" : "bad token"
+    }
+  },
+  {
+    "in" : {
+      "bound" : null,
+      "bundle_id" : "com.x",
+      "expected" : "s3cret",
+      "fn" : "check",
+      "token" : "s3cret"
+    },
+    "name" : "check 8",
+    "out" : {
+      "ok" : "com.x"
+    }
+  },
+  {
+    "in" : {
+      "bound" : null,
+      "bundle_id" : "com.x",
+      "expected" : "s3cret",
+      "fn" : "check",
+      "token" : "s3creT"
+    },
+    "name" : "check 9",
+    "out" : {
+      "error" : "bad token"
+    }
+  },
+  {
+    "in" : {
+      "bound" : "a",
+      "bundle_id" : "",
+      "expected" : "密钥",
+      "fn" : "check",
+      "token" : "密钥"
+    },
+    "name" : "check 10",
+    "out" : {
+      "ok" : "a"
+    }
+  },
+  {
+    "in" : {
+      "bound" : "a",
+      "bundle_id" : "b",
+      "expected" : "t",
+      "fn" : "check",
+      "token" : "x"
+    },
+    "name" : "check 11",
+    "out" : {
+      "error" : "bad token"
+    }
+  },
+  {
+    "in" : {
+      "fn" : "exit_code",
+      "reason" : "protocol version mismatch: host 16, client 2 (update both sides)"
+    },
+    "name" : "exit code 0",
+    "out" : 5
+  },
+  {
+    "in" : {
+      "fn" : "exit_code",
+      "reason" : "bad token"
+    },
+    "name" : "exit code 1",
+    "out" : 1
+  },
+  {
+    "in" : {
+      "fn" : "exit_code",
+      "reason" : "busy"
+    },
+    "name" : "exit code 2",
+    "out" : 1
+  },
+  {
+    "in" : {
+      "fn" : "exit_code",
+      "reason" : "Protocol version mismatch"
+    },
+    "name" : "exit code 3",
+    "out" : 1
+  },
+  {
+    "in" : {
+      "fn" : "exit_code",
+      "reason" : ""
+    },
+    "name" : "exit code 4",
+    "out" : 1
+  },
+  {
+    "in" : {
+      "fn" : "exit_code",
+      "reason" : "host says: protocol version mismatch"
+    },
+    "name" : "exit code 5",
+    "out" : 1
+  },
+  {
+    "in" : {
+      "by" : "Mac mini",
+      "fn" : "taken_over"
+    },
+    "name" : "taken over 0",
+    "out" : "taken over by Mac mini"
+  },
+  {
+    "in" : {
+      "by" : null,
+      "fn" : "taken_over"
+    },
+    "name" : "taken over 1",
+    "out" : "taken over"
+  },
+  {
+    "in" : {
+      "by" : "",
+      "fn" : "taken_over"
+    },
+    "name" : "taken over 2",
+    "out" : "taken over"
+  },
+  {
+    "in" : {
+      "by" : "客厅 \"Mac\"",
+      "fn" : "taken_over"
+    },
+    "name" : "taken over 3",
+    "out" : "taken over by 客厅 \"Mac\""
+  },
+  {
+    "in" : {
+      "fn" : "takeover_notice",
+      "reason" : "host says: taken over by Mac mini"
+    },
+    "name" : "takeover notice 0",
+    "out" : "这个窗口在 Mac mini 上打开了"
+  },
+  {
+    "in" : {
+      "fn" : "takeover_notice",
+      "reason" : "taken over"
+    },
+    "name" : "takeover notice 1",
+    "out" : "这个窗口在另一台设备上打开了"
+  },
+  {
+    "in" : {
+      "fn" : "takeover_notice",
+      "reason" : "host says: Calculator quit"
+    },
+    "name" : "takeover notice 2",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "takeover_notice",
+      "reason" : "host says: taken over"
+    },
+    "name" : "takeover notice 3",
+    "out" : "这个窗口在另一台设备上打开了"
+  },
+  {
+    "in" : {
+      "fn" : "takeover_notice",
+      "reason" : "taken over by "
+    },
+    "name" : "takeover notice 4",
+    "out" : "这个窗口在另一台设备上打开了"
+  },
+  {
+    "in" : {
+      "fn" : "takeover_notice",
+      "reason" : "host says: taken over by "
+    },
+    "name" : "takeover notice 5",
+    "out" : "这个窗口在另一台设备上打开了"
+  },
+  {
+    "in" : {
+      "fn" : "takeover_notice",
+      "reason" : "taken over by 客厅"
+    },
+    "name" : "takeover notice 6",
+    "out" : "这个窗口在 客厅 上打开了"
+  },
+  {
+    "in" : {
+      "fn" : "takeover_notice",
+      "reason" : "host says: host says: taken over"
+    },
+    "name" : "takeover notice 7",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "takeover_notice",
+      "reason" : "Taken over"
+    },
+    "name" : "takeover notice 8",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "takeover_notice",
+      "reason" : "taken over "
+    },
+    "name" : "takeover notice 9",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "takeover_notice",
+      "reason" : "taken over by ́x"
+    },
+    "name" : "takeover notice 10",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "takeover_notice",
+      "reason" : "host says: ́taken over"
+    },
+    "name" : "takeover notice 11",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "takeover_notice",
+      "reason" : ""
+    },
+    "name" : "takeover notice 12",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "takeover_notice",
+      "reason" : "host says: "
+    },
+    "name" : "takeover notice 13",
+    "out" : null
+  },
+  {
+    "in" : {
+      "by" : "Mac mini",
+      "fn" : "input_blocked_notice"
+    },
+    "name" : "input blocked notice 0",
+    "out" : "远端正在被 Mac mini 操作"
+  },
+  {
+    "in" : {
+      "by" : "",
+      "fn" : "input_blocked_notice"
+    },
+    "name" : "input blocked notice 1",
+    "out" : "远端正在被另一台设备操作"
+  },
+  {
+    "in" : {
+      "by" : "客厅",
+      "fn" : "input_blocked_notice"
+    },
+    "name" : "input blocked notice 2",
+    "out" : "远端正在被 客厅 操作"
+  }
+]
