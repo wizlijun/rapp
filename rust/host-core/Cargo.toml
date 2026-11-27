@@ -16,7 +16,7 @@ zeroize = "1"
 unicode-segmentation = "1"
 # Stock zlib, linked statically: the deflate stream must be copyable (deflateCopy)
 # and byte-identical to the Swift host's. Only src/deflate.rs touches it.
-libz-sys = { version = "1", default-features = false, features = ["static"] }
+libz-sys = { version = "1", default-features = false, features = ["static", "stock-zlib"] }
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -175,7 +175,7 @@ impl FetchSource {
             }
             FetchBody::File(file) => {
                 let mut buf = Vec::with_capacity(n);
-                file.by_ref()
+                Read::by_ref(file)
                     .take(n as u64)
                     .read_to_end(&mut buf)
                     .map_err(|_| TransferError::new("file changed"))?;
