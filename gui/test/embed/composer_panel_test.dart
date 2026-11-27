@@ -160,22 +160,25 @@ void main() {
       expect(rs.composer.caret, isNull); // spent: taken or dropped, never kept for a later mount
     });
 
-    // The panel stays mounted through a collapse (no dispose), so the Pad's own behaviour is the editor's, untouched.
-    testWidgets('pad collapse and reopen leaves the caret as the editor had it', (tester) async {
+    // The fold unmounts the panel once its animation ends (input_dock textMounted), with the panel closed:
+    // no caret is kept, and reopening puts it at the end, as before the phone shell.
+    testWidgets('pad collapse and reopen still puts caret at end', (tester) async {
       big(tester);
       await tester.pumpWidget(layer());
       await tester.pump();
       field(tester).controller!.value = const TextEditingValue(text: 'hello', selection: TextSelection.collapsed(offset: 2));
       await tester.pump();
       rs.composer.collapse();
+      await tester.pump(); // the fold's first tick has no time elapsed
       await tester.pump(const Duration(seconds: 1));
       await tester.pump();
+      expect(find.byType(ComposerPanel), findsNothing);
+      expect(rs.composer.caret, isNull);
       rs.composer.open = true;
       await tester.pump(const Duration(seconds: 1));
       await tester.pump();
       expect(text(tester), 'hello');
-      expect(rs.composer.caret, isNull);
-      expect(field(tester).controller!.selection, const TextSelection.collapsed(offset: 2));
+      expect(field(tester).controller!.selection, const TextSelection.collapsed(offset: 5));
     });
 
     testWidgets('⌘= / ⌘- / ⌘0 zoom the whole panel in four steps; the default is the smallest', (tester) async {
