@@ -184,22 +184,22 @@ B 段分三批写，前两批在两个分支上并行，互相没看过对方的
 
 **2. 探针**（计划 P），在 Windows 实机上。一级探针先跑（G1、G2、H1、H3、H5、S1、S2、S4、T1、T5、C1）：它们的结果能推翻结构。每个结果写进探针结果文件；和计划假设不一样的，照那份计划开头的表改计划，再动代码。表里写了“回来问用户”的（S1、S2、H1 的退路、I1 的退路）必须问。
 
-**3. A 段草稿**，在 Mac 上，在分支 `feat/windows-foundation` 上做（它是 `main` 加 A 段的接线，见 2.1；`main` 上的三个新 crate 没进 workspace，在 `main` 上编不到它们）：
-   1. `git merge main`；读说明文件。
-   2. 重新生成 `Cargo.lock`（`cargo metadata` 或一次 `cargo build`；**不改版本号**）。
-   3. `cargo build`、`cargo test --workspace --no-fail-fast`、`cargo clippy --workspace --all-targets -- -D warnings`、`swift test`、`flutter analyze`、`flutter test`。修到全绿。修的时候守住：unix 那一支的行为不变（拿 main 上同一条测试对）。
-   4. 到 Windows 机器上：`scripts\check-windows.ps1`（计划 A 任务 8），修到 `EXIT=0`。
-   5. 计划 A 每个任务的“实机检查”逐条做，结果写进 `tasks/todo.md`。
-   6. 两个门禁都绿了再把接线合进 `main`（`merge: …（feat/windows-foundation）`，文字见计划 A）。这次合并改的是共用代码，算 macOS 的改动。
+**3. A 段草稿**，以 Windows 为主（用户 2026-11-27 定），在分支 `feat/windows-foundation` 上做（它是 `main` 加 A 段的接线，见 2.1；`main` 上的三个新 crate 没进 workspace，在 `main` 上编不到它们）：
+   1. Mac：`git merge main`，把分支推到 origin（只推分支，不推 `main`）。
+   2. Windows：读说明文件；让 `Cargo.lock` 自己更新（**不改版本号**）；`scripts\check-windows.ps1`（计划 A 任务 8），修到 `EXIT=0`。改到 unix 也编译的代码时记一张清单，unix 那一支的行为不变。
+   3. Windows：计划 A 每个任务的“实机检查”逐条做，结果写进 `tasks/todo.md`；推分支。
+   4. Mac：在同一个提交上跑完整门禁：`cargo test --workspace --no-fail-fast`、`cargo clippy --workspace --all-targets -- -D warnings`、`swift test`、`flutter analyze`、`flutter test`。修到全绿，照那张清单核对 unix 那一支（拿 main 上同一条测试对）。Mac 上改到 Windows 也编译的代码，就回 Windows 再跑一次门禁。
+   5. 两个门禁在同一个提交上都绿了，在 Mac 上把接线合进 `main`（`merge: …（feat/windows-foundation）`，文字见计划 A）。这次合并改的是共用代码，算 macOS 的改动。
 
-**4. B 段草稿**，在 Mac 上：
-   1. 在分支 `feat/windows-host-core` 上做（它是 `main` 加 B 段的接线，见 2.1）。先 `git merge main`，读 3.2 节和三个说明文件（`…windows-b1/b2/b3-draft-notes.md`）。
-   2. 任务 3（压缩）要先有探针 C1 的结论。
-   3. 生成样本：`RAPP_WRITE_FIXTURES=1 swift test`（每个任务里写了各自的 `--filter`），然后不带那个变量再跑一遍（比对方式）。生成器只调用 `Sources/RappCore/` 的代码；Swift 符号在测试里看不到时，照计划 B 任务 2 的办法绕，**不改 Swift 的访问级别**。
-   4. `cargo test -p rapp-host-core`。红的地方：以 Swift 为准改 Rust。做不到一个字节不差的，按计划 B“Fixture rules”最后一条处理并写进 `PORTING.md`。
-   5. 任务 13–19 的草稿写完了：`cargo test -p rapp-testkit --test host_session`，再 `--test host_service`。然后补或者认下 3.2 节“草稿和 Swift 不一样”剩下的四条。
-   6. 用真的控制端连 `fake-host-core` 试一次（计划 B 任务 19）。
-   7. `host-core` 是共用代码：过完整的 Mac 门禁，再把接线合进 `main`，合并后照常发 macOS 版。Mac 门禁不能明显变慢（`host-core` 的测试加会话测试 60 秒以内）。
+**4. B 段草稿**，同样以 Windows 为主，在分支 `feat/windows-host-core` 上做（它是 `main` 加 B 段的接线，见 2.1）：
+   1. Mac：`git merge main`；做探针 C1，任务 3（压缩）要它的结论；生成样本：`RAPP_WRITE_FIXTURES=1 swift test --filter 'Fixtures/'`，然后不带那个变量再跑一遍（比对方式）；提交；推分支。生成器只调用 `Sources/RappCore/` 的代码；Swift 符号在测试里看不到时，照计划 B 任务 2 的办法绕，**不改 Swift 的访问级别**。这一步只修生成器，不修 Rust。
+   2. Windows（A 段在 Windows 上绿了以后）：`git merge main`，再把 `feat/windows-foundation` 合进这个分支，testkit 依赖的 crate 要有 A 段的接线才能在 Windows 上编。读 3.2 节和三个说明文件（`…windows-b1/b2/b3-draft-notes.md`）。
+   3. Windows：`cargo test -p rapp-host-core`。红的地方：以 Swift 为准改 Rust，不改样本。做不到一个字节不差的，按计划 B“Fixture rules”最后一条处理并写进 `PORTING.md`。样本本身错了就回 Mac 重新生成。
+   4. Windows：任务 13–19 的草稿写完了：`cargo test -p rapp-testkit --test host_session`，再 `--test host_service`。然后补或者认下 3.2 节“草稿和 Swift 不一样”剩下的四条。`scripts\check-windows.ps1` 全绿后推分支。
+   5. Mac：过完整的 Mac 门禁，不能明显变慢（`host-core` 的测试加会话测试 60 秒以内）；用真的控制端连 `fake-host-core` 试一次（计划 B 任务 19）。
+   6. `host-core` 是共用代码：排在 A 段后面，在 Mac 上把接线合进 `main`，合并后照常发 macOS 版。
+
+两份开工提示词就是照这个顺序写的：`2026-11-27-rapp-windows-kickoff-mac.md`（一头一尾）和 `…-kickoff-windows.md`（中间）。计划 A“Global Constraints”原来写的是在 Windows 机器上合并；改成在 Mac 上合并，因为最后一次门禁在 Mac 上跑，而且这次合并要触发 macOS 发版。
 
 **5. C → D → E → F → G → H**，照计划做。依赖（规格 §17.2）：C 要 A 和探针 G2；D 要 A、B 和 H1、H3、H5；E 要 A 和 T1、T5（界面那一半要 C）；F 要 D（管道协议来自 C）和 S1、S2；G 要 C、F 和 S4、I1；H 要全部。C 和 D 可以两个人同时做。F 段做完要换一个没写这段代码的人审规格 §18.2。
 
