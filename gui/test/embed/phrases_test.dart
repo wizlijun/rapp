@@ -17,11 +17,17 @@ void main() {
     expect(p.phraseCmdsSeeded, isTrue);
   });
 
-  test('an old file gets the six commands in front, once', () {
+  test('an old file gets the seven commands in front, once', () {
     File('${tmp.path}/gui.json').writeAsStringSync('{"phrases":[{"text":"a"}]}');
     final p = UiPrefs.load(tmp.path);
     expect(p.phrases, [for (final id in builtinCmdOrder) StripCmd(id), const Phrase('a')]);
     expect(p.phraseCmdsSeeded, isTrue);
+  });
+
+  test('an old file without 切模式 gets it, right after 新对话', () {
+    File('${tmp.path}/gui.json').writeAsStringSync('{"phrases":[{"text":"a"}]}');
+    final p = UiPrefs.load(tmp.path);
+    expect(p.phrases.whereType<StripCmd>().map((c) => c.id).take(2), ['new', 'mode']);
   });
 
   test('deleting every command sticks after save and load', () {

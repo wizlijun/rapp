@@ -4,6 +4,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../quick/quick_sync.dart';
 import 'state_config.dart';
 import 'state_link.dart';
 import 'state_out.dart';
@@ -20,6 +21,7 @@ class StateSync extends ChangeNotifier {
     StateLink Function(Uri)? link,
     DateTime Function()? clock,
     StateOut? out,
+    this.quick,
   }) : out = out ?? StateOut(),
        _makeLink = link ?? StateLink.new,
        config = StateConfig.load(localDir);
@@ -31,6 +33,9 @@ class StateSync extends ChangeNotifier {
   final String localDir;
   final Future<String?> Function() find;
   final StateLink Function(Uri) _makeLink;
+
+  /// The 快捷区 settings sync: attached to each link that comes up, told when the service goes away or sends `prefs.*`.
+  final QuickSync? quick;
 
   /// The app's own reports and desk upload; attached while connected.
   final StateOut out;
@@ -186,6 +191,7 @@ class StateSync extends ChangeNotifier {
     // Unreachable keeps the rows for the next page merge but stops showing them.
     if (s == StateStatus.unreachable) hasSnapshot = false;
     if (s == StateStatus.unreachable && status != StateStatus.unreachable) outage++;
+    if (s == StateStatus.off || s == StateStatus.none) quick?.detach(reachable: true);
     if (s != status) debugPrint('state_sync: ${s.name}');
     status = s;
     notifyListeners();
@@ -266,6 +272,14 @@ class StateSync extends ChangeNotifier {
     _set(StateStatus.connected);
     _attachOut(link);
     _flush();
+    final q = quick;
+    if (q != null) {
+      if (link.prefs) {
+        unawaited(q.attach(link));
+      } else {
+        q.detach(reachable: true);
+      }
+    }
   }
 
   void _attachOut(StateLink link) => out.attach(link, {'devices': _devices, if (_hasDesks) 'desks': desks});
@@ -276,11 +290,13 @@ class StateSync extends ChangeNotifier {
     _gen++;
     _cancelAll();
     if (_grace) {
-      // The first failed try after a refresh of a working link: keep showing what it had, try again soon.
+      // The first failed try after a refresh of a working link: keep showing what it had (the 快捷区 line too), try
+      // again soon.
       _grace = false;
       _timer = Timer(Duration(seconds: _backoff.first), _connect);
       return;
     }
+    quick?.detach(reachable: false);
     _set(StateStatus.unreachable);
     final secs = _backoff[_attempt < _backoff.length ? _attempt : _backoff.length - 1];
     _attempt++;
@@ -372,6 +388,8 @@ class StateSync extends ChangeNotifier {
           }
         }
       default:
+        final w = e['what'];
+        if (w is String && w.startsWith('prefs.')) quick?.onPush(e);
         return false;
     }
     return true;

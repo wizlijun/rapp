@@ -22,6 +22,13 @@ void main() {
     expect(builtinCmdOrder.every(builtinCmds.containsKey), isTrue);
   });
 
+  test('切模式 is a built-in command sending ⇧Tab on all five tools', () {
+    expect(builtinCmds['mode']!.label, '切模式');
+    for (final id in ['claude-code', 'codex', 'gemini', 'agy', 'opencode']) {
+      expect(actionFor(const StripCmd('mode'), tool(id)), const CmdKey('stab'), reason: id);
+    }
+  });
+
   test('user overrides and custom commands', () {
     expect(actionFor(const StripCmd('new', per: {'codex': CmdText('/clear')}), codex), const CmdText('/clear'));
     expect(actionFor(const StripCmd('new', per: {'codex': null}), codex), isNull);
@@ -61,9 +68,11 @@ void main() {
   });
 
   test('defaults and item parsing', () {
-    expect(defaultStripItems.length, 13);
-    expect(defaultStripItems.take(6), [for (final id in builtinCmdOrder) StripCmd(id)]);
-    expect(defaultStripItems.skip(6), defaultPhrases);
+    expect(defaultStripItems.length, 14);
+    expect(defaultStripItems[1], const StripCmd('mode'));
+    expect(builtinCmdOrder, ['new', 'mode', 'model', 'compact', 'resume', 'usage', 'search']);
+    expect(defaultStripItems.take(7), [for (final id in builtinCmdOrder) StripCmd(id)]);
+    expect(defaultStripItems.skip(7), defaultPhrases);
     expect(defaultPhrases.map((p) => p.text).toList(),
         ['继续', '按你推荐来', '进度', '全做完别问我', '先写方案别改代码', '跑下测试', '提交并推送']);
     expect(stripItemFromJson({'kind': 'cmd', 'id': 'new'}), const StripCmd('new'));

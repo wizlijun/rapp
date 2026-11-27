@@ -1,0 +1,3 @@
+{"store":"3f9a0c2e71b4d856","phrases":{"at":1764230000123,"data":[{"id":"p1","text":"继续"},{"id":"p2","text":"/compact","cmd":true}]},"keys":{"at":1764230000456,"data":[{"id":"search","name":"搜索","chord":"ctrl+r"}]},"layout":{"at":1764229000000,"data":{"rows":[["esc","tab","up"],["left","down","right"]]}},"stars":{"at":1764230000789,"data":["p2","search"]},"usage":{"mac-1":{"at":1764230001000,"data":{"p2":{"2026-11-27":4}}},"ipad-1":{"at":1764229990000,"data":{"search":{"2026-11-26":2,"2026-11-27":1}}}}}
+{"what":"prefs.phrases","doc":{"at":1764230000123,"data":[{"id":"p1","text":"继续"},{"id":"p2","text":"/compact","cmd":true}]}}
+{"what":"prefs.usage","device":"mac-1","doc":{"at":1764230001000,"data":{"p2":{"2026-11-27":4}}}}

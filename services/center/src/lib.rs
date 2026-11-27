@@ -1,8 +1,10 @@
-//! rapp-center (中心服务): one port for every builtin service; today the state queue. Listens on 127.0.0.1 only.
+//! rapp-center (中心服务): one port for every builtin service; today the state queue and the shared
+//! quick-area settings (`prefs`). Listens on 127.0.0.1 only.
 
 mod builtin;
 pub mod disk;
 mod entry;
+pub mod prefs;
 pub mod state;
 
 use std::path::PathBuf;

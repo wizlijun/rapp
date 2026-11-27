@@ -92,7 +92,7 @@ class UiPrefs {
   /// dropped on load.
   List<StripItem> phrases;
 
-  /// The six built-in commands were put in front of the saved list once (`phrase_cmds_seeded`).
+  /// The built-in commands were put in front of the saved list once (`phrase_cmds_seeded`).
   bool phraseCmdsSeeded;
 
   /// 跟着我的窗口 (`term_fit`): the host's terminal window follows this console's size. Missing or bad means on.

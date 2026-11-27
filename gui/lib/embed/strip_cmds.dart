@@ -114,7 +114,7 @@ class BuiltinCmd {
   final Map<String, CmdAction> per;
 }
 
-const builtinCmdOrder = ['new', 'model', 'compact', 'resume', 'usage', 'search'];
+const builtinCmdOrder = ['new', 'mode', 'model', 'compact', 'resume', 'usage', 'search'];
 
 // Verified against the tools' docs on 2026-11-26 (spec §7); primary command only.
 const builtinCmds = <String, BuiltinCmd>{
@@ -124,6 +124,15 @@ const builtinCmds = <String, BuiltinCmd>{
     'gemini': CmdText('/clear'),
     'agy': CmdText('/clear'),
     'opencode': CmdText('/new'),
+  }),
+  // ⇧Tab; checked 2026-11-27 (spec §7): Claude Code cycles permission modes, Codex toggles plan, Gemini cycles
+  // approval modes, Antigravity cycles default/accept-edits/plan, opencode switches agent.
+  'mode': BuiltinCmd('切模式', {
+    'claude-code': CmdKey('stab'),
+    'codex': CmdKey('stab'),
+    'gemini': CmdKey('stab'),
+    'agy': CmdKey('stab'),
+    'opencode': CmdKey('stab'),
   }),
   'model': BuiltinCmd('换模型', {
     'claude-code': CmdText('/model'),
@@ -162,10 +171,13 @@ const builtinCmds = <String, BuiltinCmd>{
 CmdAction? actionFor(StripCmd c, AgentTool tool) =>
     c.per.containsKey(tool.id) ? c.per[tool.id] : builtinCmds[c.id]?.per[tool.id];
 
-/// What a fresh install (and 恢复默认) holds: the six commands, then the default phrases.
+/// What a fresh install (and 恢复默认) holds: the seven commands, then the default phrases.
 List<StripItem> get defaultStripItems => [for (final id in builtinCmdOrder) StripCmd(id), ...defaultPhrases];
 
 StripItem? stripItemFromJson(Object? j) {
   if (j is Map && j['kind'] == 'cmd') return StripCmd.fromJson(j);
   return Phrase.fromJson(j);
 }
+
+/// How stars and counts name an item of the 常用语 doc (quick-row Ruling 1): `p:` and the phrase's id or the command's.
+String refOf(StripItem it) => 'p:${it is StripCmd ? it.id : (it as Phrase).id ?? ''}';
