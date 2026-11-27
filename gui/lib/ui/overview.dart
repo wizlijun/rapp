@@ -2,6 +2,7 @@
 // It takes the stage's place; the top bar and overlays stay as they are.
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
 import '../embed/traffic_label.dart';
@@ -10,6 +11,7 @@ import 'inbound.dart';
 import 'lamp.dart';
 import 'load_row.dart';
 import 'local_services.dart';
+import 'local_terms.dart';
 import 'os_mark.dart';
 import 'main_state.dart';
 import 'open_apps_menu.dart';
@@ -298,7 +300,9 @@ class _LocalFold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) =>
-      state.localColumnOpen(inbound: monitor?.status?.sessions.isNotEmpty ?? false)
+      state.localColumnOpen(
+          inbound: monitor?.status?.sessions.isNotEmpty ?? false,
+          terms: MainState.localTermRows(monitor?.localTerms).isNotEmpty)
       ? _Column(state: state, col: col, monitor: monitor, onFold: () => state.openLocalColumn(false))
       : _FoldedColumn(col: col, onOpen: () => state.openLocalColumn(true));
 }
@@ -425,6 +429,16 @@ class _Column extends StatelessWidget {
         // The sessions, then this device's favourites that are not open (one tap opens one). The page scrolls,
         // so the column is as tall as what it holds.
         Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          // The text terminals rapp-term runs here, first: the ones other devices can open too.
+          if (id == null && monitor?.localTerms != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: LocalTerms(
+                rows: MainState.localTermRows(monitor!.localTerms),
+                onNew: state.newLocalTermBusy ? null : state.newLocalTerm,
+                onFront: defaultTargetPlatform == TargetPlatform.macOS ? state.frontLocalTerm : null,
+              ),
+            ),
           if (col.entries.isEmpty) Text('没有打开的 app', style: TextStyle(color: t.muted)),
           for (final (i, e) in col.entries.indexed) ...[
             if (i > 0) const SizedBox(height: 8),

@@ -31,7 +31,7 @@ import '../quick/key_layout.dart';
 import '../quick/quick_prefs.dart';
 import '../quick/quick_sync.dart';
 import '../load_model.dart';
-import '../service_client.dart' show ServiceMonitor;
+import '../service_client.dart' show ServiceException, ServiceMonitor, termFrontConsent, termFrontDenied, termFrontNotFound;
 import '../permissions.dart';
 import '../embed/app_profile.dart';
 import '../embed/app_state.dart';
@@ -1176,9 +1176,9 @@ class MainState extends ChangeNotifier {
   /// so leaving 全景 for an app and coming back keeps what they chose.
   bool? localColumnPick;
 
-  /// Whether 本机 shows open: the user's pick, else open while someone is connected in ([inbound]; always false
-  /// on iPad/Duo, which have no local service).
-  bool localColumnOpen({required bool inbound}) => localColumnPick ?? inbound;
+  /// Whether 本机 shows open: the user's pick, else open while someone is connected in ([inbound]) or a text
+  /// terminal opened through rapp runs here ([terms]); both always false on iPad/Duo, which have no local service.
+  bool localColumnOpen({required bool inbound, bool terms = false}) => localColumnPick ?? (inbound || terms);
 
   void openLocalColumn(bool open) {
     if (localColumnPick == open) return;
@@ -3757,7 +3757,12 @@ class MainState extends ChangeNotifier {
   static bool isConsentAsk(String message) => message.contains('whether rApp may control Terminal');
 
   /// Whether the failed terminal open [e] is macOS asking on the host (the wait card keeps that up longer).
-  static bool consentError(Object e) => e is HubException && isConsentAsk(e.message);
+  /// [e] is from this machine's service when the open or front ran here.
+  static bool consentError(Object e) => switch (e) {
+        HubException(:final message) => isConsentAsk(message),
+        ServiceException(:final message) => message == termFrontConsent || isConsentAsk(message),
+        _ => false,
+      };
 
   /// The slow things being waited for, which the wait card over the stage shows.
   final Waits waits = Waits();
@@ -3801,6 +3806,80 @@ class MainState extends ChangeNotifier {
         TimeoutException() => '新建终端没有回应，请稍后再试',
         _ => '$e',
       };
+
+  // ---- this machine's text terminals (the 本机 column's 终端 card) ----
+
+  /// The local consent prompt is on this screen: the words say what to click, not where.
+  static const localConsentWords = 'macOS 弹出了授权框「“rApp”想要控制“终端”」：点「允许」（可能连着两个），点完再试一次';
+
+  /// What the hint says when a 新建 or a front of this machine's terminal failed with [e].
+  static String localTermWords(Object e) => switch (e) {
+        ServiceException(:final message) when message == termFrontNotFound => '没找到这个终端的窗口',
+        ServiceException(:final message) when message == termFrontDenied =>
+          '没有控制「终端」的权限：到「系统设置 › 隐私与安全性 › 自动化」里，打开 rApp 下面的「终端」',
+        ServiceException() when consentError(e) => localConsentWords,
+        // The tab script was cut off: a prompt on this Mac most likely went unanswered (serve says "that Mac").
+        ServiceException(:final message) when message.contains('allow rApp to control Terminal') =>
+          '「终端」没有回应：看看是否弹出了授权框「“rApp”想要控制“终端”」，点「允许」后再新建',
+        ServiceException(:final message) => message,
+        _ => newTermWords(e),
+      };
+
+  /// This machine's text terminals in [l] (rows of other hosts left out); none while there is no list.
+  static List<TermRow> localTermRows(TermList? l) => [
+        for (final r in l?.terms ?? const <TermRow>[])
+          if (r.host == null) r,
+      ];
+
+  /// A local terminal's lamp: its program's state only, never unread (typing in the Terminal app does not mark it
+  /// seen, so a shell with output would stay lit).
+  static Lamp localTermLamp(TermRow r) {
+    if (r.dead) return Lamp.disconnected;
+    final ps = r.ps;
+    if (ps == null) return Lamp.active;
+    final l = programLamp(ps);
+    return l == Lamp.disconnected ? Lamp.idle : l;
+  }
+
+  var _newingLocal = false;
+
+  /// A 新建 on the 本机 card is waiting for its terminal: another tap does nothing.
+  bool get newLocalTermBusy => _newingLocal;
+
+  /// 新建 on the 本机 card: a text terminal in this machine's terminal app, from the last directory. No in-app view
+  /// opens; the card lists it when the watch sends it.
+  Future<void> newLocalTerm() async {
+    final m = monitor;
+    if (m == null || _newingLocal) return;
+    final launchers = m.localTerms?.hosts.where((h) => h.host == null).firstOrNull?.launchers ?? const <String>[];
+    if (launchers.isEmpty) return say('这台设备没有可用的终端窗口');
+    final app = prefs.termAppFor(localTermsPref, launchers);
+    _newingLocal = true;
+    notifyListeners();
+    try {
+      await waits.run('正在新建终端…', () => m.termOpen(app: app, from: 'last'),
+          detail: '本机', words: localTermWords, asks: consentError);
+    } catch (e) {
+      if (!_disposed) hint = localTermWords(e);
+    } finally {
+      _newingLocal = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  /// The key of this machine's terminal app in [UiPrefs.termApp].
+  static const localTermsPref = 'local';
+
+  /// A tap on a row of the 本机 card: that terminal's window comes to the front; a failure is the hint.
+  Future<void> frontLocalTerm(String term) async {
+    final m = monitor;
+    if (m == null) return;
+    try {
+      await m.termFront(term);
+    } catch (e) {
+      if (!_disposed) say(localTermWords(e));
+    }
+  }
 
   /// Opens a text terminal window on [id], then switches to it without waiting for the session to connect; a
   /// refusal is thrown with the hub's words. [from]: the terminal it opens beside (its directory, shell and window).

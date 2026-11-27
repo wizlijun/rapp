@@ -1672,3 +1672,19 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 直接挂载至已发布的 [v0.15.66](https://github.com/wizlijun/rapp/releases/tag/v0.15.66) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
 - [x] 对齐 macOS `0.15.66`（`feat/cmd-menu`：快捷区第一行改为 `命令▾` / `常用语▾` 双菜单、去掉按键动作并将 `搜历史` `⌃R` 归回 7 个内置命令、侧栏全局设置拆分为独立「常用语」「命令」「键盘布局」三页，并一次性迁移 `0.15.63`/`64` 的 `keys` doc 与 `k:` 星标/次数/布局格）：更新 Linux 桌面端 `gui/test/quick/quick_row_widget_test.dart`（星标 `搜历史` 鼠标点击发送 `Ctrl-R` 并保持焦点与 IME 预编辑）、`gui/test/embed/phrase_strip_cmds_test.dart`（`命令▾` 拒发仅在菜单内提示）及 `gui/test/ui/cmds_page_test.dart`（`CmdsPage` 7 个内置命令与 `0.15.63`/`64` `keys` doc 迁移）；全工作区 20 个 crate `clippy -- -D warnings`、`rapp-center --test prefs`（13/13）与 Flutter 3,815 项测试全部通过。
 - [x] `v0.15.66`（源码 `177175fc`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间无头冒烟测试（因桌面进入 Omarchy Quickshell 锁屏，Hyprland 暂停实时抓屏帧；Rust 源码与已通过实机 Hyprland QUIC 抓屏的 `0.15.65` 零差异）全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json` 含 `v0.15.63`–`v0.15.66` 全部 6 项资产、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01566-parity.md`。
+
+## 总览本机列：终端卡片（feat/overview-local-terms）
+
+规格 `docs/superpowers/specs/2026-11-27-rapp-overview-local-terms-design.md`，计划 `docs/superpowers/plans/2026-11-27-rapp-overview-local-terms.md`（2026-11-27）。
+
+- [x] 本机列最上面一组「终端」：列出这台机器上 rapp-term 开的文本终端（灯 + 名字 + 程序状态，有人在看写「N 个在看」）；「新建」在「终端」app（或本机选过的终端 app）里开一个，从上次的目录开始；macOS 上点一行把它的窗口切到前面
+- [x] 有 rapp 终端时本机列自己展开，全部退出后折回；文本终端关掉时卡片不见，再打开以后回来；旧服务不认 term_watch 就不显示，也不再反复问
+- 实机检查：
+  - [ ] ① 新建开在「终端」app
+  - [ ] ② 新终端出现在卡片里
+  - [ ] ③ 别的设备能同时打开它，行尾显示「1 个在看」
+  - [ ] ④ 点一行切到对应的标签页（包括最小化的窗口）
+  - [ ] ⑤ 第一次授权的提示：macOS 弹授权框时写「点「允许」（可能连着两个），点完再试一次」
+  - [ ] ⑥ 关掉再打开文本终端以后卡片回来
+  - [ ] ⑦ 有终端时本机列自己展开，全部退出后折回
+  - [ ] ⑧ Linux 上行不可点，新建可用

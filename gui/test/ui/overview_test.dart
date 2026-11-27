@@ -67,7 +67,8 @@ void main() {
       TermSessionPort? termPort,
       String? stateRules,
       DeviceOs? localOs,
-      StateSync? stateSync}) async {
+      StateSync? stateSync,
+      ServiceMonitor? monitor}) async {
     tester.view.physicalSize = const Size(1194, 834);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -100,6 +101,7 @@ void main() {
       builtinStateRules: stateRules,
       localOs: localOs,
       stateSync: stateSync,
+      monitor: monitor,
     );
     await tester.runAsync(() async {
       for (var i = 0; i < 8; i++) {
@@ -1450,9 +1452,9 @@ void main() {
       expect(size.width, greaterThanOrEqualTo(44));
     });
 
-    Future<_Mon> showPc(WidgetTester tester) async {
+    Future<_Mon> showPc(WidgetTester tester, [_Mon? given]) async {
       s.toggleOverview();
-      final m = _Mon();
+      final m = given ?? _Mon();
       addTearDown(m.dispose);
       await tester.pumpWidget(wrap(SizedBox(width: 1194, height: 700, child: Overview(state: s, monitor: m))));
       await tester.pump();
@@ -1500,6 +1502,64 @@ void main() {
       await tester.pump();
       expect(find.byKey(const Key('column-local-folded')), findsNothing);
       expect(find.byKey(const Key('column-local-fold')), findsOneWidget);
+    });
+
+    TermList terms(List<(String, String?)> rows) => TermList('local', terms: [
+          for (final (id, host) in rows) TermRow(id, id.substring(9), 'zsh', host, 1, 0, 1, false, false),
+        ]);
+
+    testWidgets('the local column opens itself while a rapp terminal runs', (tester) async {
+      await boot(tester);
+      final m = await showPc(tester);
+      m.setTerms(terms([('term:pty:a', null)]));
+      await tester.pump();
+      expect(find.byKey(const Key('local-terms')), findsOneWidget);
+      expect(find.byKey(const Key('local-term-term:pty:a')), findsOneWidget);
+      // The card is the column's first block, above the sessions.
+      expect(tester.getTopLeft(find.byKey(const Key('local-terms'))).dy,
+          lessThan(tester.getTopLeft(find.byKey(const Key('local-services'))).dy));
+      m.setTerms(terms(const []));
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsOneWidget);
+    });
+
+    testWidgets('rows from other hosts are not shown and do not open the column', (tester) async {
+      await boot(tester);
+      final m = await showPc(tester);
+      m.setTerms(terms([('term:pty@srv:b', 'srv')]));
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      expect(find.byKey(const Key('local-terms')), findsOneWidget);
+      expect(find.byKey(const Key('local-term-term:pty@srv:b')), findsNothing);
+    });
+
+    testWidgets('no card without terminal support', (tester) async {
+      await boot(tester);
+      await showPc(tester);
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      expect(find.byKey(const Key('local-terms')), findsNothing);
+    });
+
+    testWidgets('新建 on the card opens one on this machine; a second tap while it waits does nothing', (tester) async {
+      // The app hands the window and its state the same monitor.
+      final m = _Mon();
+      await boot(tester, monitor: m);
+      await showPc(tester, m);
+      m.setTerms(const TermList('local', hosts: [TermHost(null, launchers: ['Terminal'])]));
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('local-terms-new')));
+      await tester.pump();
+      expect(m.opens, 1);
+      await tester.tap(find.byKey(const Key('local-terms-new')));
+      await tester.pump();
+      expect(m.opens, 1);
+      m.gate.complete('term:pty:n');
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
     });
 
     testWidgets('the open 本机 column shows 连上的服务; the strip does not', (tester) async {
@@ -1567,8 +1627,22 @@ class _Mon extends ServiceMonitor {
     notifyListeners();
   }
 
+  void setTerms(TermList? l) {
+    localTerms = l;
+    notifyListeners();
+  }
+
   @override
   Future<String?> stateHost() async => host;
+
+  var opens = 0;
+  final gate = Completer<String>();
+
+  @override
+  Future<String> termOpen({String? shell, required String app, String? from}) {
+    opens++;
+    return gate.future;
+  }
 }
 
 class _Fs implements FullscreenControl {

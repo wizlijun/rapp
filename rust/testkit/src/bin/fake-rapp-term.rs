@@ -199,6 +199,16 @@ fn conn(mut s: TcpStream, token: &str, config_path: &str) {
             };
             send(&mut s, &v);
         }
+        Some("front") => {
+            let v = match cfg {
+                Err(e) => json!({"error":e}),
+                Ok(_) => {
+                    log(&format!("front {req}"));
+                    if req["term"] == "term:pty:gone" { json!({"error":"not-found"}) } else { json!({"ok":true}) }
+                }
+            };
+            send(&mut s, &v);
+        }
         Some("saved") => {
             log("saved");
             send(&mut s, &json!({"ok":true,"saved":[{"key":"k1","name":"train","saved":1,"boot":1,"cwd":"/tmp/p"}]}));
