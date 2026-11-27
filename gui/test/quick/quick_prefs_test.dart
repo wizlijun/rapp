@@ -90,6 +90,41 @@ void main() {
     expect(q.stars, isEmpty);
     expect(q.layout.rows[0], ['esc']);
   });
+  test('a broken quick.json that cannot be set aside is never overwritten', () {
+    final dir = Directory.systemTemp.createTempSync().path;
+    File('$dir/quick.json').writeAsStringSync('{nope');
+    File('$dir/quick.json.bad/x').createSync(recursive: true); // a folder in the way: the move fails
+    final q = QuickPrefs.load(dir, legacy: [Phrase('继续')])..dirOf = () => dir;
+    q.toggleStar('k:esc');
+    expect(q.stars, ['k:esc'], reason: 'it still works in memory');
+    expect(File('$dir/quick.json').readAsStringSync(), '{nope', reason: 'the only copy of the user\'s file is kept');
+    expect(q.lastSaveError, isNotNull, reason: 'the app can say the settings are not saved');
+  });
+
+  test('a quick.json from a newer version is read but never rewritten as v 1', () {
+    final dir = Directory.systemTemp.createTempSync().path;
+    final body = jsonEncode({
+      'v': 2,
+      'stars': {'at': 5, 'data': ['k:esc']},
+      'layout': {'at': 5, 'data': 'a shape this version does not know'},
+    });
+    File('$dir/quick.json').writeAsStringSync(body);
+    final q = QuickPrefs.load(dir, legacy: const [])..dirOf = () => dir;
+    expect(q.stars, ['k:esc']);
+    q.toggleStar('k:tab');
+    expect(File('$dir/quick.json').readAsStringSync(), body);
+    expect(q.lastSaveError, isNotNull);
+  });
+
+  test('a failed first write is kept for whoever wires onSaveError later', () {
+    final dir = Directory.systemTemp.createTempSync().path;
+    File('$dir/blocker').writeAsStringSync('a file, not a folder');
+    final q = QuickPrefs.load('$dir/blocker/dev', legacy: const []);
+    expect(q.lastSaveError, isNotNull);
+    final ok = QuickPrefs.load(Directory.systemTemp.createTempSync().path, legacy: const []);
+    expect(ok.lastSaveError, isNull);
+  });
+
   test('a broken quick.json is set aside and rebuilt', () {
     final dir = Directory.systemTemp.createTempSync().path;
     File('$dir/quick.json').writeAsStringSync('{nope');

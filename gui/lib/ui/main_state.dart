@@ -239,6 +239,8 @@ class MainState extends ChangeNotifier {
     this.quick.addListener(notifyListeners);
     this.quick.dirOf = () => data.prefsDir();
     this.quick.onSaveError = (e) => hint = '快捷区设置没有保存：${_fsReason(e)}';
+    final saveError = this.quick.lastSaveError; // a write at load, before the line above
+    if (saveError != null) hint = '快捷区设置没有保存：${_fsReason(saveError)}';
     _portSub = port?.events.listen(_onPortEvent);
     _termSub = termPort?.events.listen(_onPortEvent);
     if (defaultTargetPlatform == TargetPlatform.macOS || defaultTargetPlatform == TargetPlatform.linux) port?.setVoiceHotkey(prefs.voiceHotkey);

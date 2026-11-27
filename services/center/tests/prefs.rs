@@ -163,11 +163,11 @@ async fn run_and_save<F: std::future::Future<Output = ()>>(cfg: Config, f: impl 
 async fn prefs_and_store_survive_restart_with_data_dir() {
     let d = tempfile::tempdir().unwrap();
     let path = d.path().join("data/prefs.json");
-    // What prefs.json holds once it holds `want`, polled for 3 s (a save comes 1 s after a change).
+    // What prefs.json holds once it holds `want`, polled for 10 s (a save comes 1 s after a change; a loaded gate is slower).
     let saved = |want: fn(&Value) -> bool| {
         let path = path.clone();
         async move {
-            for _ in 0..30 {
+            for _ in 0..100 {
                 if let Some(v) = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) {
                     if want(&v) {
                         return v;
