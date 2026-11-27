@@ -236,12 +236,15 @@ void main() {
     });
 
     testWidgets('恢复默认', (tester) async {
+      final go = s.quick.phrases.whereType<Phrase>().firstWhere((p) => p.text == '提交并推送');
+      s.toggleStar(refOf(go));
       await open(tester);
       await tester.drag(k('phrase-row-7'), const Offset(-600, 0));
       await tester.pumpAndSettle();
       await tester.tap(k('phrase-reset'));
       await tester.pumpAndSettle();
       expect(s.quick.phrases, defaultQuickPhrases);
+      expect(s.quick.stars, [refOf(go)], reason: 'a default item keeps its star');
     });
   });
 }

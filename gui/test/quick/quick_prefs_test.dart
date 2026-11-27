@@ -188,6 +188,29 @@ void main() {
     ]);
     expect(QuickPrefs.migrate(defaultStripItems).phrases, defaultQuickPhrases);
   });
+  test('restoring default phrases keeps stars on default items', () {
+    final q = QuickPrefs.migrate(defaultStripItems);
+    final keep = q.phrases.whereType<Phrase>().firstWhere((p) => p.text == '进度');
+    q.toggleStar(refOf(keep));
+    // The user's own list: the default one gone, another added.
+    q.setPhrases([for (final it in q.phrases) if (!(it is Phrase && it.text == '进度')) it, const Phrase('我的')]);
+    expect(q.stars, isEmpty);
+    q.toggleStar(refOf(q.phrases.whereType<Phrase>().firstWhere((p) => p.text == '继续')));
+    q.setPhrases(defaultQuickPhrases); // 恢复默认
+    expect(q.stars, ['p:${q.phrases.whereType<Phrase>().firstWhere((p) => p.text == '继续').id}'],
+        reason: 'the star on 继续 stays');
+    // The same ids every time, and on every device.
+    expect(defaultQuickPhrases.map(refOf), defaultQuickPhrases.map(refOf));
+    expect(defaultQuickPhrases.map(refOf).toSet(), hasLength(defaultQuickPhrases.length));
+    expect(QuickPrefs.migrate(defaultStripItems).phrases.map(refOf), defaultQuickPhrases.map(refOf));
+    expect(q.phrases.whereType<Phrase>().firstWhere((p) => p.text == '进度').id, keep.id);
+  });
+  test('a fixed default id is used once: a second phrase of that text gets its own', () {
+    final q = QuickPrefs.migrate([const Phrase('继续'), const Phrase('继续', put: true), const Phrase('别的')]);
+    final ids = [for (final p in q.phrases.whereType<Phrase>()) p.id];
+    expect(ids.toSet().length, ids.length);
+    expect(ids.first, defaultQuickPhrases.whereType<Phrase>().firstWhere((p) => p.text == '继续').id);
+  });
   test('hostile docs never throw, in load or adopt; bad entries are dropped', () {
     final dir = Directory.systemTemp.createTempSync().path;
     final hostile = {

@@ -85,9 +85,31 @@ Chord? chordOfBarKey(String id) {
 /// commands without 搜历史 (spec §6.2), then the default phrases. One definition for both.
 List<StripItem> get defaultQuickPhrases => _migrateLists(defaultStripItems).phrases;
 
-/// [l] with a fresh id on every phrase that has none (Ruling 10).
-List<StripItem> _withIds(List<StripItem> l) =>
-    [for (final it in l) it is Phrase && it.id == null ? it.withId(quickId()) : it];
+/// [l] with an id on every phrase that has none (Ruling 10): a default phrase's text takes its fixed id while no
+/// other phrase of the list holds it, anything else a fresh one.
+List<StripItem> _withIds(List<StripItem> l) {
+  final used = {for (final it in l) if (it is Phrase && it.id != null) it.id!};
+  String idFor(String text) {
+    final fixed = _defaultIds[text];
+    final id = fixed != null && !used.contains(fixed) ? fixed : quickId();
+    used.add(id);
+    return id;
+  }
+
+  return [for (final it in l) it is Phrase && it.id == null ? it.withId(idFor(it.text)) : it];
+}
+
+/// The default phrases' ids, the same on every device and every time (so 恢复默认 keeps their stars and counts): `d`
+/// and the text's 32-bit FNV-1a in base 36.
+final Map<String, String> _defaultIds = {for (final p in defaultPhrases) p.text: _fixedId(p.text)};
+
+String _fixedId(String text) {
+  var h = 0x811c9dc5;
+  for (final c in text.codeUnits) {
+    h = ((h ^ c) * 0x01000193) & 0xffffffff;
+  }
+  return 'd${h.toRadixString(36).padLeft(7, '0')}';
+}
 
 bool _needsIds(List<StripItem> l) => l.any((it) => it is Phrase && it.id == null);
 
