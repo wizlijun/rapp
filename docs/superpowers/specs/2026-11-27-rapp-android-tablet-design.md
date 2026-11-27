@@ -608,6 +608,7 @@ Windows 的 C 段也要「会话端口的小接口」，在 Windows 机器上做
 6. 厂商系统的省电策略会不会在前台就限制它。
 7. 更新一遍。
 8. 双栈的真 IPv6：有全局 IPv6 的网络、只有 IPv6 的网络（NAT64）下各连一次 relay（模拟器上没有全局 IPv6，P0 测不了，见 P0 结果第 3 节）。
+9. 触控板双指滚动、捏合：Flutter 收到的是 `PointerPanZoom*` 还是 `PointerScrollEvent`（模拟器上用 `uinput` 虚拟触控板测不出，见 P0 结果第 5 节）；以及外接实体键盘上 Ctrl+C、Ctrl+V 在焦点于空白区时到不到 App（P0 里只有模拟器上的内核级注入和平板上的 `input keycombination`，后者不带修饰键状态）。
 
 ## 15. 请你核对
 
