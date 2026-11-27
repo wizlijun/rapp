@@ -13,7 +13,7 @@ import '../ui/controls.dart';
 import 'composer_editor.dart';
 import 'linux_candidates.dart';
 
-class FlutterEditor implements ComposerEditor, HandoffEditor {
+class FlutterEditor implements ComposerEditor, HandoffEditor, SelectionEditor {
   /// [rime] defaults to the built-in input method on iOS and to none elsewhere.
   FlutterEditor({RimeLink? rime})
     : _rime = rime ?? (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS ? RappRime.instance : null) {
@@ -409,6 +409,19 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
     _controller.value = TextEditingValue(
       text: v.text.replaceRange(start, end, text),
       selection: TextSelection.collapsed(offset: start + text.length),
+    );
+  }
+
+  @override
+  TextSelection get selection => _controller.selection;
+
+  @override
+  set selection(TextSelection value) {
+    if (_disposed) return;
+    final n = _controller.text.length;
+    _controller.selection = TextSelection(
+      baseOffset: value.baseOffset.clamp(0, n),
+      extentOffset: value.extentOffset.clamp(0, n),
     );
   }
 

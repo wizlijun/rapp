@@ -139,6 +139,14 @@ class _ComposerPanelState extends State<ComposerPanel> {
       onLetter: (l) => defaultTargetPlatform == TargetPlatform.iOS && sendLatchedLetter(widget.state, _s, widget.port, l),
     );
     _attached = _m.attach(_ed);
+    final saved = _m.selection;
+    final ed = _ed;
+    if (saved != null && ed is SelectionEditor) {
+      // After the draft is in the editor (setText puts the caret at the end).
+      _attached.then((_) {
+        if (mounted) (ed as SelectionEditor).selection = saved;
+      });
+    }
     _focusSeen = _m.focusTick;
     _releaseSeen = _m.releaseTick;
     _m.addListener(_modelChanged);
@@ -164,6 +172,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
     // Collapse, a session switch, the stage going away: the editor's text goes into the draft
     // first, then the editor is let go.
     final ed = _ed;
+    if (ed is SelectionEditor) _m.selection = (ed as SelectionEditor).selection;
     _m.detach(ed).whenComplete(ed.dispose);
     super.dispose();
   }

@@ -111,6 +111,22 @@ void main() {
 
     Rect rect(WidgetTester tester, String key) => tester.getRect(find.byKey(Key(key)));
 
+    testWidgets('caret survives shell switch', (tester) async {
+      big(tester);
+      await tester.pumpWidget(layer());
+      await tester.pump();
+      field(tester).controller!.value = const TextEditingValue(text: 'hello', selection: TextSelection.collapsed(offset: 2));
+      await tester.pump();
+      // The phone shell takes the stage's place (the composer unmounts), then the Pad comes back.
+      await tester.pumpWidget(wrap(const SizedBox.shrink()));
+      await tester.pump();
+      await tester.pumpWidget(layer());
+      await tester.pump();
+      await tester.pump();
+      expect(text(tester), 'hello');
+      expect(field(tester).controller!.selection, const TextSelection.collapsed(offset: 2));
+    });
+
     testWidgets('⌘= / ⌘- / ⌘0 zoom the whole panel in four steps; the default is the smallest', (tester) async {
       big(tester);
       await tester.pumpWidget(layer());

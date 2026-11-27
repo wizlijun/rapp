@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show TextSelection;
 
 import 'composer_editor.dart';
 import 'session_port.dart';
@@ -133,6 +134,9 @@ class ComposerModel extends ChangeNotifier {
   void Function(String? shown, String live)? onRecalled;
 
   /// The text while no editor is attached; the last copy otherwise. A held block is in it as its mark.
+  /// The editor's caret or selection when it went away, put back when the next one mounts (F9). Clamped there.
+  TextSelection? selection;
+
   String get draft => _draft;
   String _draft = '';
   int _draftEpoch = 0;

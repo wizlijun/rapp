@@ -1024,7 +1024,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       final gridW = shown ? m.cols * cw : 0.0, gridH = shown ? m.rows * ch : 0.0;
       // The pane keeps the device's rows and columns; it is laid out at the font size that fits it to the
       // stage, up as well as down, and drawn at that size rather than stretched.
-      final k = gridScale(w: w, h: h, gridW: gridW, gridH: gridH, up: !widget.state.prefs.termFit);
+      final k = gridScale(w: w, h: h, gridW: gridW, gridH: gridH, up: !_wantFit);
       _drawn = shown ? _metricsAt(math.max(4.0, _metrics.style.fontSize! * k), m.cols, m.rows, w, h) : _metrics;
       // The zoom (B's alone, never in the view asked for): the grid drawn at a bigger font, panned and clipped.
       _stage = Size(w, h);

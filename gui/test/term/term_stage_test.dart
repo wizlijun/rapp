@@ -390,6 +390,18 @@ void main() {
     expect(painter(t).metrics.style.fontSize, lessThan(14));
   });
 
+  testWidgets('a view that asks fit:false scales a small pane up whatever the pref says', (t) async {
+    expect(state.prefs.termFit, true);
+    model.apply(scr([for (var i = 0; i < 2; i++) 'r$i'], cols: 10));
+    await t.pumpWidget(wrap(SizedBox(
+      width: 40 * cw,
+      height: 20 * ch,
+      child: TermStage(state: state, session: session, port: port, fit: false),
+    )));
+    expect(painter(t).metrics.style.fontSize, closeTo(56, 1));
+    expect(views().first['fit'], false);
+  });
+
   testWidgets('a small pane is scaled up to fill', (t) async {
     state.prefs.termFit = false;
     model.apply(scr([for (var i = 0; i < 2; i++) 'r$i'], cols: 10));

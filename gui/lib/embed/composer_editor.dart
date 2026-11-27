@@ -106,6 +106,12 @@ abstract class ComposerEditor {
   void dispose();
 }
 
+/// Editors whose caret or selection can be read and put back (a panel remount keeps it, spec F9).
+abstract class SelectionEditor {
+  TextSelection get selection;
+  set selection(TextSelection value);
+}
+
 /// Editors that can relinquish input synchronously during native-window handoff.
 abstract class HandoffEditor {
   void setHandoff(bool active);
