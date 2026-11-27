@@ -169,3 +169,6 @@ StripItem? stripItemFromJson(Object? j) {
   if (j is Map && j['kind'] == 'cmd') return StripCmd.fromJson(j);
   return Phrase.fromJson(j);
 }
+
+/// How stars and counts name an item of the 常用语 doc (quick-row Ruling 1): `p:` and the phrase's id or the command's.
+String refOf(StripItem it) => 'p:${it is StripCmd ? it.id : (it as Phrase).id ?? ''}';

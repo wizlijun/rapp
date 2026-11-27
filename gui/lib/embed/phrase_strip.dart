@@ -44,12 +44,12 @@ class _PhraseStripState extends State<PhraseStrip> {
 
   AgentTool? get _tool => widget.state.stripToolOf(widget.session);
 
-  /// What the strip shows now: each item with its index in the whole `prefs.phrases` (the key and the edit index).
+  /// What the strip shows now: each item with its index in the whole `quick.phrases` (the key and the edit index).
   /// Commands only with a tool in front.
   List<(int, StripItem)> get _items {
     final tool = _tool;
     return [
-      for (final (i, it) in widget.state.prefs.phrases.indexed)
+      for (final (i, it) in widget.state.quick.phrases.indexed)
         if (it is Phrase || tool != null) (i, it),
     ];
   }
@@ -96,7 +96,7 @@ class _PhraseStripState extends State<PhraseStrip> {
 
   /// The long-press menu of the [i]th item of the whole list.
   Future<void> _menu(int i, Offset at) async {
-    final all = widget.state.prefs.phrases;
+    final all = widget.state.quick.phrases;
     if (i >= all.length) return;
     final item = all[i];
     final pick = await showRappMenu<String>(context, position: menuAt(context, at), items: [
@@ -106,7 +106,7 @@ class _PhraseStripState extends State<PhraseStrip> {
       const RappMenuItem(value: 'delete', key: Key('phrase-menu-delete'), label: '删除'),
     ]);
     if (!mounted || pick == null) return;
-    final l = List.of(widget.state.prefs.phrases);
+    final l = List.of(widget.state.quick.phrases);
     final at0 = l.indexOf(item);
     if (at0 < 0) return; // changed meanwhile
     switch (pick) {
@@ -116,7 +116,7 @@ class _PhraseStripState extends State<PhraseStrip> {
         final StripItem? e =
             item is StripCmd ? await editStripCmd(context, c: item) : await editPhrase(context, p: item as Phrase);
         if (e == null) return;
-        final now = List.of(widget.state.prefs.phrases);
+        final now = List.of(widget.state.quick.phrases);
         final j = now.indexOf(item);
         if (j >= 0) widget.state.setStripItems(now..[j] = e);
       case 'first':

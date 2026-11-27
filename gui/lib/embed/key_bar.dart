@@ -56,7 +56,8 @@ bool typedIntoPicture(MainState state, RemoteSession session, KeyEvent e) =>
 bool phraseStripShown(MainState state, RemoteSession session) {
   final p = state.prefs;
   if (!p.phraseStrip || !(_isTerm(state, session) || session.profile.phrases)) return false;
-  return p.phrases.any((i) => i is Phrase) || (p.phrases.isNotEmpty && state.stripToolOf(session) != null);
+  final l = state.quick.phrases;
+  return l.any((i) => i is Phrase) || (l.isNotEmpty && state.stripToolOf(session) != null);
 }
 
 /// How high the bar is, with the modes now on (the 常用语条 included).

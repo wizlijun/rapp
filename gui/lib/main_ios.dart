@@ -27,6 +27,7 @@ import 'state/refresh_on.dart';
 import 'state/state_sync.dart';
 import 'ui/main_state.dart';
 import 'ui/main_window.dart';
+import 'quick/quick_prefs.dart';
 import 'ui/prefs.dart';
 import 'ui/system_font.dart' show fallbackTextSize;
 import 'ui/tokens.dart';
@@ -78,6 +79,8 @@ Future<void> mainIos() async {
   }
 
   final prefs = UiPrefs.load(data.prefsDir() ?? data.localDir);
+  // The 快捷区 docs: quick.json, built from gui.json's phrases the first time; memory only without a device id.
+  final quick = QuickPrefs.load(data.prefsDir(), legacy: prefs.phrases);
   SessionPort? port;
   var doubleClick = const Duration(milliseconds: 500);
   try {
@@ -104,6 +107,7 @@ Future<void> mainIos() async {
       hubError: hubError,
       data: data,
       prefs: prefs,
+      quick: quick,
       port: port,
       termPort: TermSessionPort(),
       doubleClick: doubleClick,

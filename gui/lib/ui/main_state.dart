@@ -27,6 +27,9 @@ import '../history/input_recorder.dart';
 import '../hub_client.dart';
 import '../state/state_out.dart' show AppReport;
 import '../state/state_sync.dart';
+import '../quick/key_actions.dart' show KeyAction;
+import '../quick/key_layout.dart';
+import '../quick/quick_prefs.dart';
 import '../load_model.dart';
 import '../service_client.dart' show ServiceMonitor;
 import '../permissions.dart';
@@ -203,7 +206,9 @@ class MainState extends ChangeNotifier {
     LocalIme? localIme,
     this.monitor,
     this.stateSync,
-  })  : localOs = localOs ?? localDeviceOs(),
+    QuickPrefs? quick,
+  })  : quick = quick ?? QuickPrefs.migrate(prefs.phrases),
+        localOs = localOs ?? localDeviceOs(),
         _builtinStateRules = builtinStateRules,
         stateRules = stateRules ?? StateRulesLibrary.parse(builtinStateRules, const {}),
         resources = ResourcesState(clock: clock),
@@ -229,6 +234,9 @@ class MainState extends ChangeNotifier {
     _refreshHotwords();
     _loadRules();
     resources.addListener(notifyListeners);
+    this.quick.addListener(notifyListeners);
+    this.quick.dirOf = () => data.prefsDir();
+    this.quick.onSaveError = (e) => hint = '快捷区设置没有保存：${_fsReason(e)}';
     _portSub = port?.events.listen(_onPortEvent);
     _termSub = termPort?.events.listen(_onPortEvent);
     if (defaultTargetPlatform == TargetPlatform.macOS || defaultTargetPlatform == TargetPlatform.linux) port?.setVoiceHotkey(prefs.voiceHotkey);
@@ -383,6 +391,10 @@ class MainState extends ChangeNotifier {
   /// The data root; mutable so a relocation can swap it.
   DataDir data;
   final UiPrefs prefs;
+
+  /// The 快捷区 docs (常用语和命令, 按键动作, 布局, 星标, 次数): quick.json, the strip's source since quick-row. gui.json's
+  /// `phrases` stays as it was for older versions and is no longer changed.
+  final QuickPrefs quick;
   final SessionPort? port;
   final UnlockStore unlockStore;
   final Set<Object> _unlockSeen = {};
@@ -4748,18 +4760,29 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
-  /// The whole strip list (commands and phrases) replaced; saved.
-  void setStripItems(List<StripItem> v) {
-    prefs.phrases = List.of(v);
-    _save();
-  }
+  /// The whole strip list (commands and phrases) replaced; saved in quick.json.
+  void setStripItems(List<StripItem> v) => quick.setPhrases(List.of(v));
 
   /// 加到常用语: [text] at the end unless a phrase already has it. False when it was there (or blank).
   bool addPhrase(String text) {
-    if (text.trim().isEmpty || prefs.phrases.whereType<Phrase>().any((p) => p.text == text)) return false;
-    setStripItems([...prefs.phrases, Phrase(text)]);
+    if (text.trim().isEmpty || quick.phrases.whereType<Phrase>().any((p) => p.text == text)) return false;
+    setStripItems([...quick.phrases, Phrase(text)]);
     return true;
   }
+
+  /// The 按键动作 replaced; a deleted one leaves the stars and the layout.
+  void setKeyActions(List<KeyAction> v) => quick.setKeys(v);
+
+  void setKeyLayout(KeyLayout l) => quick.setLayout(l);
+
+  /// [ref] (`p:<id>` / `k:<id>`) starred at the end, or unstarred.
+  void toggleStar(String ref) => quick.toggleStar(ref);
+
+  /// [ref] first among the stars.
+  void starFirst(String ref) => quick.starFirst(ref);
+
+  /// One more use of [ref] today (the first row's order).
+  void recordUse(String ref) => quick.recordUse(ref);
 
   /// 「跟着我的窗口」: the host's terminal window follows this console on or off; saved.
   void setTermFit(bool v) {
@@ -5648,6 +5671,7 @@ class MainState extends ChangeNotifier {
     appLatch.dispose();
     resources.removeListener(notifyListeners);
     resources.dispose();
+    quick.removeListener(notifyListeners);
     hub?.removeListener(_onHub);
     monitor?.removeListener(_onMonitor);
     stateSync?.removeListener(_onStateSync);

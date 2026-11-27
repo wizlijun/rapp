@@ -794,13 +794,13 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(ph('phrase-menu-first'));
       await tester.pumpAndSettle();
-      expect((s.prefs.phrases.first as Phrase).text, '确认');
+      expect((s.quick.phrases.first as Phrase).text, '确认');
       await tester.longPress(ph('phrase-0'));
       await tester.pumpAndSettle();
       await tester.tap(ph('phrase-menu-delete'));
       await tester.pumpAndSettle();
-      expect((s.prefs.phrases.first as Phrase).text, '继续');
-      expect(s.prefs.phrases, hasLength(_oldTen.length - 1));
+      expect((s.quick.phrases.first as Phrase).text, '继续');
+      expect(s.quick.phrases, hasLength(_oldTen.length - 1));
       expect(term.calls.where((c) => c.$1 != 'composer'), isEmpty);
     });
 

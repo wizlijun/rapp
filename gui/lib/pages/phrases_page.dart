@@ -72,7 +72,7 @@ class _PhraseEditorState extends State<_PhraseEditor> {
           RappButton.primary(
             key: const Key('phrase-save'),
             label: '保存',
-            onPressed: _ok ? () => Navigator.of(context).pop(Phrase(_text.text.trim(), put: _put)) : null,
+            onPressed: _ok ? () => Navigator.of(context).pop(Phrase(_text.text.trim(), put: _put, id: widget.start?.id)) : null,
           ),
         ]),
       ]),
@@ -254,7 +254,7 @@ class PhrasesPage extends StatelessWidget {
   final MainState state;
 
   void _put(int? i, StripItem item) {
-    final l = List.of(state.prefs.phrases);
+    final l = List.of(state.quick.phrases);
     if (i == null || i >= l.length) {
       l.add(item);
     } else {
@@ -264,7 +264,7 @@ class PhrasesPage extends StatelessWidget {
   }
 
   Future<void> _edit(BuildContext context, int? i) async {
-    final cur = i == null ? null : state.prefs.phrases[i];
+    final cur = i == null ? null : state.quick.phrases[i];
     final StripItem? r = cur is StripCmd ? await editStripCmd(context, c: cur) : await editPhrase(context, p: cur as Phrase?);
     if (r != null) _put(i, r);
   }
@@ -283,7 +283,7 @@ class PhrasesPage extends StatelessWidget {
       body: ListenableBuilder(
         listenable: state,
         builder: (context, _) {
-          final l = state.prefs.phrases;
+          final l = state.quick.phrases;
           return ListView(padding: const EdgeInsets.all(16), children: [
             RappSwitchRow(
               switchKey: const Key('phrase-strip-switch'),
@@ -313,7 +313,7 @@ class PhrasesPage extends StatelessWidget {
                       color: Colors.red.withValues(alpha: .7),
                       child: const Text('删除', style: TextStyle(color: Colors.white)),
                     ),
-                    onDismissed: (_) => state.setStripItems(List.of(state.prefs.phrases)..removeAt(i)),
+                    onDismissed: (_) => state.setStripItems(List.of(state.quick.phrases)..removeAt(i)),
                     child: ListTile(
                       key: Key('phrase-row-$i'),
                       contentPadding: EdgeInsets.zero,

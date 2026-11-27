@@ -48,7 +48,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  List<String> texts() => [for (final p in s.prefs.phrases.whereType<Phrase>()) p.text];
+  List<String> texts() => [for (final p in s.quick.phrases.whereType<Phrase>()) p.text];
 
   testWidgets('the switch turns the strip off; the list is the defaults', (tester) async {
     await open(tester);
@@ -71,8 +71,8 @@ void main() {
     await tester.pump();
     await tester.tap(find.byKey(const Key('phrase-save')));
     await tester.pumpAndSettle();
-    expect(s.prefs.phrases.last, const Phrase('帮我看看日志', put: true));
-    expect(s.prefs.phrases, hasLength(_oldTen.length + 1));
+    expect(s.quick.phrases.last, const Phrase('帮我看看日志', put: true));
+    expect(s.quick.phrases, hasLength(_oldTen.length + 1));
   });
 
   testWidgets('tap a row edits it; swipe deletes; 恢复默认 brings the defaults back', (tester) async {
@@ -91,13 +91,13 @@ void main() {
 
     await tester.tap(find.byKey(const Key('phrase-reset')));
     await tester.pumpAndSettle();
-    expect(s.prefs.phrases, defaultStripItems);
+    expect(s.quick.phrases, defaultStripItems);
   });
 
   group('commands on the page', () {
     setUp(() => s.setStripItems(defaultStripItems));
 
-    List<StripCmd> cmds() => s.prefs.phrases.whereType<StripCmd>().toList();
+    List<StripCmd> cmds() => s.quick.phrases.whereType<StripCmd>().toList();
     StripCmd cmd(String id) => cmds().firstWhere((c) => c.id == id);
     Finder k(String key) => find.byKey(Key(key));
 
@@ -121,8 +121,8 @@ void main() {
       await tester.drag(k('phrase-row-7'), const Offset(-600, 0));
       await tester.pumpAndSettle();
       expect([for (final c in cmds()) c.id], builtinCmdOrder);
-      expect(s.prefs.phrases.take(6).every((e) => e is StripCmd), isTrue);
-      expect(s.prefs.phrases, hasLength(defaultStripItems.length - 1));
+      expect(s.quick.phrases.take(6).every((e) => e is StripCmd), isTrue);
+      expect(s.quick.phrases, hasLength(defaultStripItems.length - 1));
     });
 
     testWidgets('editing a phrase keeps the commands', (tester) async {
@@ -133,17 +133,17 @@ void main() {
       await tester.tap(k('phrase-save'));
       await tester.pumpAndSettle();
       expect([for (final c in cmds()) c.id], builtinCmdOrder);
-      expect(s.prefs.phrases[6], const Phrase('改了'));
+      expect(s.quick.phrases[6], const Phrase('改了'));
     });
 
     testWidgets('dragging a phrase before a command reorders the whole list', (tester) async {
       await open(tester);
-      final first = s.prefs.phrases[6];
+      final first = s.quick.phrases[6];
       final handle = find.descendant(of: k('phrase-row-6'), matching: find.byIcon(Icons.drag_handle));
       await tester.drag(handle, const Offset(0, -6 * 72.0 - 40));
       await tester.pumpAndSettle();
-      expect(s.prefs.phrases.first, first);
-      expect(s.prefs.phrases[1], isA<StripCmd>());
+      expect(s.quick.phrases.first, first);
+      expect(s.quick.phrases[1], isA<StripCmd>());
     });
 
     testWidgets('＋ 新增命令', (tester) async {
@@ -156,7 +156,7 @@ void main() {
       await tester.pump();
       await tester.tap(k('phrase-cmd-save'));
       await tester.pumpAndSettle();
-      final c = s.prefs.phrases.last as StripCmd;
+      final c = s.quick.phrases.last as StripCmd;
       expect(c.labelOf(), '审查');
       expect(actionFor(c, agentTools.firstWhere((t) => t.id == 'codex')), const CmdText('/review'));
     });
@@ -218,7 +218,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(k('phrase-reset'));
       await tester.pumpAndSettle();
-      expect(s.prefs.phrases, defaultStripItems);
+      expect(s.quick.phrases, defaultStripItems);
     });
   });
 }

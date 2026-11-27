@@ -93,10 +93,11 @@ void main() {
   iosTest('back to the shell: commands go, the first is 继续, the bar is as high', (tester) async {
     final h = keyBarHeightOf(s, tsess);
     fg('zsh', shell: true);
-    s.setStripItems(List.of(s.prefs.phrases)); // notify
+    s.setStripItems(List.of(s.quick.phrases)); // notify
     await tester.pumpWidget(strip(tsess));
     expect(find.text('新对话'), findsNothing);
-    expect(find.descendant(of: ph('phrase-6'), matching: find.text('继续')), findsOneWidget);
+    // 搜历史 went to the 按键动作 (quick-row): 继续 is the sixth of the list.
+    expect(find.descendant(of: ph('phrase-5'), matching: find.text('继续')), findsOneWidget);
     expect(keyBarHeightOf(s, tsess), h);
   });
 
@@ -128,14 +129,14 @@ void main() {
     expect(ph('phrase-menu-edit'), findsOneWidget);
     await tester.tap(ph('phrase-menu-first'));
     await tester.pumpAndSettle();
-    expect((s.prefs.phrases.first as StripCmd).id, 'compact');
-    expect((s.prefs.phrases[1] as StripCmd).id, 'new');
+    expect((s.quick.phrases.first as StripCmd).id, 'compact');
+    expect((s.quick.phrases[1] as StripCmd).id, 'new');
     await tester.longPress(ph('phrase-0'));
     await tester.pumpAndSettle();
     await tester.tap(ph('phrase-menu-delete'));
     await tester.pumpAndSettle();
-    expect((s.prefs.phrases.first as StripCmd).id, 'new');
-    expect(s.prefs.phrases.whereType<StripCmd>(), hasLength(5));
+    expect((s.quick.phrases.first as StripCmd).id, 'new');
+    expect(s.quick.phrases.whereType<StripCmd>(), hasLength(4)); // five without 搜历史 (quick-row), one deleted
   });
 
   iosTest('全部 ›: lists commands when a tool is recognised, none under zsh', (tester) async {
@@ -146,7 +147,7 @@ void main() {
     Navigator.of(tester.element(find.byType(ListTile).first)).pop();
     await tester.pumpAndSettle();
     fg('zsh', shell: true);
-    s.setStripItems(List.of(s.prefs.phrases));
+    s.setStripItems(List.of(s.quick.phrases));
     await tester.pump();
     await tester.tap(ph('phrases-all'));
     await tester.pumpAndSettle();
@@ -158,7 +159,7 @@ void main() {
     app.setProfile(const ResolvedProfile(phrases: true));
     await tester.pumpWidget(strip(app));
     expect(find.text('新对话'), findsNothing);
-    expect(find.descendant(of: ph('phrase-6'), matching: find.text('继续')), findsOneWidget);
+    expect(find.descendant(of: ph('phrase-5'), matching: find.text('继续')), findsOneWidget); // 搜历史 is a 按键动作 now
   });
 
   testWidgets('linux desktop KeyBar sends tool commands and Ctrl-R while preserving TextField caret', (tester) async {
@@ -201,7 +202,7 @@ void main() {
       await tester.pump(const Duration(seconds: 3));
       // Antigravity (agy) on Linux: 搜历史 is unsupported -> greyed + hint; bash shell hides commands.
       fg('agy');
-      s.setStripItems(List.of(s.prefs.phrases));
+      s.setStripItems(List.of(s.quick.phrases));
       await tester.pump();
       await tester.tap(ph('phrase-5'));
       await tester.pump();
@@ -209,7 +210,7 @@ void main() {
       await tester.pump(const Duration(seconds: 5));
 
       fg('bash', shell: true);
-      s.setStripItems(List.of(s.prefs.phrases));
+      s.setStripItems(List.of(s.quick.phrases));
       await tester.pump();
       expect(find.text('新对话'), findsNothing);
       expect(find.descendant(of: ph('phrase-6'), matching: find.text('继续')), findsOneWidget);

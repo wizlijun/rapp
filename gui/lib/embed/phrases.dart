@@ -6,23 +6,28 @@ abstract interface class StripItem {
   Map<String, Object?> toJson();
 }
 
-/// One 常用语. [put] (放进输入框) appends it to the draft instead of sending.
+/// One 常用语. [put] (放进输入框) appends it to the draft instead of sending. [id] names it for stars, counts and sync
+/// (quick-row spec §9); it is not part of `==`, and QuickPrefs gives every phrase one.
 class Phrase implements StripItem {
-  const Phrase(this.text, {this.put = false});
+  const Phrase(this.text, {this.put = false, this.id});
   final String text;
   final bool put;
+  final String? id;
 
-  Phrase copyWith({String? text, bool? put}) => Phrase(text ?? this.text, put: put ?? this.put);
+  Phrase copyWith({String? text, bool? put}) => Phrase(text ?? this.text, put: put ?? this.put, id: id);
+
+  Phrase withId(String id) => Phrase(text, put: put, id: id);
 
   @override
-  Map<String, Object> toJson() => {'text': text, if (put) 'put': true};
+  Map<String, Object> toJson() => {'text': text, if (put) 'put': true, 'id': ?id};
 
-  /// Null when [j] is not a phrase with a non-blank text.
+  /// Null when [j] is not a phrase with a non-blank text. A blank or non-string id reads as none.
   static Phrase? fromJson(Object? j) {
     if (j is! Map) return null;
     final t = j['text'];
     if (t is! String || t.trim().isEmpty) return null;
-    return Phrase(t, put: j['put'] == true);
+    final id = j['id'];
+    return Phrase(t, put: j['put'] == true, id: id is String && id.isNotEmpty ? id : null);
   }
 
   @override

@@ -272,7 +272,7 @@ class _Footer extends StatelessWidget {
                 height: rowHeight,
                 child: Row(children: [
                   Expanded(child: Text('常用语', style: small)),
-                  Text(state.prefs.phraseStrip ? '${state.prefs.phrases.length} 条' : '已关', style: small.copyWith(color: t.muted)),
+                  Text(state.prefs.phraseStrip ? '${state.quick.phrases.length} 条' : '已关', style: small.copyWith(color: t.muted)),
                   Icon(Icons.chevron_right, color: t.muted, size: 18),
                 ]),
               ),
