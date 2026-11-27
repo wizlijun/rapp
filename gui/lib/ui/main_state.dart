@@ -748,10 +748,13 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Whether the center service feeds the queue and the needs (the phone home reads it to pick its rows).
+  bool get needsFromService => _fromService;
+
   /// The text terminal on show, or null: a GUI app session, no session, or a window nobody can see.
   SessionEntry? get _shownTerm {
     final r = current;
-    if (r == null || r.standby != null || !isTermApp(r.app) || !_mainVisible || backgrounded) return null;
+    if ((phoneForm && !phoneInSession) || r == null || r.standby != null || !isTermApp(r.app) || !_mainVisible || backgrounded) return null;
     return r;
   }
 
@@ -1168,6 +1171,35 @@ class MainState extends ChangeNotifier {
     super.notifyListeners();
   }
 
+  // ---- phone form ----
+  bool _phoneForm = false;
+  bool _phoneInSession = false;
+
+  /// The window is in the phone form (short side under the fold): A's window is never resized meanwhile.
+  bool get phoneForm => _phoneForm;
+
+  /// In the phone form and inside a session (not on the home): only then is a picture or terminal on show.
+  bool get phoneInSession => _phoneInSession;
+
+  void setPhone({required bool form, bool inSession = false}) {
+    if (form == _phoneForm && inSession == _phoneInSession) return;
+    final entering = form && !_phoneForm;
+    _phoneForm = form;
+    _phoneInSession = inSession;
+    if (entering) {
+      // A judgement still waiting would resize A from a Pad stage that is gone.
+      for (final rs in remote.values) {
+        rs.policy.cancel();
+      }
+      panel = null;
+      corner = null;
+      overview = false;
+      logs = false;
+    }
+    _applyFps();
+    notifyListeners();
+  }
+
   // ---- overview ----
   /// The stage shows the overview wall instead of the current session's picture.
   bool overview = false;
@@ -1476,7 +1508,7 @@ class MainState extends ChangeNotifier {
     if (p == null) return;
     _sentFps.removeWhere((sid, _) => !remote.containsKey(sid));
     // In overview no picture is on stage: every session runs at its off-stage rate (C4).
-    final onStage = overview || logs || !_mainVisible ? null : currentRecord;
+    final onStage = overview || logs || !_mainVisible || (phoneForm && !phoneInSession) ? null : currentRecord;
     for (final rs in remote.values) {
       final last = _sentFps[rs.sid];
       if (last == null) continue; // not started yet: its start carries the rate
@@ -3158,7 +3190,7 @@ class MainState extends ChangeNotifier {
     _unlockSeen.remove(s.sid);
     _lockEpoch.remove(s.sid);
     final rs = RemoteSession(s.sid, r.appName, onResize: (w, a, b) {
-          if (_liveSid(s.sid)) portOf(s.sid)!.resize(s.sid, w, a, b);
+          if (_liveSid(s.sid) && !phoneForm) portOf(s.sid)!.resize(s.sid, w, a, b);
         },
         onSelect: (w) {
           if (_liveSid(s.sid)) portOf(s.sid)!.selectWindow(s.sid, w);
