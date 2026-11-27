@@ -62,7 +62,7 @@ async fn service_lists_starts_and_stops_host_core() {
 
     // The stream now reaches the worker: B's hello with that token is answered with `ready`.
     let address =
-        Address { host: "127.0.0.1".to_string(), port: 0, app: FAKE_APP.to_string(), token, mode: 1, fps: 10 };
+        Address { host: "127.0.0.1".to_string(), port: 0, app: FAKE_APP.to_string(), token, mode: 1, fps: 15 };
     s.write_all(&address.hello(1.0)).await.unwrap();
     let ready = tokio::time::timeout(WAIT, async {
         loop {
@@ -98,7 +98,7 @@ async fn an_unknown_app_starts_a_worker_that_refuses_the_hello() {
     assert_eq!(r["ok"], true, "{r}");
     let token = r["token"].as_str().unwrap().to_string();
     let address =
-        Address { host: "127.0.0.1".to_string(), port: 0, app: "no.such.app".to_string(), token, mode: 1, fps: 10 };
+        Address { host: "127.0.0.1".to_string(), port: 0, app: "no.such.app".to_string(), token, mode: 1, fps: 15 };
     s.write_all(&address.hello(1.0)).await.unwrap();
     let error = tokio::time::timeout(WAIT, async {
         loop {
