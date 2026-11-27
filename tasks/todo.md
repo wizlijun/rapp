@@ -1529,12 +1529,15 @@ macOS、Linux、Duo、iPad 各一遍。
 
 ## Windows B 段（主机核心）（计划 `docs/superpowers/plans/2026-11-26-rapp-windows-b-host-core.md`，分支 `feat/windows-host-core`，2026-11-27）
 
-现状（2026-11-27，分支 `feat/windows-host-core`）：在 Mac 上编过、测过，**还没合进 `main`，也没在 Windows 上跑过**。
+现状（2026-11-27）：在 Mac 上编过、测过，**接线已合进本机 `main`**（用户定的：Mac 门禁绿了就合）。**没在 Windows 上跑过。**
 
 - `main` 已合进分支（含 A 段接线 `5e39bb91`），成员表里 host-core、host-windows、svc-windows 都在。合并后的树上 Mac 门禁全绿：`cargo test --workspace`、clippy `-D warnings`、`swift test`、`flutter analyze`、`flutter test`（`linux_detach_test` 要先 `cargo build --release -p rapp-client-core --bin rapp-session`）。
 - Swift 样本（`30cdd17a`）全部对上，deflate 和 Swift 逐字节相同（`libz-sys` 原版 zlib，加了 `stock-zlib`）；会话测试 71 个、服务对接 2 个都过。修的地方和逐条原因见 `rust/host-core/PORTING.md` 和分支的提交记录；样本和生成器一个没改。
 - 交接文档 3.2 节剩下的四条：窗口移不动和保持唤醒失败的两行日志已照 Swift 补上（平台接口 `move_to` 返回 bool、`stay_awake` 返回 `Option<String>`，计划同一提交改了）；焦点日志里的控件角色、规则看到的语言、焦点区测试的 8 点误差三条认下，写进 `PORTING.md` 第 4 部分。
-- 接下来：在 Windows 机器上跑这个分支的 `scripts\check-windows.ps1`（A 段接线已在 `main`，不用再单合 `feat/windows-foundation`）；合进 `main` 是共用代码，算 macOS 的改动，但 macOS 的被控端还是 Swift 的 `rapp-host`，行为不变。
+- 接下来：Windows 机器装好后在 `main` 上跑 `scripts\check-windows.ps1`（A、B 两段的接线都在 `main` 里了，不用再到分支上做）。`host-core` 是共用代码，这次合并算 macOS 的改动；macOS 的被控端还是 Swift 的 `rapp-host`，安装包里不带 `host-core`，行为不变。
+- [ ] 计划 B 任务 19 步骤 4：用真的 Mac 控制端连 `fake-host-core` 走一遍。只能用户手工做，还没做。
+- [ ] 分块样本的缺口：把 `tile` 的 `MAX_CANDIDATES` 改成 1 或 2，样本测试照样过，样本里没有一帧用到一个以上滚动候选的例子。要补得给 Swift 生成器加例子再重新生成，由用户定补不补。
+- `wintable::STACK_STEP` 在 Rust 里没人用（Swift 那边是控制端发消息时用的），删不删都行，D 段顺手定。
 
 验证顺序见 `docs/superpowers/plans/notes/2026-11-26-windows-b3-draft-notes.md` §6。下面几项假平台演不出来，要等 D 段有了真的 Windows 平台再到实机上看。交接内容见 `rust/host-core/PORTING.md` 第 5 部分「B 段交接」。
 
