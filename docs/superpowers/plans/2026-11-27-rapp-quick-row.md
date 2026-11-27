@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 常用语条末尾换成「按键▾」「常用语▾」两个菜单（可打星、进各自设置页），前面显示打星的项或按 30 天次数排；新增带名字的按键动作和可编辑的两行键盘布局；这五样存成 `quick.json`，网里有 rapp-state 时经新的 `/v1/prefs` 多端同步。
+**Goal:** 常用语条末尾换成「按键▾」「常用语▾」两个菜单（可打星、进各自设置页），前面显示打星的项或按 30 天次数排；新增带名字的按键动作和可编辑的两行键盘布局；这五样存成 `quick.json`，网里有中心服务 rapp-center 时经它的内置能力 `prefs`（`/prefs/v1/…`）多端同步。
 
-**Architecture:** 纯数据放新目录 `gui/lib/quick/`：`key_actions.dart`（Chord、KeyAction）、`key_layout.dart`（布局）、`quick_usage.dart` + `quick_row.dart`（次数和第一行排序）、`quick_prefs.dart`（五份文档、读写、迁移，ChangeNotifier）、`quick_merge.dart`（§10.3 的纯函数）、`quick_sync.dart`（接 StateLink，照 `StateOut` 的 attach/detach）。`MainState` 持有 `QuickPrefs`，原来读 `prefs.phrases` 的地方都改读它。Rust 侧在 `services/state` 加 `prefs.rs` 一个模块和四条路由，`prefs.json` 与 `state.json` 并排。
+**Architecture:** 纯数据放新目录 `gui/lib/quick/`：`key_actions.dart`（Chord、KeyAction）、`key_layout.dart`（布局）、`quick_usage.dart` + `quick_row.dart`（次数和第一行排序）、`quick_prefs.dart`（五份文档、读写、迁移，ChangeNotifier）、`quick_merge.dart`（§10.3 的纯函数）、`quick_sync.dart`（接 StateLink，照 `StateOut` 的 attach/detach）。`MainState` 持有 `QuickPrefs`，原来读 `prefs.phrases` 的地方都改读它。Rust 侧在 `services/center` 加内置能力 `prefs`（`src/prefs/`，实现 `Builtin`），存自己的 `prefs.json`。
 
-**Tech Stack:** Flutter / Dart（`gui/`，flutter_test）；Rust（`services/state`，tokio + hyper，tests 用现有 `tests/http.rs` 的辅助函数）。不动 `rust/` 下的协议 crate。
+**Tech Stack:** Flutter / Dart（`gui/`，flutter_test）；Rust（`services/center`，tokio + hyper，tests 用现有的辅助函数）。不动 `rust/` 下的协议 crate。
 
 **Spec:** `docs/superpowers/specs/2026-11-27-rapp-quick-row-design.md`（第 2 稿，用户 2026-11-27 确认，选“两期一起写计划”）。实现者两份都读；冲突以 spec 为准。
 
@@ -14,14 +14,14 @@
 
 - 工作目录 `.worktrees/quick-row`，分支 `feat/quick-row`。不改版本号、不打 tag、不 push、不动 `website/`（CLAUDE.md）。不读 `docs/archives/`。
 - Flutter：`~/development/flutter/bin/flutter`（不在 PATH）；测试后 `git checkout gui/pubspec.lock`（如有改动）。cargo 在 `$HOME/.cargo/bin`。
-- 用户可见文字全中文。菜单按钮文字 `按键▾` `常用语▾`；菜单末行 `设置…`；长按项 `打星` / `取消星标` / `移到最前`；设置页侧栏行 `按键`；同步行三句原文：`已和 <设备名> 上的状态服务同步` / `只存在本机（没有状态服务）` / `连不上状态服务，改动会在连上后同步`。
+- 用户可见文字全中文。菜单按钮文字 `按键▾` `常用语▾`；菜单末行 `设置…`；长按项 `打星` / `取消星标` / `移到最前`；设置页侧栏行 `按键`；同步行三句原文：`已和 <设备名> 上的中心服务同步` / `只存在本机（没有中心服务）` / `连不上中心服务，改动会在连上后同步`。
 - 内置按键动作（顺序即菜单顺序）：`search` 搜历史 ⌃R · `mode` 切模式 ⇧Tab · `expand` 展开输出 ⌃O · `bg` 转后台 ⌃B · `clear` 清屏 ⌃L · `newtab` 新标签 ⌘T。
 - 默认布局 = 今天的两行去掉 `more`：第 1 行 `tab stab esc cc bksp enter up`，第 2 行 `copy paste cmdt cmd ctrl pgup pgdn left down right`。每行 ≤10 格；第 2 行非空时第 1 行 ≤9 格，`more` 自动接在第 1 行末尾。
 - 次数只留最近 30 天（本地日期 `yyyy-mm-dd`）；服务端某设备 `usage` 90 天没更新清掉；单份 `data` ≤256 KB（413）；本机改动 1 秒合并后交；次数最多 1 分钟交一次。
 - `at` 一律毫秒；本机写 `at = max(现在, 已知服务 at + 1)`；迁移出来的五份 `at = 0`。
 - `phrase_strip`、`key_bar_more`、`phrase_cmds_seeded` 留在 `gui.json`，不同步；`gui.json` 的 `phrases` 照原样读写、不再被改（旧版本还读它）。
 - 没有设备 id（`DataDir.prefsDir()` 为 null）时 `quick.json` 不落盘，只在内存（同 `_save` 的 R22）。
-- 每个任务结束：`flutter analyze` 无 error/warning + 本任务测试；Rust 任务再跑 `cargo clippy -p rapp-state --all-targets -- -D warnings`。最后一个任务跑全量门禁。
+- 每个任务结束：`flutter analyze` 无 error/warning + 本任务测试；Rust 任务再跑 `cargo clippy -p rapp-center --all-targets -- -D warnings`。最后一个任务跑全量门禁。
 
 ### 本计划替 spec 定下的细节（Ruling，实现时照此）
 
@@ -29,14 +29,14 @@
 2. **Chord 的 JSON** 是字符串：修饰键按 `ctrl alt shift cmd` 的顺序，最后是键，用 `+` 连，如 `ctrl+r`、`shift+tab`、`ctrl+alt+x`、`cmd+t`。键：`a`–`z`、`0`–`9`，或命名键 `esc tab enter bksp left up down right pgup pgdn`。键面写 `⌃⌥⇧⌘` 顺序 + 字母大写 / 数字 / `barKeys` 的 label（`⇧Tab`、`⌃←`）。
 3. **数字键码**另开 `macDigitCodes`（`1:18 2:19 3:20 4:21 5:23 6:22 7:26 8:28 9:25 0:29`），不并进 `macLetterCodes`（`sendLatchedLetter` 用它，并进去会悄悄改 sticky 修饰加数字的行为）。
 4. **终端上的 ⌘**：只有恰好 `cmd+<字母>` 且字母在 `termCommandLetters = {'c','v','t','w'}`（`term_stage.dart` `_command`）里才能发，走 `session.termCommand`；其余带 ⌘ 的在终端上灰掉。
-5. **服务身份**用服务自己的 store id（health 的 `store`，随机生成、存在 `prefs.json` 里），不用 URL（iOS 走 `localhost:<local>` 端口映射）、不用设备 id；store id 变了 = 换了服务 / 重装 / 只放内存，按“第一次接上”处理。设备名用 `stateHost()`（Mac 是 monitor，iOS 是 hub）拿到设备 id，再 `MainState.deviceName`；拿不到写 `已和状态服务同步`。
+5. **服务身份**用服务自己的 store id（`/prefs/v1/all` 的 `store`，随机生成、存在 `prefs.json` 里），不用 URL（iOS 走 `localhost:<local>` 端口映射）、不用设备 id；store id 变了 = 换了服务 / 重装 / 只放内存，按“第一次接上”处理。设备名用 `stateHost()`（Mac 是 monitor，iOS 是 hub）拿到设备 id，再 `MainState.deviceName`；拿不到写 `已和中心服务同步`。
 6. **`usage` 90 天**按服务收到它的时间算（服务的秒钟），不按客户端的 `at`。
 7. **布局里同一个 id 只留第一个**（否则 `Key('bar-$id')` 重复）；指向已删按键动作的格在显示时丢掉，`setKeyActions` 删动作时顺手从布局里删它的格。
 8. **拖动只在同一行内**；跨行 = 选中删掉 + 另一行「＋」。
 9. **第一行的顺序缓存**：键是（会话 sid、`stars`、常用语文档 `at`、按键文档 `at`）；次数变了不重算，其余变了重算。
 10. **`Phrase.id`** 是可空字段、不参与 `==`；`QuickPrefs` 读进来时给没 id 的补上随机 8 位（`[a-z0-9]`，`Random.secure`）。条上的小块 key 仍用常用语文档里的下标 `phrase-$i`，按键动作用 `keyact-<id>`。
 11. **`quick.json` 整个读不出**：改名 `quick.json.bad`，按迁移重建；单份文档坏了只这一份回到默认（`at = 0`）。
-12. **StateLink 的 health**：`health()` 照旧返回 bool，顺便把 `prefs:1` 时的 store id 记在 `link.prefsStore`；测试里覆写 `health()` 的假 link 自然没有 prefs，不同步。
+12. **StateLink 的 health**：`health()` 照旧返回 bool，顺便在 health 带 `routes:true` 时读 `/v1/routes`，列着 prefs v1 就把 `link.prefs` 设成 true（2026-11-27 改，原来是 health 里的 `prefs:1`/`store`）；store 从 `/prefs/v1/all` 来。测试里覆写 `health()` 的假 link 自然没有 prefs，不同步。
 
 ## Review Focus
 
@@ -495,52 +495,58 @@ Expected: FAIL
 
 ## P2 同步
 
-### Task 11: rapp-state 的 `/v1/prefs`
+### Task 11: 中心服务的内置能力 `prefs`
+
+（2026-11-27 改：rapp-state 已改名 rapp-center，`services/center/`；用户定这一期做成它的内置能力 `prefs`，并掉中心服务规格的 G3。spec §10.2。）
 
 **Files:**
-- Create: `services/state/src/prefs.rs`
-- Modify: `services/state/src/lib.rs`（`pub mod prefs`）、`services/state/src/disk.rs`（按文件名读写）、`services/state/src/http.rs`（路由、health、watch、存盘、清理）、`services/state/api/http.md`、`services/state/api/samples/prefs.ndjson`（新）
-- Test: `services/state/tests/prefs.rs`（新）；`services/state/tests/http.rs` 的 `health_says_who_it_is` 改
+- Create: `services/center/src/prefs/mod.rs`（`PrefsBlock`，照 `src/state/mod.rs` 的 `StateBlock` 写：`Builtin` 实现、`route()`、`Limited` 读体、404/405）
+- Modify: `services/center/src/builtin.rs`（`table()` 加一行 `Arc::new(PrefsBlock::new(...))`）、`services/center/src/lib.rs`（`mod prefs`）、`services/center/api/routes.md`（例子加 `prefs`）
+- Create: `services/center/api/prefs.md`、`services/center/api/samples/prefs.ndjson`
+- Test: `services/center/tests/prefs.rs`（新，用现有 tests 的启动/请求辅助，必要时挪进 `tests/common/mod.rs`）；`/v1/routes` 的现有断言改成两项
 
 **Interfaces:**
-- Produces（HTTP，见 spec §10.2）：
-  - `GET /v1/health` → `{"name":"rapp-state","v":1,"prefs":1,"store":"<16 位十六进制>"}`；store id 首次生成后存进 `prefs.json`，内存模式每次启动新生成。
-  - `GET /v1/prefs` → `{"phrases":{"at":…,"data":…},…,"usage":{"<device>":{"at":…,"data":…}}}`，没有的不带。
-  - `PUT /v1/prefs/<phrases|keys|layout|stars>` 体 `{at:u64, base:u64, data:any}` → 204；服务上 at ≠ base → 409 体是服务上那份（没有时 `{"at":0,"data":null}`）；体不对 → 400；`data` 序列化后 >256 KB → 413（这条路由读体上限 `MAX_BODY + 4096`）；别的名字 → 404。
-  - `PUT /v1/prefs/usage/<device>` 体 `{at, data}` → 204，总是收下，记服务收到的秒钟 `put_at`。
-  - watch 推 `{"what":"prefs","name":"<名字>","doc":{at,data}}`；usage 的再带 `"device"`。
-  - Rust 内部：`pub struct Prefs`，`fn put(&mut self, name:&str, at:u64, base:u64, data:Value) -> Result<(), Option<Doc>>`、`fn put_usage(&mut self, device:&str, at:u64, data:Value, now_secs:u64)`、`fn expire(&mut self, now_secs:u64)`（90 天 = `90*86400`）、`fn to_json`/`from_json`；`disk::load_named(dir, file)`、`disk::write_named(dir, file, bytes)`（`state.json` 的旧函数改成调它们）。`prefs.json` 和 `state.json` 同一个 saver 循环里各自脏了才写。store id 用 `RandomState` 哈希时间和 pid 得到（不加依赖）。
+- Produces（HTTP，spec §10.2）：
+  - `GET /v1/routes` 多一项 `{"name":"prefs","kind":"builtin","v":1}`（入口自动列出，不用另写）。
+  - `GET /prefs/v1/all` → `{"store":"<16 位小写十六进制>","phrases":{"at":…,"data":…},…,"usage":{"<device>":{"at":…,"data":…}}}`，没有的不带。
+  - `GET /prefs/v1/<名字>` → `{at,data}`；没有 → `{"at":0,"data":null}`；名字不认 → 404。
+  - `PUT /prefs/v1/<phrases|keys|layout|stars>` 体 `{at:u64, base:u64, data:any}` → 204；服务上 at（没有算 0）≠ base → 409 体是服务上那份（没有时 `{"at":0,"data":null}`）；体不对 → 400；`data` 序列化后 >256 KB → 413（读体上限 `MAX_BODY + 4096`）；别的名字 → 404；别的方法 → 405。
+  - `PUT /prefs/v1/usage/<device>` 体 `{at, data}` → 204，总是收下，记服务收到的秒钟 `put_at`。
+  - watch（入口那一条）推 `{"what":"prefs.<名字>","doc":{at,data}}`；usage 推 `{"what":"prefs.usage","device":"…","doc":{at,data}}`。推送在自己的锁里调 `cx.publish`，改了调 `cx.mark()`。
+  - `Builtin`：`name() = "prefs"`、`version() = 1`、`file() = "prefs.json"`；`save()` 写 `{"store":…,"docs":{…},"usage":{device:{at,data,put_at}}}`；`load()` 读回并顺手清过期；`spawn()` 每 10 分钟清一次过期 usage（`90*86400` 秒，按 `put_at`）。没有数据目录时 `load` 不会被调，store 每次启动新生成。store id 用 `RandomState` 哈希时间和 pid（不加依赖）。
+  - Rust 内部（可测的纯部分）：`fn put(&mut self, name:&str, at:u64, base:u64, data:Value) -> Result<(), Doc>`、`fn put_usage(&mut self, device:&str, at:u64, data:Value, now_secs:u64)`、`fn expire(&mut self, now_secs:u64)`。
 
-- [ ] **Step 1: 写失败的测试**（`tests/prefs.rs`，用 `tests/http.rs` 那套 `start/get/put` 辅助，必要时挪进 `tests/common/mod.rs`）
+- [ ] **Step 1: 写失败的测试**（`tests/prefs.rs`）
 
 ```rust
-#[tokio::test] async fn health_says_prefs_and_store() { /* prefs == 1, store 16 hex */ }
+#[tokio::test] async fn routes_list_prefs_v1() {}
+#[tokio::test] async fn all_has_a_16_hex_store_and_no_docs_at_first() {}
 #[tokio::test] async fn put_with_right_base_is_204_then_get_returns_it() {}
 #[tokio::test] async fn put_with_stale_base_is_409_with_current_doc() {}
 #[tokio::test] async fn put_on_missing_with_nonzero_base_is_409_at_zero() {}
-#[tokio::test] async fn unknown_name_is_404_and_bad_body_400() {}
+#[tokio::test] async fn unknown_name_is_404_bad_body_400_wrong_method_405() {}
 #[tokio::test] async fn data_over_256k_is_413() {}
 #[tokio::test] async fn usage_replaces_per_device() {}
 #[tokio::test] async fn watch_pushes_prefs_and_usage() {}
 #[tokio::test] async fn prefs_and_store_survive_restart_with_data_dir() {}
-#[tokio::test] async fn memory_mode_writes_no_prefs_file() {}
+#[tokio::test] async fn memory_mode_writes_no_prefs_file_and_store_changes_per_start() {}
+#[tokio::test] async fn a_bad_prefs_file_is_moved_aside_and_state_still_loads() {}
 #[test] fn usage_older_than_90_days_by_receive_time_is_dropped() {}
-#[test] fn bad_prefs_file_is_moved_to_bad() {}
 ```
 
 - [ ] **Step 2: 跑，确认失败**
 
-Run: `cd rust && cargo test -p rapp-state --test prefs`
-Expected: FAIL（404 / 编译错 `rapp_state::prefs`）
+Run: `cd rust && cargo test -p rapp-center --test prefs`
+Expected: FAIL（`/prefs/v1/…` 404，routes 只有一项）
 
-- [ ] **Step 3: 实现**；`http.md` 加一节 `/v1/prefs`（照 spec §10.2 和上面的状态码），样本写一条 watch 推送和一条 GET 回复。
+- [ ] **Step 3: 实现**；`api/prefs.md` 照 spec §10.2 和上面的状态码写，样本一条 `/prefs/v1/all` 回复、一条 watch 推送。
 
-- [ ] **Step 4: 跑全 crate 和 clippy**
+- [ ] **Step 4: 跑 workspace 测试和 clippy**
 
-Run: `cd rust && cargo test -p rapp-state && cargo clippy -p rapp-state --all-targets -- -D warnings`
-Expected: 全 PASS，clippy 无输出警告
+Run: `cd rust && cargo test --workspace --no-fail-fast && cargo clippy --workspace --all-targets -- -D warnings`
+Expected: 全 PASS（testkit 的 linux_detach 先要 `cargo build --release --bin rapp-session`），clippy 无警告
 
-- [ ] **Step 5: 提交** `git commit -m "feat(state): /v1/prefs 存快捷区设置，watch 推送，prefs.json 落盘"`
+- [ ] **Step 5: 提交** `git commit -m "feat(center): 内置能力 prefs，存快捷区设置，watch 推送，prefs.json 落盘"`
 
 ### Task 12: StateLink 的 prefs 调用
 
@@ -551,17 +557,18 @@ Expected: 全 PASS，clippy 无输出警告
 **Interfaces:**
 - Consumes: Task 11 的 HTTP。
 - Produces:
-  - `String? prefsStore`：`health()` 成功且 `prefs == 1` 时记下 `store`，否则 null（Ruling 12）。
-  - `Future<Map<String, Object?>> prefs()`（`GET /v1/prefs`）
+  - `bool prefs`：`health()` 成功、回复里 `routes == true`、并且 `GET /v1/routes` 列着 `{"name":"prefs","v":1}` 时为 true，否则 false（Ruling 12 改）。`health()` 照旧返回 bool，`/v1/routes` 失败不影响它的结果。
+  - `Future<Map<String, Object?>> prefsAll()`（`GET /prefs/v1/all`，含 `store`）
   - `Future<QuickDoc?> putPref(String name, {required int at, required int base, required Object? data})`：204 → null；409 → 读体返回 `QuickDoc`；其他 → `StateLinkError(status)`。
-  - `Future<void> putUsage(String device, {required int at, required Object? data})`
+  - `Future<void> putUsage(String device, {required int at, required Object? data})`（`PUT /prefs/v1/usage/<编码后的 device>`）
+  - 路径都经 `_uri`，所以手填的 `https://host/state` 也落到 `https://host/state/prefs/v1/…`。
   - `QuickDoc` 从 `quick_prefs.dart` 引入（不另定义）。
 
-- [ ] **Step 1: 写失败的测试**（照 `state_link_test.dart` 现有的本地 `HttpServer` 假服务）：health 带 prefs 时 `prefsStore == 'abc'`、不带时 null；`putPref` 204 → null、409 → 返回 doc 的 at/data、500 → 抛 `StateLinkError(500)`；`prefs()` 解析；`putUsage` 路径里的设备 id 有 URL 编码。
+- [ ] **Step 1: 写失败的测试**（照 `state_link_test.dart` 现有的本地 `HttpServer` 假服务）：health 带 `routes:true` 且 routes 有 prefs v1 → `prefs == true`；routes 没这项、health 没 `routes`、routes 404 → false 且 `health()` 仍是 true；`putPref` 204 → null、409 → 返回 doc 的 at/data、500 → 抛 `StateLinkError(500)`；`prefsAll()` 解析出 store；`putUsage` 路径里的设备 id 有 URL 编码。
 - [ ] **Step 2: 跑，确认失败**：`cd gui && ~/development/flutter/bin/flutter test test/state/state_link_test.dart` → FAIL
 - [ ] **Step 3: 实现**（409 读体：给 `_send` 加一个返回状态码和体的内部变体，别复制整段）
 - [ ] **Step 4: 跑，通过**
-- [ ] **Step 5: 提交** `git commit -m "feat(gui): StateLink 读写 /v1/prefs"`
+- [ ] **Step 5: 提交** `git commit -m "feat(gui): StateLink 读写中心服务的 prefs"`
 
 ### Task 13: 合并规则（纯函数）
 
@@ -604,12 +611,12 @@ test('isFirstJoin: new store / synced 0 / server older / server gone', ...);
 - Test: `gui/test/quick/quick_sync_test.dart`
 
 **Interfaces:**
-- Consumes: `QuickPrefs`（`adopt`、`floor`、`onLocal`、`setOthers`、`docOf`、`usage`）、`decide`/`firstJoin`/`isFirstJoin`（Task 13）、`StateLink.prefs/putPref/putUsage/prefsStore`（Task 12）。
+- Consumes: `QuickPrefs`（`adopt`、`floor`、`onLocal`、`setOthers`、`docOf`、`usage`）、`decide`/`firstJoin`/`isFirstJoin`（Task 13）、`StateLink.prefs`（bool）/`prefsAll`/`putPref`/`putUsage`（Task 12）。
 - Produces:
   - `enum QuickSyncStatus { local, synced, waiting }`
-  - `class QuickSync extends ChangeNotifier { QuickSync({required QuickPrefs prefs, required String localDir, required String? device, Future<String?> Function()? host, DateTime Function() clock = DateTime.now, Duration debounce = const Duration(seconds: 1), Duration usageEvery = const Duration(minutes: 1)}); QuickSyncStatus status; String? hostId; Future<void> attach(StateLink link, String store); void detach({required bool reachable}); void onPush(Map<String, Object?> e); }`
+  - `class QuickSync extends ChangeNotifier { QuickSync({required QuickPrefs prefs, required String localDir, required String? device, Future<String?> Function()? host, DateTime Function() clock = DateTime.now, Duration debounce = const Duration(seconds: 1), Duration usageEvery = const Duration(minutes: 1)}); QuickSyncStatus status; String? hostId; Future<void> attach(StateLink link); void detach({required bool reachable}); void onPush(Map<String, Object?> e); }`
   - 记账文件 `<localDir>/quick-sync.json`：`{"store":"…","synced":{"phrases":…,…},"others":{"<device>":{"at":…,"data":…}}}`。
-  - 行为：`attach` → `GET /v1/prefs` → 第一次接上走 `firstJoin`，否则每份 `decide`；`Adopt` → `prefs.adopt`、`synced = at`、`floor = at + 1`；`Push` → `putPref`，204 → `synced = doc.at`，409 → 用回来的 doc 再走一遍（最多 3 回，之后等下次推送）；别的设备的 usage → `prefs.setOthers`。`onLocal(name)` 合并 `debounce` 后交；本机 usage 变了最多每 `usageEvery` 交一次；`device == null` 不交 usage。watch 来的 doc 当“服务上的”走 `decide`；`at <= synced` 的忽略。`detach(reachable: false)` → `waiting`，`detach(reachable: true)`（服务不支持 prefs、或没服务）→ `local`；计时器全停。
+  - 行为：`attach` → `link.prefsAll()`（`GET /prefs/v1/all`，store 从这里来）→ 第一次接上走 `firstJoin`，否则每份 `decide`；`Adopt` → `prefs.adopt`、`synced = at`、`floor = at + 1`；`Push` → `putPref`，204 → `synced = doc.at`，409 → 用回来的 doc 再走一遍（最多 3 回，之后等下次推送）；别的设备的 usage → `prefs.setOthers`。`onLocal(name)` 合并 `debounce` 后交；本机 usage 变了最多每 `usageEvery` 交一次；`device == null` 不交 usage。watch 来的 doc 当“服务上的”走 `decide`；`at <= synced` 的忽略。`detach(reachable: false)` → `waiting`，`detach(reachable: true)`（服务不支持 prefs、或没服务）→ `local`；计时器全停。
 
 - [ ] **Step 1: 写失败的测试**（用 Task 12 测试里那种本地 `HttpServer` 假服务，或一个实现同样三个方法的假 `StateLink` 子类）
 
@@ -627,18 +634,18 @@ test('detach: waiting when unreachable, local when no prefs', ...);
 - [ ] **Step 2: 跑，确认失败**：`cd gui && ~/development/flutter/bin/flutter test test/quick/quick_sync_test.dart` → FAIL
 - [ ] **Step 3: 实现**（用 `fake_async` 测计时，项目里已有的话；没有就把 `debounce` 设成几毫秒）
 - [ ] **Step 4: 跑，通过**
-- [ ] **Step 5: 提交** `git commit -m "feat(gui): QuickSync 和状态服务同步快捷区设置"`
+- [ ] **Step 5: 提交** `git commit -m "feat(gui): QuickSync 和中心服务同步快捷区设置"`
 
 ### Task 15: 接进 StateSync、两个入口和设置页的同步行
 
 **Files:**
-- Modify: `gui/lib/state/state_sync.dart`（构造参数 `QuickSync? quick`；连上后 `link.prefsStore != null` 就 `quick.attach(link, store)`，否则 `quick.detach(reachable: true)`；`_fail` 里 `detach(reachable: false)`；off/none 时 `detach(reachable: true)`；`_onPush` 的 `'prefs'` 转给 `quick.onPush`）
+- Modify: `gui/lib/state/state_sync.dart`（构造参数 `QuickSync? quick`；连上后 `link.prefs` 就 `quick.attach(link)`，否则 `quick.detach(reachable: true)`；`_fail` 里 `detach(reachable: false)`；off/none 时 `detach(reachable: true)`；`_apply` 里 `what` 以 `prefs.` 开头的转给 `quick.onPush`）
 - Modify: `gui/lib/main.dart:113`（`host: monitor.stateHost`）、`gui/lib/main_ios.dart:98`（`host: hub.stateHost`）：建 `QuickSync`，传给 `StateSync` 和 `MainState`（`MainState({QuickSync? quickSync})`）
-- Create: `gui/lib/pages/quick_sync_line.dart`：`QuickSyncLine(state)`，按 `status` 出三句之一；`synced` 时设备名 = `state.deviceName(hostId)`，`hostId` null 写 `已和状态服务同步`。`QuickSync == null` 当 `local`。
+- Create: `gui/lib/pages/quick_sync_line.dart`：`QuickSyncLine(state)`，按 `status` 出三句之一；`synced` 时设备名 = `state.deviceName(hostId)`，`hostId` null 写 `已和中心服务同步`。`QuickSync == null` 当 `local`。
 - Modify: `keys_page.dart`、`phrases_page.dart` 底部放 `QuickSyncLine`
 - Test: `gui/test/state/state_sync_test.dart`（加用例）、`gui/test/pages/quick_sync_line_test.dart`
 
-- [ ] **Step 1: 写失败的测试**：StateSync 连上带 prefs 的服务 → `quick.status == synced`；不带 → `local`；断开 → `waiting`；watch 推 `prefs` → 本机 `QuickPrefs` 内容变；`QuickSyncLine` 三种文字原文（Global Constraints）。回到前台不用另写：`MainState` 回前台已调 `stateSync.refresh()`，重连就会再 `attach` 一次 —— 写一个用例钉住 refresh 后又 `GET /v1/prefs` 了一次。
+- [ ] **Step 1: 写失败的测试**：StateSync 连上带 prefs 的服务 → `quick.status == synced`；不带 → `local`；断开 → `waiting`；watch 推 `prefs.layout` → 本机 `QuickPrefs` 内容变；`QuickSyncLine` 三种文字原文（Global Constraints）。回到前台不用另写：`MainState` 回前台已调 `stateSync.refresh()`，重连就会再 `attach` 一次 —— 写一个用例钉住 refresh 后又 `GET /prefs/v1/all` 了一次。
 - [ ] **Step 2: 跑，确认失败**：`cd gui && ~/development/flutter/bin/flutter test test/state/state_sync_test.dart test/pages/quick_sync_line_test.dart` → FAIL
 - [ ] **Step 3: 实现**
 - [ ] **Step 4: 全量门禁**
@@ -651,6 +658,6 @@ git checkout pubspec.lock
 ```
 Expected: 全 PASS；analyze `No issues found!`；clippy 无警告。（testkit 的 linux_detach 先要 `cargo build --release --bin rapp-session`。）
 
-- [ ] **Step 5: 实机检查写进待办**：把 spec §14 的 1–11 条写成 `tasks/todo.md` 新一节「快捷区第一行（计划 `docs/superpowers/plans/2026-11-27-rapp-quick-row.md`，分支 `feat/quick-row`）」，并注明“状态服务要升到带 `/v1/prefs` 的版本，旧服务不同步、不报错”。
+- [ ] **Step 5: 实机检查写进待办**：把 spec §14 的 1–11 条写成 `tasks/todo.md` 新一节「快捷区第一行（计划 `docs/superpowers/plans/2026-11-27-rapp-quick-row.md`，分支 `feat/quick-row`）」，并注明“中心服务要升到带 `prefs` 的版本（`/v1/routes` 里有它），旧服务不同步、不报错”。
 
-- [ ] **Step 6: 提交** `git commit -m "feat(gui): 快捷区设置接进状态服务同步，设置页显示同步状态"`
+- [ ] **Step 6: 提交** `git commit -m "feat(gui): 快捷区设置接进中心服务同步，设置页显示同步状态"`

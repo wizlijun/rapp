@@ -70,7 +70,7 @@
 
 | 做法 | 取舍 | 结果 |
 |---|---|---|
-| 甲：放进 rapp-state，加 `/v1/prefs` 一组接口和 watch 推送 | 发现、存盘、app 接入、iOS 经 hub 访问全部沿用；设置是单独模块，以后可拆。代价：不能只开设置不开状态 | **选定**（U9） |
+| 甲：放进 rapp-state，加 `/v1/prefs` 一组接口和 watch 推送 | 发现、存盘、app 接入、iOS 经 hub 访问全部沿用；设置是单独模块，以后可拆。代价：不能只开设置不开状态 | **选定**（U9）；2026-11-27 rapp-state 改名中心服务 rapp-center，改成它的内置能力 `prefs`，见 §10.2 |
 | 乙：另开 rapp-prefs 服务（8103、`kind:"prefs"`） | 最低耦合；发现机制和 app 接入要再做一份，工作量约多一倍 | 没选 |
 | 系统同步（iCloud 等） | 管不到 Linux、Windows | 去掉 |
 | 存 relay 上 | 和“relay 只做门”的定位冲突 | 去掉 |
@@ -209,7 +209,7 @@ Layout { rows: [[id…], [id…]] }
 | `stars` | 项 id 的列表，按打星先后 |
 | `usage` | 只有这台设备自己的次数 `{ 项 id: { 日期: 次数 } }` |
 
-- **`local/quick-sync.json`**（不进 git）：同步的记账：连的是哪个状态服务（它所在设备的 id），每份文档的 `synced`（上次和**这个**服务一致时的 `at`，没同步过是 0），以及从服务上抄来的别的设备的次数。这样别的设备的次数和同步时间不会每分钟进 git。
+- **`local/quick-sync.json`**（不进 git）：同步的记账：连的是哪个中心服务（它所在设备的 id），每份文档的 `synced`（上次和**这个**服务一致时的 `at`，没同步过是 0），以及从服务上抄来的别的设备的次数。这样别的设备的次数和同步时间不会每分钟进 git。
 - 数据目录里已有的 `shared/` 也是靠 git 在设备间共用的，但只有配了 git 远端才同步、而且是分钟级；这五样走 rapp-state（U9），不放 `shared/`，免得两套同步打架。
 - **迁移**：`quick.json` 不存在时，从 `gui.json` 的 `phrases` 建：
   - `StripCmd('search')`：它的 `per` 里没有任何改成文字的（今天用户可以改），就拿出来变成按键动作 `search`（`per` 里的 `CmdKey` 换成对应的 chord）；有改成文字的就留在常用语里当命令，按键动作里照样放一个内置 `search`。
@@ -219,20 +219,23 @@ Layout { rows: [[id…], [id…]] }
   - `gui.json` 里的 `phrases` 留着不删（旧版本还读它），以后只读 `quick.json`【我定的】。
 - `phrase_strip`（开关）、`key_bar_more`、`phrase_cmds_seeded` 留在 `gui.json`，不同步。
 
-### 10.2 rapp-state 加的接口
+### 10.2 中心服务的内置能力 `prefs`
+
+rapp-state 已改名中心服务 rapp-center（`services/center/`，见 `2026-11-27-rapp-center-design.md`）。用户 2026-11-27 定：这五样做成中心服务的内置能力 `prefs`（实现 `Builtin`，在 `builtin::table` 登记一行），**并掉中心服务规格里的 G3**（那边只同步常用语、整份覆盖；以这里为准）。
 
 | 接口 | 做什么 |
 |---|---|
-| `GET /v1/health` | 回复加 `"prefs":1`，app 靠它知道这个服务支持设置（旧的没有就不同步） |
-| `GET /v1/prefs` | `{ "phrases": {at, data}, "keys": …, "layout": …, "stars": …, "usage": { 设备 id: {at, data} } }`，没有的不带 |
-| `PUT /v1/prefs/<名字>` | `{at, base, data}`，`名字` 是 `phrases` `keys` `layout` `stars` 之一。`base` 是客户端以为服务上现在的 `at`（没有就 0）。服务上的 `at` 等于 `base` 就收下，回 204；否则回 409 和服务上的那份 |
-| `PUT /v1/prefs/usage/<设备 id>` | `{at, data}`：整份替换这台设备的次数，总是收下 |
-| `GET /v1/watch` | 多一种推送：`{"what":"prefs","name":…,"doc":{at,data}}`（`usage` 那条再带 `device`） |
+| `GET /v1/routes` | 入口自己的，自动多一项 `{"name":"prefs","kind":"builtin","v":1}`；app 靠它知道这个服务支持设置（没有这项、或 `/v1/routes` 404 的旧服务就不同步） |
+| `GET /prefs/v1/all` | `{ "store": "<16 位十六进制>", "phrases": {at, data}, "keys": …, "layout": …, "stars": …, "usage": { 设备 id: {at, data} } }`，没有的文档不带 |
+| `GET /prefs/v1/<名字>` | 一份：`{at, data}`；没有时 `{"at":0,"data":null}` |
+| `PUT /prefs/v1/<名字>` | `{at, base, data}`，`名字` 是 `phrases` `keys` `layout` `stars` 之一。`base` 是客户端以为服务上现在的 `at`（没有就 0）。服务上的 `at`（没有算 0）等于 `base` 就收下，回 204；否则回 409 和服务上的那份 |
+| `PUT /prefs/v1/usage/<设备 id>` | `{at, data}`：整份替换这台设备的次数，总是收下，回 204 |
+| `GET /v1/watch` | 入口那一条，多两种推送：`{"what":"prefs.<名字>","doc":{at,data}}`；`{"what":"prefs.usage","device":…,"doc":{at,data}}`。旧 app 遇到不认的 `what` 忽略（`state_sync.dart` 的 `_apply` 默认分支） |
 
-- 存在 `--data DIR` 下的 `prefs.json`（和 `state.json` 并排，权限、先写 `.tmp` 再改名、坏文件挪成 `.bad` 的做法都同 `state.json`），没有 `--data` 时只放内存。不过期；某台设备的 `usage` 90 天没更新就清掉【我定的】。
-- 每份 `data` 最大 256 KB，超了回 413。
-- 不认的名字回 404。服务不检查 `data` 的内容（app 自己验，坏的当没有）。
-- 写进 `services/state/api/http.md`，加样本到 `services/state/api/samples/`。
+- `store`：服务的身份（§10.3 “第一次接上”靠它认），第一次建时随机生成，存进 `prefs.json`；没有数据目录（只放内存）时每次启动新生成。`health` 不动（它归入口）。
+- 存盘：数据目录下自己的 `prefs.json`（入口的 saver：0600、原子写、读坏了挪开只丢这一块、记 `load_failed`），没有数据目录时只放内存。文档不过期；某台设备的 `usage` 按**服务收到的时间** 90 天没更新就清掉【我定的】。
+- 每份 `data` 序列化后最大 256 KB，超了回 413；体不是 `{at, base, data}` 回 400；不认的名字回 404；方法不对 405。服务不检查 `data` 的内容（app 自己验，坏的当没有）。
+- 写进 `services/center/api/prefs.md`，`routes.md` 的例子加上 `prefs`，样本放 `services/center/api/samples/prefs.ndjson`。
 
 ### 10.3 合并规则
 
@@ -252,18 +255,18 @@ Layout { rows: [[id…], [id…]] }
   - 本机改过：`phrases` 和 `keys` **合并**：服务上的在前，本机有而服务上没有的接在后面（常用语和命令按文字 / id 认同一条，按键动作按 id，用户加的按“名字 + 键”认）；合并后本机的 `stars` 里指向被认成同一条的 id 换成服务上的 id；`stars` 取并集，服务上的在前；`layout` 用服务上的，除非服务上那份是默认、本机不是。合并结果当作本机的新改动交上去。谁也不丢东西【我定的】。
   - 合并完记下这个服务，`synced` 按它记。
 - **服务上这份比 `synced` 旧，或者没了**（服务重装、换成了只放内存）：当作第一次接上处理。
-- 网里只该有一个状态服务（rapp-state spec §3）；有两个时 app 用设备 id 最小的那个，它掉线换到另一个时，也走“第一次接上”。
+- 网里只该有一个中心服务（中心服务规格 §3）；有两个时 app 用设备 id 最小的那个，它掉线换到另一个时，也走“第一次接上”。
 - `usage` 不走这张表：每台只写自己那格，读的时候加起来。本机的次数变了，最多 1 分钟交一次【我定的】。
 
 ### 10.4 什么时候同步
 
-- 和状态服务连着的时候（`StateSync` 是 connected、health 带 `prefs`）：连上时 `GET /v1/prefs` 走一遍 §10.3；之后靠 watch 的 `prefs` 推送；本机一改（间隔 1 秒合并）就交。
-- 连不上、或状态服务关了：只用本机文件，改动记着（`at > synced`），连上后按 §10.3 交。
+- 和中心服务连着的时候（`StateSync` 是 connected、`/v1/routes` 里有 `prefs`）：连上时 `GET /prefs/v1/all` 走一遍 §10.3；之后靠 watch 的 `prefs.*` 推送；本机一改（间隔 1 秒合并）就交。
+- 连不上、或中心服务关了：只用本机文件，改动记着（`at > synced`），连上后按 §10.3 交。
 - 回到前台时重取一次（同状态的做法）。
 
 ### 10.5 用户看得到的
 
-- 两个设置页底部一行灰字：「已和 <设备名> 上的状态服务同步」/「只存在本机（没有状态服务）」/「连不上状态服务，改动会在连上后同步」。
+- 两个设置页底部一行灰字：「已和 <设备名> 上的中心服务同步」/「只存在本机（没有中心服务）」/「连不上中心服务，改动会在连上后同步」。
 - 别处改了、这台收到时，第一行和设置页直接换成新的，不提示。
 
 ## 11. 分期和验收
@@ -271,7 +274,7 @@ Layout { rows: [[id…], [id…]] }
 | 期 | 内容 | 验收 |
 |---|---|---|
 | P1 本机 | §5–§9、§10.1：两个菜单、星、按次数排、按键动作和它的设置页、可编辑的键盘布局、`quick.json` 和迁移 | 只改 Dart；全部在本机生效；老用户升级后第一行内容不变（「搜历史」在第一行末尾，按键动作接在后面） |
-| P2 同步 | §10.2–§10.5：rapp-state 的 `/v1/prefs`、app 的同步 | Mac 上改布局，iPad 连同一个状态服务，最多几秒后布局一样；断网时改，连上后交上去 |
+| P2 同步 | §10.2–§10.5：中心服务的内置能力 `prefs`（`/prefs/v1/…`）、app 的同步 | Mac 上改布局，iPad 连同一个中心服务，最多几秒后布局一样；断网时改，连上后交上去 |
 
 P1 合并后就能发，不用等 P2。
 
@@ -279,7 +282,7 @@ P1 合并后就能发，不用等 P2。
 
 - Dart 单元：`KeyAction`/`Layout`/`quick.json` 的读写和坏数据；迁移（有 `search`、没 `search`、`phrases` 坏）；§5.2 的排序（有星、没星、次数相同、跨设备相加）；§10.3 每一行。
 - Dart 组件：两个菜单点行发出、点星不发不收、「设置…」进对的页；第一行有星/没星；按键动作在终端发 wire 名、在 App 发键码；布局编辑后快捷键盘跟着变；倒 T 在自定义布局里仍对。
-- Rust（`services/state/tests/`）：`/v1/prefs` 的 204/409/404/413；`usage` 按设备替换；watch 推 `prefs`；存盘重启还在；`memory` 不落盘。
+- Rust（`services/center/tests/prefs.rs`）：`/prefs/v1/…` 的 204/409/404/413；`usage` 按设备替换；watch 推 `prefs.*`；`/v1/routes` 列出 `prefs`；存盘重启还在；`memory` 不落盘。
 - 门禁照旧：`cargo test --workspace`、clippy `-D warnings`、`flutter analyze`、`flutter test`。
 
 ## 13. 我定的（汇总）
@@ -312,5 +315,5 @@ P1 合并后就能发，不用等 P2。
 7. 布局：把 PgUp 拖到第 1 行、删掉 ⌘T、加一个按键动作；快捷键盘跟着变；倒 T 还在。
 8. 「恢复默认」分别恢复按键动作和布局。
 9. （P2）Mac 改布局，iPad 几秒后一样；iPad 断网改常用语，连上后 Mac 看到。
-10. （P2）没有状态服务：设置页显示「只存在本机」，其余一切照常。
+10. （P2）没有中心服务：设置页显示「只存在本机」，其余一切照常。
 11. （P2）两台都各自改过常用语再第一次接上同一个服务：两边的常用语都在，谁也没丢。
