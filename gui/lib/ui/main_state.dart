@@ -724,7 +724,7 @@ class MainState extends ChangeNotifier {
     final sync = stateSync!;
     if (sync.status == StateStatus.unreachable && sync.outage > _outageSeen) {
       _outageSeen = sync.outage;
-      _queue(HintRecord('状态服务连不上，先用本机的', _now()));
+      _queue(HintRecord('中心服务连不上，先用本机的', _now()));
     }
     _markPushedRows(sync);
     notifyListeners();

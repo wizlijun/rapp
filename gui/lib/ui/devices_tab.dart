@@ -47,7 +47,7 @@ class DevicesTab extends StatefulWidget {
   /// Asked for each device's shared ports; null leaves the 端口 section out.
   final SharesApi? shares;
 
-  /// Turns each device's 状态服务 on or off; null leaves the row out.
+  /// Turns each device's 中心服务 on or off; null leaves the row out.
   final ServiceSwitchApi? serviceSwitch;
 
   @override

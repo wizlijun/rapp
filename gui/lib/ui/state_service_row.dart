@@ -1,4 +1,4 @@
-// The 状态服务 switch on a device page: turns that device's center service on or off.
+// The 中心服务 switch on a device page: turns that device's center service on or off.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -146,7 +146,7 @@ class _StateServiceRowState extends State<StateServiceRow> {
     ];
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       RappSwitchRow(
-        label: '状态服务',
+        label: '中心服务',
         value: r['on'] == true,
         onChanged: _busy ? null : _set,
       ),

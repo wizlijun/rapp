@@ -153,7 +153,7 @@ Linux can share ports and text terminals. New terminal windows require a graphic
 session, a supported terminal app, and a working systemd user manager.
 They run in separate transient user services and survive a rapp-service restart.
 Run `rapp share`, `rapp unshare`, `rapp hosts`, `rapp pipe`, `rapp term restore`
-(`--list` / `--forget` / `<number|name>...`), `rapp state` (`on` / `off`),
+(`--list` / `--forget` / `<number|name>...`), `rapp center` (`on` / `off`),
 `rapp load` (`pick` / `--top` / `--json`), or `rapp update`
 (`status` / `check` / `rollback`, with `--json`) for CLI access; on Linux
 online self-replacement is disabled (`not_launchd`, exit 7) and directs to the

@@ -307,7 +307,7 @@ async fn a_crashed_service_comes_back() {
     assert!(off.is_empty(), "no device was told the sink is gone: {off:?}");
 }
 
-/// `rapp state off` and `on` with the disk store: the service comes back with what it had seen
+/// `rapp center off` and `on` with the disk store: the service comes back with what it had seen
 /// of this device, and this device's numbers go on from there, so its next change is taken.
 #[tokio::test]
 async fn off_and_on_again_keeps_taking_changes() {
@@ -629,7 +629,7 @@ fn no_secrets(dirs: &[&Path], lines: &[Value], must: &[std::path::PathBuf]) -> u
     files.len()
 }
 
-/// A, with `rapp state on` (a free port, in memory), and B with session `a` idle: each knows the
+/// A, with `rapp center on` (a free port, in memory), and B with session `a` idle: each knows the
 /// other, A's `state on` told B, B's outbox is up and its snap is in. Returns them, the port and
 /// B's fingerprint.
 async fn told_pair(first: u16) -> (TestService, TestService, u16, String) {

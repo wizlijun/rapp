@@ -26,7 +26,7 @@ pub fn backoff(fails: u32) -> Duration {
     Duration::from_secs(s)
 }
 
-/// What the outbox is doing, for `rapp state`.
+/// What the outbox is doing, for `rapp center`.
 #[derive(Default, Clone, Debug, Serialize)]
 pub struct Stats {
     pub active: bool,

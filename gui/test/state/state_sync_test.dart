@@ -191,6 +191,26 @@ void main() {
     sync.dispose();
   });
 
+  test('pushes it does not know (prefs.phrases, routes) are ignored and the watch stays open', () async {
+    withState();
+    make().start();
+    await settle();
+    final c = links.single.watchCtl;
+    c.add({'what': 'hello'});
+    await settle();
+    final before = sync.rows.length;
+    c.add({'what': 'prefs.phrases', 'rev': 1, 'items': []});
+    c.add({'what': 'routes', 'routes': []});
+    c.add({'what': 'queue', 'row': row('F:e:9', 900)});
+    await settle();
+    expect(sync.status, StateStatus.connected);
+    expect(sync.rows.length, before + 1);
+    expect(sync.rows.first['eid'], 'F:e:9');
+    expect(links.length, 1);
+    expect(links.single.closed, isFalse);
+    sync.dispose();
+  });
+
   test('rows are capped at 200', () async {
     withState();
     make().start();

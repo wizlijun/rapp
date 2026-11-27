@@ -6103,7 +6103,7 @@ void main() {
     });
 
     test('unreachable: back to local rows and one outage line', () {
-      const line = '状态服务连不上，先用本机的';
+      const line = '中心服务连不上，先用本机的';
       connect([row('F:e:1', 'working')]);
       sync
         ..status = StateStatus.unreachable

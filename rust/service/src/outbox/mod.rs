@@ -1,7 +1,7 @@
 //! The outbox: while a state service is known, the terminal session lists go through the diff
 //! into the 200-event cache, and from there to the chosen service (spec §7).
 //! `diff`/`cache` are the pure logic, `send` speaks HTTP to the service, `pump` is the one task
-//! that feeds and sends; this file runs it: which service, which source, and `rapp state`.
+//! that feeds and sends; this file runs it: which service, which source, and `rapp center`.
 
 mod cache;
 mod diff;
@@ -179,7 +179,7 @@ async fn follow<R, F>(
             }
         };
         if end.is_some() {
-            // The run is over and its cache gone with it: `rapp state` must not show what it had.
+            // The run is over and its cache gone with it: `rapp center` must not show what it had.
             outbox.reset(Some(dest.clone()));
         }
         // Stopped for another service (or none): start over at once. Gone: forget it, which is a
