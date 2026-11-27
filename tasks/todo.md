@@ -1535,6 +1535,7 @@ macOS、Linux、Duo、iPad 各一遍。
 现状（2026-11-27）：在 Mac 上编过、测过，**接线已合进本机 `main`**（用户定的：Mac 门禁绿了就合）。**没在 Windows 上跑过。**
 
 - `main` 已合进分支（含 A 段接线 `5e39bb91`），成员表里 host-core、host-windows、svc-windows 都在。合并后的树上 Mac 门禁全绿：`cargo test --workspace`、clippy `-D warnings`、`swift test`、`flutter analyze`、`flutter test`（`linux_detach_test` 要先 `cargo build --release -p rapp-client-core --bin rapp-session`）。
+- **Linux x86_64 门禁已编译验证通过（`0.15.59`，`a1b9135c`）。** 全工作区 20 个 crate（含 `rapp-host-core` 及 `libz-sys` `stock-zlib`）通过 `cargo clippy --workspace --locked --all-targets -- -D warnings`，`rapp-host-core` 全部单测与 Swift 样本逐字节对拍，以及 `rapp-testkit` `host_service`（2 个）和 `host_session`（71 个）全部通过。
 - Swift 样本（`30cdd17a`）全部对上，deflate 和 Swift 逐字节相同（`libz-sys` 原版 zlib，加了 `stock-zlib`）；会话测试 71 个、服务对接 2 个都过。修的地方和逐条原因见 `rust/host-core/PORTING.md` 和分支的提交记录；样本和生成器一个没改。
 - 交接文档 3.2 节剩下的四条：窗口移不动和保持唤醒失败的两行日志已照 Swift 补上（平台接口 `move_to` 返回 bool、`stay_awake` 返回 `Option<String>`，计划同一提交改了）；焦点日志里的控件角色、规则看到的语言、焦点区测试的 8 点误差三条认下，写进 `PORTING.md` 第 4 部分。
 - 接下来：Windows 机器装好后在 `main` 上跑 `scripts\check-windows.ps1`（A、B 两段的接线都在 `main` 里了，不用再到分支上做）。`host-core` 是共用代码，这次合并算 macOS 的改动；macOS 的被控端还是 Swift 的 `rapp-host`，安装包里不带 `host-core`，行为不变。
@@ -1555,6 +1556,12 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），将 Linux / Omarchy `x86_64` 产物依次构建并挂载至已发布的 [v0.15.56](https://github.com/wizlijun/rapp/releases/tag/v0.15.56) 与 [v0.15.58](https://github.com/wizlijun/rapp/releases/tag/v0.15.58) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
 - [x] 对齐 macOS `0.15.56`–`0.15.58`（`feat/bar-cmd`、`feat/windows-foundation`、`feat/bar-pgup`、`feat/quick-one`）并修复 Linux 被控端 `applications` 能力透传：快捷区精简重排为第一行 `Tab ⇧Tab Esc ⌃C ⌫ ⏎ ↑ ⋯`（移除 `⌄`）、第二行 `⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →`（倒 T 方向键对齐、终端 `PgUp`/`PgDn` 回滚翻页、粘滞 `⌘`+字母 rApp 快捷键及收起松开 `⌃`/`⌘`）；在 Linux 上完成 Windows A 段接线后的全工作区 19 个 crate `clippy -- -D warnings` 与测试验证；在 `rust/service/src/workers.rs` 以 `#[cfg(target_os = "linux")]` 修复 `permissions()` 漏拷 `applications` 的遗漏。
 - [x] `v0.15.58`（源码 `9083e22d`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01556-parity.md` 与 `docs/superpowers/plans/2026-11-27-linux-01558-parity.md`。
+
+## Linux 0.15.59 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 直接挂载至已发布的 [v0.15.59](https://github.com/wizlijun/rapp/releases/tag/v0.15.59) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.59`（`feat/quick-stay`）并完成 Windows B 段 `rapp-host-core` 在 Linux x86_64 上的全量验证：快捷区开关在桌面端输入面板展开与收起时均固定在右下角按钮列（`[快捷区开关] [输入/收起] [语音]`）且鼠标点击不丢失焦点、选区与 Fcitx5/IBus 未上屏预编辑；补充 `gui/test/embed/input_dock_test.dart` Linux 桌面带语音常驻对齐测试；全工作区 20 个 crate（含 `rapp-host-core`、`libz-sys` `stock-zlib`、Swift 样本对拍及 `host_session` 71 项集成测试）与 3,648 项 Flutter 测试在 Linux 上全部通过。
+- [x] `v0.15.59`（源码 `a1b9135c`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01559-parity.md`。
 
 ## 中心服务 G1（规格 `docs/superpowers/specs/2026-11-27-rapp-center-design.md`，计划 `docs/superpowers/plans/2026-11-27-rapp-center-g1.md`，分支 `feat/center-g1`，2026-11-27）
 
