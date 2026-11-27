@@ -32,7 +32,7 @@
 | 3 | 进程内 hub 和网络 | 过（两个模拟器都起得来 hub、出接入引导；放进 relay 和 key、加上这台 Mac 后在线；默认和只有 IPv4 两种状态下 relay 都解析成 `::ffff:` 映射并连上。relay 是 IPv4 字面地址，域名解析没测到；真 IPv6 一半模拟器上测不了，留给实机） | §6.1 小改（`AI_V4MAPPED` 那个问题不用回答）；§6.5 的 `systemOpen` 要安卓通道；§14.6 加一条 | 2026-11-27 |
 | 4 | 进程内会话、节流 | 过，模拟器 36 的打字除外（门禁两轮在模拟器 34、模拟器 36、平板实机上都过：慢速 200 ms 时 `p0 fps` 平均 4.4–4.7，traffic `frames` 平均 28.9–29.6，后 6 次减前 6 次的 PSS 是 −10.6 / −5.9 / −7.9 MB（1 MB = 1000 dumpsys KB），都在 40 MB 以内；P0Moving 的动画面、颜色在 34、36、平板上都过；TextEdit 打 `p0probe` 在 34、平板上过，**在 36 上不稳：重复 7 次，`input text 'p0probe'` 3 次里到齐 2 次，逐键 `input keyevent` 3 次里到齐 1 次，另一串 `a1abba` 1 次到齐；少字 3 次，其中有截图的 2 次（A 第 1 次、B 第 2 次）写作条里已经少了；B 第 3 次没有截图**（第 4 节「模拟器 36 打字重复测量」；没用真键盘测过）；打字都经写作条发出；**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（桌面会话）；会话自己断的原因是 hub 的 64 KiB 行上限，探查里绕过后会话撑过 250 s） | 待定；hub 读到超过 64 KiB 的回复行（`watch_load` 首行）就丢整条连接，这段是 main 上的共用代码；会话因此断开只在探查的进程内会话里见过，桌面没测；绕过后，建流时首行已超上限（Mac 服务起来约 52 分钟以后，量到的区间是 51.5–55 分钟）余力就到不了安卓控制端，早于这个时间建流就到得了；Mac 服务重启后从头算 | 2026-11-27 |
 | 5 | 键盘和触控板 | 部分过。计划里的过关条件（Ctrl+C/V 在空白区到得了 App，`isControlPressed` 为真）在 34、36 上**过**（`uinput`，内核级，`ctrl=1`）；**平板（实机）上这一项没做，等用户用真键盘按**：键到得了，但 `input keycombination` 的字母 `metaState` 为 0、平板上 `uinput` 被拒，注入显示不了修饰键状态，真机上的过关没有确认。文本框有焦点、软键盘打开时（36 上重做）Ctrl+C/V/A/Z/X 都到、`ctrl=1`；原先「到不了」是点歪了位置（没点进文本框），结论撤回，Ctrl+SPACE 和单按字母的现象原因没查明。Meta 组合都被系统拿走，到不了 App。滚轮 `PointerScrollEvent kind=mouse`，34、36、平板都有；触控板双指和捏合模拟器上测不出，平板上没触控板，留给实机 | §14.6 加第 9 条（已加，含用户的一分钟真键盘检查） | 2026-11-27 |
-| 6 | 语音 | 部分过：三个目标按规格 §11 手算都是「不能用」（34 符合要求；36 走规则 4、平板走规则 4）；**36 按住说话没出字**：普通一段收到 `ready`、`begin`、`error 7`，`rms` 有动静（5 次、最大 10.0），识别器报没检测到语音；设备上下载 `cmn-Hans-CN` 后仍报 `error 13`；分段、热词两次 `rms` 停在 -2.0，声音没确认进入，**没测**；**平板（实机）** 五次（普通 ×3、分段、热词）每次 `force-stop` 后重开，都没有任何回调（没有 `ready`/`error`/`end`），无法判断分段、热词 | 要改：规则 2 靠的在线 `checkRecognitionSupport` 在 36 和平板上都报 14，实际走不到；语言标签是 `cmn-Hans-CN` 不是 `zh-CN`；「有默认识别器就按能用」被平板直接推翻（见「规格要改的地方」） | 2026-11-27 |
+| 6 | 语音 | 部分过：三个目标按规格 §11 手算都是「不能用」（34 符合要求；36 走规则 4、平板走规则 4）；**36 按住说话没出字**：普通一段收到 `ready`、`begin`、`error 7`，`rms` 有动静（5 次、最大 10.0），识别器报没检测到语音；设备上下载 `cmn-Hans-CN` 后仍报 `error 13`；分段值给 `Long` 时 36 的识别器拒绝了（日志 `ignoring EXTRA_SEGMENTED_SESSION`），改给 `int` 后日志里不再拒绝，但只来过一个空的 `segment`，`rms` 停在 -2.0，分段结果能否收到、热词有没有效果**没测**；**平板（实机）** 六次（普通 ×3、分段 ×2、热词）每次 `force-stop` 后重开，都没有任何回调（没有 `ready`/`error`/`end`），无法判断分段、热词 | 要改：规则 2 靠的在线 `checkRecognitionSupport` 在 36 和平板上都报 14，实际走不到；语言标签是 `cmn-Hans-CN` 不是 `zh-CN`；「有默认识别器就按能用」被平板直接推翻（见「规格要改的地方」） | 2026-11-27 |
 | 7 | 自己装自己 | 部分过：两个模拟器过（`versionCode` 9001 → 9002，`canInstall` 起点是否、开开关后是；装完 App 被杀、没自己重启（34 上没查到「打开」通知，36 没查）；`success` 回调没观察到，页面也观察不了（进程死了，日志在内存里）；数据文件和开关都还在；装完缓存里的包还在）；哈希不对的四个条件在 34 和平板上都过；**平板（实机）装不下去：荣耀多出安全检测、`已了解…` 勾选、锁屏密码三层，密码不能替用户输，没做，等用户** | §13.2 第 4 步已改（装完不重启）；§13.2 加一句荣耀的多层确认（见「规格要改的地方」） | 2026-11-27 |
 | 8 | 数字 | 部分过：强制 relay 的 fps 没量；APK、`.so` 大小只量了模拟器 34 的包，模拟器 36 和平板没量（装的是同一个 APK）。量了的（大小只量了模拟器 34 的包，单位 MiB，1 MiB = 1,048,576 字节：APK 28.15；三个 `.so` 分别 7.88 / 11.04 / 7.18；34 上没开会话时 PSS 约 86.7 MiB，开着静态 2560×1600 桌面会话时 6 次平均约 215.2 MiB。Task 4G 的 PSS 单位是 MB = 1000 dumpsys KB：模拟器 36 没会话 89.1、静态单应用会话（TextEdit）158.6；平板没会话 209.0、静态单应用会话 445.7。release 动画面 30 s 平均 `p0 fps`：平板 26.1（屏幕 60 Hz）；模拟器 34 是 26.0、模拟器 36 是 25.1（模拟器，只作参考）。「静态」单应用会话里每秒仍到 3–7 帧，PSS 6 次之间摆动大，平均数只作大概） | 待定 | 2026-11-27 |
 
@@ -516,34 +516,48 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 
 ### 6.2 说话
 
-麦克风：36 用 `adb emu avd hostmicon`，`say -v Tingting` 在 Mac 上读，Mac 输出音量 47、未静音，没动；平板自己的麦克风听 Mac 的扬声器，`adb shell input swipe` 按住按钮 14 秒。普通一段说「今天下午三点开会」；分段说两句，中间停 3 秒；热词说「打开 rApp」。每次都先 `am force-stop` 再重新打开页面，每个进程只建一个识别器。
+麦克风：36 用 `adb emu avd hostmicon`，`say -v Tingting` 在 Mac 上读，Mac 输出音量 47、未静音，没动；平板自己的麦克风听 Mac 的扬声器，`adb shell input swipe` 按住按钮 14 秒。普通一段说「今天下午三点开会」；分段说两句，中间停 3 秒；热词说「打开 rApp」。每次都先 `am force-stop` 再重新打开页面；除了普通 3（它先调了 `support`，`support` 自己会建一个识别器再销毁，日志 `t6f-tab-plain3support-log.txt` 里有它的 `Connection to speech recognition service lost, but no #startListening has been invoked yet`），每次说话只用一个识别器。探查页没有单独的 `rms` 事件（简报里列了）：`onRmsChanged` 只计数，次数和最大值放在 `ready`/`begin`/`error`/`end` 等事件上。
 
-分段按参考页写：`EXTRA_SEGMENTED_SESSION` 的值是另一个 extra 的名字，这里用 `EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS`，同一个 intent 里再给它设 2000。参考页的原话：「Optional string to enable segmented session mode of the specified type, which can be EXTRA_AUDIO_SOURCE, EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS or EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS.」「When setting this extra, make sure the extra used as the string value here is also set in the same intent with proper value.」「Depending on the recognizer implementation, this value may have no effect.」热词用 `EXTRA_BIASING_STRINGS`（字符串列表）。
+「第一次测量」指分段值还是 `Long` 的那一版（`p0/t6f-*`）；「第二次测量」指改成 `int` 的那一版（`p0/t6g-*`）。
 
-**模拟器 36**（Mac 未锁屏；`RECORD_AUDIO` 用 `pm grant` 授予。每次说话前都查过 Mac 没锁屏。这一轮没有记录到系统的麦克风许可提示）：
+**分段的请求，两次测量的结果。** 参考页的原话：「Optional string to enable segmented session mode of the specified type, which can be EXTRA_AUDIO_SOURCE, EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS or EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS.」「When setting this extra, make sure the extra used as the string value here is also set in the same intent with proper value.」所以 `EXTRA_SEGMENTED_SESSION` 的值是另一个 extra 的名字，同一个 intent 里还要给那个 extra 设值。
+
+- 值给 `2000L`（`Long`）：36 的识别器**拒绝了**。`t6g-e36-seg-long-log.txt` 里的原样日志：`W Bundle : Key android.speech.extras.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS expected Integer but value was a java.lang.Long.  The default value 0 was returned.`，调用栈经过 `Intent.getIntExtra` 和 `GoogleTTSRecognitionService.onStartListening`，接着 `E RecognitionServiceInten: EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS is not set with positive value; ignoring EXTRA_SEGMENTED_SESSION`。也就是说这个识别器按 `int` 读这个 extra。第一次测量里 36 的分段、热词两次都是在这个状态下跑的，`p0/t6f-e36-seg-log.txt` 里只有栈帧和最后一行 `E`，没有 `W Bundle` 那一行标题。
+- 值给 `2000`（`int`）：`p0/t6g-e36-seg-log.txt` 里没有 `W Bundle` 类型警告，也没有 `ignoring EXTRA_SEGMENTED_SESSION`：36 的识别器接受了这个请求。事件（`p0/t6g-e36-seg.txt`）：`ready`、`begin`，松手后来了一个 `segment`（`text: []`，空），然后 `error 7`、`end`；`rms` 只有 1 次、最大 -2.0，声音没有确认进入识别器。所以「请求被接受」有日志为证；「分段结果能收到」没有：唯一的 `segment` 是空的，没有文字。
+- 平板上同样的 `int` 请求（`p0/t6g-tab-seg.txt`、`-log.txt`）：和之前一样，`start` 之后没有任何回调，日志里没有 `W Bundle` 之类的行；平板的识别服务没有给第三方回调，所以不能说它接受或拒绝。
+
+热词用 `EXTRA_BIASING_STRINGS`（字符串列表）。
+
+**模拟器 36**（第一次测量，Mac 未锁屏，每次说话前我自己用 `tools/locked` 查过，这一条没有保存的文件；`RECORD_AUDIO` 用 `pm grant` 授予）：
 
 | 次 | 设置 | 事件顺序 | 文字 |
 |---|---|---|---|
-| 普通一段 | 在线，`zh-CN` | `ready`（`rms` 0，`rmsMax` -1000）、约 0.8 s 后 `begin`、松手后 0.27 s `error 7`（`NO_MATCH`）、`end`；`end` 上 `rms` 5、`rmsMax` 10.0。日志摘录：`#onResults empty final recognition results`、`no speech - erroring`、`agsa_transcription_NO_SPEECH_DETECTED`（`p0/t6f-e36-plain-log.txt`） | 没有（没有 `partial`、`final`） |
-| 分段 | 在线，`EXTRA_SEGMENTED_SESSION` 按上面写 | `ready`、`begin`、`error 7`、`end`，没有 `segment`；`rms` 只有 1 次、`rmsMax` -2.0 | 没有 |
-| 热词 | `EXTRA_BIASING_STRINGS=[rApp]` | `ready`、`begin`、`error 7`、`end`；`rms` 只有 1 次、`rmsMax` -2.0 | 没有 |
-| 设备上、`cmn-Hans-CN` | 先用 `download` 触发语言包下载（模拟器上弹出「Download 普通话 (中国大陆) update」，52.97 MB，我点了 Download，日志有 `onEndTriggerModelDownload(): success`），再勾「设备上」「cmn-Hans-CN」按住 | `start` 后 0.04 s 就 `error 13`（日志 `agsa_transcription_LANGUAGE_PACK_ERROR`），`end`；之后又来一个 `ready`，松手时 `error 5`，日志有 `#stopListening called with no preceding #startListening - ignoring`。下载后再查 `support`，`installed` 仍是 `[en-US]`，`pending: [cmn-Hans-CN]` | 没有 |
+| 普通一段 | 在线，`zh-CN` | `ready`（`rms` 0，`rmsMax` -1000）、约 0.86 s 后 `begin`、松手后 0.26 s `error 7`（`NO_MATCH`）、`end`；`end` 上 `rms` 5、`rmsMax` 10.0。日志摘录：`#onResults empty final recognition results`、`no speech - erroring`、`agsa_transcription_NO_SPEECH_DETECTED`（`p0/t6f-e36-plain-log.txt`） | 没有（没有 `partial`、`final`） |
+| 分段（`Long`，被拒绝） | 见上 | `ready`、`begin`、`error 7`、`end`，没有 `segment`；`rms` 只有 1 次、最大 -2.0 | 没有 |
+| 热词 | `EXTRA_BIASING_STRINGS=[rApp]` | `ready`、`begin`、`error 7`、`end`；`rms` 只有 1 次、最大 -2.0，声音没确认进入，热词效果**没测** | 没有 |
+| 设备上、`cmn-Hans-CN` | 先点 `download` 触发语言包下载，再勾「设备上」「cmn-Hans-CN」按住 | `start` 后 0.04 s 就 `error 13`（日志 `agsa_transcription_LANGUAGE_PACK_ERROR`），`end`；之后又来一个 `ready`，松手时 `error 5`，日志有 `#stopListening called with no preceding #startListening - ignoring`（`p0/t6f-e36-ondevice-cmn-log.txt`） | 没有 |
 
-36 上没有拿到任何中文字。能确认的：普通一段里 `rms` 回调有 5 次、最大 10.0，说明声音到了识别器，但识别器给的是「没有检测到语音」。分段和热词两次 `rms` 只有一次、停在 -2.0，**声音没有确认进入识别器**，所以这两次不能当成「分段/热词没效果」的证据，只能说：没报错，也没出字，`segment` 没来。设备上 `cmn-Hans-CN` 下载后 `support` 还是 `pending`，识别报 13；语言包为什么没就绪，没查明。
+下载这一步：当时在屏幕上看到「Download 普通话 (中国大陆) update」对话框、52.97 MB，我点了 Download；日志里看到过 `onEndTriggerModelDownload(): success`；这两处没有留文字证据（屏幕只有截图 `p0/t6f-e36-download.png`，日志没存）。下载之后再查 `support`（`p0/t6f-e36-support-after-download.txt`）：`installed` 仍是 `[en-US]`，`pending: [cmn-Hans-CN]`。语言包为什么没就绪，没查明。
 
-第一轮在 36 上的结果（没有这几项观察，Mac 当时锁屏）不再引用：Mac 锁屏时「没弹出麦克风许可」说明不了什么。
+第二次测量（36；跑的时候 Mac 的屏幕据说已锁屏，我每次用 `tools/locked` 查到的却是未锁，两者对不上，没有保存的文件可核；请求是否被接受只看日志，不依赖声音）：
+- 分段 `int`：见上，请求被接受，`rms` 1 次 -2.0，没有声音进入的证据。
+- 设备上 `cmn-Hans-CN`：`error 13`、`end`，之后没有 `ready`，松手时没有 `error 5`，日志里也没有 `no preceding #startListening`（`p0/t6g-e36-ondevice-cmn.txt`、`-log.txt`）：`stop` 只在会话还在时才调 `stopListening` 之后，`error 5` 没再出现。`error 5` 的原因：`stop` 在会话已经结束后又调了 `stopListening()`，是探查页自己引起的，不是识别器的行为。
+- 普通一段又跑了一次（`p0/t6g-e36-plain.txt`）：`rms` 1 次 -2.0，`error 7`，同样没有声音进入的证据。
 
-**平板（实机）**（按规则是「不能用」，仍照要求试了；没有同意书、登录、下载或密码界面的**截图**，这条只靠截图，没有别的证据）：
+36 上没有拿到任何中文字。第一次测量里普通一段 `rms` 5 次、最大 10.0，识别器给的是「没有检测到语音」；其余几次 `rms` 都停在 -2.0，不能当成「分段/热词没效果」的证据。第一轮（更早、Mac 当时锁屏、没有 `rms`）的 36 结果不再引用。
+
+**平板（实机）**（按规则是「不能用」，仍照要求试了；没有同意书、登录、下载或密码界面，这一条只靠截图，没有别的证据）：
 
 | 次 | 设置 | 事件顺序 | 文字 |
 |---|---|---|---|
 | 普通 1 | 没调 `support`，按住 14 s | `start` 之后一个回调都没来：没有 `ready`、`begin`、`error`、`end`，`rms` 没有。日志摘录：`SpeechRecognitionManagerServiceImpl: Client … has opened 1 sessions`，`AppOpsControllerImpl: onActiveChanged(…, com.hihonor.magicvoice, true …)`，`PrivacyItemController: updatePrivacyList: (microphone, com.hihonor.magicvoice …)`（`p0/t6f-tab-plain1-log.txt`） | 没有 |
 | 普通 2 | 没调 `support` | 同普通 1 | 没有 |
 | 普通 3 | 先调了 `support`（两条回答同 6.1），再按住 | 同普通 1 | 没有 |
-| 分段 | 按上面写 | 同普通 1 | 没有 |
+| 分段（`Long`） | 第一次测量 | 同普通 1 | 没有 |
 | 热词 | `[rApp]` | 同普通 1 | 没有 |
+| 分段（`int`） | 第二次测量 | 同普通 1 | 没有 |
 
-五次都是 `force-stop` 后重开、每个进程一个识别器，结果一样：没有任何回调。第一轮平板上出现过的 `error 11`，这一轮没有再出现；第一轮的写法是先 `destroy` 再创建，这一轮改成复用，是否就是这一差别引起，没有单独验证。静默本身与 `support` 调不调无关（普通 1、2 没调，普通 3 调了）。平板的系统日志只证明：系统记了「客户端打开 1 个会话」，`com.hihonor.magicvoice` 在使用麦克风；没有证据显示它为什么不回调。分段、热词在平板上同样没有结果，无法判断是否生效。
+六次都是 `force-stop` 后重开，结果一样：没有任何回调。第一轮平板上出现过的 `error 11`，之后没有再出现；第一轮的写法是先 `destroy` 再创建，之后改成复用，是否就是这一差别引起，没有单独验证。静默与 `support` 调不调无关（普通 1、2 没调，普通 3 调了）。平板的系统日志只证明：系统记了「客户端打开 1 个会话」，`com.hihonor.magicvoice` 在使用麦克风；没有证据显示它为什么不回调。分段、热词在平板上没有结果，无法判断是否生效。
 
 ### 6.3 P1 要知道的
 
@@ -551,12 +565,19 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 - `checkRecognitionSupport` 在没有识别服务时回调**一直不来**，要自己加超时（探查用了 10 秒）。
 - 清单要 `RECORD_AUDIO` 和 `<queries><intent><action android:name="android.speech.RecognitionService"/></intent></queries>`（探查里加了，没做不加的对比）。
 - 默认识别服务的包名：`Settings.Secure.getString(contentResolver, "voice_recognition_service")`，两个有识别服务的目标上都是 `包名/类名`。
-- 识别器的建法：一种模式（在线、设备上）一个 `SpeechRecognizer`，复用；每次开始前先 `cancel()`，只在 `error 11` 时销毁重建，并在 Activity 销毁时 `destroy()`。每个事件带实例号和 `rms` 次数，先后顺序是 `ready`、`begin`、`error`、`end`；设备上识别器在 36 上有过 `error`、`end` 之后才来 `ready` 的顺序（实例号相同，见 6.2 最后一行），所以别靠「收到 `end` 就收尾」。
-- 分段和热词的正确写法见 6.2 开头；36 和平板上都没有拿到有效的对比，所以 P1 不能靠这次探查决定「识别器支持分段」，要在真有中文可识别的机器上再验，`segment` 不来时按规格走「一段结束手还按着就立刻开下一段」。
-- 语言标签：36 的 `supported` 用 `cmn-Hans-CN`；`start` 用 `zh-CN` 时在线路径没报语言错误，设备上用 `cmn-Hans-CN` 在下载后报 13。
-- 看到的错误码：14（`support`，在线路径）；识别时 5、7、11、12、13。
-- 拿到第一个结果的时间：没有结果可量；36 上按下到 `ready` 约 0.04–0.08 s，到 `begin` 约 0.8–1.2 s，松手到 `error 7` 约 0.3–1.1 s。
-- 国行平板（荣耀）：`probe` 有识别服务，`onDevice` 假，`support` 报 14，识别没有任何回调（本次五次）。规格 §11 写的「国行平板上多半走到第 3 条」不准确：这台平板按手算走的是规则 4（`support` 报 14），结论同样是不能用。
+- 分段：`EXTRA_SEGMENTED_SESSION` 的值写 `EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS`，同一 intent 里再用 `putExtra(…, 2000)` 给 `int`，**不能给 `Long`**：36 的 Google 识别器按 `int` 读，给 `Long` 会读成 0 并忽略分段（原样日志见 6.2）。给 `int` 时 36 的识别器接受（日志里没有拒绝），但还没有收到过带文字的 `segment`（只有一个空的），所以「识别器支持分段」没有确证；P1 要在能出字的机器上再验，`segment` 不来时按规格走「一段结束手还按着就立刻开下一段」。
+- 热词 `EXTRA_BIASING_STRINGS`：没报错，效果没测（`rms` 停在 -2.0）。
+- 识别器的建法（**没有被任何一次保存的运行验证过**）：本探查的写法是一种模式一个 `SpeechRecognizer`、复用、开始前 `cancel()`、只在 `error 11` 时销毁重建；但每次运行都是新进程里的 `run: 1`，也没有出现过 `error 11`，所以复用和销毁重建这两条路径都没跑过，P1 不要当成已验证的做法。
+- 探查页的一个缺口，P1 不要照抄：`run`、`rms` 次数、`rmsMax` 是在回调到达时从页面的全局变量里读的，不是开始时捕获的；复用同一个识别器时，上一轮迟到的回调会被算进新一轮。
+- 看到的错误码，及哪次测量、已知的原因：
+  - 14：`support` 在线路径，36 和平板，每次都是（第一、二次测量）。
+  - 7（`NO_MATCH`）：36 上在线识别，日志是 `NO_SPEECH_DETECTED`（第一、二次测量）。
+  - 13（`LANGUAGE_PACK_ERROR`）：36 设备上 `cmn-Hans-CN`，下载之后（两次测量）。
+  - 12（`LANGUAGE_NOT_SUPPORTED`）：只在更早的一轮里见过（36 设备上，中文没装，`p0/t6-e36-ondevice.txt`），之后两次测量没再试，没有日志摘录。
+  - 11（`SERVER_DISCONNECTED`）：只在更早的一轮里在平板上见过（`p0/t6-tab-plain2.txt`）；当时的探查页在创建前先 `destroy`，可能就是原因，之后没有再出现，没验证。
+  - 5（`CLIENT`）：第一次测量里 36 设备上识别松手时出现，原因是探查页的 `stop` 在会话已结束后又调了 `stopListening()`（日志 `stopListening called with no preceding #startListening`）；加了 `listening` 判断之后第二次测量没再出现。这是页面自己的问题，不是识别器的行为。
+- 识别时的时间（第一次测量，36，普通一段、分段、热词三次）：按下到 `ready` 0.027–0.038 s，到 `begin` 0.86–0.91 s，松手到 `error 7` 0.26–0.80 s；没有结果，没有可量的首字时间。
+- 国行平板（荣耀）：`probe` 有识别服务，`onDevice` 假，`support` 报 14，识别没有任何回调（六次）。规格 §11 写的「国行平板上多半走到第 3 条」不准确：这台平板按手算走的是规则 4（`support` 报 14），结论同样是不能用。
 
 ## 7 自己装自己
 
