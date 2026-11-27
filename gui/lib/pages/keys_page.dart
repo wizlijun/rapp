@@ -1,6 +1,7 @@
 // 按键 settings (quick-row spec §6.4): the 按键动作 list (drag to reorder, swipe to delete, tap to edit, ★ to put on the
 // first row), 新增 and 恢复默认按键动作; the sheet that edits one action; and the 键盘布局 section (§8): select a cell, replace
 // it, delete it, drag it within its row, or add one at a row's end.
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../embed/key_bar.dart';
@@ -246,7 +247,13 @@ class _LayoutEditorState extends State<_LayoutEditor> {
   (int, int)? _sel;
   int? _adding;
 
+  /// The rows as last drawn: when the layout is not these any more, the selection is let go.
+  List<List<String>>? _drawn;
+
   MainState get _s => widget.state;
+
+  static bool _same(List<List<String>> a, List<List<String>> b) =>
+      a.length == b.length && [for (var r = 0; r < a.length; r++) listEquals(a[r], b[r])].every((x) => x);
 
   List<List<String>> _rows() => [for (final r in _s.quick.layout.rows) List<String>.of(r)];
 
@@ -296,7 +303,10 @@ class _LayoutEditorState extends State<_LayoutEditor> {
     if (from >= rows[row].length || to >= rows[row].length || from == to) return;
     rows[row].insert(to, rows[row].removeAt(from));
     _commit(rows);
-    setState(() => _sel = null);
+    setState(() {
+      _sel = null;
+      _adding = null;
+    });
   }
 
   String _faceOf(String id) {
@@ -389,9 +399,14 @@ class _LayoutEditorState extends State<_LayoutEditor> {
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     final rows = _rows();
-    // A change from elsewhere (another device's layout) can leave the selection pointing past the row.
-    final sel = _sel;
-    if (sel != null && sel.$2 >= rows[sel.$1].length) _sel = null;
+    // A layout changed since the last draw (恢复默认, another device's, a deleted action's cell gone): the selected
+    // place may hold another key now, or be past the row's end; let go of it, and of a ＋ that was on.
+    final drawn = _drawn;
+    if (drawn != null && !_same(drawn, rows)) {
+      _sel = null;
+      _adding = null;
+    }
+    _drawn = rows;
     final candidates = [
       for (final id in barKeys.keys)
         if (id != 'more') id,
@@ -421,7 +436,15 @@ class _LayoutEditorState extends State<_LayoutEditor> {
       Align(
         alignment: Alignment.centerLeft,
         child: RappButton.quiet(
-            key: const Key('keys-restore-layout'), label: '恢复默认布局', onPressed: () => _s.setKeyLayout(KeyLayout.fallback)),
+            key: const Key('keys-restore-layout'),
+            label: '恢复默认布局',
+            onPressed: () {
+              _s.setKeyLayout(KeyLayout.fallback);
+              setState(() {
+                _sel = null;
+                _adding = null;
+              });
+            }),
       ),
     ]);
   }

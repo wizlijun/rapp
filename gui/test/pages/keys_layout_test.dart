@@ -151,6 +151,44 @@ void main() {
     expect(find.text('恢复默认布局'), findsOneWidget);
   });
 
+  testWidgets('restoring the default layout clears the selection', (tester) async {
+    s.setKeyLayout(const KeyLayout([
+      ['up', 'esc', 'tab'],
+      ['copy'],
+    ]));
+    await open(tester);
+    await tapK(tester, 'layout-cell-0-0'); // ↑
+    expect(k('layout-delete'), findsOneWidget);
+    await tapK(tester, 'keys-restore-layout');
+    expect(rows(), KeyLayout.fallback.rows);
+    // Cell 0-0 is Tab now: a lit cell (and 删除这一格) would point at a key the user never picked.
+    expect(k('layout-delete'), findsNothing);
+    expect(tester.widget<Text>(k('layout-hint')).data, '先点一格或行末的＋');
+    // A ＋ that was on goes off too.
+    await tapK(tester, 'layout-add-0');
+    expect(tester.widget<Text>(k('layout-hint')).data, '点下面的键加到第 1 行末尾');
+    await tapK(tester, 'keys-restore-layout');
+    expect(tester.widget<Text>(k('layout-hint')).data, '先点一格或行末的＋');
+  });
+
+  testWidgets('a layout changed elsewhere clears the selection', (tester) async {
+    await open(tester);
+    await tapK(tester, 'layout-cell-0-0'); // Tab
+    expect(k('layout-delete'), findsOneWidget);
+    // Another device's layout comes in: same lengths, other keys.
+    s.setKeyLayout(KeyLayout([
+      ['up', ...KeyLayout.fallback.rows[0].where((id) => id != 'up')],
+      KeyLayout.fallback.rows[1],
+    ]));
+    await tester.pumpAndSettle();
+    expect(k('layout-delete'), findsNothing);
+    expect(tester.widget<Text>(k('layout-hint')).data, '先点一格或行末的＋');
+    await tapK(tester, 'layout-add-0');
+    s.setKeyLayout(KeyLayout.fallback);
+    await tester.pumpAndSettle();
+    expect(tester.widget<Text>(k('layout-hint')).data, '先点一格或行末的＋');
+  });
+
   testWidgets('a pick with nothing selected does nothing; ⋯ is shown but not selectable', (tester) async {
     await open(tester);
     await tapK(tester, 'layout-pick-cr');
