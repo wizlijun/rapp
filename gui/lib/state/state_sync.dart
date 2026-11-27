@@ -95,6 +95,26 @@ class StateSync extends ChangeNotifier {
     return null;
   }
 
+  /// Every session of every device the service listed, with the device's 9-digit id; devices without an id are skipped.
+  Iterable<(String id, Row session)> get sessionRows sync* {
+    for (final d in _devices) {
+      final id = d['id'];
+      if (id is! String) continue;
+      for (final s in _sessions(d)) {
+        yield (id, s);
+      }
+    }
+  }
+
+  /// Marks the queue row [eid] as handled. Not connected: nothing happens, and nothing is queued for later.
+  Future<void> markHandled(String eid) async {
+    final link = _link;
+    if (link == null || status != StateStatus.connected) return;
+    try {
+      await link.seen(eid: eid, handled: true);
+    } catch (_) {}
+  }
+
   String? fpOf(String deviceId) {
     for (final d in _devices) {
       if (d['id'] == deviceId) return d['fp'] as String?;

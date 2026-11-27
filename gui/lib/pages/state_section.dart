@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../state/state_config.dart';
 import '../state/state_sync.dart';
+import '../ui/tokens.dart' show ControlMetrics;
 import 'section_card.dart';
 
 class StateSection extends StatefulWidget {
@@ -61,13 +62,20 @@ class _StateSectionState extends State<StateSection> {
     if (bad == null) _sync.setConfig(StateConfig(StateMode.manual, url: v.trim()));
   }
 
-  Widget _choice(String label, StateMode m, StateMode current) => ListTile(
-    dense: true,
-    contentPadding: EdgeInsets.zero,
-    leading: Icon(m == current ? Icons.radio_button_checked : Icons.radio_button_unchecked),
-    title: Text(label),
-    onTap: () => _pick(m),
-  );
+  Widget _choice(String label, StateMode m, StateMode current) {
+    // Only a page that asks for it (ControlMetrics) makes the rows taller and spaced; otherwise as ever.
+    final metrics = ControlMetrics.maybeOf(context);
+    final tile = ListTile(
+      dense: true,
+      minTileHeight: metrics?.minHeight,
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(m == current ? Icons.radio_button_checked : Icons.radio_button_unchecked),
+      title: Text(label),
+      onTap: () => _pick(m),
+    );
+    final gap = metrics?.gap;
+    return gap == null ? tile : Padding(padding: EdgeInsets.only(bottom: gap), child: tile);
+  }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(

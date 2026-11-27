@@ -1,4 +1,5 @@
 // The stage: where the remote window sits; a placeholder while it is elsewhere (S1, detached).
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:flutter/rendering.dart';
 import '../embed/composer_editor.dart';
 import '../embed/composer_panel.dart';
 import '../embed/picture.dart';
+import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../term/end_term_dialog.dart';
 import '../term/term_id.dart';
@@ -27,6 +29,29 @@ Future<void> requestUnlock(BuildContext context, MainState state, String device)
   final request = await showUnlockDialog(context, store: state.unlockStore, device: device);
   if (request != null) {
     await state.unlock(device, request.password, remember: request.remember, auto: request.auto);
+  }
+}
+
+/// A locked session wants the password: one dialog at a time. The Pad's MainWindow and the phone shell both use it.
+mixin UnlockAsks<T extends StatefulWidget> on State<T> {
+  StreamSubscription<String>? _asks;
+  bool _asking = false;
+
+  void listenUnlockAsks(MainState state) {
+    _asks = state.unlockAsks.listen((device) async {
+      if (_asking || !mounted) return;
+      _asking = true;
+      try {
+        await requestUnlock(context, state, device);
+      } finally {
+        _asking = false;
+      }
+    });
+  }
+
+  void stopUnlockAsks() {
+    _asks?.cancel();
+    _asks = null;
   }
 }
 
@@ -97,7 +122,7 @@ class Stage extends StatelessWidget {
           // A terminal (live, or frozen by a network drop): its box lines need whole device pixels.
           full = true;
           term = true;
-          body = _PixelSnap(child: TermStage(
+          body = PixelSnap(child: TermStage(
               state: state,
               session: rs,
               port: state.termPort!,
@@ -209,62 +234,78 @@ class Stage extends StatelessWidget {
               child: body,
             ),
           );
+          final overlays = stageOverlays(context,
+              state: state, rec: rec, rs: rs, term: term, picture: picture, full: full, keyboard: keyboard,
+              editor: composerEditor);
           if (term && rs != null) {
             // The same tree whether the panel is open or not: the terminal stage is never remounted (its focus
             // would fight the panel's caret), and never moves (input-dock spec): the input dock floats over it.
-            final bar = rec != null && rec.frozen ? offlineBarFor(state, rec) : null;
-            return Stack(
-              children: [
-                Positioned.fill(child: stage),
-                if (bar != null) Positioned(top: 0, left: 0, right: 0, child: bar),
-                ...composerLayer(state: state, session: rs, port: state.portOf(rs.sid)!,
-                    keyboard: keyboard, editor: composerEditor),
-              ],
-            );
+            return Stack(children: [Positioned.fill(child: stage), ...overlays]);
           }
-          final port = state.port;
-          final banner = state.lockBanner;
-          final notice = state.hostNotice;
-          final offline = rec != null && rec.frozen && picture ? offlineBarFor(state, rec) : null;
-          final layer = !full && (picture || (rs != null && rs.detached)) && rs != null && port != null;
-          return Stack(
-            children: [
-              stage,
-              if (layer)
-                ...composerLayer(state: state, session: rs, port: port, keyboard: keyboard, editor: composerEditor),
-              if (offline != null || banner != null || notice != null)
-                Positioned(
-                  top: 0, left: 0, right: 0,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      ?offline,
-                      if (banner != null)
-                        Material(
-                          color: const Color(0xffffe7a3),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                            child: Row(children: [
-                              Expanded(child: Text(banner.text, style: const TextStyle(color: Colors.black87))),
-                              // Raw TextButton on purpose: it sits on the yellow banner, so its ink is fixed black.
-                              TextButton(
-                                style: TextButton.styleFrom(foregroundColor: Colors.black87),
-                                onPressed: () => requestUnlock(context, state, rec!.id),
-                                child: Text(banner.action),
-                              ),
-                            ]),
-                          ),
-                        ),
-                      if (notice != null) _HostNoticeBar(state: state, notice: notice),
-                    ],
-                  ),
-                ),
-            ],
-          );
+          return Stack(children: [stage, ...overlays]);
         });
       },
     );
   }
+}
+
+/// What stands over the stage's body, after it in a [Stack]: the composer layer, the offline bar, the lock banner
+/// and the host notice. The Pad's [Stage] and the phone's session view both lay these (one implementation).
+/// [term] is a live or frozen terminal on show; [picture] a picture (live or frozen); [full] a body that fills the
+/// stage (a terminal, the disconnected stage).
+List<Widget> stageOverlays(
+  BuildContext context, {
+  required MainState state,
+  required SessionRecord? rec,
+  required RemoteSession? rs,
+  required bool term,
+  required bool picture,
+  required bool full,
+  required double keyboard,
+  ComposerEditor Function()? editor,
+}) {
+  if (term && rs != null) {
+    final bar = rec != null && rec.frozen ? offlineBarFor(state, rec) : null;
+    return [
+      if (bar != null) Positioned(top: 0, left: 0, right: 0, child: bar),
+      ...composerLayer(state: state, session: rs, port: state.portOf(rs.sid)!, keyboard: keyboard, editor: editor),
+    ];
+  }
+  final port = state.port;
+  final banner = state.lockBanner;
+  final notice = state.hostNotice;
+  final offline = rec != null && rec.frozen && picture ? offlineBarFor(state, rec) : null;
+  final layer = !full && (picture || (rs != null && rs.detached)) && rs != null && port != null;
+  return [
+    if (layer) ...composerLayer(state: state, session: rs, port: port, keyboard: keyboard, editor: editor),
+    if (offline != null || banner != null || notice != null)
+      Positioned(
+        top: 0, left: 0, right: 0,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ?offline,
+            if (banner != null)
+              Material(
+                color: const Color(0xffffe7a3),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  child: Row(children: [
+                    Expanded(child: Text(banner.text, style: const TextStyle(color: Colors.black87))),
+                    // Raw TextButton on purpose: it sits on the yellow banner, so its ink is fixed black.
+                    TextButton(
+                      style: TextButton.styleFrom(foregroundColor: Colors.black87),
+                      onPressed: () => requestUnlock(context, state, rec!.id),
+                      child: Text(banner.action),
+                    ),
+                  ]),
+                ),
+              ),
+            if (notice != null) _HostNoticeBar(state: state, notice: notice),
+          ],
+        ),
+      ),
+  ];
 }
 
 /// A v13 host notice over the picture, in the lock banner's colours: what A did, and what to do about it.
@@ -305,19 +346,19 @@ class _HostNoticeBar extends StatelessWidget {
 
 /// Paints [child] moved by under a device pixel, so its top-left lands on one: whatever it snaps in
 /// its own coordinates is then snapped on the screen too, wherever the layout put it.
-class _PixelSnap extends SingleChildRenderObjectWidget {
-  const _PixelSnap({required super.child});
+class PixelSnap extends SingleChildRenderObjectWidget {
+  const PixelSnap({super.key, required super.child});
 
   @override
   RenderObject createRenderObject(BuildContext context) =>
-      _RenderPixelSnap(MediaQuery.devicePixelRatioOf(context));
+      RenderPixelSnap(MediaQuery.devicePixelRatioOf(context));
 
   @override
-  void updateRenderObject(BuildContext context, _RenderPixelSnap r) => r.dpr = MediaQuery.devicePixelRatioOf(context);
+  void updateRenderObject(BuildContext context, RenderPixelSnap renderObject) => renderObject.dpr = MediaQuery.devicePixelRatioOf(context);
 }
 
-class _RenderPixelSnap extends RenderProxyBox {
-  _RenderPixelSnap(this._dpr);
+class RenderPixelSnap extends RenderProxyBox {
+  RenderPixelSnap(this._dpr);
 
   double _dpr;
   set dpr(double v) {

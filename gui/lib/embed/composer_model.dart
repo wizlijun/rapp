@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show TextSelection;
 
 import 'composer_editor.dart';
 import 'session_port.dart';
@@ -131,6 +132,10 @@ class ComposerModel extends ChangeNotifier {
   /// ↑/↓ moved (R2): [shown] is the record put in as it was (null back on the text being written),
   /// [live] the text being written, without block marks. A record left untouched is no draft of its own.
   void Function(String? shown, String live)? onRecalled;
+
+  /// The editor's text and caret when the panel was unmounted while open (a shell switch, F9). The next editor
+  /// takes it once, and only if its text is still the same text; collapsing does not leave one.
+  ({String text, TextSelection sel})? caret;
 
   /// The text while no editor is attached; the last copy otherwise. A held block is in it as its mark.
   String get draft => _draft;

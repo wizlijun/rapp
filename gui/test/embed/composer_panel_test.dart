@@ -111,6 +111,76 @@ void main() {
 
     Rect rect(WidgetTester tester, String key) => tester.getRect(find.byKey(Key(key)));
 
+    testWidgets('caret survives shell switch', (tester) async {
+      big(tester);
+      await tester.pumpWidget(layer());
+      await tester.pump();
+      field(tester).controller!.value = const TextEditingValue(text: 'hello', selection: TextSelection.collapsed(offset: 2));
+      await tester.pump();
+      // The phone shell takes the stage's place (the composer unmounts), then the Pad comes back.
+      await tester.pumpWidget(wrap(const SizedBox.shrink()));
+      await tester.pump();
+      await tester.pumpWidget(layer());
+      await tester.pump();
+      await tester.pump();
+      expect(text(tester), 'hello');
+      expect(field(tester).controller!.selection, const TextSelection.collapsed(offset: 2));
+    });
+
+    Future<void> swapOut(WidgetTester tester, {String text = 'hello', int at = 3}) async {
+      big(tester);
+      await tester.pumpWidget(layer());
+      await tester.pump();
+      field(tester).controller!.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: at));
+      await tester.pump();
+      await tester.pumpWidget(wrap(const SizedBox.shrink()));
+      await tester.pump();
+    }
+
+    Future<void> swapIn(WidgetTester tester) async {
+      await tester.pumpWidget(layer());
+      await tester.pump();
+      await tester.pump();
+    }
+
+    testWidgets('stale caret is dropped when the draft changed', (tester) async {
+      await swapOut(tester);
+      rs.composer.draft = 'hello world';
+      await swapIn(tester);
+      expect(text(tester), 'hello world');
+      expect(field(tester).controller!.selection, const TextSelection.collapsed(offset: 11));
+    });
+
+    testWidgets('caret after send is not reused', (tester) async {
+      await swapOut(tester);
+      rs.composer.draft = ''; // what a send leaves
+      await swapIn(tester);
+      await tester.pump();
+      expect(text(tester), '');
+      expect(rs.composer.caret, isNull); // spent: taken or dropped, never kept for a later mount
+    });
+
+    // The fold unmounts the panel once its animation ends (input_dock textMounted), with the panel closed:
+    // no caret is kept, and reopening puts it at the end, as before the phone shell.
+    testWidgets('pad collapse and reopen still puts caret at end', (tester) async {
+      big(tester);
+      await tester.pumpWidget(layer());
+      await tester.pump();
+      field(tester).controller!.value = const TextEditingValue(text: 'hello', selection: TextSelection.collapsed(offset: 2));
+      await tester.pump();
+      rs.composer.collapse();
+      await tester.pump(); // the fold's first tick has no time elapsed
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(find.byType(ComposerPanel), findsNothing);
+      expect(rs.composer.caret, isNull);
+      rs.composer.open = true;
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(text(tester), 'hello');
+      expect(field(tester).controller!.selection, const TextSelection.collapsed(offset: 5));
+    });
+
     testWidgets('⌘= / ⌘- / ⌘0 zoom the whole panel in four steps; the default is the smallest', (tester) async {
       big(tester);
       await tester.pumpWidget(layer());

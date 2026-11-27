@@ -46,6 +46,13 @@ class ResizePolicy {
     _timer = null;
   }
 
+  /// Forgets the stage size it was given (and drops a judgement still waiting): the next [stage] is judged even
+  /// when it is the same size. Back from the phone form, where a size was taken but never sent.
+  void forget() {
+    _stage = null;
+    cancel();
+  }
+
   void dispose() {
     _timer?.cancel();
     _timer = null;

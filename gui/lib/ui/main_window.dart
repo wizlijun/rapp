@@ -75,11 +75,9 @@ class MainWindow extends StatefulWidget {
   State<MainWindow> createState() => _MainWindowState();
 }
 
-class _MainWindowState extends State<MainWindow> {
+class _MainWindowState extends State<MainWindow> with UnlockAsks<MainWindow> {
   bool _full = false;
   StreamSubscription<bool>? _sub;
-  StreamSubscription<String>? _asks;
-  bool _asking = false;
 
   MainState get state => widget.state;
 
@@ -102,7 +100,7 @@ class _MainWindowState extends State<MainWindow> {
     widget.fullscreen.isFullScreen().then((v) {
       if (mounted) setState(() => _full = v);
     });
-    _asks = state.unlockAsks.listen(_onAsk);
+    listenUnlockAsks(state);
     state.addListener(_onState);
     _onState();
     widget.monitor?.addListener(_onMonitor);
@@ -141,17 +139,6 @@ class _MainWindowState extends State<MainWindow> {
   /// The in-process hub has no key yet: the access setup stands where the overview was.
   bool get _needsAccess => caps.hubInProcess && _access?.hasKey == false;
 
-  /// A locked session wants the password: one dialog at a time.
-  Future<void> _onAsk(String device) async {
-    if (_asking || !mounted) return;
-    _asking = true;
-    try {
-      await requestUnlock(context, state, device);
-    } finally {
-      _asking = false;
-    }
-  }
-
   @override
   void dispose() {
     state.removeListener(_onState);
@@ -159,7 +146,7 @@ class _MainWindowState extends State<MainWindow> {
     _log = null;
     widget.monitor?.removeListener(_onMonitor);
     state.hub?.removeListener(_onAccess);
-    _asks?.cancel();
+    stopUnlockAsks();
     _sub?.cancel();
     super.dispose();
   }

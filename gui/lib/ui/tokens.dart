@@ -315,7 +315,26 @@ bool touchPlatform(TargetPlatform p) => p == TargetPlatform.iOS || p == TargetPl
 double controlHeightFor(TargetPlatform p) => touchPlatform(p) ? 48 : 40;
 
 /// [controlHeightFor] the platform of [c]'s theme.
-double controlHeightOf(BuildContext c) => controlHeightFor(Theme.of(c).platform);
+double controlHeightOf(BuildContext c) {
+  final base = controlHeightFor(Theme.of(c).platform);
+  final min = ControlMetrics.maybeOf(c)?.minHeight;
+  return min != null && min > base ? min : base;
+}
+
+/// The gap between two controls stacked in a section (8 unless a [ControlMetrics] above says otherwise).
+double controlGapOf(BuildContext c) => ControlMetrics.maybeOf(c)?.gap ?? 8;
+
+/// A page that wants bigger touch targets (the phone shell: 56 high, 12 apart) says so here; the controls
+/// below read it through [controlHeightOf] and [controlGapOf]. Without one, nothing changes.
+class ControlMetrics extends InheritedWidget {
+  const ControlMetrics({super.key, this.minHeight, this.gap, required super.child});
+  final double? minHeight, gap;
+
+  static ControlMetrics? maybeOf(BuildContext c) => c.dependOnInheritedWidgetOfExactType<ControlMetrics>();
+
+  @override
+  bool updateShouldNotify(ControlMetrics o) => o.minHeight != minHeight || o.gap != gap;
+}
 
 /// [textSize]: the system's text size ([systemTextSize]), used by every text style.
 /// [platform]: sets the control height (see [controlHeightFor]); defaults to [defaultTargetPlatform].
