@@ -8,6 +8,7 @@ import '../embed/key_bar_keys.dart';
 import '../embed/strip_tools.dart';
 import '../quick/key_actions.dart';
 import '../quick/key_layout.dart';
+import 'quick_sync_line.dart';
 import '../ui/controls.dart';
 import '../ui/main_state.dart';
 import '../ui/tokens.dart';
@@ -153,6 +154,7 @@ class KeysPage extends StatelessWidget {
           ..._actions(context, t),
           const SizedBox(height: 24),
           _LayoutEditor(state: state),
+          QuickSyncLine(state: state),
         ]),
       ),
     );

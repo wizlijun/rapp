@@ -28,6 +28,7 @@ import 'state/state_sync.dart';
 import 'ui/main_state.dart';
 import 'ui/main_window.dart';
 import 'quick/quick_prefs.dart';
+import 'quick/quick_sync.dart';
 import 'ui/prefs.dart';
 import 'ui/system_font.dart' show fallbackTextSize;
 import 'ui/tokens.dart';
@@ -98,7 +99,10 @@ Future<void> mainIos() async {
   try {
     builtinRules = await rootBundle.loadString('assets/state_rules.json');
   } catch (_) {}
-  final stateSync = StateSync(localDir: data.localDir, find: () async => stateUrlFromPorts(hub?.portMaps ?? const []))..start();
+  final quickSync = QuickSync(prefs: quick, localDir: data.localDir, device: data.deviceId(), host: hub?.stateHost);
+  final stateSync = StateSync(
+      localDir: data.localDir, find: () async => stateUrlFromPorts(hub?.portMaps ?? const []), quick: quickSync)
+    ..start();
   // A share that appears is picked up now, not at the next 60 s look.
   if (hub != null) refreshStateOn(hub, () => hub!.portMaps, stateSync);
   final state = MainState(
@@ -108,6 +112,7 @@ Future<void> mainIos() async {
       data: data,
       prefs: prefs,
       quick: quick,
+      quickSync: quickSync,
       port: port,
       termPort: TermSessionPort(),
       doubleClick: doubleClick,

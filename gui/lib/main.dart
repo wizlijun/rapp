@@ -29,6 +29,7 @@ import 'state/state_sync.dart';
 import 'ui/main_state.dart';
 import 'ui/main_window.dart';
 import 'quick/quick_prefs.dart';
+import 'quick/quick_sync.dart';
 import 'ui/prefs.dart';
 import 'ui/system_font.dart';
 import 'main_ios.dart';
@@ -113,7 +114,8 @@ Future<void> main(List<String> args) async {
   try {
     builtinRules = await rootBundle.loadString('assets/state_rules.json');
   } catch (_) {}
-  final stateSync = StateSync(localDir: data.localDir, find: monitor.stateUrl)..start();
+  final quickSync = QuickSync(prefs: quick, localDir: data.localDir, device: data.deviceId(), host: monitor.stateHost);
+  final stateSync = StateSync(localDir: data.localDir, find: monitor.stateUrl, quick: quickSync)..start();
   // The service may connect after the first look: look again when it does.
   refreshStateOn(monitor, () => monitor.running, stateSync);
   final state = MainState(
@@ -123,6 +125,7 @@ Future<void> main(List<String> args) async {
       data: data,
       prefs: prefs,
       quick: quick,
+      quickSync: quickSync,
       port: port,
       // Terminals only beside embedded app sessions (Windows has neither yet).
       termPort: port == null ? null : TermSessionPort(),

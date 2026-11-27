@@ -7,6 +7,7 @@ import '../embed/phrases.dart';
 import '../embed/strip_cmds.dart';
 import '../embed/strip_tools.dart';
 import '../quick/quick_prefs.dart';
+import 'quick_sync_line.dart';
 import '../ui/controls.dart';
 import '../ui/main_state.dart';
 import '../ui/tokens.dart';
@@ -383,6 +384,7 @@ class PhrasesPage extends StatelessWidget {
                 style: TextStyle(color: t.muted)),
             const SizedBox(height: 8),
             Text('命令只在文字终端里认出 Claude Code、Codex 等工具时出现。', style: TextStyle(color: t.muted)),
+            QuickSyncLine(state: state),
           ]);
         },
       ),

@@ -30,6 +30,7 @@ import '../state/state_sync.dart';
 import '../quick/key_actions.dart' show KeyAction;
 import '../quick/key_layout.dart';
 import '../quick/quick_prefs.dart';
+import '../quick/quick_sync.dart';
 import '../load_model.dart';
 import '../service_client.dart' show ServiceMonitor;
 import '../permissions.dart';
@@ -207,6 +208,7 @@ class MainState extends ChangeNotifier {
     this.monitor,
     this.stateSync,
     QuickPrefs? quick,
+    this.quickSync,
   })  : quick = quick ?? QuickPrefs.migrate(prefs.phrases),
         localOs = localOs ?? localDeviceOs(),
         _builtinStateRules = builtinStateRules,
@@ -395,6 +397,9 @@ class MainState extends ChangeNotifier {
   /// The 快捷区 docs (常用语和命令, 按键动作, 布局, 星标, 次数): quick.json, the strip's source since quick-row. gui.json's
   /// `phrases` stays as it was for older versions and is no longer changed.
   final QuickPrefs quick;
+
+  /// Keeps [quick] in step with the center service; null in tests and where there is none.
+  final QuickSync? quickSync;
   final SessionPort? port;
   final UnlockStore unlockStore;
   final Set<Object> _unlockSeen = {};
@@ -5675,6 +5680,7 @@ class MainState extends ChangeNotifier {
     hub?.removeListener(_onHub);
     monitor?.removeListener(_onMonitor);
     stateSync?.removeListener(_onStateSync);
+    quickSync?.dispose();
     profiles.removeListener(_onProfiles);
     _portSub?.cancel();
     _termSub?.cancel();
