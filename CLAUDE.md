@@ -12,7 +12,7 @@
 ### 其他 session（做功能的）
 
 1. 在分支上开发，最好用 `.worktrees/` 下的 worktree；不要把任务直接提交到 main。
-2. 完成且自测通过后，**合并到自己这台机器的本机 `main` 即可**（Mac 上是 `/Users/bruce/git/rapp`；Windows 机器上的路径等机器装好后填在这里）：
+2. 完成且自测通过后，**合并到自己这台机器的本机 `main` 即可**（Mac 上是 `/Users/bruce/git/rapp`，Windows 机器上是 `D:\git\rapp`）：
    - 先 `git merge main` 到自己的分支解决冲突，再在 main 上 `git merge --no-ff <branch>`；
    - 提交信息用 `merge: <中文说明>（<branch>）`。
 3. **不要**做这些事，它们归发版 session：

@@ -7,6 +7,10 @@
 | 代号 | 机器 | 系统和内部版本 | 处理器 / 显卡 | 屏幕和缩放 | 备注 |
 |---|---|---|---|---|---|
 | mac | Mac（Apple M5） | macOS 27.0.1（26A434），arm64 | Apple M5 | —— | C1 只在这台上做 |
+| W11-L | Windows 11 集显主机 | Windows 11 Home China 24H2（26100.9711），x64 | 12th Gen Intel Core i5-1240P / Intel Iris Xe Graphics | 1920×1080 @ 100%（单屏） | checkout 路径 `D:\git\rapp`；当前唯一可用 Windows 实机 |
+| W11-D | Windows 11 独显双屏台式机 | 没有 | —— | —— | 暂无此机器 |
+| S22-C | Windows Server 2022 无显卡云主机 | 没有 | —— | —— | 暂无此机器；用户已明确无显卡 Server 2022 只提供 `service`、不提供图形 `host` |
+| NODISP | 未接显示器的机器或虚拟机 | 没有 | —— | —— | 暂无此机器 |
 
 ## 工具版本
 
@@ -16,6 +20,10 @@
 | Rust（mac） | rustc 1.99.1、cargo 1.99.1 |
 | 系统 zlib（mac，Swift 用的） | 1.2.12（`zlibVersion()`） |
 | cmake（mac，只为编 zlib-ng） | 4.4.5，装在临时 venv 里，不在系统里 |
+| Git for Windows（W11-L） | git version 2.50.1.windows.1（`core.autocrlf=false`，`core.longpaths=true`） |
+| Visual Studio Build Tools（W11-L） | Visual Studio 2022 Build Tools 17.14.34（17.14.37328.6），Windows SDK 10.0.26100.0 / 10.0.22621.0 |
+| Rust（W11-L） | rustc 1.99.1（58cf8f9c3 2026-10-13）、cargo 1.99.1（5f94df478 2026-08-27），`x86_64-pc-windows-msvc` |
+| Flutter（W11-L） | Flutter 3.44.1（revision 924134a44c，Engine c416acfeb8，Dart 3.12.1），`D:\tools\flutter` |
 
 ## 总表
 
