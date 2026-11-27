@@ -130,6 +130,22 @@ KeyAction { id, label, chord, per? }
 
 这几个的名字是按 Claude Code 的含义起的【我定的】；实现时照各工具文档核一遍，某个工具上含义不同的，用 `per` 标成 null 或改键（同常用语条命令 spec §7 的做法）。
 
+**文档核对结果（2026-11-27，Task 1）**：标准是“在这个工具上会做坏事才记 null，只是没反应不算”。结论：四个都不做坏事，`per` 里只有 `search` 的 `agy`、`opencode` 是 null（沿用命令表）。
+
+| 键 | Claude Code | Codex | Gemini CLI |
+|---|---|---|---|
+| ⇧Tab 切模式 | 轮换权限模式 | 文档里没写，按“没反应”处理 | 轮换批准模式（agent 忙时跳过） |
+| ⌃O 展开输出 | 开关记录视图，展开折叠行 | 复制最近一条完成的回复（不破坏数据） | 展开/折叠内容块 |
+| ⌃B 转后台 | 把运行中的 Bash 和 agent 转后台 | 文档里没写 | 开关当前后台 shell 的显示 |
+| ⌃L 清屏 | 只重绘屏幕，对话保留 | 只清终端画面，对话保留，任务进行中禁用 | 清屏并重绘 |
+
+Antigravity（agy）和 opencode 没查到公开的按键文档，沿用不特别处理（没反应也不算坏）。
+
+出处：
+- Claude Code：https://code.claude.com/docs/en/interactive-mode
+- Codex：https://learn.chatgpt.com/docs/developer-commands?surface=cli
+- Gemini CLI：https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/reference/keyboard-shortcuts.md
+
 ### 6.3 怎么发
 
 - 终端：`chord` 转成 wire 名（`Ctrl-Alt-x`、`Shift-Tab`），和快捷键盘一样发。⌘ 组合在终端上走 rApp 自己的快捷键（今天 sticky ⌘ 加字母那条路，`termCommand`）；不是 rApp 认得的 ⌘ 组合在终端上不能用（变灰）。

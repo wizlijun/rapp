@@ -27,6 +27,10 @@ double keyBarHeight(int rows) => rows * keyBarKeyHeight + (rows - 1) * keyBarGap
 /// macOS key codes of the letters, for the ⌃-letter keys and ⌘T.
 const macLetterCodes = <String, int>{'a':0,'s':1,'d':2,'f':3,'h':4,'g':5,'z':6,'x':7,'c':8,'v':9,'b':11,'q':12,'w':13,'e':14,'r':15,'y':16,'t':17,'o':31,'u':32,'i':34,'p':35,'l':37,'j':38,'k':40,'n':45,'m':46};
 
+/// macOS key codes of the digit row, for the chords of the 按键动作 (kept apart from [macLetterCodes], which
+/// sendLatchedLetter reads: merging would change what a sticky modifier and a digit does).
+const macDigitCodes = <String, int>{'1':18,'2':19,'3':20,'4':21,'5':23,'6':22,'7':26,'8':28,'9':25,'0':29};
+
 const barKeys = <String, BarKey>{
   'esc': (id: 'esc', label: 'Esc', spoken: 'Esc', kind: BarKind.send, wire: 'Esc', code: 53, mods: 0, bit: null, repeats: false),
   'stab': (id: 'stab', label: '⇧Tab', spoken: 'Shift Tab', kind: BarKind.send, wire: 'Shift-Tab', code: 48, mods: latchShift, bit: null, repeats: false),
