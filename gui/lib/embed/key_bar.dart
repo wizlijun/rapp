@@ -416,6 +416,29 @@ class KeyBarRow extends StatelessWidget {
   }
 }
 
+/// A face that is one symbol (⏎ ⌫ ↑ ⌘ ⋯), not a word or a chord like ⌃C: drawn bigger, the way a keycap prints it.
+bool isSymbolKeyLabel(String label) =>
+    label.runes.length == 1 && !RegExp(r'[\p{L}\p{N}]', unicode: true).hasMatch(label);
+
+/// Each platform's own UI font for key faces, so ⏎ ⌫ ↑ look like that platform's keyboard: SF Pro on Apple, Segoe UI
+/// on Windows, Roboto on Android, the system sans on Linux, each with the symbol fonts the platform ships behind it.
+/// Never the mono font: SF Mono and Menlo draw these arrows small and thin.
+TextStyle keyFaceStyle(TargetPlatform platform, String label) {
+  final (family, fallback) = switch (platform) {
+    TargetPlatform.iOS || TargetPlatform.macOS => ('CupertinoSystemText', const ['Apple Symbols']),
+    TargetPlatform.windows => ('Segoe UI', const ['Segoe UI Symbol', 'Segoe UI Emoji']),
+    TargetPlatform.android => ('Roboto', const ['Noto Sans Symbols', 'Noto Sans Symbols 2']),
+    TargetPlatform.linux || TargetPlatform.fuchsia =>
+      ('sans-serif', const ['DejaVu Sans', 'Noto Sans', 'Noto Sans Symbols', 'Noto Sans Symbols 2']),
+  };
+  return TextStyle(
+    fontFamily: family,
+    fontFamilyFallback: fallback,
+    fontSize: isSymbolKeyLabel(label) ? 19 : 14,
+    fontWeight: FontWeight.w500,
+  );
+}
+
 /// The face of a key: a rounded box with its [label]; [lit] draws the accent border (a lit modifier, or a selected cell
 /// in the layout editor), [locked] also tints it. Never focusable: a tap leaves the caret where it was.
 class KeyFace extends StatelessWidget {
@@ -439,11 +462,17 @@ class KeyFace extends StatelessWidget {
       child: InkWell(
         canRequestFocus: false,
         onTap: onTap,
-        child: Center(
-          child: Text(label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 13, color: t.text, fontFamily: t.mono, fontFamilyFallback: t.monoFallback)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          child: Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(label,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: keyFaceStyle(Theme.of(context).platform, label).copyWith(color: t.text)),
+            ),
+          ),
         ),
       ),
     );

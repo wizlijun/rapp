@@ -1633,6 +1633,16 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 5. 命令页：拖动排序、左滑删除、＋ 新增命令、恢复默认，都只动命令，常用语的顺序不变；常用语页反过来也一样。
 - [ ] 6. （P2）一台改了命令顺序，另一台几秒后一样；旧版本（0.15.63/64）同步来的 `keys` 文档不会让新版本出错。
 
+### 快捷区键面字形（分支 `feat/key-glyphs`）
+
+键面原来用等宽字体（SF Mono / Menlo），⏎ ⌫ ↑ 又小又细。现在每个平台用自己的界面字体：苹果 SF Pro（`CupertinoSystemText`，缺字退 Apple Symbols），Windows Segoe UI → Segoe UI Symbol，Android Roboto → Noto Sans Symbols，Linux 系统 sans → DejaVu Sans / Noto。单符号键 19 号、文字键 14 号，都 w500；字太宽就缩小，不再出省略号。键盘布局页同样生效。flutter analyze 通过；全量只剩 `linux_detach_test` 2 条。实机检查：
+
+- [ ] 1. Mac：⌫ ⏎ ↑↓←→ ⌘ ⌃ ⌥ 和苹果键盘上印的一样粗、一样大；Tab Esc PgUp 是 SF Pro，不是等宽字。
+- [ ] 2. iPad / Duo：同上，竖屏窄键上 PgUp、⇧Tab 整个显示（缩小），没有「…」。
+- [ ] 3. 全局设置 → 键盘布局：编辑页里的键面和快捷区一样。
+- [ ] 4. Linux：⌫ ⏎ 方向键不是方框（缺字体就装 `fonts-dejavu` 或 Noto）。
+- [ ] 5. Windows / Android（以后）：⌫ ⏎ 方向键能显示，不是方框。
+
 ## Linux 0.15.61 与 0.15.62 版本跟随对齐与发布（2026-11-27）
 
 - [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），依次构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 挂载至已发布的 [v0.15.61](https://github.com/wizlijun/rapp/releases/tag/v0.15.61) 与 [v0.15.62](https://github.com/wizlijun/rapp/releases/tag/v0.15.62) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
