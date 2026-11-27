@@ -126,6 +126,8 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(d.path().join("device.key")).unwrap().permissions().mode() & 0o777, 0o600);
         }
+        #[cfg(windows)]
+        assert_eq!(rapp_net::private::acl(&d.path().join("device.key")).unwrap(), rapp_net::private::private_acl().unwrap());
     }
 
     #[test]

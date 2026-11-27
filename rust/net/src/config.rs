@@ -104,10 +104,40 @@ pub fn write_private(path: &Path, data: &[u8]) -> Result<()> {
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
     let mut f = opts.open(&tmp).with_context(|| format!("write {}", tmp.display()))?;
+    // Made private while still empty, so no secret is ever in a broader file (Review Focus 3).
+    #[cfg(windows)]
+    crate::private::file(&tmp).with_context(|| format!("make private {}", tmp.display()))?;
     f.write_all(data)?;
     f.sync_all()?;
+    #[cfg(not(windows))]
     std::fs::rename(&tmp, path).with_context(|| format!("rename to {}", path.display()))?;
+    #[cfg(windows)]
+    rename_retrying(&tmp, path).with_context(|| format!("rename to {}", path.display()))?;
     Ok(())
+}
+
+/// `rename`, retried while another program (antivirus, indexer) holds `to` open for a moment:
+/// 10 tries, 20 ms apart. The old `to` stays whole until one succeeds; on the last failure the
+/// temporary file is removed.
+#[cfg(windows)]
+fn rename_retrying(from: &Path, to: &Path) -> std::io::Result<()> {
+    const TRIES: u32 = 10;
+    // ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION.
+    let busy = |e: &std::io::Error| e.kind() == std::io::ErrorKind::PermissionDenied || matches!(e.raw_os_error(), Some(5 | 32 | 33));
+    let mut tried = 1;
+    loop {
+        match std::fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(e) if busy(&e) && tried < TRIES => {
+                tried += 1;
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(from);
+                return Err(e);
+            }
+        }
+    }
 }
 
 /// `Ok(None)` when the file does not exist.
@@ -127,12 +157,24 @@ pub fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
 
 /// This machine's name (`hostname`, without `.local`); "rapp" when unknown.
 /// A's default device name and the name B introduces itself with.
+#[cfg(not(windows))]
 pub fn hostname() -> String {
     std::process::Command::new("hostname")
         .output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .map(|s| s.trim().trim_end_matches(".local").to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "rapp".into())
+}
+
+/// This machine's name from `COMPUTERNAME` (no child process, so no console window); "rapp" when
+/// it is missing or empty.
+#[cfg(windows)]
+pub fn hostname() -> String {
+    std::env::var("COMPUTERNAME")
+        .ok()
+        .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "rapp".into())
 }
@@ -220,5 +262,78 @@ mod tests {
         let path = dir.path().join("x.json");
         std::fs::write(&path, "{").unwrap();
         assert!(read_json::<Vec<u32>>(&path).is_err());
+    }
+
+    /// `<tmp>/张 三` (Review Focus 1), created.
+    fn named_dir() -> (tempfile::TempDir, PathBuf) {
+        let t = tempfile::tempdir().unwrap();
+        let d = t.path().join("张 三");
+        std::fs::create_dir(&d).unwrap();
+        (t, d)
+    }
+
+    #[test]
+    fn write_private_replaces_and_stays_private() {
+        let (_t, d) = named_dir();
+        let path = d.join("k.json");
+        write_private(&path, b"first").unwrap();
+        write_private(&path, b"second").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"second");
+        assert!(!d.join("k.tmp").exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        #[cfg(windows)]
+        assert_eq!(crate::private::acl(&path).unwrap(), crate::private::expected_acl());
+    }
+
+    /// Opens `path` the way a scanner might: readable, but without delete sharing, so it cannot be
+    /// replaced while this handle is open.
+    #[cfg(windows)]
+    fn lock(path: &Path) -> std::fs::File {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_READ: u32 = 1;
+        std::fs::OpenOptions::new().read(true).share_mode(FILE_SHARE_READ).open(path).unwrap()
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn write_private_waits_out_a_short_lock() {
+        // Review Focus 3.
+        let (_t, d) = named_dir();
+        let path = d.join("k.json");
+        write_private(&path, b"old").unwrap();
+        let held = lock(&path);
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            drop(held);
+        });
+        write_private(&path, b"new").unwrap();
+        release.join().unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"new");
+        assert!(!d.join("k.tmp").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn write_private_keeps_the_old_file_when_the_lock_stays() {
+        let (_t, d) = named_dir();
+        let path = d.join("k.json");
+        write_private(&path, b"old").unwrap();
+        let held = lock(&path);
+        assert!(write_private(&path, b"new").is_err());
+        assert!(!d.join("k.tmp").exists());
+        drop(held);
+        assert_eq!(std::fs::read(&path).unwrap(), b"old");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn hostname_comes_from_the_environment() {
+        let want = std::env::var("COMPUTERNAME").unwrap();
+        assert!(!want.is_empty());
+        assert_eq!(hostname(), want.trim());
     }
 }

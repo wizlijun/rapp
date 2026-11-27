@@ -55,6 +55,8 @@ async fn add_host_hosts_apps_open_close_remove() {
         let mode = std::fs::metadata(home.path().join("hosts.json")).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
     }
+    #[cfg(windows)]
+    assert_eq!(rapp_net::private::acl(&home.path().join("hosts.json")).unwrap(), rapp_net::private::private_acl().unwrap());
 
     let r = hub.call(json!({"cmd":"hosts"})).await;
     let h = &r["hosts"][0];
