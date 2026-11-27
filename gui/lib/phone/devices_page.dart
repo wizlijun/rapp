@@ -91,7 +91,7 @@ class _DeviceListState extends State<DeviceList> {
                   padding: const EdgeInsets.only(bottom: 12),
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(minHeight: phoneTap),
-                    child: SessionBlock(state: state, entry: e, onTap: () => _tap(e)),
+                    child: SessionBlock(state: state, entry: e, onTap: () => _tap(e), grow: true),
                   ),
                 ),
               for (final f in state.idleFavorites.where((f) => f.device == c.id))

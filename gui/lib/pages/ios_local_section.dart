@@ -12,6 +12,7 @@ import '../ui/access_setup.dart';
 import '../ui/controls.dart';
 import '../ui/prefs.dart';
 import '../ui/resources_state.dart' show sizeText;
+import '../ui/tokens.dart' show controlGapOf;
 import 'local_section.dart' show keyMask;
 import 'section_card.dart';
 
@@ -152,7 +153,7 @@ class _IosLocalSectionState extends State<IosLocalSection> {
           ),
         ),
       ),
-      const SizedBox(height: 8),
+      SizedBox(height: controlGapOf(context)),
       Align(
         alignment: Alignment.centerLeft,
         child: RappButton.secondary(

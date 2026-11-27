@@ -5,8 +5,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/hub_client.dart';
-import 'package:rapp/pages/ios_local_section.dart';
-import 'package:rapp/pages/state_section.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/phone/form.dart' show phoneFormSettle;
 import 'package:rapp/phone/home_screen.dart';
@@ -54,14 +52,10 @@ double _contrast(Color a, Color b) {
 Color _over(Color top, Color under) => Color.alphaBlend(top, under);
 
 class _Tap {
-  _Tap(this.element, this.rect, this.primary, this.shared);
+  _Tap(this.element, this.rect, this.primary);
   final Element element;
   final Rect rect;
   final bool primary;
-
-  /// Inside a section the phone settings page reuses as it is (本机, 中心服务); those rows are 48 high on
-  /// touch platforms (shared code, not the phone's to change), so they are left out of the 56 check, and the 12 check between two of their own rows.
-  final bool shared;
 }
 
 String _chain(Element e) {
@@ -125,7 +119,7 @@ void main() {
       }
     };
     await tester.runAsync(flush);
-    s = MainState(hub: HubClient(t), data: DataDir(tmp.path), prefs: UiPrefs(), port: FakeSessionPort(), unlockStore: UnlockStore(supported: false, memory: false), termPort: FakeTermSessionPort());
+    s = MainState(hub: HubClient(t), data: DataDir(tmp.path), prefs: UiPrefs(), stateSync: FakeStateSync(tmp.path), port: FakeSessionPort(), unlockStore: UnlockStore(supported: false, memory: false), termPort: FakeTermSessionPort());
     nav = PhoneNav(s);
     booted = true;
     t.emit({'event': 'presence', 'id': 'm2', 'online': true});
@@ -188,16 +182,15 @@ void main() {
     }
     final out = <_Tap>[];
     for (final e in found) {
-      var nested = false, shared = false;
+      var nested = false;
       e.visitAncestorElements((a) {
         if (identical(a, root.evaluate().first)) return false;
-        if (a.widget is IosLocalSection || a.widget is StateSection) shared = true;
         if (isTap(a.widget)) nested = true;
         return !nested;
       });
       if (nested) continue;
       final box = e.renderObject! as RenderBox;
-      out.add(_Tap(e, box.localToGlobal(Offset.zero) & box.size, e.widget is PhoneButton && (e.widget as PhoneButton).primary, shared));
+      out.add(_Tap(e, box.localToGlobal(Offset.zero) & box.size, e.widget is PhoneButton && (e.widget as PhoneButton).primary));
     }
     return out;
   }
@@ -205,13 +198,13 @@ void main() {
   void checkTaps(WidgetTester tester, Finder root, String where) {
     final taps = tappables(tester, root);
     expect(taps, isNotEmpty, reason: '$where: nothing to tap found');
-    for (final a in taps.where((a) => !a.shared)) {
+    for (final a in taps) {
       expect(a.rect.height, greaterThanOrEqualTo(a.primary ? phonePrimaryTap : phoneTap), reason: '$where: tap height ${a.element.widget.runtimeType} at ${a.rect} ${_chain(a.element)}');
     }
     // Two tappables that overlap horizontally and sit one above the other need 12 between them.
     for (final a in taps) {
       for (final b in taps) {
-        if (identical(a, b) || (a.shared && b.shared)) continue; // the shared sections space their own rows
+        if (identical(a, b)) continue;
         final overlap = math.min(a.rect.right, b.rect.right) - math.max(a.rect.left, b.rect.left);
         if (overlap <= 0 || a.rect.bottom > b.rect.top + 0.01) continue;
         expect(b.rect.top - a.rect.bottom, greaterThanOrEqualTo(12), reason: '$where: gap ${a.rect} -> ${b.rect}');
@@ -233,16 +226,6 @@ void main() {
   Future<void> phoneRun(WidgetTester tester, Size size, RappTheme th, {double scale = 1}) async {
     final where = '${size.width.toInt()}x${size.height.toInt()} ${th.name} x$scale';
     await boot(tester, size, th, scale: scale);
-    if (scale > 1) {
-      // The shared session card (ui/session_block.dart) is a fixed 56 high and overflows at 2x text on the devices
-      // page. It is not the phone's to change: only that overflow is let through, every other one still fails.
-      final old = FlutterError.onError;
-      FlutterError.onError = (d) {
-        if (d.exceptionAsString().contains('overflowed') && d.toString().contains('lib/ui/session_block.dart')) return;
-        old?.call(d);
-      };
-      addTearDown(() => FlutterError.onError = old);
-    }
     expect(tester.takeException(), isNull, reason: '$where home');
     expect(find.byType(PhonePage), findsWidgets, reason: where);
     expect(find.byType(MainWindow), findsNothing, reason: where);

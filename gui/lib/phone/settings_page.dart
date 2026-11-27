@@ -50,9 +50,19 @@ class SettingsPage extends StatelessWidget {
                   ),
                 ),
               const SizedBox(height: 12),
-              if (hub != null)
-                IosLocalSection(hub: hub, prefs: state.prefs, onPrefs: state.savePrefs, data: state.data),
-              if (state.stateSync != null) StateSection(sync: state.stateSync!),
+              // Q1/Q2: the shared sections' controls are 56 high and 12 apart here (the Pad keeps 48 and 8).
+              ControlMetrics(
+                minHeight: phoneTap,
+                gap: 12,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (hub != null)
+                      IosLocalSection(hub: hub, prefs: state.prefs, onPrefs: state.savePrefs, data: state.data),
+                    if (state.stateSync != null) StateSection(sync: state.stateSync!),
+                  ],
+                ),
+              ),
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 child: Text('手机和展开后的 Pad 界面用同一个主题。',

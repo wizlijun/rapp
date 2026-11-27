@@ -152,7 +152,8 @@ class _RappButtonState extends State<RappButton> {
       borderRadius: BorderRadius.circular(t.r),
     );
     final icon = widget.icon;
-    final min = icon == null ? const Size(48, 48) : Size.square(widget.size);
+    // A text button is at least 48 high; a page can ask for more (ControlMetrics).
+    final min = icon == null ? Size(48, math.max(48, ControlMetrics.maybeOf(context)?.minHeight ?? 0)) : Size.square(widget.size);
     // A smaller square is the whole button: no padded tap target around it.
     final tap = widget.size < 48 ? MaterialTapTargetSize.shrinkWrap : null;
     final child = icon == null

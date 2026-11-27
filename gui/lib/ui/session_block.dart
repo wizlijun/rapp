@@ -313,9 +313,14 @@ class SessionBlock extends StatelessWidget {
     this.onTap,
     this.keyPrefix = 'block',
     this.showDevice = false,
+    this.grow = false,
   });
   final MainState state;
   final SessionEntry entry;
+
+  /// The card is at least its usual height and grows with the text (the phone's lists at a big text size), where
+  /// it is otherwise fixed. The title then wraps too.
+  final bool grow;
 
   /// What a tap does besides switching to [entry] (the top bar's list closes itself).
   final VoidCallback? onTap;
@@ -466,6 +471,7 @@ class SessionBlock extends StatelessWidget {
         ].join('，'),
         onTap: canAct ? onTap : null,
         labels: _labels(),
+        titleWrap: grow,
       ),
     );
   }
