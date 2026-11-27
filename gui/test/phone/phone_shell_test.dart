@@ -12,7 +12,9 @@ import 'package:rapp/phone/session_view.dart';
 import 'package:rapp/phone/sheet.dart';
 import 'package:rapp/platform_caps.dart';
 import 'package:rapp/ui/access_setup.dart';
+import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/ui/main_state.dart';
+import 'package:rapp/ui/unlock.dart';
 import 'package:rapp/ui/main_window.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/tokens.dart';
@@ -25,6 +27,7 @@ void main() {
   late FakeTransport t;
   late MainState s;
   late PhoneNav nav;
+  late FakeSessionPort port;
   var sid = 0;
 
   Future<void> flush() => Future<void>.delayed(Duration.zero);
@@ -63,11 +66,11 @@ void main() {
     t.emit({'event': 'hosts', 'hosts': [{'id': 'm1', 'name': 'mini'}]});
     t.onSend = (m) {
       if (m['cmd'] == 'open') {
-        t.emit({'event': 'opened', 'sid': ++sid, 'id': m['id'], 'app': m['app'], 'path': 'lan', 'req': m['req'], if (m['embed'] == true) ...{'port': 5000 + sid, 'token': 'tk'}});
+        t.emit({'event': 'opened', 'sid': ++sid, 'id': m['id'], 'app': m['app'], 'path': 'lan', 'req': m['req'], 'port': 5000 + sid, 'token': 'tk'});
       }
     };
     await tester.runAsync(flush);
-    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: FakeSessionPort(), termPort: FakeTermSessionPort());
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port = FakeSessionPort(), unlockStore: UnlockStore(supported: false, memory: false), termPort: FakeTermSessionPort());
     nav = PhoneNav(s);
     t.emit({'event': 'terms', 'id': 'm1', 'path': 'lan', 'terms': rows, 'hosts': []});
     await tester.runAsync(() async {
@@ -144,6 +147,113 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('every phone view renders inside the shell', (tester) async {
+    await boot(tester, open: ['x'], rows: [term('x', 'working')], at: phoneSize);
+    expect(find.byType(PhoneSessionView), findsOneWidget);
+    for (final v in [PhoneView.home, PhoneView.devices, PhoneView.settings, PhoneView.session]) {
+      if (v == PhoneView.session) {
+        nav.enter('m1/term:pty:x');
+      } else {
+        nav.open(v);
+      }
+      await tester.pump();
+      expect(tester.takeException(), isNull, reason: '$v');
+      expect(nav.now, v);
+    }
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('an old phone visit does not beat where the Pad is now', (tester) async {
+    await boot(tester, open: ['x', 'y', 'z'], rows: [term('x', 'working'), term('w', 'blocked')]);
+    s.select('m1/term:pty:x');
+    await resize(tester, phoneSize);
+    nav.enter('m1/term:pty:y');
+    await tester.pump();
+    await resize(tester, padSize);
+    expect(s.currentKey, 'm1/term:pty:y');
+    s.select('m1/term:pty:z');
+    await tester.pump();
+    await resize(tester, phoneSize);
+    await resize(tester, padSize);
+    expect(s.currentKey, 'm1/term:pty:z');
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('fold from the overview, enter on the phone, unfold lands in it', (tester) async {
+    await boot(tester, open: ['x', 'y'], rows: [term('x', 'working')]);
+    s.toggleOverview();
+    await tester.pump();
+    expect(s.overview, isTrue);
+    await resize(tester, phoneSize);
+    expect(find.byType(HomeScreen), findsOneWidget);
+    nav.enter('m1/term:pty:y');
+    await tester.pump();
+    await resize(tester, padSize);
+    expect(s.currentKey, 'm1/term:pty:y');
+    expect(s.overview, isFalse);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('fold from the overview, unfold: the overview', (tester) async {
+    await boot(tester, open: ['x'], rows: [term('x', 'working')]);
+    s.toggleOverview();
+    await tester.pump();
+    await resize(tester, phoneSize);
+    await resize(tester, padSize);
+    expect(s.overview, isTrue);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a session that ended on the phone is not landed on', (tester) async {
+    await boot(tester, open: ['x'], rows: [term('x', 'working')]);
+    await tester.runAsync(() async {
+      s.openOrSwitch('m1', 'app', 'App');
+      for (var i = 0; i < 4; i++) {
+        await flush();
+      }
+    });
+    final appSid = sid;
+    s.toggleOverview();
+    await tester.pump();
+    await resize(tester, phoneSize);
+    nav.enter('m1/app');
+    await tester.pump();
+    port.emit(ReadyEvent(appSid, 'App'));
+    port.emit(ClosedEvent(appSid, 'closed'));
+    await tester.runAsync(flush);
+    await tester.pump();
+    expect(s.entries.any((e) => e.key == 'm1/app'), isFalse);
+    await resize(tester, padSize);
+    expect(s.overview, isTrue);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('an unlock ask in the phone form shows the password dialog', (tester) async {
+    await boot(tester, rows: [term('y', 'blocked')], at: phoneSize);
+    await tester.runAsync(() async {
+      s.openOrSwitch('m1', 'app', 'App');
+      for (var i = 0; i < 4; i++) {
+        await flush();
+      }
+    });
+    port.emit(ReadyEvent(sid, 'App'));
+    port.emit(ScreenLockedEvent(sid, true));
+    await tester.runAsync(flush);
+    await tester.pump();
+    port.emit(ScreenLockedEvent(sid, false));
+    port.emit(ScreenLockedEvent(sid, true));
+    await tester.runAsync(flush);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(UnlockDialog), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpWidget(const SizedBox());
+  });
+
   group('iOS without a key', () {
     late PlatformCaps was;
     setUp(() {
@@ -153,15 +263,17 @@ void main() {
     tearDown(() => caps = was);
 
     testWidgets('new user sees access setup', (tester) async {
-      await boot(tester, at: phoneSize);
+      await boot(tester, at: const Size(844, 390));
       t.emit({'event': 'access', 'relay': null, 'has_key': false, 'name': 'iPhone'});
       await tester.runAsync(flush);
       await tester.pump();
       expect(find.byType(AccessSetup), findsOneWidget);
-      expect(tester.getSize(find.byType(AccessSetup)).width, lessThanOrEqualTo(480));
-      expect(find.byType(TextField), findsNWidgets(2));
-      final xs = {for (final f in tester.widgetList(find.byType(TextField)).map((w) => tester.getTopLeft(find.byWidget(w)).dx)) f};
-      expect(xs.length, 1);
+      // The inner column, not the outer Center: one column, at most 480 wide, even on a wide phone (landscape).
+      final fields = find.byType(TextField);
+      expect(fields, findsNWidgets(2));
+      expect({for (var i = 0; i < 2; i++) tester.getTopLeft(fields.at(i)).dx}.length, 1);
+      expect(tester.getSize(fields.at(0)).width, lessThanOrEqualTo(480));
+      expect(tester.getSize(find.descendant(of: find.byType(AccessSetup), matching: find.byType(ConstrainedBox)).first).width, lessThanOrEqualTo(480));
       expect(tester.takeException(), isNull);
     });
   });

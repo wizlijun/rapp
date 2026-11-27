@@ -8,6 +8,7 @@ import '../paths.dart';
 import '../platform_caps.dart';
 import '../ui/access_setup.dart';
 import '../ui/main_state.dart';
+import '../ui/stage.dart' show UnlockAsks;
 import 'devices_page.dart';
 import 'form.dart';
 import 'home_model.dart';
@@ -29,7 +30,7 @@ class PhoneShell extends StatefulWidget {
   State<PhoneShell> createState() => _PhoneShellState();
 }
 
-class _PhoneShellState extends State<PhoneShell> {
+class _PhoneShellState extends State<PhoneShell> with UnlockAsks<PhoneShell> {
   MainState get _s => widget.state;
 
   /// The hub's last `access` (no service): null until it answered. Same as the Pad's.
@@ -38,13 +39,18 @@ class _PhoneShellState extends State<PhoneShell> {
   @override
   void initState() {
     super.initState();
-    _s.hub?.addListener(_onAccess);
-    _s.hub?.access().then((_) {}, onError: (_) {});
-    _onAccess();
+    listenUnlockAsks(_s);
+    // Only a hub in this process owns the access; elsewhere the service does and the Pad's monitor reads it.
+    if (caps.hubInProcess) {
+      _s.hub?.addListener(_onAccess);
+      _s.hub?.access().then((_) {}, onError: (_) {});
+      _onAccess();
+    }
   }
 
   @override
   void dispose() {
+    stopUnlockAsks();
     _s.hub?.removeListener(_onAccess);
     super.dispose();
   }
@@ -63,6 +69,8 @@ class _PhoneShellState extends State<PhoneShell> {
 
   bool get _needsAccess => caps.hubInProcess && _access?.hasKey == false;
 
+  Widget _page(Widget child) => Scaffold(resizeToAvoidBottomInset: false, body: child);
+
   @override
   Widget build(BuildContext context) {
     if (_needsAccess && _s.hub != null) {
@@ -73,10 +81,11 @@ class _PhoneShellState extends State<PhoneShell> {
     return ListenableBuilder(
       listenable: widget.nav,
       builder: (context, _) => switch (widget.nav.now) {
-        PhoneView.home => Scaffold(body: HomeScreen(state: _s, nav: widget.nav)),
+        // The pages hold InkWells and need a Material above them; the session view has its own Scaffold.
+        PhoneView.home => _page(HomeScreen(state: _s, nav: widget.nav)),
         PhoneView.session => PhoneSessionView(state: _s, nav: widget.nav),
-        PhoneView.devices => DevicesPage(state: _s, nav: widget.nav),
-        PhoneView.settings => SettingsPage(state: _s, nav: widget.nav),
+        PhoneView.devices => _page(DevicesPage(state: _s, nav: widget.nav)),
+        PhoneView.settings => _page(SettingsPage(state: _s, nav: widget.nav)),
       },
     );
   }
@@ -90,6 +99,9 @@ Widget phoneFormSwitch({
   required DataDir data,
   Duration settle = phoneFormSettle,
 }) {
+  // One build per fold: `waiting` and `isWaiting` read the same model; onFold drops it.
+  HomeModel? memo;
+  HomeModel model() => memo ??= phoneHomeModel(state, nav);
   return FormSwitch(
     state: state,
     settle: settle,
@@ -104,9 +116,11 @@ Widget phoneFormSwitch({
         nav.home();
       }
       nav.cameFrom = landing.cameFrom;
+      memo = null;
     },
-    entered: () => nav.entered,
-    waiting: () => phoneHomeModel(state, nav).items.where((i) => i.kind == HomeKind.waiting).length,
-    isWaiting: (key) => phoneHomeModel(state, nav).items.any((i) => i.kind == HomeKind.waiting && i.sessionKey == key),
+    // A session that ended on the phone is not a place to land.
+    entered: () => state.entries.any((e) => e.key == nav.entered) ? nav.entered : null,
+    waiting: () => model().items.where((i) => i.kind == HomeKind.waiting).length,
+    isWaiting: (key) => model().items.any((i) => i.kind == HomeKind.waiting && i.sessionKey == key),
   );
 }

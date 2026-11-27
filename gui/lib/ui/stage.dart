@@ -1,4 +1,5 @@
 // The stage: where the remote window sits; a placeholder while it is elsewhere (S1, detached).
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -27,6 +28,29 @@ Future<void> requestUnlock(BuildContext context, MainState state, String device)
   final request = await showUnlockDialog(context, store: state.unlockStore, device: device);
   if (request != null) {
     await state.unlock(device, request.password, remember: request.remember, auto: request.auto);
+  }
+}
+
+/// A locked session wants the password: one dialog at a time. The Pad's MainWindow and the phone shell both use it.
+mixin UnlockAsks<T extends StatefulWidget> on State<T> {
+  StreamSubscription<String>? _asks;
+  bool _asking = false;
+
+  void listenUnlockAsks(MainState state) {
+    _asks = state.unlockAsks.listen((device) async {
+      if (_asking || !mounted) return;
+      _asking = true;
+      try {
+        await requestUnlock(context, state, device);
+      } finally {
+        _asking = false;
+      }
+    });
+  }
+
+  void stopUnlockAsks() {
+    _asks?.cancel();
+    _asks = null;
   }
 }
 
