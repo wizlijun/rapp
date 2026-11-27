@@ -1558,6 +1558,8 @@ macOS、Linux、Duo、iPad 各一遍。
 
 ## 中心服务 G1（规格 `docs/superpowers/specs/2026-11-27-rapp-center-design.md`，计划 `docs/superpowers/plans/2026-11-27-rapp-center-g1.md`，分支 `feat/center-g1`，2026-11-27）
 
+- **G3（`prefs`）不要另做**：2026-11-27 用户定，`prefs` 由快捷区第一行的第二期来做（分支 `feat/quick-row`，规格 `2026-11-27-rapp-quick-row-design.md` §10.2），同步五样：常用语、按键动作、键盘布局、星标、使用次数。合并规则以那份规格为准。中心服务规格 §8 已在那条分支上标成历史。
+
 - 状态服务改名为中心服务 `rapp-center`（源码 `services/center/`），改动如下：
   - 新加一个入口，内置能力放在它后面。现在只有一块 `state`，旧路径不变。
   - 新加 `GET /v1/routes`，health 升到 v2；状态接口另有一份 `/state/v1/…` 前缀的路径可用。
