@@ -50,6 +50,7 @@ void main() {
     port = FakeSessionPort();
     term = FakeTermSessionPort();
     s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(phrases: _oldTen), port: port, termPort: term);
+    s.setStripItems(_oldTen); // the list these tests were written for: phrases only (the migration adds 切模式)
     term.seed(2);
     app = RemoteSession(1, 'Safari');
     tsess = RemoteSession(2, 'term');

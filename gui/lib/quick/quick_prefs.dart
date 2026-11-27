@@ -70,6 +70,11 @@ Chord? chordOfBarKey(String id) {
     }
     phrases.add(it);
   }
+  // 切模式 used to be a key action (⇧Tab on the keyboard row); the old list never had it: add it once, after 新对话.
+  if (!phrases.any((it) => it is StripCmd && it.id == 'mode')) {
+    final at = phrases.indexWhere((it) => it is StripCmd && it.id == 'new');
+    phrases.insert(at < 0 ? 0 : at + 1, const StripCmd('mode'));
+  }
   return (
     phrases: _withIds(phrases),
     keys: [for (final a in builtinKeyActions) a.id == 'search' && search != null ? search : a],

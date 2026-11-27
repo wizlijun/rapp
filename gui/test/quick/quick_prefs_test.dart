@@ -27,13 +27,34 @@ void main() {
   test('migration: a search changed to text stays a command', () {
     final custom = StripCmd('search', per: {'codex': const CmdText('/history')});
     final q = QuickPrefs.migrate([custom, Phrase('继续')]);
-    expect(q.phrases.first, custom);
+    expect(q.phrases, [const StripCmd('mode'), custom, const Phrase('继续')]);
     expect(q.keys.where((a) => a.id == 'search').length, 1);
   });
   test('migration: a search with only keys becomes the action with those keys', () {
     final q = QuickPrefs.migrate([StripCmd('search', per: {'codex': const CmdKey('co')})]);
-    expect(q.phrases, isEmpty);
+    expect(q.phrases, [const StripCmd('mode')]); // only the added 切模式
     expect(chordFor(q.keys.first, agentTools.firstWhere((t) => t.id == 'codex'))!.toJson(), 'ctrl+o');
+  });
+  test('migration from gui.json adds 切模式 after 新对话', () {
+    final q = QuickPrefs.migrate([const Phrase('a'), const StripCmd('new'), const StripCmd('model')]);
+    expect(q.phrases.map(refOf).take(4).toList(), [refOf(q.phrases[0]), 'p:new', 'p:mode', 'p:model']);
+  });
+  test('migration adds 切模式 at the front when 新对话 was deleted', () {
+    final q = QuickPrefs.migrate([const Phrase('a'), const StripCmd('model')]);
+    expect(q.phrases.map(refOf).first, 'p:mode');
+    expect(q.phrases, hasLength(3));
+  });
+  test('migration does not add a second 切模式', () {
+    final q = QuickPrefs.migrate(defaultStripItems);
+    expect(q.phrases.whereType<StripCmd>().where((c) => c.id == 'mode'), hasLength(1));
+  });
+  test('a quick.json that already exists without 切模式 does not get it back', () {
+    final dir = Directory.systemTemp.createTempSync().path;
+    QuickPrefs.load(dir, legacy: [const Phrase('a')]);
+    final q = QuickPrefs.load(dir, legacy: [const Phrase('a')]);
+    q.setPhrases([for (final it in q.phrases) if (!(it is StripCmd && it.id == 'mode')) it]);
+    final back = QuickPrefs.load(dir, legacy: [const Phrase('a')]);
+    expect(back.phrases.whereType<StripCmd>().map((c) => c.id), isNot(contains('mode')));
   });
   test('round trip through quick.json, at from the clock and never below the floor', () async {
     final dir = Directory.systemTemp.createTempSync().path;
@@ -59,7 +80,7 @@ void main() {
     final dir = Directory.systemTemp.createTempSync().path;
     File('$dir/quick.json').writeAsStringSync('{nope');
     final q = QuickPrefs.load(dir, legacy: [Phrase('继续')]);
-    expect(q.phrases.single, Phrase('继续'));
+    expect(q.phrases.whereType<Phrase>().single, Phrase('继续'));
     expect(File('$dir/quick.json.bad').existsSync(), isTrue);
   });
 
@@ -67,7 +88,7 @@ void main() {
 
   test('migration: a search with no per is dropped, the built-in action stays as it was', () {
     final q = QuickPrefs.migrate([const StripCmd('search'), const Phrase('继续')]);
-    expect(q.phrases, [const Phrase('继续')]);
+    expect(q.phrases, [const StripCmd('mode'), const Phrase('继续')]);
     expect(q.keys, builtinKeyActions);
   });
   test('migration: keys of a search keep the built-in per for the tools it does not name; a cleared tool is off', () {
@@ -89,16 +110,16 @@ void main() {
   test('migration: phrases, other commands and their order stay; ids are new and distinct', () {
     final legacy = [const Phrase('a', put: true), const StripCmd('new'), const StripCmd('u9', label: '我的'), const Phrase('b')];
     final q = QuickPrefs.migrate(legacy);
-    expect(q.phrases, legacy);
+    expect(q.phrases, [legacy[0], legacy[1], const StripCmd('mode'), legacy[2], legacy[3]]);
     final ids = [for (final p in q.phrases.whereType<Phrase>()) p.id];
     expect(ids.toSet(), hasLength(2));
     expect(ids.every((i) => RegExp(r'^[a-z0-9]{8}$').hasMatch(i!)), isTrue);
-    expect(q.phrases.map(refOf), ['p:${ids[0]}', 'p:new', 'p:u9', 'p:${ids[1]}']);
+    expect(q.phrases.map(refOf), ['p:${ids[0]}', 'p:new', 'p:mode', 'p:u9', 'p:${ids[1]}']);
   });
   test('no dir: nothing is written, the docs live in memory', () {
     var t = DateTime.fromMillisecondsSinceEpoch(1000);
     final q = QuickPrefs.load(null, legacy: [const Phrase('a')], clock: () => t);
-    q.toggleStar(refOf(q.phrases.single));
+    q.toggleStar(refOf(q.phrases.whereType<Phrase>().single));
     expect(q.stars, hasLength(1));
     expect(q.atOf('stars'), 1000);
   });
@@ -120,10 +141,10 @@ void main() {
     for (final n in [...quickDocNames, 'usage']) {
       expect((j[n] as Map)['at'], 0);
     }
-    expect(((j['phrases'] as Map)['data'] as List).single, {'text': 'a', 'id': (q.phrases.single as Phrase).id});
+    expect(((j['phrases'] as Map)['data'] as List).last, {'text': 'a', 'id': (q.phrases.last as Phrase).id});
     expect(File('$dir/quick.json.tmp').existsSync(), isFalse);
     final back = QuickPrefs.load(dir, legacy: [const Phrase('x')]);
-    expect((back.phrases.single as Phrase).id, (q.phrases.single as Phrase).id);
+    expect((back.phrases.last as Phrase).id, (q.phrases.last as Phrase).id);
   });
   test('one bad doc goes back to its default alone, at 0', () {
     final dir = Directory.systemTemp.createTempSync().path;
@@ -210,10 +231,10 @@ void main() {
   });
   test('setPhrases gives a new phrase an id and keeps the ones it has', () {
     final q = QuickPrefs.migrate(const [Phrase('a')]);
-    final id = (q.phrases.single as Phrase).id;
+    final id = (q.phrases.last as Phrase).id;
     q.setPhrases([...q.phrases, const Phrase('b')]);
-    expect((q.phrases[0] as Phrase).id, id);
-    expect((q.phrases[1] as Phrase).id, isNotNull);
+    expect((q.phrases[1] as Phrase).id, id);
+    expect((q.phrases[2] as Phrase).id, isNotNull);
   });
   test('stars: toggle adds at the end and removes; starFirst moves to the front', () {
     final q = QuickPrefs.migrate(const [])
