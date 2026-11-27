@@ -51,6 +51,28 @@ void main() {
 
   List<String> texts() => [for (final p in s.quick.phrases.whereType<Phrase>()) p.text];
 
+  testWidgets('star on the phrases page stars the item', (tester) async {
+    await open(tester);
+    final r0 = refOf(s.quick.phrases[0]);
+    final r2 = refOf(s.quick.phrases[2]);
+    await tester.tap(find.byKey(const Key('phrases-star-0')));
+    await tester.pumpAndSettle();
+    expect(s.quick.stars, [r0]);
+    expect(find.byTooltip('取消打星'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('phrases-star-2')));
+    await tester.pumpAndSettle();
+    expect(s.quick.stars, [r0, r2]);
+    await tester.tap(find.byKey(const Key('phrases-star-0')));
+    await tester.pumpAndSettle();
+    expect(s.quick.stars, [r2]);
+    // reorder: the star follows the phrase, not the row
+    s.setStripItems([s.quick.phrases[1], ...s.quick.phrases.sublist(2), s.quick.phrases[0]]);
+    await tester.pumpAndSettle();
+    expect(s.quick.stars, [r2]);
+    expect(find.byTooltip('取消打星'), findsOneWidget);
+    expect(tester.widget<IconButton>(find.byKey(const Key('phrases-star-1'))).tooltip, '取消打星');
+  });
+
   testWidgets('the switch turns the strip off; the list is the defaults', (tester) async {
     await open(tester);
     expect(find.byKey(const Key('phrase-row-9')), findsOneWidget);

@@ -250,6 +250,25 @@ String _cmdSubtitle(StripCmd c) => [
           '${t.name} ${a is CmdText ? a.text : barKeys[(a as CmdKey).key]?.label ?? a.key}',
     ].join(' · ');
 
+/// The row's star, the same look as the key actions page's.
+class _StarButton extends StatelessWidget {
+  const _StarButton({required this.index, required this.starred, required this.onPressed});
+  final int index;
+  final bool starred;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    return IconButton(
+      key: Key('phrases-star-$index'),
+      tooltip: starred ? '取消打星' : '打星',
+      icon: Icon(starred ? Icons.star : Icons.star_border, color: starred ? t.text : t.muted),
+      onPressed: onPressed,
+    );
+  }
+}
+
 class PhrasesPage extends StatelessWidget {
   const PhrasesPage({super.key, required this.state});
   final MainState state;
@@ -285,6 +304,7 @@ class PhrasesPage extends StatelessWidget {
         listenable: state,
         builder: (context, _) {
           final l = state.quick.phrases;
+          final stars = state.quick.stars;
           return ListView(padding: const EdgeInsets.all(16), children: [
             RappSwitchRow(
               switchKey: const Key('phrase-strip-switch'),
@@ -336,10 +356,14 @@ class PhrasesPage extends StatelessWidget {
                               ? Text('放进输入框', style: TextStyle(color: t.muted))
                               : null,
                       onTap: () => _edit(context, i),
-                      trailing: ReorderableDragStartListener(
-                        index: i,
-                        child: Icon(Icons.drag_handle, color: t.muted),
-                      ),
+                      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                        _StarButton(
+                          index: i,
+                          starred: stars.contains(refOf(p)),
+                          onPressed: () => state.toggleStar(refOf(p)),
+                        ),
+                        ReorderableDragStartListener(index: i, child: Icon(Icons.drag_handle, color: t.muted)),
+                      ]),
                     ),
                   ),
               ],
