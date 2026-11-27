@@ -55,6 +55,12 @@ pub(crate) fn swift_lowercased(s: &str) -> String {
     out
 }
 
+/// The string in NFC. Swift's `==` and `<` on `String` and `Character` compare canonically
+/// equivalent text as equal ("é" and "e\u{301}"); comparing the NFC forms does the same.
+pub(crate) fn nfc(s: &str) -> String {
+    icu_normalizer::ComposingNormalizerBorrowed::new_nfc().normalize(s).into_owned()
+}
+
 /// `Array(string)`: the string's Characters (extended grapheme clusters).
 fn characters(s: &str) -> Vec<&str> {
     s.graphemes(true).collect()
@@ -76,10 +82,10 @@ fn is_letter_or_number(c: &str) -> bool {
 /// (CJK) is a substring. Case-insensitive; lines are trimmed first.
 pub fn text_matches(patterns: &[String], lines: &[String]) -> bool {
     let lowered: Vec<String> =
-        lines.iter().map(|l| swift_lowercased(l.trim_matches(is_whitespace_or_newline))).collect();
+        lines.iter().map(|l| nfc(&swift_lowercased(l.trim_matches(is_whitespace_or_newline)))).collect();
     let ls: Vec<Vec<&str>> = lowered.iter().map(|l| characters(l)).collect();
     for p in patterns {
-        let lp = swift_lowercased(p);
+        let lp = nfc(&swift_lowercased(p));
         let pat = characters(&lp);
         if pat.is_empty() {
             continue;

@@ -182,9 +182,19 @@ impl AppStateReport {
     }
 }
 
-/// Swift's `split(separator: ".", omittingEmptySubsequences: false)`.
+/// Swift's `split(separator: ".", omittingEmptySubsequences: false)`: it splits at Characters,
+/// so a "." carrying a combining mark is not a separator.
 fn dotted(s: &str) -> Vec<&str> {
-    s.split('.').collect()
+    let mut out = Vec::new();
+    let mut start = 0;
+    for (i, g) in s.grapheme_indices(true) {
+        if g == "." {
+            out.push(&s[start..i]);
+            start = i + 1;
+        }
+    }
+    out.push(&s[start..]);
+    out
 }
 
 /// Dotted numbers compared segment by segment; a missing segment counts as 0; a segment that
@@ -199,8 +209,12 @@ pub fn compare_versions(a: &str, b: &str) -> i64 {
             if m != n {
                 return if m < n { -1 } else { 1 };
             }
-        } else if p != q {
-            return if p < q { -1 } else { 1 };
+        } else {
+            // Swift orders strings by their NFC scalars, and equivalent ones are equal.
+            let (p, q) = (super::detectors::nfc(p), super::detectors::nfc(q));
+            if p != q {
+                return if p < q { -1 } else { 1 };
+            }
         }
     }
     0

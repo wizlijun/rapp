@@ -1649,6 +1649,7 @@ name = "rapp-host-core"
 version = "0.15.55"
 dependencies = [
  "anyhow",
+ "icu_normalizer",
  "libz-sys",
  "rapp-client-core",
  "serde",
