@@ -1,4 +1,4 @@
-/// Where the phone shell is (V1b Task 7: the minimal version; Task 6 adds to it).
+/// Where the phone shell is. Leaving home (enter, open) clears [cameFrom]; the fold sets it after.
 library;
 
 import 'package:flutter/foundation.dart';
@@ -23,6 +23,7 @@ class PhoneNav extends ChangeNotifier {
     state.select(key);
     state.setPhone(form: true, inSession: true);
     entered = key;
+    cameFrom = null;
     _now = PhoneView.session;
     notifyListeners();
   }
@@ -36,6 +37,7 @@ class PhoneNav extends ChangeNotifier {
 
   /// The devices or the settings page.
   void open(PhoneView v) {
+    cameFrom = null;
     _now = v;
     notifyListeners();
   }
