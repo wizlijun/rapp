@@ -97,7 +97,7 @@ release when `⋯` folds), redesigned quick-area first row (starred items or
 right whose refused items explain why inside the menu only, built-in key actions 搜历史 `⌃R` / 展开输出 `⌃O` / 转后台 `⌃B` / 清屏
 `⌃L` / 新标签 `⌘T`, and built-in AI tool commands 新对话 / 切模式 / 换模型 /
 压缩 / 恢复 / 用量 for Claude Code, Codex, Gemini CLI, agy and opencode, stored
-in `quick.json` and synced across devices via `rapp-center` `/prefs/v1/…` while dropping closed links on pause or reconnect), overview Open App
+in `quick.json` without overwriting unreadable unmovable files or newer-version schemas and synced across devices via `rapp-center` `/prefs/v1/…` while dropping closed links on pause or reconnect), overview Open App
 dropdown menu, overview Local column inbound sessions, OSC 7501 program
 status, GUI app state rules client support, top-bar status queue, Needs You
 direct jump, OSC 0/1/2 terminal titles (with · 2 numbering on clashes),
@@ -127,13 +127,13 @@ strip while nobody is connected in), remote macOS Terminal consent prompts with 
 `Ctrl+Shift+V` Linux terminal paste with Wayland selection roundtrip, and the
 enlarged 3-line non-blocking `WaitCard` stage overlay (for slow `Ctrl+Shift+T`,
 新建, 恢复, standby 启动 and device-tab shell opens, with queued counts and
-automatic switch to a remote Mac's desktop on consent) share the macOS 0.15.64
+automatic switch to a remote Mac's desktop on consent) share the macOS 0.15.65
 layout and rules.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and
 reattach without reconnecting. This release uses protocol v16 (compatible with
-macOS 0.15.35–0.15.64); update both peers when coming from protocol v15. Incoming GUI
+macOS 0.15.35–0.15.65); update both peers when coming from protocol v15. Incoming GUI
 state rules are forwarded by the Linux client to compatible hosts (such as
 macOS 0.15.35+) and safely ignored by the Linux desktop/app host. Off-stage and
 hidden/minimized embedded or detached sessions pause pictures but keep activity
