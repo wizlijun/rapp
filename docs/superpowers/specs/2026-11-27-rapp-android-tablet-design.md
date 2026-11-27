@@ -253,7 +253,7 @@ pub use rapp_hub_ffi::{rapp_hub_start, rapp_hub_send, rapp_hub_free_line, rapp_h
 
 /// kind：0 是事件，1 是帧，2 是会话结束（ptr 空、len 0，每个会话恰好一次，是最后一次回调）。
 /// 0 和 1 时 ptr 指向的内容和管道里的一个包一模一样：第一个字节是 0 或 1，
-/// 后面是事件的 JSON 或「24 字节帧头 + BGRA」。这样 Dart 的读循环两条路共用，帧不用拷贝。
+/// 后面是事件的 JSON 或「24 字节帧头 + BGRA」。这样 Dart 的读循环两条路共用；Dart 收到后拷一次（见规矩 3）。
 type Sink = extern "C" fn(id: u64, kind: u8, ptr: *mut u8, len: usize);
 ```
 
@@ -261,7 +261,7 @@ type Sink = extern "C" fn(id: u64, kind: u8, ptr: *mut u8, len: usize);
 
 1. **一次只有一帧在路上，顺序和管道一样**。子进程那条路靠管道写满来挡住发送方，进程内没有管道。`NativeCallable.listener` 是往 Dart 的消息队列里投，永远不会挡，不管的话 Dart 慢一点帧就会在内存里堆起来。做法是学管道：`Output` 不改，给它的写入端是一个带闸的东西，交出一帧后闸关上，下一条（不管是事件还是帧）等 `rapp_session_ack` 才交。`Output` 的队列照旧保序（描述一帧的窗口表事件永远排在那一帧前面），积压时照旧只留最新一帧，事件照旧受 `MAX_EVENTS = 32` 的上限。Dart 拿到一帧、做成图片或决定丢掉之后就 ack，不等画到屏幕上。忘了 ack（哪怕是丢掉的帧），会话就永远结束不了，`disconnected` 和 kind 2 都不会来。写入端的顺序是「等闸开、关闸（是帧时）、交给 sink」，不能「交给 sink 再关闸」，否则 ack 可能先到而丢掉。`rapp_session_close` 要能把卡在闸上的写入端放开。（P0 结果 §2）
 2. **恐慌不能穿过 FFI**。每个 `extern "C"` 函数和每个库线程的入口包一层 `catch_unwind`，出事就给 sink 发一条 `kind = 2`。`rapp-hub-ffi` 的四个 `extern "C"` 函数要在它自己的 crate 里包（iOS 一起受益）：`rapp-android-ffi` 只能 `pub use` 它们，包不了。（P0 结果 §2）
-3. **内存归还**。sink 拿到的内存由 Dart 用完后经 `rapp_session_free` 归还（`asTypedList(len, finalizer: …)`）。Dart 一侧已经关掉的会话，后到的消息直接归还。
+3. **内存归还**。Dart 收到 kind 0、1 时，把内容拷进 Dart 自己的 `Uint8List`（一次），然后立刻 `rapp_session_free`，和 ack 无关。不用 `asTypedList(len, finalizer: …)` 不拷：端口在 ack 之后还留着最后一帧（`lastNativeFrame`），内存必须归 Dart 所有。Dart 一侧已经关掉的会话，后到的消息同样拷完就还（或者不拷直接还）。
 4. 会话线程连的还是 `127.0.0.1:<port>`，和子进程时一样，hub 不用知道有区别。
 5. 这个 crate 在 Mac 上也能编、能测（对着本机回环起一个假的 A），进 `cargo test --workspace` 和 clippy。Windows 的门禁上它也要能编；编不过就用 `cfg` 把内容在 Windows 上置空，不要把它移出 workspace。
 
@@ -290,7 +290,7 @@ type Sink = extern "C" fn(id: u64, kind: u8, ptr: *mut u8, len: usize);
 | `paths` | 数据根 `filesDir/rapp`，缓存 `cacheDir` |
 | `deviceName` | `Settings.Global.DEVICE_NAME`，取不到用 `Build.MODEL` |
 | `idiom` | 不用（Dart 按短边算） |
-| `version` | `PackageInfo` 的 `versionName` 和 `longVersionCode` |
+| `version` | `PackageInfo.versionName`，一个 `x.y.z` 字符串，和 iOS 的 `CFBundleShortVersionString` 同一个样子（不带构建号） |
 | `net` | 永远返回可用。iOS 那个是查「无线数据」被拒，安卓没有这回事 |
 | `openSettings` | 打开本 App 的系统设置页 |
 | `keepAwake` | `FLAG_KEEP_SCREEN_ON` 加上或去掉 |
@@ -322,8 +322,10 @@ type Sink = extern "C" fn(id: u64, kind: u8, ptr: *mut u8, len: usize);
 `PlatformCaps.forOs` 加：
 
 ```dart
-// systemOpen 等安卓的打开文件、分享通道接上再开
-'android' => const PlatformCaps(hubInProcess: true, onlineUpdate: true),
+// onlineUpdate：P3 做 App 内更新时再开（用户 2026-11-27 同意 P1 不带）
+// systemOpen：等安卓的打开文件、分享通道接上再开
+// secretStore、systemLinks、opensFolders 是 P1b 新加的三位（计划 Task 8）
+'android' => const PlatformCaps(hubInProcess: true, secretStore: SecretStore.memory, systemLinks: true, opensFolders: false),
 ```
 
 `systemOpen` 现在的四处用法（`main_window.dart:43`、`term_stage.dart:50`、`local_section.dart:43`、`data_section.dart:54`）都走 `iosChannel`。要先给安卓接一个通道（打开文件、分享），再开这一位；没接之前安卓上留 false（上面的代码就是这样）。（P0 结果 §3）
