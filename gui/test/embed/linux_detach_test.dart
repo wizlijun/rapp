@@ -4,6 +4,9 @@ import 'dart:ui' as ui;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/worker_session_port.dart';
+import 'package:rapp/embed/linux_session_host.dart';
+import 'package:rapp/embed/session_link.dart';
+import 'package:rapp/embed/session_worker.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'worker_session_port_test.dart' as wire;
 
@@ -24,12 +27,12 @@ void main() {
       return null;
     });
     final process = await Process.start('cat', const []);
-    final port = WorkerSessionPort('/bin/cat', framePresented: () async {});
+    final port = WorkerSessionPort(ProcessSessionLinks('/bin/cat'), LinuxSessionHost(), framePresented: () async {});
     final events = <SessionEvent>[];
     final sub = port.events.listen(events.add);
     try {
       await port.init();
-      port.seedSessionForTest(91, process);
+      port.seedSessionForTest(91, ProcessSessionLink(SessionWorker.fromProcess(process)));
       final pending = port.detach(91, text: 'keep draft');
       await entered.future;
       await port.invoke('close', {'sid': 91});
@@ -57,12 +60,12 @@ void main() {
       return null;
     });
     final process = await Process.start('cat', const []);
-    final port = WorkerSessionPort('/bin/cat', framePresented: () async {});
+    final port = WorkerSessionPort(ProcessSessionLinks('/bin/cat'), LinuxSessionHost(), framePresented: () async {});
     final events = <SessionEvent>[];
     final sub = port.events.listen(events.add);
     try {
       await port.init();
-      port.seedSessionForTest(91, process);
+      port.seedSessionForTest(91, ProcessSessionLink(SessionWorker.fromProcess(process)));
       final pending = port.detach(91);
       await entered.future;
       expect(events.whereType<DetachedEvent>(), isEmpty);
@@ -106,12 +109,12 @@ void main() {
       return null;
     });
     final process = await Process.start('cat', const []);
-    final port = WorkerSessionPort('/bin/cat', framePresented: () async {});
+    final port = WorkerSessionPort(ProcessSessionLinks('/bin/cat'), LinuxSessionHost(), framePresented: () async {});
     final events = <SessionEvent>[];
     final sub = port.events.listen(events.add);
     try {
       await port.init();
-      port.seedSessionForTest(91, process);
+      port.seedSessionForTest(91, ProcessSessionLink(SessionWorker.fromProcess(process)));
       final pending = port.detach(91, text: 'keep draft');
       await entered.future;
       port.freeze(91, 'lost connection');
@@ -154,7 +157,8 @@ void main() {
       final presentationStarted = Completer<void>();
       final stalledPresentation = Completer<void>();
       final port = WorkerSessionPort(
-        File('../rust/target/release/rapp-session').absolute.path,
+        ProcessSessionLinks(File('../rust/target/release/rapp-session').absolute.path),
+        LinuxSessionHost(),
         framePresented: () {
           if (!presentationStarted.isCompleted) presentationStarted.complete();
           return stalledPresentation.future;

@@ -10,6 +10,8 @@ import 'cm_page.dart';
 import 'embed/session_port.dart';
 import 'embed/state_rules.dart';
 import 'embed/worker_session_port.dart';
+import 'embed/session_link.dart';
+import 'embed/linux_session_host.dart';
 import 'hub_client.dart';
 import 'update.dart';
 import 'pages/local_section.dart';
@@ -99,7 +101,7 @@ Future<void> main(List<String> args) async {
   if (Platform.isMacOS || Platform.isLinux) {
     try {
       final SessionPort p = Platform.isLinux
-          ? WorkerSessionPort('$bin/rapp-session') : ChannelSessionPort();
+          ? WorkerSessionPort(ProcessSessionLinks('$bin/rapp-session'), LinuxSessionHost()) : ChannelSessionPort();
       doubleClick = Duration(milliseconds: await p.init());
       port = p;
     } catch (e) {

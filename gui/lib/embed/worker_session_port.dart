@@ -18,8 +18,8 @@ import 'voice_key_gate.dart';
 import 'linux_transfer.dart';
 import 'session_copy.dart';
 import 'session_host.dart';
-import 'linux_session_host.dart';
-import 'session_worker.dart';
+import 'session_link.dart';
+import 'frame_sink.dart';
 
 export 'session_worker.dart' show sessionPackets;
 
@@ -33,15 +33,16 @@ void _streamTrace(SessionHost host, int worker, String stage, String detail) {
 
 class WorkerSessionPort extends SessionPort with WidgetsBindingObserver {
   WorkerSessionPort(
-    this.executable, {
+    this.links,
+    this.host, {
     Future<void> Function()? framePresented,
-    SessionHost? host,
-  }) : host = host ?? LinuxSessionHost(),
-       _framePresented =
+    this.sink = const ImageFrameSink(),
+  }) : _framePresented =
            framePresented ?? (() => SchedulerBinding.instance.endOfFrame);
   final Future<void> Function() _framePresented;
-  final String executable;
+  final SessionLinks links;
   final SessionHost host;
+  final FrameSink sink;
   final _events = StreamController<SessionEvent>.broadcast();
   final _sessions = <Object, _Session>{};
   final _starting = <Object>{};
@@ -109,9 +110,7 @@ class WorkerSessionPort extends SessionPort with WidgetsBindingObserver {
 
   @override
   Future<int> init() async {
-    if (!await File(executable).exists()) {
-      throw StateError('rapp-session not found: $executable');
-    }
+    await links.check();
     await host.init(_nativeEvent);
     WidgetsBinding.instance.addObserver(this);
     return 500;
@@ -399,19 +398,28 @@ class WorkerSessionPort extends SessionPort with WidgetsBindingObserver {
     _sendStream(s);
   }
 
-  /// A focused session over [process] without the worker handshake.
+  /// A focused session over [link] without the worker handshake. With
+  /// [reading] the input watch and the read loop run, as after a real start.
   @visibleForTesting
-  void seedSessionForTest(Object sid, Process process) {
-    _sessions[sid] = _Session(
-      sid,
-      SessionWorker.fromProcess(process),
-      _emit,
-      _framePresented,
-      0,
-      '',
-      host,
-    );
+  void seedSessionForTest(Object sid, SessionLink link, {bool reading = false}) {
+    final s = _Session(sid, link, _emit, _framePresented, 0, '', host, sink);
+    _sessions[sid] = s;
     _focused = sid;
+    if (reading) _watch(sid, s);
+  }
+
+  void _watch(Object sid, _Session s) {
+    unawaited(
+      s.link.inputDone.catchError((Object _) {
+        s.disconnect('session worker stopped');
+      }),
+    );
+    unawaited(
+      s.read().whenComplete(() {
+        if (s.closed && identical(_sessions[sid], s)) _sessions.remove(sid);
+        if (_focused == sid) _focused = null;
+      }),
+    );
   }
 
   /// Holds [text] as a copy without a session.
@@ -504,9 +512,9 @@ class WorkerSessionPort extends SessionPort with WidgetsBindingObserver {
         throw StateError('Invalid session');
       }
       _starting.add(sid);
-      late final SessionWorker process;
+      late final SessionLink link;
       try {
-        process = await SessionWorker.start(executable);
+        link = await links.open();
       } catch (_) {
         _cancelledStarts.remove(sid);
         rethrow;
@@ -515,19 +523,20 @@ class WorkerSessionPort extends SessionPort with WidgetsBindingObserver {
       }
       final cancelled = _cancelledStarts.remove(sid);
       if (_disposed || cancelled) {
-        unawaited(process.packets.drain<void>());
-        unawaited(process.closeInput().catchError((Object _) {}));
-        process.kill(ProcessSignal.sigkill);
+        unawaited(link.packets.drain<void>());
+        unawaited(link.close().catchError((Object _) {}));
+        link.kill();
         throw StateError('Session start cancelled');
       }
       final s = _Session(
         sid,
-        process,
+        link,
         _emit,
         _framePresented,
         args['port'] as int,
         args['token'] as String,
         host,
+        sink,
       );
       s.stream = {
         'mode': args['mode'],
@@ -535,18 +544,8 @@ class WorkerSessionPort extends SessionPort with WidgetsBindingObserver {
         'density': args['density'],
       };
       _sessions[sid] = s;
-      unawaited(
-        process.inputDone.catchError((Object _) {
-          s.disconnect('session worker stopped');
-        }),
-      );
+      _watch(sid, s);
       s.send({'cmd': 'start', ...args, 'density': _density(args['density'])});
-      unawaited(
-        s.read().whenComplete(() {
-          if (s.closed && identical(_sessions[sid], s)) _sessions.remove(sid);
-          if (_focused == sid) _focused = null;
-        }),
-      );
       return null;
     }
     if (method == 'close' && _starting.contains(sid)) {
@@ -793,21 +792,16 @@ double linuxViewDensity({required double base, required bool original,
   return math.min(desired, base * math.sqrt(area / viewed)).clamp(0.01, 8).toDouble();
 }
 
-void _retire(ui.Image? image) {
-  if (image == null) return;
-  SchedulerBinding.instance.addPostFrameCallback((_) => image.dispose());
-  SchedulerBinding.instance.scheduleFrame();
-}
-
 class _Session {
   _Session(
     this.sid,
-    this.process,
+    this.link,
     this.emit,
     this.framePresented,
     this.port,
     this.token,
     this.host,
+    this.sink,
   ) {
     transfers = LinuxTransfers(
       port,
@@ -916,7 +910,8 @@ class _Session {
   final Future<void> Function() framePresented;
   final _closed = Completer<void>();
   final Object sid;
-  final SessionWorker process;
+  final SessionLink link;
+  final FrameSink sink;
   final void Function(SessionEvent) emit;
   List<RemoteWindow> windows = [];
   int viewWindow = 0;
@@ -924,6 +919,8 @@ class _Session {
   double viewZoom = 1;
   final _pictures = <int, RemoteWindow>{};
   Uint8List? _pendingFrame;
+  // The mailbox frame came off the link and is not acked yet.
+  bool _pendingAck = false;
   int _receivedFrames = 0;
   int _pendingSequence = 0;
   bool _restorePending = false;
@@ -944,14 +941,17 @@ class _Session {
     if (!closed && bytes != null) queueFrame(bytes, restore: true);
   }
 
-  void queueFrame(Uint8List bytes, {bool restore = false}) {
+  void queueFrame(Uint8List bytes, {bool restore = false, bool fromLink = false}) {
     // Latest-frame mailbox: decoding/display must never block control events.
+    // The frame it pushes out is dropped for good: ack it now.
+    if (_pendingAck) link.ack();
+    _pendingAck = fromLink;
     _pendingFrame = bytes;
     _restorePending = restore;
     _pendingSequence = ++_receivedFrames;
     _streamTrace(
       host,
-      process.pid,
+      link.id,
       'pipe-frame',
       'output=$_pendingSequence bytes=${bytes.length}',
     );
@@ -965,11 +965,18 @@ class _Session {
         final bytes = _pendingFrame!;
         final sequence = _pendingSequence;
         final restore = _restorePending;
+        final ack = _pendingAck;
         _restorePending = false;
+        _pendingAck = false;
         _pendingFrame = null;
-        _streamTrace(host, process.pid, 'image-start', 'output=$sequence');
-        await frame(bytes, restore: restore);
-        _streamTrace(host, process.pid, 'image-ready', 'output=$sequence');
+        _streamTrace(host, link.id, 'image-start', 'output=$sequence');
+        try {
+          await frame(bytes, restore: restore);
+        } finally {
+          // Drawn, skipped or failed: the bytes are used up.
+          if (ack) link.ack();
+        }
+        _streamTrace(host, link.id, 'image-ready', 'output=$sequence');
         if (!closed && !disconnected) {
           // Use a per-frame stop signal: registering on one long-lived future
           // would retain a callback for every displayed frame until disconnect.
@@ -982,7 +989,7 @@ class _Session {
             stop.future,
           ]);
           _renderWait = null;
-          _streamTrace(host, process.pid, 'flutter-frame', 'output=$sequence');
+          _streamTrace(host, link.id, 'flutter-frame', 'output=$sequence');
         }
       }
     } catch (e) {
@@ -1187,7 +1194,7 @@ class _Session {
   }
 
   void send(Map<String, Object?> args) {
-    if (!closed && !disconnected) process.send(jsonEncode(args));
+    if (!closed && !disconnected) link.send(jsonEncode(args));
   }
 
   void publish() {
@@ -1200,10 +1207,13 @@ class _Session {
 
   Future<void> read() async {
     try {
-      await for (final packet in process.packets) {
-        if (closed || disconnected) break;
+      await for (final packet in link.packets) {
+        if (closed || disconnected) {
+          if (packet[0] == 1) link.ack();
+          break;
+        }
         if (packet[0] == 1) {
-          queueFrame(Uint8List.sublistView(packet, 1));
+          queueFrame(Uint8List.sublistView(packet, 1), fromLink: true);
         } else if (packet[0] == 0) {
           final m =
               jsonDecode(utf8.decode(packet.sublist(1)))
@@ -1283,7 +1293,7 @@ class _Session {
               windows = e.windows;
               for (final id in _pictures.keys.toList()) {
                 if (!windows.any((w) => w.id == id)) {
-                  _retire(_pictures.remove(id)?.image);
+                  sink.retire(_pictures.remove(id)?.image);
                 }
               }
               if (!windows.any((w) => w.id == selected)) {
@@ -1333,20 +1343,9 @@ class _Session {
     // Detached windows draw this canvas themselves. Building another full
     // Flutter image here copies/uploads pixels for a stage that is not visible.
     if (closed || detached || (disconnected && !restore)) return;
-    final buffer = await ui.ImmutableBuffer.fromUint8List(
-      Uint8List.sublistView(bytes, 24),
-    );
-    final descriptor = ui.ImageDescriptor.raw(
-      buffer,
-      width: width,
-      height: height,
-      pixelFormat: ui.PixelFormat.bgra8888,
-    );
-    ui.Codec? codec;
     ui.Image? image;
     try {
-      codec = await descriptor.instantiateCodec();
-      image = (await codec.getNextFrame()).image;
+      image = await sink.decode(Uint8List.sublistView(bytes, 24), width, height);
       if (closed || detached || (disconnected && !restore)) return;
       var geometryChanged = false;
       for (final w in windows) {
@@ -1362,7 +1361,7 @@ class _Session {
           // Selecting it raises the remote window and supplies a fresh picture.
           final old = _pictures.remove(w.id);
           if (old != null) {
-            _retire(old.image);
+            sink.retire(old.image);
             geometryChanged = true;
           }
           continue;
@@ -1381,7 +1380,7 @@ class _Session {
         );
         final old = _pictures[w.id];
         final frames = old?.frames ?? ValueNotifier<WindowFrame?>(null);
-        _retire(frames.value?.image);
+        sink.retire(frames.value?.image);
         frames.value = WindowFrame(image.clone(), source);
         if (old == null || old.visible != visible) geometryChanged = true;
         _pictures[w.id] = RemoteWindow(
@@ -1401,9 +1400,6 @@ class _Session {
       if (geometryChanged) publish();
     } finally {
       image?.dispose();
-      codec?.dispose();
-      descriptor.dispose();
-      buffer.dispose();
     }
   }
 
@@ -1423,17 +1419,19 @@ class _Session {
       if (!reply.isCompleted) reply.complete('远端已断开，发送未确认；请检查远端内容后再重试');
     }
     held.clear();
+    if (_pendingAck) link.ack();
+    _pendingAck = false;
     _pendingFrame = null;
     _restorePending = false;
     _closed.complete();
     wakeRenderer();
-    unawaited(process.closeInput().catchError((Object _) {}));
+    unawaited(link.close().catchError((Object _) {}));
     // EOF wakes the worker even if the host stopped producing frames.
     final timer = Timer(
       const Duration(seconds: 2),
-      () => process.kill(ProcessSignal.sigkill),
+      () => link.kill(),
     );
-    unawaited(process.exitCode.then((_) => timer.cancel()));
+    unawaited(link.exitCode.then((_) => timer.cancel()));
   }
 
   void close(String reason) {
@@ -1441,7 +1439,7 @@ class _Session {
     closed = true;
     _stopTransport();
     for (final p in _pictures.values) {
-      _retire(p.image);
+      sink.retire(p.image);
     }
     _pictures.clear();
     lastNativeFrame = null;
