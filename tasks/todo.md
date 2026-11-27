@@ -1501,7 +1501,7 @@ macOS、Linux、Duo、iPad 各一遍。
 
 ## Windows 版 A 段（地基）（计划 `docs/superpowers/plans/2026-11-26-rapp-windows-a-foundation.md`，分支 `feat/windows-foundation`）
 
-现状（2026-11-27）：代码是草稿，**还没在任何机器上编译、没跑过测试**。草稿笔记在 `docs/superpowers/plans/notes/2026-11-26-windows-a-draft-notes.md`，验证的人先看它的第 6、7 节。
+现状（2026-11-27）：**在 Mac 上过了门禁**，测的是分支 `feat/windows-foundation` 的提交 `0b5bd91f`（合并 `main` 4b8c337d 之后）。草稿代码不用改就编过了：`cargo test --workspace --no-fail-fast` 1716 个过；`rapp-ports` 有一个用固定端口的测试 `every_map_stays_when_the_device_list_cannot_be_read` 在负载下挂了一次，单独重跑 5 次都过，这个 crate 分支没改。clippy `-D warnings` 干净；`swift test` 563 个过、0 个失败；`flutter analyze` 没问题；`flutter test` 3623 个过，`linux_detach_test.dart` 的 2 个失败是因为新 worktree 里没有 `rust/target/release/rapp-session`，补上这个文件后重跑也过了，跟分支无关。iOS：`rapp-hub-ffi` 对 `aarch64-apple-ios`（release）和 `aarch64-apple-ios-sim` 的 `cargo check` 都过。**Windows 门禁还没跑**，Linux 也没编：Mac 上交叉编译缺 C 头文件，`ring` 编不过。草稿笔记在 `docs/superpowers/plans/notes/2026-11-26-windows-a-draft-notes.md`，验证的人先看它的第 6、7 节。
 
 - **已合进本机 `main`，这次合并不发版。** `main` 的文件里只有 Mac 不编译的部分：`rust/host-windows/`、`rust/svc-windows/`（都不在 `rust/Cargo.toml` 的成员表里）、`scripts/check-windows.ps1`、`scripts/stage-windows.ps1`、`.gitattributes` 和文档。Mac 编译的文件和合并前一个字节都不差，所以不影响 macOS 和 iOS 发版。
 - **接线不在 `main` 的文件里。** 对已有 crate 的改动（约 55 个文件）在提交 `118b1f72` 里撤下了，它们在 `main` 的历史里。分支 `feat/windows-foundation` 上已经把这个提交还原好，验证的人直接在分支上编译、修。
