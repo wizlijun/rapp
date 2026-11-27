@@ -1693,7 +1693,7 @@ macOS、Linux、Duo、iPad 各一遍。
 
 P0 探查已完成（2026-11-27），结论见 `docs/superpowers/specs/2026-11-27-rapp-android-p0-findings.md`；规格 `docs/superpowers/specs/2026-11-27-rapp-android-tablet-design.md` 已按结果改好，下一步写 P1 计划。改用户看到的东西的三条建议（荣耀的三层安装确认、语音按下去没回调、「装完回到桌面」的提示）在 P0 结果页末尾，等用户定。
 
-- [ ] **hub 读到超过 64 KiB 的回复行就丢整条连接。** `watch_load` 的第一行带全部历史（每点 99–103 字节），Mac 服务起来约 52 分钟以后就超过 65,536 字节，hub 丢掉整条连接、会话跟着断。这是 `rust/hub`、`rust/net` 和 service 的共用代码，main 上没修；影响只在安卓探查的进程内会话里见过，桌面没测。真修法：给这条回复放大或去掉行长上限，或者把历史分块发。探查分支上的 `keeps_link`（`rust/hub/src/link.rs`，按错误文字判断）只是绕过，不进 P1。P1 接会话之前要修好。
+- [x] **hub 读到超过 64 KiB 的回复行就丢整条连接。** `watch_load` 的第一行带全部历史（每点 99–103 字节），Mac 服务起来约 52 分钟以后就超过 65,536 字节，hub 丢掉整条连接、会话跟着断。这是 `rust/hub`、`rust/net` 和 service 的共用代码，main 上没修；影响只在安卓探查的进程内会话里见过，桌面没测。真修法：给这条回复放大或去掉行长上限，或者把历史分块发。探查分支上的 `keeps_link`（`rust/hub/src/link.rs`，按错误文字判断）只是绕过，不进 P1。P1 接会话之前要修好。 `fix/hub-long-reply` 修了：余力回复放宽到 256 KiB，超长只让那一个请求失败、不丢连接。
 - [ ] 本机原有的测试失败（和安卓无关，P0 里两次都看到）：`gui/test/embed/linux_detach_test.dart` 的两条；`gui/test/service_client_test.dart` 的「ServiceMonitor share…」时好时坏。
 - 探查分支 `probe/android-p0`、worktree `.worktrees/android-p0` 和 `.worktrees/android-p0-docs` 留到 P1 计划写完，之后可以删。工具和两个 AVD（`rapp-p0-34`、`rapp-p0-36`）留给 P1。
 
