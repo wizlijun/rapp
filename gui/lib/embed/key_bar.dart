@@ -78,10 +78,17 @@ String termWire(String wire, int flags) {
 
 /// A typed [letter] with ⌃ / ⌥ / ⌘ latched goes out with them and the latch is used up: true. Nothing latched: false
 /// and nothing sent. A terminal takes `Ctrl-R` / `Alt-r`; an app the macOS key code of the letter and the flags.
+/// A terminal with ⌘ latched (⌃ too or not) sends nothing: ⌘ and the letter is rApp's shortcut, run by the stage
+/// ([RemoteSession.termCommand]) as a hardware ⌘ would be; a letter with none does nothing, and ⌘ is used up.
 bool sendLatchedLetter(MainState state, RemoteSession session, SessionPort port, String letter) {
   final latch = keyLatchOf(state, session);
   final flags = latch.flags;
   if (_isTerm(state, session)) {
+    if (flags & latchCmd != 0) {
+      latch.used();
+      session.termCommand?.call(letter.toLowerCase());
+      return true;
+    }
     if (flags & (latchCtrl | latchOpt) == 0 || port is! TermSessionPort) return false;
     final ctrl = flags & latchCtrl != 0;
     port.sendKeys(session.sid, [termWire(ctrl ? letter.toUpperCase() : letter, flags)]);
@@ -319,8 +326,19 @@ class _KeyBarState extends State<KeyBar> {
         }
       case BarKind.paste:
         _paste();
+      case BarKind.cmdT:
+        // A terminal: the stage's own ⌘T (a new terminal beside). An app: ⌘T goes to it.
+        if (_term) {
+          widget.session.termCommand?.call('t');
+        } else {
+          widget.port.key(_sid, macLetterCodes['t']!, latchCmd);
+        }
       case BarKind.more:
-        widget.state.setKeyBarMore(!widget.state.prefs.keyBarMore);
+        final more = widget.state.prefs.keyBarMore;
+        // Folding the second row takes its sticky ⌃ ⌘ with it: a lit key out of sight would turn the next letter
+        // into a combination nobody sees coming.
+        if (more) _latch.releaseAll();
+        widget.state.setKeyBarMore(!more);
       case BarKind.hide:
         // Asked for, so not [foldKeyBar]: a lit ⌃ or 打字后自动收起 off does not keep the 快捷区 up.
         widget.state.setQuickHidden(term: termKind(widget.state, widget.session), hidden: true);

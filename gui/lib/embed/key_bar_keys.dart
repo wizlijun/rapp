@@ -2,7 +2,7 @@
 // Pure data and layout: the widget draws what keyBarRows says and sends what barKeys says.
 import 'modifier_latch.dart';
 
-enum BarKind { send, mod, copy, paste, more, hide }
+enum BarKind { send, mod, copy, paste, cmdT, more, hide }
 
 /// One key. [wire] is the terminal wire name; [code] and [mods] the macOS key code and modifier bits for app sessions;
 /// [bit] the latch bit of a mod key; [alt] the id of the swipe-up key.
@@ -25,7 +25,7 @@ const keyBarPad = 6.0;
 
 double keyBarHeight(int rows) => rows * keyBarKeyHeight + (rows - 1) * keyBarGap + 2 * keyBarPad;
 
-/// macOS key codes of the letters, for the ⌃-letter keys.
+/// macOS key codes of the letters, for the ⌃-letter keys and ⌘T.
 const macLetterCodes = <String, int>{'a':0,'s':1,'d':2,'f':3,'h':4,'g':5,'z':6,'x':7,'c':8,'v':9,'b':11,'q':12,'w':13,'e':14,'r':15,'y':16,'t':17,'o':31,'u':32,'i':34,'p':35,'l':37,'j':38,'k':40,'n':45,'m':46};
 
 const barKeys = <String, BarKey>{
@@ -53,25 +53,22 @@ const barKeys = <String, BarKey>{
   'cmd': (id: 'cmd', label: '⌘', spoken: 'Command', kind: BarKind.mod, wire: null, code: null, mods: 0, bit: latchCmd, alt: null, repeats: false),
   'copy': (id: 'copy', label: '⌘C', spoken: '复制', kind: BarKind.copy, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
   'paste': (id: 'paste', label: '⌘V', spoken: '粘贴', kind: BarKind.paste, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
+  'cmdt': (id: 'cmdt', label: '⌘T', spoken: 'Command T', kind: BarKind.cmdT, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
   'more': (id: 'more', label: '⋯', spoken: '更多按键', kind: BarKind.more, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
   'hide': (id: 'hide', label: '⌄', spoken: '收起快捷区', kind: BarKind.hide, wire: null, code: null, mods: 0, bit: null, alt: null, repeats: false),
 };
 
 /// The rows of the bar, each a list of key ids, grouped by what the key is for (key-bar-keys research, 2026-11-25).
-/// First row, eleven keys: complete and switch mode (Tab ⇧Tab), stop (Esc ⌃C), the sticky ⌃, choose (↑ ↓), ⌫ ⏎, then
-/// the bar's own two at the right end: ⋯ (second row) and ⌄ (fold the 快捷区, as the toggle in the box does; the user
-/// asked for it back on 2026-11-25). [more] adds the second row: copy and paste (shown as ⌘C ⌘V), ⌥ (and ⌘ for an app), ← →,
-/// then the ⌃ keys by how often the agent CLIs use them. Any other ⌃ key is the sticky ⌃ and a typed letter.
+/// First row, ten keys: complete and switch mode (Tab ⇧Tab), stop (Esc ⌃C), choose (↑ ↓), ⌫ ⏎, then the bar's own two
+/// at the right end: ⋯ (second row) and ⌄ (fold the 快捷区, as the toggle in the box does; the user asked for it back on
+/// 2026-11-25). [more] adds the second row (bar-cmd, 2026-11-27): copy and paste (shown as ⌘C ⌘V), ⌘T, the sticky ⌘
+/// and ⌃, ← →. Any ⌃ key is the sticky ⌃ and a typed letter; on a terminal the sticky ⌘ and a letter is rApp's own
+/// shortcut. The rows are the same for an app and a terminal; [app] is kept for the callers that tell them apart.
 List<List<String>> keyBarRows({required bool app, required bool more}) {
-  const first = ['tab', 'stab', 'esc', 'cc', 'ctrl', 'up', 'down', 'bksp', 'enter', 'more', 'hide'];
+  const first = ['tab', 'stab', 'esc', 'cc', 'up', 'down', 'bksp', 'enter', 'more', 'hide'];
   if (!more) return [first];
   return [
     first,
-    [
-      'copy', 'paste',
-      'opt', if (app) 'cmd',
-      'left', 'right',
-      'co', 'cr', 'ct', 'cb', 'cl',
-    ],
+    ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'left', 'right'],
   ];
 }

@@ -218,6 +218,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     widget.session.addListener(_onSession);
     widget.session.termCopy = _copy;
     widget.session.termTakesKey = _takesKey;
+    widget.session.termCommand = _command;
     _focus.addListener(_onFocus);
     HardwareKeyboard.instance.addHandler(_onKeys);
     _focusSeen = widget.state.termFocusTick;
@@ -244,6 +245,8 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       widget.session.termCopy = _copy;
       if (old.session.termTakesKey == _takesKey) old.session.termTakesKey = null;
       widget.session.termTakesKey = _takesKey;
+      if (old.session.termCommand == _command) old.session.termCommand = null;
+      widget.session.termCommand = _command;
       _focusIfWanted();
       // The element is reused for the new session: a hold of the hotkey was on the old one, and ends there.
       _gateTimer?.cancel();
@@ -268,6 +271,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     widget.session.removeListener(_onSession);
     if (widget.session.termCopy == _copy) widget.session.termCopy = null;
     if (widget.session.termTakesKey == _takesKey) widget.session.termTakesKey = null;
+    if (widget.session.termCommand == _command) widget.session.termCommand = null;
     widget.state.removeListener(_onState);
     HardwareKeyboard.instance.removeHandler(_onKeys);
     _voiceEnds?.cancel();
@@ -810,8 +814,9 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     // (Esc, Ctrl+[ / ], Ctrl+O, F11) are the window's again.
     if (!_canInput || widget.frozen) return KeyEventResult.ignored;
     // The key bar's sticky ⌃ ⌥: a letter goes as `Ctrl-<letter>` / `Alt-<letter>`, a named key with them added.
+    // Its sticky ⌘: a letter is rApp's ⌘ shortcut ([_command]), a named key goes plain.
     final latch = widget.session.keyLatch;
-    if (latch.flags & (latchCtrl | latchOpt) != 0 && input != null) {
+    if (latch.flags & (latchCtrl | latchOpt | latchCmd) != 0 && input != null) {
       if (input case TermText(:final text) when RegExp(r'^[a-zA-Z]$').hasMatch(text)) {
         if (sendLatchedLetter(widget.state, widget.session, widget.port, text)) {
           _sentInput();
@@ -849,6 +854,21 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     if (r == null) return KeyEventResult.ignored;
     if (action == TermShortcut.closeTerm && !widget.state.canEndTerm(r.key)) return KeyEventResult.ignored;
     return KeyEventResult.handled;
+  }
+
+  /// The key bar's ⌘ and [letter] (its ⌘T key, or its sticky ⌘ and a typed letter): what a hardware ⌘ and the
+  /// letter do on this stage. One with no shortcut does nothing.
+  void _command(String letter) {
+    switch (letter) {
+      case 'c':
+        _copy();
+      case 'v':
+        if (_canInput && !widget.frozen) unawaited(_paste());
+      case 't':
+        _termShortcut(TermShortcut.newTerm);
+      case 'w':
+        _termShortcut(TermShortcut.closeTerm);
+    }
   }
 
   /// ⌘T: a new terminal beside this one. ⌘W: end this one, on a device that can (else the window has the key).

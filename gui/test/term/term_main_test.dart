@@ -9,6 +9,7 @@ import 'package:flutter/gestures.dart' show kSecondaryButton;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/key_bar.dart';
+import 'package:rapp/embed/modifier_latch.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
@@ -974,6 +975,39 @@ void main() {
       expect(t.sent.where((m) => m['cmd'] == 'open_term').single['from'], app);
       expect(term.calls.where((c) => c.$1 == 'keys' || c.$1 == 'type'), isEmpty);
       await tester.pump(const Duration(seconds: 1)); // the new terminal's resize wait
+    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+    testWidgets('the key bar\'s ⌘ then a hardware t opens one beside, as ⌘T does', (tester) async {
+      await tester.pumpWidget(wrap(window()));
+      t.emit(listOf(shell: true, fg: 'zsh'));
+      await openTerm(tester, two);
+      hubAnswers(list: listOf(shell: true));
+      final rs = s.currentRemote!;
+      rs.keyLatch.tap(latchCmd);
+      Focus.of(tester.element(find.byKey(const Key('term-grid')))).requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyT);
+      await settle(tester);
+      expect(t.sent.where((m) => m['cmd'] == 'open_term').single['from'], app);
+      expect(term.calls.where((c) => c.$1 == 'keys' || c.$1 == 'type'), isEmpty);
+      expect(rs.keyLatch.flags, 0);
+      await tester.pump(const Duration(seconds: 1));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+    testWidgets('termCommand: t opens one beside, x does nothing', (tester) async {
+      await tester.pumpWidget(wrap(window()));
+      t.emit(listOf(shell: true, fg: 'zsh'));
+      await openTerm(tester, two);
+      hubAnswers(list: listOf(shell: true));
+      final run = s.currentRemote!.termCommand!;
+      run('x');
+      await settle(tester);
+      expect(t.sent.where((m) => m['cmd'] == 'open_term' || m['cmd'] == 'end_term'), isEmpty);
+      expect(term.calls.where((c) => c.$1 == 'keys' || c.$1 == 'type'), isEmpty);
+      run('t');
+      await settle(tester);
+      expect(t.sent.where((m) => m['cmd'] == 'open_term'), hasLength(1));
+      await tester.pump(const Duration(seconds: 1));
     }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
     testWidgets('⌘W in a terminal ends it on a new device, and bubbles on an old one', (tester) async {
