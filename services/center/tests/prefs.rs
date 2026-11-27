@@ -162,11 +162,33 @@ async fn run_and_save<F: std::future::Future<Output = ()>>(cfg: Config, f: impl 
 #[tokio::test]
 async fn prefs_and_store_survive_restart_with_data_dir() {
     let d = tempfile::tempdir().unwrap();
-    run_and_save(data_cfg(&d), |addr| async move {
-        assert_eq!(put(addr, "/prefs/v1/phrases", &doc(5, 0, json!(["a"]))).await.0, 204);
-        assert_eq!(put(addr, "/prefs/v1/usage/dev1", r#"{"at":8,"data":{"a":{}}}"#).await.0, 204);
-    })
-    .await;
+    let path = d.path().join("data/prefs.json");
+    // What prefs.json holds once it holds `want`, polled for 3 s (a save comes 1 s after a change).
+    let saved = |want: fn(&Value) -> bool| {
+        let path = path.clone();
+        async move {
+            for _ in 0..30 {
+                if let Some(v) = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) {
+                    if want(&v) {
+                        return v;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            panic!("prefs.json never got there: {:?}", std::fs::read_to_string(&path));
+        }
+    };
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    let task = tokio::spawn(serve(data_cfg(&d), l));
+    // Past the start's own save, so only a PUT can bring the next one.
+    saved(|v| v["store"].is_string()).await;
+    assert_eq!(put(addr, "/prefs/v1/phrases", &doc(5, 0, json!(["a"]))).await.0, 204);
+    saved(|v| v["docs"]["phrases"]["at"] == 5).await;
+    assert_eq!(put(addr, "/prefs/v1/usage/dev1", r#"{"at":8,"data":{"a":{}}}"#).await.0, 204);
+    saved(|v| v["usage"]["dev1"]["at"] == 8).await;
+    task.abort();
+    let _ = task.await;
     let file: Value = serde_json::from_slice(&std::fs::read(d.path().join("data/prefs.json")).unwrap()).unwrap();
     assert!(is_store(&file["store"]), "{file}");
     assert_eq!(file["docs"], json!({"phrases":{"at":5,"data":["a"]}}));
