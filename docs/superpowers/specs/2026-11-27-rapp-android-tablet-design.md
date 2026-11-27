@@ -1,7 +1,7 @@
 # rApp 安卓平板版设计
 
 日期：2026-11-27
-状态：待用户核对
+状态：用户已核对（2026-11-27），待写计划
 分支：`docs/android-tablet-design`
 相关规格：iPad 和 Duo（`2026-11-17-rapp-ipad-duo-design.md`，下文叫「iPad 规格」）、Windows（`2026-11-26-rapp-windows-design.md`，下文叫「Windows 规格」）、iOS 内置输入法（`2026-11-20-rapp-ios-rime-ime-design.md`）
 
