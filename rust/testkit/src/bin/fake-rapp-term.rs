@@ -129,11 +129,15 @@ fn send(s: &mut TcpStream, v: &Value) -> bool {
 fn conn(mut s: TcpStream, token: &str, config_path: &str) {
     let mut r = BufReader::new(s.try_clone().unwrap());
     let _ = s.set_read_timeout(Some(Duration::from_secs(30)));
+    #[cfg(windows)]
+    let _ = r.get_ref().set_read_timeout(Some(Duration::from_secs(30)));
     let (mut req, mut tok) = (String::new(), String::new());
     if !matches!(r.read_line(&mut req), Ok(1..)) || !matches!(r.read_line(&mut tok), Ok(1..)) {
         return;
     }
     let _ = s.set_read_timeout(None);
+    #[cfg(windows)]
+    let _ = r.get_ref().set_read_timeout(None);
     if tok.trim_end_matches('\n') != token {
         send(&mut s, &json!({"error":"bad token"}));
         return;
@@ -214,6 +218,8 @@ fn conn(mut s: TcpStream, token: &str, config_path: &str) {
 fn watch(mut s: TcpStream, mut r: BufReader<TcpStream>, config_path: &str) {
     log("watch open");
     let _ = s.set_read_timeout(Some(Duration::from_millis(20)));
+    #[cfg(windows)]
+    let _ = r.get_ref().set_read_timeout(Some(Duration::from_millis(20)));
     let (mut last, mut sent): (Option<String>, Option<Value>) = (None, None);
     'run: loop {
         let (text, cfg) = config(config_path);

@@ -1868,6 +1868,10 @@ fn password_never_leaves() {
             assert!(!holds(text.as_bytes(), n), "{what} holds part of the password (needle {i})");
         }
     }
+    // Windows `File::lock` is a mandatory byte-range lock: wait until the unlock thread releases it
+    // before `std::fs::read` inspects the files under the data root.
+    #[cfg(windows)]
+    rapp_host_core::lock::with_unlock_lock(&unlock_lock_file(&platform.data_root()), &mut |_| {}, || ());
     let mut files = Vec::new();
     files_under(&platform.data_root(), &mut files);
     assert!(files.iter().any(|(p, _)| p.ends_with("unlock.lock")), "the unlock lock file was used");

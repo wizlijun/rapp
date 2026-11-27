@@ -334,7 +334,7 @@ mod tests {
             })
             .on(PLUTIL, move |a| {
                 assert_eq!(&a[..5], ["-extract", "CFBundleShortVersionString", "raw", "-o", "-"]);
-                assert!(a[5].ends_with("rapp.app/Contents/Info.plist"), "{a:?}");
+                assert!(Path::new(&a[5]).ends_with("rapp.app/Contents/Info.plist"), "{a:?}");
                 Out::ok(format!("{version}\n"))
             })
     }

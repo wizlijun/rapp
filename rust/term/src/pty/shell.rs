@@ -269,6 +269,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn zsh_launch_sets_zdotdir_and_keeps_old() {
         let l = launch(&v(&["/bin/zsh", "-l"]), Path::new("/h"), Some("/u/z"), None).unwrap();
         assert_eq!(l.args, v(&["-l"]));
@@ -282,6 +283,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn zsh_launch_without_old_zdotdir_sets_no_rapp_zdotdir() {
         let l = launch(&v(&["/bin/zsh", "-l"]), Path::new("/h"), None, None).unwrap();
         assert!(l.set.contains(&pair("ZDOTDIR", "/h/zsh")), "{l:?}");
@@ -291,6 +293,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn bash_launch_drops_login_flag() {
         let l = launch(&v(&["/bin/bash", "-l"]), Path::new("/h"), Some("/u/z"), None).unwrap();
         assert_eq!(l.args, v(&["--init-file", "/h/rapp.bash", "-i"]));
@@ -303,6 +306,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn fish_launch_quotes_path() {
         let l = launch(&v(&["/opt/my shells/fish", "-l"]), Path::new(r"/h/it's\x"), None, None).unwrap();
         assert_eq!(l.args, v(&["-l", "-C", r"source '/h/it\'s\\x/rapp.fish'"]));

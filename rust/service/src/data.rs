@@ -542,8 +542,10 @@ mod tests {
         assert!(!logged.contains("service.json") && !logged.contains("local/"), "{logged}");
     }
 
+    #[cfg(unix)]
     static PROBES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
+    #[cfg(unix)]
     fn counted_shim(_: &Path) -> bool {
         PROBES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         true

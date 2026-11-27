@@ -1045,7 +1045,7 @@ fn cli_bin() -> std::path::PathBuf {
                 None => std::thread::sleep(Duration::from_millis(100)),
             }
         }
-        let bin = dir.join("rapp-cli");
+        let bin = dir.join(format!("rapp-cli{}", std::env::consts::EXE_SUFFIX));
         assert!(bin.exists(), "{} was not built", bin.display());
         bin
     })

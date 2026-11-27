@@ -76,12 +76,18 @@ impl AsyncUdpSocket for Socket {
             let mut failed = None;
             // A failure is handed to tokio as WouldBlock, which clears the readiness: the socket
             // is tried again when the system next says it is readable, not straight away.
-            let r = self.io.try_io(Interest::READABLE, || match self.inner.recv((&self.io).into(), bufs, meta) {
-                Err(e) if e.kind() != io::ErrorKind::WouldBlock => {
-                    failed = Some(e);
-                    Err(io::ErrorKind::WouldBlock.into())
+            // On Windows, ICMP port-unreachable from an offline peer arrives on the next receive as
+            // ConnectionReset (WSAECONNRESET, 10054); skip it and read whatever follows.
+            let r = self.io.try_io(Interest::READABLE, || loop {
+                match self.inner.recv((&self.io).into(), bufs, meta) {
+                    #[cfg(windows)]
+                    Err(e) if e.kind() == io::ErrorKind::ConnectionReset => continue,
+                    Err(e) if e.kind() != io::ErrorKind::WouldBlock => {
+                        failed = Some(e);
+                        return Err(io::ErrorKind::WouldBlock.into());
+                    }
+                    r => return r,
                 }
-                r => r,
             });
             match (r, failed) {
                 (Ok(n), _) => return Poll::Ready(Ok(n)),

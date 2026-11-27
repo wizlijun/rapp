@@ -283,7 +283,15 @@ async fn a_crashed_service_comes_back() {
     assert_eq!(health(p).await.unwrap()["name"], "rapp-state");
     wait_state(&a, WAIT, |r| r["outbox"]["dest"] == json!({"local": p}) && r["outbox"]["up"] == true).await;
     wait_http_state(p, WAIT, |v| session_a(v, &a_fp).is_some_and(|s| s["state"] == "idle")).await;
+    #[cfg(unix)]
     let killed = std::process::Command::new("kill").args(["-9", &pid.to_string()]).status().unwrap();
+    #[cfg(windows)]
+    let killed = rapp_net::proc::command("taskkill")
+        .args(["/F", "/PID", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap();
     assert!(killed.success());
     // Changed while it is down.
     term_json(a.home.path(), "working", 0);

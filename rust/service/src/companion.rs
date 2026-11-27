@@ -378,7 +378,12 @@ async fn run_once(state: &Arc<State>, c: &'static Companion, cfg: &ServiceCfg, c
         *child = None;
         state.log.event(Lvl::Info, "companion_exit", json!({"name": c.name, "code": status.ok().and_then(|s| s.code())}));
         let line = last.lock().unwrap().clone();
-        if quick && (line.contains("Address already in use") || line.contains("AddrInUse")) {
+        #[cfg(unix)]
+        let port_taken = line.contains("Address already in use") || line.contains("AddrInUse");
+        #[cfg(windows)]
+        let port_taken =
+            line.contains("Address already in use") || line.contains("AddrInUse") || line.contains("(os error 10048)");
+        if quick && port_taken {
             return Outcome::Failed("port taken", format!("端口 {port} 被占用"));
         }
         return Outcome::Failed("exited", "没有起来".into());
