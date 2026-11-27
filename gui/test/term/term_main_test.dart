@@ -1251,6 +1251,40 @@ void main() {
       expect(s.entryFor(key), isNull);
       await tester.pump(const Duration(seconds: 1));
     }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
+    testWidgets('on Linux the key bar sticky ⌘ + t/x runs rApp terminal shortcuts without typing into the PTY',
+        (tester) async {
+      await tester.pumpWidget(wrap(window()));
+      t.emit(listOf(shell: true, fg: 'zsh'));
+      await openTerm(tester, two);
+      hubAnswers(list: listOf(shell: true));
+      final rs = s.currentRemote!;
+      s.setKeyBarMore(true);
+      rs.keyLatch.tap(latchCmd);
+      rs.keyLatch.tap(latchCtrl);
+      s.setKeyBarMore(false);
+      expect(rs.keyLatch.flags, 0, reason: 'folding second row releases sticky ⌘ and ⌃');
+
+      rs.keyLatch.tap(latchCmd);
+      Focus.of(tester.element(find.byKey(const Key('term-grid')))).requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyX);
+      await settle(tester);
+      expect(rs.keyLatch.flags, 0);
+      expect(t.sent.where((m) => m['cmd'] == 'open_term'), isEmpty);
+      expect(term.calls.where((c) => c.$1 == 'keys' || c.$1 == 'type'), isEmpty);
+
+      rs.keyLatch.tap(latchCmd);
+      rs.keyLatch.tap(latchCmd);
+      expect(rs.keyLatch.of(latchCmd), LatchState.locked);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.keyT);
+      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyT);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.keyT);
+      await settle(tester);
+      expect(t.sent.where((m) => m['cmd'] == 'open_term').single['from'], app);
+      expect(term.calls.where((c) => c.$1 == 'keys' || c.$1 == 'type'), isEmpty);
+      await tester.pump(const Duration(seconds: 1));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
   });
 
   group('with the real terminal port', () {
