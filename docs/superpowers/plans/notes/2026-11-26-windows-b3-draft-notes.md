@@ -207,6 +207,7 @@
 - **计划 :678（任务 15，过大的 stateRules）**：过大的规则在协议解码器那一层就被拒了（protocol.rs:1019-1022；Swift Protocol.swift:474），会话以 `bad data from client: rules too large` 结束，根本到不了 engine。
 - **计划 :633/:641（任务 13）**：unexpected message 的文案应以 Server.swift:538 为准，即 `unexpected message from client`。
 - **计划 :661（任务 14）**：stats 事件没有 `in_flight` 字段。测试改为检查帧数（没有 ack 时为 1）和 stats fps ≤ 1。
+- **计划 :585、:591（任务 13，平台接口）**：`WindowOps::move_to` 和 `LockOps::stay_awake` 不返回结果，Swift 的两行失败日志就写不出来：窗口移不动时的 `could not move a window (the app may not allow it)`（Server.swift:485-487，`WindowResizer.move` 返回 Bool），保持唤醒被拒时的 `could not keep A awake (IOKit …)`（PowerHold.swift:21-23，被拒就不持有，结束时也不释放）。已改成 `move_to(…) -> bool`、`stay_awake(on) -> Option<String>`（`None` 是成功，否则是原因），会话照 Swift 写这两行；计划同一提交改了。
 - **任务 14 的空区域场景**：`capture_region` 走不到空区域，测试只好强制一个 0x0 帧，命中 `sendable` 守卫。
 
 ## 5. 编译和行为风险（最可能的在前）

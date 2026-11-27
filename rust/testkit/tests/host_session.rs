@@ -769,6 +769,24 @@ fn a_refused_hello_never_holds_a_awake() {
     assert_eq!(count_text(&host, "A may idle again"), 0);
 }
 
+/// `PowerHold.swift:21-23`: a refused hold logs why, and the end releases nothing.
+#[test]
+fn a_refused_stay_awake_is_logged_and_never_released() {
+    let (platform, host) = serve();
+    platform.set_awake_error(Some("refused-for-test"));
+    let mut c = Controller::connect(host.port());
+    c.hello(TOKEN, FAKE_APP, "B", 0, 15);
+    c.wait_for(|m| matches!(m, Incoming::Ready(..)));
+    wait_text(&host, "could not keep A awake (refused-for-test)", 1);
+    assert!(!platform.awake());
+    c.close();
+    ended_event(&host);
+    let log = platform.log();
+    assert!(!log.iter().any(|l| l == "stay_awake off"), "{log:?}");
+    assert_eq!(count_text(&host, "keeping A awake while the session is open"), 0);
+    assert_eq!(count_text(&host, "A may idle again"), 0);
+}
+
 // MARK: - Task 15: input, covers, focus pane, state rules
 
 use rapp_host_core::platform::OpenedApp;
@@ -1967,4 +1985,21 @@ fn window_commands_reach_the_platform() {
     let activate = log.iter().position(|x| x == "activate");
     let raise = log.iter().position(|x| *x == format!("raise {id}"));
     assert!(activate.is_some() && activate < raise, "{log:?}");
+    assert_eq!(count_text(&host, "could not move a window"), 0);
+}
+
+/// `Server.swift:485-487`: a window that will not move is logged, and the session goes on.
+#[test]
+fn a_window_that_will_not_move_is_logged() {
+    let (platform, host) = serve();
+    platform.set_move_fails(true);
+    let (mut c, id) = with_window(&host);
+    let mut moved = id.to_le_bytes().to_vec();
+    moved.extend(100f32.to_le_bytes());
+    moved.extend(50f32.to_le_bytes());
+    c.send(&client::packet(16, moved));
+    wait_text(&host, "could not move a window (the app may not allow it)", 1);
+    c.send(&client::packet(15, id.to_le_bytes().to_vec()));
+    let close = format!("close {id}");
+    wait_log(&platform, |l| l.contains(&close));
 }

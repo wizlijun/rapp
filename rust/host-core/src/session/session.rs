@@ -1082,20 +1082,23 @@ impl Session {
 }
 
 /// `PowerHold.stayAwake` (`Sources/rapp-host/PowerHold.swift`): the platform keeps A awake;
-/// host-core writes Swift's two log lines. `LockOps::stay_awake` cannot report a refusal, so
-/// Swift's "could not keep A awake" line has no counterpart (the hold id is always 0).
+/// host-core writes Swift's three log lines. A refused hold logs "could not keep A awake" and
+/// holds nothing, so the end releases nothing (the hold id is always 0).
 fn stay_awake(inner: &Arc<Inner>) -> StayAwake {
     let power = shared(inner.platform.lock());
     let (on, off) = (power.clone(), power);
     let (out_on, out_off) = (inner.out.clone(), inner.out.clone());
     StayAwake::new(
         move || {
-            hold(&on).stay_awake(true);
+            if let Some(reason) = hold(&on).stay_awake(true) {
+                out_on.log(&format!("could not keep A awake ({reason})"));
+                return None;
+            }
             out_on.log("keeping A awake while the session is open");
             Some(0)
         },
         move |_| {
-            hold(&off).stay_awake(false);
+            let _ = hold(&off).stay_awake(false);
             out_off.log("A may idle again");
         },
     )

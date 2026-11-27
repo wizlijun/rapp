@@ -195,8 +195,8 @@ pub trait WindowOps: Send {
     fn screen(&mut self) -> Vec<ScreenWindow>;
     fn raise(&mut self, id: u32);
     fn close(&mut self, id: u32);
-    /// Global points.
-    fn move_to(&mut self, id: u32, origin: Point);
+    /// Global points. False when the window did not move (the app may not allow it).
+    fn move_to(&mut self, id: u32, origin: Point) -> bool;
     fn resize(&mut self, id: u32, size: Size);
     /// The app that came to the front since the last call, if any.
     fn opened_app(&mut self) -> Option<OpenedApp>;
@@ -256,5 +256,8 @@ pub trait LockOps: Send {
     fn wake(&mut self);
     fn type_units(&mut self, units: &[u16]);
     fn press_return(&mut self);
-    fn stay_awake(&mut self, on: bool);
+    /// `on`: hold A awake for this handle, `None` when held; otherwise why it could not be
+    /// (logged as "could not keep A awake (<reason>)"). `off`: drop this handle's hold; the
+    /// answer is ignored.
+    fn stay_awake(&mut self, on: bool) -> Option<String>;
 }

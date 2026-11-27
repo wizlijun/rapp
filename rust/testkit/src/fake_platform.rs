@@ -69,6 +69,10 @@ struct State {
     can_unlock: bool,
     /// Why the next `lock` call cannot be made (`None`: it locks).
     lock_error: Option<String>,
+    /// Why `stay_awake(true)` is refused (`None`: it holds).
+    awake_error: Option<String>,
+    /// Windows refuse to move.
+    move_fails: bool,
     /// The lock handles holding A awake now. A hold belongs to the handle that made it (Windows'
     /// execution state belongs to a thread), so only that handle's `stay_awake(false)` ends it.
     awake: Vec<u64>,
@@ -231,6 +235,8 @@ impl FakePlatform {
             typed_ok: true,
             can_unlock: true,
             lock_error: None,
+            awake_error: None,
+            move_fails: false,
             awake: Vec::new(),
             next_lock: 1,
             locked_windows: None,
@@ -365,6 +371,16 @@ impl FakePlatform {
     /// Makes `lock` fail with `reason` (`None`: it locks again).
     pub fn set_lock_error(&self, reason: Option<&str>) {
         self.st().lock_error = reason.map(str::to_string);
+    }
+
+    /// Makes `stay_awake(true)` refuse with `reason` (`None`: it holds again).
+    pub fn set_awake_error(&self, reason: Option<&str>) {
+        self.st().awake_error = reason.map(str::to_string);
+    }
+
+    /// Makes windows refuse to move, as an app that does not allow it.
+    pub fn set_move_fails(&self, on: bool) {
+        self.st().move_fails = on;
     }
 
     /// The window frames the platform lists for the fake app while A is locked (`None`, the
@@ -683,13 +699,16 @@ impl WindowOps for FakeWindows {
         s.windows.retain(|w| w.id != id);
         FakePlatform::changed(&mut s);
     }
-    fn move_to(&mut self, id: u32, origin: Point) {
+    fn move_to(&mut self, id: u32, origin: Point) -> bool {
         let mut s = lock_state(&self.0);
         s.log.push(format!("move {id} to {},{}", origin.x, origin.y));
-        if let Some(w) = s.windows.iter_mut().find(|w| w.id == id) {
-            w.rect = Rect::new(origin.x, origin.y, w.rect.w(), w.rect.h());
+        if s.move_fails {
+            return false;
         }
+        let Some(w) = s.windows.iter_mut().find(|w| w.id == id) else { return false };
+        w.rect = Rect::new(origin.x, origin.y, w.rect.w(), w.rect.h());
         FakePlatform::changed(&mut s);
+        true
     }
     fn resize(&mut self, id: u32, size: Size) {
         let mut s = lock_state(&self.0);
@@ -967,16 +986,20 @@ impl LockOps for FakeLock {
         s.typed = 0;
         s.typed_ok = true;
     }
-    fn stay_awake(&mut self, on: bool) {
+    fn stay_awake(&mut self, on: bool) -> Option<String> {
         let id = self.1;
         let mut s = lock_state(&self.0);
         s.log.push(format!("stay_awake {}", if on { "on" } else { "off" }));
         if on {
+            if let Some(reason) = s.awake_error.clone() {
+                return Some(reason);
+            }
             if !s.awake.contains(&id) {
                 s.awake.push(id);
             }
         } else {
             s.awake.retain(|h| *h != id);
         }
+        None
     }
 }

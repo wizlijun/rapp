@@ -368,7 +368,9 @@ impl Session {
         );
         let origin = Point::new(self.display.min_x() + canvas.x, self.display.min_y() + canvas.y);
         let Some(ops) = self.ops.as_ref() else { return };
-        hold(&ops.windows).move_to(w.id, origin);
+        if !hold(&ops.windows).move_to(w.id, origin) {
+            self.inner.out.log("could not move a window (the app may not allow it)");
+        }
     }
 
     // MARK: Input sources (`Server.swift:1134-1148`)
