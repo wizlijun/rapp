@@ -1,0 +1,135 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/hub_client.dart';
+import 'package:rapp/paths.dart';
+import 'package:rapp/phone/devices_page.dart';
+import 'package:rapp/phone/phone_nav.dart';
+import 'package:rapp/phone/settings_page.dart';
+import 'package:rapp/phone/sheet.dart';
+import 'package:rapp/ui/main_state.dart';
+import 'package:rapp/ui/prefs.dart';
+import 'package:rapp/ui/session_block.dart';
+import 'package:rapp/ui/tokens.dart';
+
+import '../fakes.dart';
+
+void main() {
+  late Directory tmp;
+  late FakeTransport t;
+  late FakeSessionPort port;
+  late MainState s;
+  late PhoneNav nav;
+  var sid = 0;
+
+  Future<void> flush() => Future<void>.delayed(Duration.zero);
+
+  setUp(() {
+    tmp = Directory.systemTemp.createTempSync('pages_test');
+    sid = 0;
+  });
+  tearDown(() {
+    nav.dispose();
+    s.dispose();
+    tmp.deleteSync(recursive: true);
+  });
+
+  Future<void> boot(WidgetTester tester, {List<String> apps = const []}) async {
+    t = FakeTransport();
+    port = FakeSessionPort();
+    t.onSend = (m) {
+      if (m['cmd'] == 'hosts') {
+        t.emit({
+          'event': 'hosts',
+          'req': m['req'],
+          'hosts': [
+            {'id': 'm1', 'name': 'mini'},
+            {'id': 'm2', 'name': 'mac2'},
+          ],
+        });
+      } else if (m['cmd'] == 'apps') {
+        t.emit({'event': 'apps', 'req': m['req'], 'id': m['id'], 'path': 'lan', 'apps': []});
+      } else if (m['cmd'] == 'open') {
+        t.emit({
+          'event': 'opened', 'sid': ++sid, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+          if (m['embed'] == true) ...{'port': 5000 + sid, 'token': 'tk'},
+          'req': m['req'],
+        });
+      }
+    };
+    s = MainState(hub: HubClient(t), data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
+    nav = PhoneNav(s);
+    await tester.runAsync(() async {
+      for (var i = 0; i < 8; i++) {
+        await flush();
+      }
+      for (final a in apps) {
+        final p = a.split('/');
+        s.openOrSwitch(p[0], p[1], p[1]);
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      }
+    });
+  }
+
+  Widget app(RappTheme th, Widget home) => MaterialApp(theme: themeDataFor(th), home: Scaffold(body: home));
+
+  void size(WidgetTester tester) {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+  }
+
+  for (final th in RappTheme.values) {
+    group(th.name, () {
+      testWidgets('sheet has two rows', (tester) async {
+        size(tester);
+        await boot(tester);
+        await tester.pumpWidget(app(th, Builder(builder: (c) => TextButton(onPressed: () => showPhoneSheet(c, nav), child: const Text('go')))));
+        await tester.tap(find.text('go'));
+        await tester.pumpAndSettle();
+        for (final w in ['设备', '设置']) {
+          expect(find.text(w), findsOneWidget);
+          expect(tester.getSize(find.ancestor(of: find.text(w), matching: find.byType(InkWell)).first).height, greaterThanOrEqualTo(56));
+        }
+        for (final w in ['项目', '助理', '已处理']) {
+          expect(find.text(w), findsNothing);
+        }
+        await tester.tap(find.text('设置'));
+        await tester.pumpAndSettle();
+        expect(nav.now, PhoneView.settings);
+      });
+
+      testWidgets('device rows are 56', (tester) async {
+        size(tester);
+        await boot(tester, apps: ['m1/a', 'm1/b', 'm2/a', 'm2/b']);
+        await tester.pumpWidget(app(th, DevicesPage(state: s, nav: nav)));
+        await tester.pump();
+        expect(find.byType(SessionBlock), findsNWidgets(4));
+        for (final b in tester.widgetList<SessionBlock>(find.byType(SessionBlock))) {
+          final box = find.ancestor(of: find.byWidget(b), matching: find.byType(ConstrainedBox)).first;
+          expect(tester.getSize(box).height, greaterThanOrEqualTo(56));
+        }
+        expect(find.text('mini'), findsOneWidget);
+        expect(find.text('mac2'), findsOneWidget);
+        await tester.tap(find.byKey(const Key('block-m2/b')));
+        await tester.pump();
+        expect(nav.now, PhoneView.session);
+        expect(s.currentKey, 'm2/b');
+      });
+
+      testWidgets('settings switches theme', (tester) async {
+        size(tester);
+        await boot(tester);
+        await tester.pumpWidget(app(th, SettingsPage(state: s, nav: nav)));
+        await tester.pump();
+        expect(find.text('手机和展开后的 Pad 界面用同一个主题。'), findsOneWidget);
+        await tester.tap(find.text('WESTWORLD'));
+        await tester.pump();
+        expect(s.prefs.theme, RappTheme.westworld);
+      });
+    });
+  }
+}
