@@ -81,7 +81,8 @@ Esc cancels; Tab edits before sending. Change the shortcut in the sidebar.
 AI correction learning and prompt/chat modes use the shared LLM endpoint.
 Gateway hotwords provide spelling context to local recognition on each recording.
 Cached correction rules fix recognized words locally before sending or editing.
-The input dock, quick-area toggle, regrouped key bar (first row `Tab ⇧Tab Esc ⌃C
+The input dock, corner quick-area toggle (staying beside 收起/输入 and 语音
+whether the writing panel is open or closed), regrouped key bar (first row `Tab ⇧Tab Esc ⌃C
 ⌫ ⏎ ↑ ⋯`; second row `⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →` with inverted-T arrows
 aligning `↓` under `↑` and `→` under `⋯`, terminal `PgUp`/`PgDn` history paging
 or alt-screen keys, terminal `⌘T`, sticky `⌘` + letter rApp shortcuts, and
@@ -116,13 +117,13 @@ present), remote macOS Terminal consent prompts with screen preservation,
 `Ctrl+Shift+V` Linux terminal paste with Wayland selection roundtrip, and the
 enlarged 3-line non-blocking `WaitCard` stage overlay (for slow `Ctrl+Shift+T`,
 新建, 恢复, standby 启动 and device-tab shell opens, with queued counts and
-automatic switch to a remote Mac's desktop on consent) share the macOS 0.15.58
+automatic switch to a remote Mac's desktop on consent) share the macOS 0.15.59
 layout and rules.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and
 reattach without reconnecting. This release uses protocol v16 (compatible with
-macOS 0.15.35–0.15.58); update both peers when coming from protocol v15. Incoming GUI
+macOS 0.15.35–0.15.59); update both peers when coming from protocol v15. Incoming GUI
 state rules are forwarded by the Linux client to compatible hosts (such as
 macOS 0.15.35+) and safely ignored by the Linux desktop/app host. Off-stage and
 hidden/minimized embedded or detached sessions pause pictures but keep activity
