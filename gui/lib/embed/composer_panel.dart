@@ -670,8 +670,8 @@ Widget _cornerRow(BuildContext context, MainState state, RemoteSession session, 
   );
 }
 
-/// iOS's stage stack, its bottom [bottom] up off the [stage]'s bottom: 语音, the 快捷区 toggle and 输入 (收起 while
-/// the panel is open) one element either way, so the toggle's icon turns over; closed, 还原 and the upload strip too. [upright] as
+/// iOS's stage stack, its bottom [bottom] up off the [stage]'s bottom: 语音, 输入 (收起 while the panel is open: one
+/// element either way, so its icon turns over) and the 快捷区 toggle; closed, 还原 and the upload strip too. [upright] as
 /// [stackUprightOf] has it: a portrait stage, or a column with no room above the block.
 Widget _iosStack(BuildContext context, MainState state, RemoteSession session, SessionPort port, VoiceHold? hold,
     double bottom, Size stage, bool upright) {

@@ -225,6 +225,37 @@ void main() {
     }
   });
 
+  iosTest('iPhone landscape, text area open: the stack (语音, 收起, 快捷区) lies in a row and covers no key', (tester) async {
+    stage = const Size(844, 340);
+    tester.view.physicalSize = stage;
+    s.dispose();
+    // The 常用语条 on and 更多按键: the 快捷区 is tall enough that a column of 语音, the toggle and 输入 has no
+    // room above it on a 340-tall stage.
+    s = MainState(
+        hub: HubClient(FakeTransport()),
+        data: DataDir(tmp.path),
+        prefs: UiPrefs(phraseStrip: true),
+        port: port,
+        termPort: term,
+        voice: FakeVoice());
+    s.setKeyBarMore(true);
+    await tester.pumpWidget(layer(tsess));
+    tsess.composer.open = true;
+    await tester.pumpAndSettle();
+    expect(panel, findsOneWidget);
+    final toggle = find.byKey(const Key('quick-toggle-stack'));
+    expect(toggle, findsOneWidget);
+    expect(bar, findsOneWidget);
+    final top = tester.getRect(panel).top;
+    final row = tester.getRect(toggle).center.dy;
+    for (final b in [toggle, find.byKey(const Key('composer-open')), find.byKey(const Key('voice-hold'))]) {
+      final r = tester.getRect(b);
+      expect(r.center.dy, row, reason: '$b in one row');
+      expect(r.bottom <= top, isTrue, reason: '$b at $r over the text area at $top');
+      expect(r.top >= 0, isTrue);
+    }
+  });
+
   for (final p in [TargetPlatform.iOS, TargetPlatform.macOS, TargetPlatform.linux]) {
     dockTest(p, 'terminal: quick area at panelWidth, bottom at the default anchor, no handle', (tester) async {
       await tester.pumpWidget(layer(tsess));
