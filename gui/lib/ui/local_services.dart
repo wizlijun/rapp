@@ -1,5 +1,5 @@
 // 本机列「连上的服务」: rapp's own services this device uses — the 中心服务 and the LLM 网关 — each with a lamp and
-// a short status (overview-local-services spec §2.1). Read-only: settings live in 全局设置 / 本机页 / LLM 接入点.
+// a short status that wraps when long (overview-local-services spec §2.1). Read-only: settings live in 全局设置 / 本机页 / LLM 接入点.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -50,7 +50,7 @@ class _LocalServicesState extends State<LocalServices> {
 
   String? _host;
 
-  /// The center url [_host] was asked for; asked again when connected at a new url.
+  /// The center url [_host] was asked for; null while not connected, so each new connection asks again.
   Uri? _hostFor;
   int _hosts = 0;
 
@@ -108,10 +108,17 @@ class _LocalServicesState extends State<LocalServices> {
     if (mounted) setState(() {});
   }
 
-  /// Asks [LocalServices.hostApi] which device runs the center, once per url it connects at.
+  /// Asks [LocalServices.hostApi] which device runs the center, once per connection: when the link drops, the old
+  /// answer and any lookup still in flight are dropped, so a reconnect asks again even at the same url (the share
+  /// address can stay while the center moves to another device).
   void _lookHost() {
     final s = widget.sync, api = widget.hostApi;
     final url = s?.status == StateStatus.connected ? s?.url : null;
+    if (url == null && _hostFor != null) {
+      _hostFor = null;
+      _host = null;
+      _hosts++;
+    }
     if (url == null || api == null || url == _hostFor) return;
     _hostFor = url;
     _host = null;
@@ -153,17 +160,18 @@ class _LocalServicesState extends State<LocalServices> {
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     final small = Theme.of(context).textTheme.bodySmall;
+    // One line of the small text, so the lamp sits centred on the first line.
+    final lineH = (small?.fontSize ?? 12) * (small?.height ?? 1.4) * MediaQuery.textScalerOf(context).scale(1);
     Widget row(String key, String name, (Lamp, String) v) => Padding(
       key: Key('local-service-$key'),
       padding: const EdgeInsets.only(top: 4),
-      child: Row(children: [
-        StatusLamp(v.$1),
+      // Long text wraps onto more lines so all of it can be read; the lamp and name stay on the first line.
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        SizedBox(height: lineH, child: Center(child: StatusLamp(v.$1))),
         const SizedBox(width: 6),
         Text(name, style: small?.copyWith(color: t.text)),
         const SizedBox(width: 8),
-        Expanded(
-          child: Text(v.$2, maxLines: 1, overflow: TextOverflow.ellipsis, style: small?.copyWith(color: t.muted)),
-        ),
+        Expanded(child: Text(v.$2, softWrap: true, style: small?.copyWith(color: t.muted))),
       ]),
     );
     final s = widget.sync;
