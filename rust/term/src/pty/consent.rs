@@ -9,6 +9,39 @@ pub const SYSTEM_EVENTS: &str = "com.apple.systemevents";
 pub const WOULD_ASK: i32 = -1744;
 /// `procNotFound`: the target is not running, so macOS cannot say.
 pub const NOT_RUNNING: i32 = -600;
+/// `errAEEventNotPermitted`: the user said no; only 系统设置 › 隐私与安全性 › 自动化 turns it back on.
+pub const DENIED: i32 = -1743;
+
+/// What bringing a Terminal tab forward may do: the front script talks to Terminal alone, never System Events.
+#[derive(Debug, PartialEq)]
+pub enum Front {
+    Go,
+    /// macOS would ask: the prompt is put up, and the script is not run.
+    Ask,
+    /// The user refused rApp control of Terminal: the script would fail.
+    Denied,
+}
+
+/// [`Front`] from macOS's answer for Terminal.
+pub fn front_verdict(terminal: i32) -> Front {
+    match terminal {
+        WOULD_ASK => Front::Ask,
+        DENIED => Front::Denied,
+        _ => Front::Go,
+    }
+}
+
+/// [`Front`] now, putting up the Terminal prompt when macOS would ask. Off macOS [`Front::Go`].
+pub fn front() -> Front {
+    #[cfg(target_os = "macos")]
+    {
+        mac::front()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Front::Go
+    }
+}
 
 /// The targets macOS would still ask about, in the order the tab script talks to them. `determine` answers for a
 /// bundle id without a prompt; `start_events` starts System Events when it is not running and answers for it then.
@@ -115,6 +148,23 @@ mod mac {
         if ask.is_empty() {
             return false;
         }
+        prompt(ask);
+        true
+    }
+
+    pub fn front() -> Front {
+        if PROMPTING.load(Ordering::SeqCst) {
+            return Front::Ask;
+        }
+        let v = front_verdict(determine(TERMINAL, false));
+        if v == Front::Ask {
+            prompt(vec![TERMINAL]);
+        }
+        v
+    }
+
+    /// Puts the prompts for `ask` up, one after another, on a thread that waits for the answers (none while one is).
+    fn prompt(ask: Vec<&'static str>) {
         if !PROMPTING.swap(true, Ordering::SeqCst) {
             std::thread::spawn(move || {
                 for b in ask {
@@ -123,7 +173,6 @@ mod mac {
                 PROMPTING.store(false, Ordering::SeqCst);
             });
         }
-        true
     }
 }
 
@@ -163,7 +212,16 @@ mod tests {
     #[test]
     fn denied_is_left_to_the_script() {
         // Denied fails the script at once, and a window opens instead: no reason to stop.
-        assert_eq!(run(-1743, -1743, None), (vec![], false));
+        assert_eq!(run(DENIED, DENIED, None), (vec![], false));
+    }
+
+    #[test]
+    fn front_asks_about_terminal_alone() {
+        assert_eq!(front_verdict(0), Front::Go);
+        // Not running: the front script answers "none" without talking to it.
+        assert_eq!(front_verdict(NOT_RUNNING), Front::Go);
+        assert_eq!(front_verdict(WOULD_ASK), Front::Ask);
+        assert_eq!(front_verdict(DENIED), Front::Denied);
     }
 
     #[test]

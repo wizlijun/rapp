@@ -306,6 +306,8 @@ pub enum FrontRefused {
     NotFound,
     /// macOS is asking whether rApp may control Terminal.
     Consent,
+    /// The user refused rApp control of Terminal (系统设置 › 隐私与安全性 › 自动化 turns it back on).
+    Denied,
     /// This platform cannot bring a window forward.
     Unsupported,
 }
@@ -315,6 +317,7 @@ impl FrontRefused {
         match self {
             FrontRefused::NotFound => "not-found",
             FrontRefused::Consent => "consent",
+            FrontRefused::Denied => "denied",
             FrontRefused::Unsupported => "unsupported",
         }
     }
@@ -332,9 +335,12 @@ pub fn front(tty: &str, launch_with: Option<&Path>) -> Result<(), FrontRefused> 
     if !cfg!(target_os = "macos") {
         return Err(FrontRefused::Unsupported);
     }
-    // Asked first: the script would only hang on the prompt.
-    if super::consent::asking() {
-        return Err(FrontRefused::Consent);
+    // Asked first, about Terminal alone (the script talks to nothing else): it would only hang on the prompt, and
+    // when the user refused, fail as if there were no such tab.
+    match super::consent::front() {
+        super::consent::Front::Ask => return Err(FrontRefused::Consent),
+        super::consent::Front::Denied => return Err(FrontRefused::Denied),
+        super::consent::Front::Go => {}
     }
     let mut c = Command::new("osascript");
     c.arg("-e").arg(TERMINAL_FRONT).arg(tty);

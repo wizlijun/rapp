@@ -31,7 +31,7 @@ import '../quick/key_layout.dart';
 import '../quick/quick_prefs.dart';
 import '../quick/quick_sync.dart';
 import '../load_model.dart';
-import '../service_client.dart' show ServiceException, ServiceMonitor, termFrontConsent, termFrontNotFound;
+import '../service_client.dart' show ServiceException, ServiceMonitor, termFrontConsent, termFrontDenied, termFrontNotFound;
 import '../permissions.dart';
 import '../embed/app_profile.dart';
 import '../embed/app_state.dart';
@@ -3815,7 +3815,12 @@ class MainState extends ChangeNotifier {
   /// What the hint says when a 新建 or a front of this machine's terminal failed with [e].
   static String localTermWords(Object e) => switch (e) {
         ServiceException(:final message) when message == termFrontNotFound => '没找到这个终端的窗口',
+        ServiceException(:final message) when message == termFrontDenied =>
+          '没有控制「终端」的权限：到「系统设置 › 隐私与安全性 › 自动化」里，打开 rApp 下面的「终端」',
         ServiceException() when consentError(e) => localConsentWords,
+        // The tab script was cut off: a prompt on this Mac most likely went unanswered (serve says "that Mac").
+        ServiceException(:final message) when message.contains('allow rApp to control Terminal') =>
+          '「终端」没有回应：看看是否弹出了授权框「“rApp”想要控制“终端”」，点「允许」后再新建',
         ServiceException(:final message) => message,
         _ => newTermWords(e),
       };

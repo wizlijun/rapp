@@ -127,6 +127,19 @@ void main() {
     expect(MainState.consentError(ServiceException('not-found')), isFalse);
   });
 
+  test('macOS refused rApp control of Terminal: says where to turn it on', () async {
+    mon.frontError = ServiceException(termFrontDenied);
+    await s.frontLocalTerm('term:pty:a');
+    expect(s.hint, '没有控制「终端」的权限：到「系统设置 › 隐私与安全性 › 自动化」里，打开 rApp 下面的「终端」');
+  });
+
+  test('Terminal not answering on this Mac is said in Chinese, about this Mac', () async {
+    mon.onOpen = () => Future.error(
+        ServiceException('Terminal did not answer: on that Mac, allow rApp to control Terminal and System Events'));
+    await s.newLocalTerm();
+    expect(s.hint, '「终端」没有回应：看看是否弹出了授权框「“rApp”想要控制“终端”」，点「允许」后再新建');
+  });
+
   test('localTermLamp ignores unread', () {
     expect(MainState.localTermLamp(_row('term:pty:a', unread: true)), Lamp.active);
     expect(MainState.localTermLamp(_row('term:pty:a', ps: const TermPs('blocked'))), Lamp.waiting);

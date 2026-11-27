@@ -18,6 +18,9 @@ const servicePort = 22029;
 const termFrontNotFound = 'not-found';
 const termFrontConsent = 'consent';
 
+/// The user refused rApp control of Terminal; only 系统设置 turns it back on.
+const termFrontDenied = 'denied';
+
 class ServiceException implements Exception {
   ServiceException(this.message, {this.page});
   final String message;
