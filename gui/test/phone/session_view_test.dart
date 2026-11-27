@@ -125,8 +125,19 @@ void main() {
     expect(views().last['fit'], true);
   });
 
+  // A Pad stage size is known and A's window is the wrong size for it: only the phone form holds the resize back.
   testWidgets('phone picture sends no resize', (tester) async {
     await boot(tester, app: 'Safari', phone: true);
+    s.stageSize(const Size(1194, 834));
+    port.emit(const ReadyEvent(1, 'Safari'));
+    port.emit(const WindowsEvent(1, [
+      RemoteWindow(
+        id: 5, parent: 0, kind: WindowKind.normal, title: 'w', rect: Rect.fromLTWH(0, 0, 800, 628), titleBar: 28,
+        resizable: true, focused: true, texture: 42, visible: Rect.fromLTWH(0, 0, 1, 1),
+      ),
+    ]));
+    await tester.runAsync(flush);
+    await tester.pump();
     await tester.pump(const Duration(seconds: 1));
     expect(port.calls.where((c) => c.$1 == 'resize'), isEmpty);
     expect(t.sent.where((m) => m['cmd'] == 'resize'), isEmpty);
