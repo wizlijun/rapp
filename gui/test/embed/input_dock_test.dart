@@ -505,7 +505,7 @@ void main() {
     expect(find.descendant(of: toggle, matching: find.byIcon(Icons.keyboard_hide_outlined)), findsOneWidget);
   });
 
-  iosTest('swipe up 40 on bar-up sends PgUp; the block rect is unchanged', (tester) async {
+  iosTest('a drag up 40 on bar-up sends Up; the block rect is unchanged', (tester) async {
     await tester.pumpWidget(layer(tsess));
     await settle(tester);
     final before = block(tsess);
@@ -519,7 +519,7 @@ void main() {
     await g.up();
     await settle(tester);
     expect([for (final c in term.calls) if (c.$1 == 'keys') c.$2['keys']], [
-      ['PageUp'],
+      ['Up'],
     ]);
     expect(block(tsess), before);
   });

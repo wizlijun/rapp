@@ -1,7 +1,6 @@
 // The key bar (iOS input toggle; the desktop's too, pc-key-bar spec): Esc, Tab, arrows, ⌃ ⌥ ⌘, copy and paste over a terminal or an app session, laid out
 // by [keyBarRows]. A terminal gets wire key names, an app macOS key codes. The modifiers are sticky ([ModifierLatch]);
-// the arrows and ⌫ repeat while held, and an arrow swiped up sends its alt (Home, PgUp, PgDn, End). A key takes no
-// focus: whatever had it keeps it.
+// the arrows and ⌫ repeat while held. A key takes no focus: whatever had it keeps it.
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -23,9 +22,6 @@ import 'session_port.dart';
 /// A repeating key starts repeating after this long held, then goes every [repeatEvery].
 const keyRepeatAfter = Duration(milliseconds: 400);
 const keyRepeatEvery = Duration(milliseconds: 80);
-
-/// A swipe up this far (logical points) on a key with an alt sends the alt.
-const keySwipeUp = 24.0;
 
 bool _isTerm(MainState state, RemoteSession session) => state.termPort?.owns(session.sid) == true;
 
@@ -312,17 +308,16 @@ class _KeyBarState extends State<KeyBar> {
     }
   }
 
-  /// A key goes (down for most; up for an arrow, after its swipe was told from its hold). A press plays the click, a
-  /// repeat ([haptic] false) does not. Returns the latch flags a send went with, for the repeats to keep.
-  int? _fire(BarKey key, {bool alt = false, bool haptic = true, int? flags}) {
+  /// A key goes on its press. A press plays the click, a repeat ([haptic] false) does not. Returns the latch flags a
+  /// send went with, for the repeats to keep.
+  int? _fire(BarKey key, {bool haptic = true, int? flags}) {
     if (_blocked) return null;
     if (haptic) unawaited(HapticFeedback.selectionClick());
-    final target = alt ? barKeys[key.alt]! : key;
-    switch (target.kind) {
+    switch (key.kind) {
       case BarKind.send:
-        return _send(target, flags);
+        return _send(key, flags);
       case BarKind.mod:
-        _latch.tap(target.bit!);
+        _latch.tap(key.bit!);
       case BarKind.copy:
         final copy = widget.onCopy;
         if (copy != null) {
@@ -345,9 +340,6 @@ class _KeyBarState extends State<KeyBar> {
         final more = widget.state.prefs.keyBarMore;
         if (more) _latch.releaseAll();
         widget.state.setKeyBarMore(!more);
-      case BarKind.hide:
-        // Asked for, so not [foldKeyBar]: a lit ⌃ or 打字后自动收起 off does not keep the 快捷区 up.
-        widget.state.setQuickHidden(term: termKind(widget.state, widget.session), hidden: true);
     }
     return null;
   }
@@ -384,23 +376,28 @@ class _KeyBarState extends State<KeyBar> {
     );
   }
 
+  /// One row: the arrow block at its end ([keyBarTail]) one column of [keyBarColumns] each, the keys before it
+  /// sharing the rest, so the arrows line up across the rows.
   Widget _rowOf(List<String> ids) {
-    final children = <Widget>[];
-    for (final (i, id) in ids.indexed) {
-      if (i > 0) children.add(const SizedBox(width: keyBarGap));
-      final key = barKeys[id]!;
-      children.add(Expanded(
-        child: _BarKeyView(
+    return LayoutBuilder(builder: (context, c) {
+      final column = ((c.maxWidth - (keyBarColumns - 1) * keyBarGap) / keyBarColumns).clamp(0.0, double.infinity);
+      final tail = keyBarTail(ids);
+      final children = <Widget>[];
+      for (final (i, id) in ids.indexed) {
+        if (i > 0) children.add(const SizedBox(width: keyBarGap));
+        final key = barKeys[id]!;
+        final view = _BarKeyView(
           key: Key('bar-$id'),
           keyDef: key,
           sid: _sid,
           state: key.bit == null ? LatchState.off : _latch.of(key.bit!),
           blocked: _blocked,
-          onFire: (alt, haptic, flags) => _fire(key, alt: alt, haptic: haptic, flags: flags),
-        ),
-      ));
-    }
-    return Row(children: children);
+          onFire: (haptic, flags) => _fire(key, haptic: haptic, flags: flags),
+        );
+        children.add(i >= ids.length - tail ? SizedBox(width: column, child: view) : Expanded(child: view));
+      }
+      return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: children);
+    });
   }
 }
 
@@ -416,7 +413,7 @@ class _BarKeyView extends StatefulWidget {
   final Object sid;
   final LatchState state;
   final bool blocked;
-  final int? Function(bool alt, bool haptic, int? flags) onFire;
+  final int? Function(bool haptic, int? flags) onFire;
 
   @override
   State<_BarKeyView> createState() => _BarKeyViewState();
@@ -424,16 +421,11 @@ class _BarKeyView extends StatefulWidget {
 
 class _BarKeyViewState extends State<_BarKeyView> {
   Timer? _timer;
-  Offset? _from;
-  bool _swiped = false, _sentByHold = false;
 
   /// The latch flags the first press went with: a hold repeats with them.
   int? _flags;
 
   BarKey get _k => widget.keyDef;
-
-  /// A key with an alt waits for its finger to say tap, swipe or hold; the rest go at once.
-  bool get _waits => _k.alt != null;
 
   @override
   void didUpdateWidget(_BarKeyView old) {
@@ -450,48 +442,18 @@ class _BarKeyViewState extends State<_BarKeyView> {
   void _stop() {
     _timer?.cancel();
     _timer = null;
-    _from = null;
   }
 
-  void _repeat() {
-    _timer = Timer.periodic(keyRepeatEvery, (_) => widget.onFire(false, false, _flags));
-  }
-
+  /// A key goes at once; a repeating one goes again after [keyRepeatAfter] held, then every [keyRepeatEvery].
   void _down(PointerDownEvent e) {
     if (widget.blocked) return;
-    _from = e.position;
-    _swiped = _sentByHold = false;
-    _flags = null;
-    if (!_waits) _flags = widget.onFire(false, true, null);
-    if (_k.repeats) {
-      _timer = Timer(keyRepeatAfter, () {
-        _sentByHold = true;
-        _flags = widget.onFire(false, _waits, _flags);
-        _repeat();
-      });
-    }
-  }
-
-  void _move(PointerMoveEvent e) {
-    final from = _from;
-    if (from == null || _swiped || _sentByHold || _k.alt == null) return;
-    if (from.dy - e.position.dy >= keySwipeUp) {
-      _swiped = true;
-      _timer?.cancel();
-      _timer = null;
-    }
-  }
-
-  void _up(PointerUpEvent e) {
-    final held = _from != null;
-    final swiped = _swiped, sentByHold = _sentByHold;
     _stop();
-    if (!held || !_waits) return;
-    if (swiped) {
-      widget.onFire(true, true, null);
-    } else if (!sentByHold) {
-      widget.onFire(false, true, null);
-    }
+    _flags = widget.onFire(true, null);
+    if (!_k.repeats) return;
+    _timer = Timer(keyRepeatAfter, () {
+      _flags = widget.onFire(false, _flags);
+      _timer = Timer.periodic(keyRepeatEvery, (_) => widget.onFire(false, _flags));
+    });
   }
 
   @override
@@ -503,20 +465,18 @@ class _BarKeyViewState extends State<_BarKeyView> {
       borderRadius: BorderRadius.circular(t.r),
       side: BorderSide(color: once || locked ? t.accent : t.line, width: once || locked ? 2 : 1),
     );
-    final alt = k.alt == null ? null : barKeys[k.alt]!;
     return Semantics(
       button: true,
       label: k.spoken,
       toggled: k.bit != null ? widget.state != LatchState.off : null,
       excludeSemantics: true,
-      onTap: widget.blocked ? null : () => widget.onFire(false, true, null),
+      onTap: widget.blocked ? null : () => widget.onFire(true, null),
       child: Opacity(
         opacity: widget.blocked ? .4 : 1,
         child: Listener(
           behavior: HitTestBehavior.opaque,
           onPointerDown: _down,
-          onPointerMove: _move,
-          onPointerUp: _up,
+          onPointerUp: (_) => _stop(),
           onPointerCancel: (_) => _stop(),
           child: Material(
             color: locked ? Color.alphaBlend(t.accent.withValues(alpha: .18), t.raise.first) : t.raise.first,
@@ -526,21 +486,11 @@ class _BarKeyViewState extends State<_BarKeyView> {
             child: InkWell(
               canRequestFocus: false,
               onTap: widget.blocked ? null : () {},
-              child: Stack(
-                children: [
-                  Center(
-                    child: Text(k.label,
-                        maxLines: 1,
-                        style: TextStyle(
-                            fontSize: 13, color: t.text, fontFamily: t.mono, fontFamilyFallback: t.monoFallback)),
-                  ),
-                  if (alt != null)
-                    Positioned(
-                      top: 2,
-                      right: 3,
-                      child: Text(alt.label, style: TextStyle(fontSize: 9, color: t.muted)),
-                    ),
-                ],
+              child: Center(
+                child: Text(k.label,
+                    maxLines: 1,
+                    style: TextStyle(
+                        fontSize: 13, color: t.text, fontFamily: t.mono, fontFamilyFallback: t.monoFallback)),
               ),
             ),
           ),
