@@ -94,7 +94,7 @@ void main() {
     final got = <({PhoneScreen screen, String? cameFrom})>[];
     await tester.pumpWidget(ListenableBuilder(
       listenable: s,
-      builder: (_, __) => MaterialApp(
+      builder: (_, _) => MaterialApp(
         home: FormSwitch(
           state: s,
           settle: settle,
