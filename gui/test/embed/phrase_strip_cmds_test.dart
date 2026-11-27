@@ -272,7 +272,7 @@ void main() {
     }
   });
 
-  testWidgets('linux desktop: refused taps in 常用语▾ and 按键▾ explain in the sheet only without leaving phrase-hint on KeyBar',
+  testWidgets('linux desktop: refused taps in 命令▾ explain in the sheet only without leaving phrase-hint on KeyBar',
       (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
     try {
@@ -283,8 +283,8 @@ void main() {
       s.setStripItems([const StripCmd('new', per: {'codex': null}), ...defaultStripItems.skip(1)]);
       await tester.pumpWidget(wrap(SizedBox(width: 900, child: KeyBar(state: s, session: tsess, port: term))));
 
-      // Unsupported command in 常用语▾: explained inside the sheet only, never on the strip behind it.
-      await tester.tap(ph('quick-menu-phrases'));
+      // Unsupported command in 命令▾: explained inside the sheet only, never on the strip behind it.
+      await tester.tap(ph('quick-menu-cmds'));
       await tester.pumpAndSettle();
       await tester.tap(ph('menu-p-0'));
       await tester.pump();
@@ -294,13 +294,15 @@ void main() {
       await tester.pumpAndSettle();
       expect(ph('phrase-hint'), findsNothing);
 
-      // Unregistered termCommand in 按键▾ (新标签 ⌘T with session.termCommand == null): usable key action fails in the
-      // sheet only, never on the strip behind it.
-      await tester.tap(ph('quick-menu-keys'));
-      await tester.pumpAndSettle();
-      await tester.tap(ph('menu-k-newtab'));
+      // Plain shell (no AI tool): tapping a greyed command in 命令▾ explains inside the sheet only.
+      fg('zsh', shell: true);
+      s.setStripItems(List.of(s.quick.phrases));
       await tester.pump();
-      expect(tester.widget<Text>(ph('menu-hint')).data, '这里发不了 ⌘T');
+      await tester.tap(ph('quick-menu-cmds'));
+      await tester.pumpAndSettle();
+      await tester.tap(ph('menu-p-0'));
+      await tester.pump();
+      expect(tester.widget<Text>(ph('menu-hint')).data, '这里没有认得的 AI 工具，发不了命令');
       expect(ph('phrase-hint'), findsNothing);
       Navigator.of(tester.element(ph('menu-hint'))).pop();
       await tester.pumpAndSettle();

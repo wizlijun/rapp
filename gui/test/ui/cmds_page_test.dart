@@ -175,4 +175,29 @@ void main() {
     expect(phrases(), ps);
     expect(s.quick.stars, [refOf(cmd('compact'))]);
   });
+
+  testWidgets('Linux desktop: CmdsPage lists all 7 built-in commands including 搜历史 and migrates 0.15.63/64 keys doc',
+      variant: TargetPlatformVariant.only(TargetPlatform.linux), (tester) async {
+    await tester.runAsync(() async {
+      final migDir = Directory('${tmp.path}/mig')..createSync();
+      File('${migDir.path}/quick.json').writeAsStringSync(
+        '{"v":1,'
+        '"phrases":{"at":10,"data":[{"cmd":"new"},{"text":"继续","id":"p1"}]},'
+        '"keys":{"at":10,"data":[{"id":"search","label":"翻历史"},{"id":"clear","label":"清屏"}]},'
+        '"layout":{"at":10,"data":{"rows":[["tab","k:clear","esc"],["copy"]]}},'
+        '"stars":{"at":10,"data":["k:search","k:clear"]},'
+        '"usage":{"at":10,"data":{"k:search":{"2026-11-27":3},"k:clear":{"2026-11-27":2}}}}',
+      );
+      final q = QuickPrefs.load(migDir.path, legacy: const []);
+      expect(q.phrases.whereType<StripCmd>().any((c) => c.id == 'search' && c.label == '翻历史'), isTrue);
+      expect(q.stars, ['p:search']);
+      expect(q.layout.rows[0], ['tab', 'esc']);
+      expect(q.usage, {'p:search': {'2026-11-27': 3}});
+      expect(File('${migDir.path}/quick.json').readAsStringSync().contains('"keys"'), isFalse);
+    });
+    await open(tester);
+    expect(find.text('新对话'), findsOneWidget);
+    expect(find.text('搜历史'), findsOneWidget);
+    expect([for (final c in cmds()) c.id], builtinCmdOrder);
+  });
 }

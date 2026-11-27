@@ -363,13 +363,15 @@ void main() {
     expect(term.calls.where((c) => c.$1 != 'composer'), isEmpty);
   });
 
-  testWidgets('Linux desktop: mouse click on a quick-row key action sends keys while preserving editor focus and IME preedit',
+  testWidgets('Linux desktop: mouse click on a quick-row command chip sends keys while preserving editor focus and IME preedit',
       (tester) async {
     tester.view.physicalSize = const Size(1600, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     tsess.composer.open = true;
-    s.toggleStar('k:clear');
+    final searchIdx = s.quick.phrases.indexWhere((it) => it is StripCmd && it.id == 'search');
+    expect(searchIdx, isNonNegative);
+    s.toggleStar(refOf(s.quick.phrases[searchIdx]));
     await tester.pumpWidget(wrap(SizedBox(
       width: 1200,
       height: 700,
@@ -378,7 +380,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('bar-stab')), findsNothing);
-    expect(ph('quick-menu-keys'), findsOneWidget);
+    expect(ph('quick-menu-cmds'), findsOneWidget);
     expect(ph('quick-menu-phrases'), findsOneWidget);
 
     final field = find.byKey(const Key('composer-field'));
@@ -394,9 +396,9 @@ void main() {
     await tester.pump();
 
     term.calls.clear();
-    await tester.tap(ph('keyact-clear'), kind: PointerDeviceKind.mouse);
+    await tester.tap(ph('phrase-$searchIdx'), kind: PointerDeviceKind.mouse);
     await tester.pump();
-    expect(term.calls.where((c) => c.$1 == 'keys').single.$2['keys'], ['Ctrl-L']);
+    expect(term.calls.where((c) => c.$1 == 'keys').single.$2['keys'], ['Ctrl-R']);
     expect(editor().focusNode.hasFocus, isTrue);
     expect(editor().controller.value, preedit);
     await waitRepeat(tester);
