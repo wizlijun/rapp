@@ -16,6 +16,7 @@ import 'package:rapp/embed/strip_cmds.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/pages/keys_page.dart';
 import 'package:rapp/pages/phrases_page.dart';
+import 'package:rapp/quick/key_actions.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/quick/quick_row.dart';
 import 'package:rapp/quick/quick_usage.dart';
@@ -344,5 +345,46 @@ void main() {
     expect(s.quick.keys.where((a) => a.id == 'bg'), isEmpty);
     expect(s.quick.stars, isEmpty, reason: 'the deleted action takes its star');
     expect(ph('keyact-bg'), findsNothing);
+  });
+
+  iosTest('a key action with its own chord on codex says that chord where it cannot go', (tester) async {
+    // ⌘K on codex: a terminal has no ⌘ key and rApp has no ⌘K shortcut, so it is grey here; the plain chord ⌃R could go.
+    s.setKeyActions([
+      const KeyAction('x', label: '试试', chord: Chord('r', ctrl: true), per: {'codex': Chord('k', cmd: true)}),
+    ]);
+    fg('codex');
+    await tester.pumpWidget(strip(tsess));
+    await tester.tap(ph('quick-menu-keys'));
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: ph('menu-k-x'), matching: find.text('⌘K')), findsOneWidget);
+    await tester.tap(ph('menu-k-x'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Text>(ph('menu-hint')).data, '这里发不了 ⌘K');
+    expect(term.calls.where((c) => c.$1 == 'keys'), isEmpty);
+  });
+
+  iosTest('no AI tool: the commands stay in 常用语▾, grey; a tap sends nothing, the star still works', (tester) async {
+    fg('zsh', shell: true);
+    await tester.pumpWidget(strip(tsess));
+    final i = s.quick.phrases.indexWhere((it) => it is StripCmd && it.id == 'new');
+    final ref = refOf(s.quick.phrases[i]);
+    expect(ph('phrase-$i'), findsNothing, reason: 'not on the row (spec §5.2)');
+    term.calls.clear();
+    await tester.tap(ph('quick-menu-phrases'));
+    await tester.pumpAndSettle();
+    expect(ph('menu-p-$i'), findsOneWidget);
+    expect(find.ancestor(of: ph('menu-p-$i'), matching: find.byWidgetPredicate((w) => w is Opacity && w.opacity < 1)),
+        findsOneWidget);
+    await tester.tap(ph('menu-p-$i'));
+    await tester.pumpAndSettle();
+    expect(ph('menu-settings'), findsOneWidget, reason: 'a grey row keeps the sheet');
+    expect(tester.widget<Text>(ph('menu-hint')).data, '这里没有认得的 AI 工具，发不了命令');
+    expect(term.calls.where((c) => c.$1 != 'composer'), isEmpty);
+    expect(usageTotals([s.quick.usage], DateTime.now())[ref], isNull);
+    await tester.tap(ph('menu-star-p-$i'));
+    await tester.pumpAndSettle();
+    expect(s.quick.stars, [ref]);
+    expect(ph('menu-settings'), findsOneWidget);
+    expect(term.calls.where((c) => c.$1 != 'composer'), isEmpty);
   });
 }

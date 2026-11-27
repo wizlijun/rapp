@@ -25,6 +25,9 @@ import 'session_port.dart';
 import 'strip_cmds.dart';
 import 'strip_tools.dart';
 
+/// What a command says in 常用语▾ when no AI tool it knows is in front.
+const noToolHint = '这里没有认得的 AI 工具，发不了命令';
+
 class PhraseStrip extends StatefulWidget {
   const PhraseStrip({super.key, required this.state, required this.session, required this.port});
 
@@ -92,10 +95,12 @@ class _PhraseStripState extends State<PhraseStrip> {
     return _order!;
   }
 
-  /// Why [a] cannot go here: the tool has no such key, or a terminal cannot send the chord.
+  /// Why [a] cannot go here: the tool has no such key, or a terminal cannot send the chord (the tool's own, when it
+  /// has one).
   String _keyHint(KeyAction a, AgentTool? tool) {
-    if (tool != null && chordFor(a, tool) == null) return '${tool.name} 没有这个命令';
-    return '这里发不了 ${a.chord.label}';
+    final c = chordFor(a, tool);
+    if (c == null) return '${tool!.name} 没有这个命令';
+    return '这里发不了 ${c.label}';
   }
 
   /// What a refused tap says ([o] not sent or put); null when there is nothing to say.
@@ -278,13 +283,23 @@ class _PhraseStripState extends State<PhraseStrip> {
             final rows = switch (kind) {
               _Kind.phrases => [
                   for (final (i, it) in q.phrases.indexed)
-                    if (it is StripCmd && tool != null)
+                    if (it is StripCmd && tool == null)
+                      // No AI tool in front: the command is there but grey, a tap says why (spec §5.4).
                       row(
                         key: Key('menu-p-$i'),
                         starKey: Key('menu-star-p-$i'),
                         ref: refOf(it),
                         title: it.labelOf(),
-                        grey: actionFor(it, tool) == null,
+                        grey: true,
+                        onTap: () => setSheet(() => said = (refOf(it), noToolHint)),
+                      )
+                    else if (it is StripCmd)
+                      row(
+                        key: Key('menu-p-$i'),
+                        starKey: Key('menu-star-p-$i'),
+                        ref: refOf(it),
+                        title: it.labelOf(),
+                        grey: actionFor(it, tool!) == null,
                         onTap: () => use(refOf(it), () => _tapCmd(it, refOf(it))),
                       )
                     else if (it is Phrase)

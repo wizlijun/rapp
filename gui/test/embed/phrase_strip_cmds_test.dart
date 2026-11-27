@@ -176,7 +176,7 @@ void main() {
     expect(s.quick.keys.map((k) => k.id).toList().indexOf('search'), 0);
   });
 
-  iosTest('常用语▾: lists commands when a tool is recognised, none under zsh', (tester) async {
+  iosTest('常用语▾: lists commands when a tool is recognised, grey under zsh (spec §5.4)', (tester) async {
     await tester.pumpWidget(strip(tsess));
     await tester.tap(ph('quick-menu-phrases'));
     await tester.pumpAndSettle();
@@ -188,7 +188,9 @@ void main() {
     await tester.pump();
     await tester.tap(ph('quick-menu-phrases'));
     await tester.pumpAndSettle();
-    expect(find.descendant(of: find.byType(ListTile), matching: find.text('新对话')), findsNothing);
+    final cmd = find.ancestor(of: find.text('新对话'), matching: find.byType(ListTile));
+    expect(cmd, findsOneWidget);
+    expect(find.ancestor(of: cmd, matching: find.byWidgetPredicate((w) => w is Opacity && w.opacity < 1)), findsOneWidget);
     expect(find.descendant(of: find.byType(ListTile), matching: find.text('继续')), findsOneWidget);
   });
 
