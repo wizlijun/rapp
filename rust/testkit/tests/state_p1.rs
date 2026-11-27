@@ -199,7 +199,8 @@ async fn state_on_runs_and_shares_it() {
     assert_eq!((l["id"].as_str(), l["on"].as_bool()), (Some(a.id.as_str()), Some(true)), "{l}");
     // The file keeps what it had, with `on` set.
     let file: Value = serde_json::from_slice(&std::fs::read(a.home.path().join("services.json")).unwrap()).unwrap();
-    assert_eq!(file, json!({"state": {"on": true, "port": p, "store": "memory"}}));
+    // Written under `center`; the old `state` key it was prepared with is gone.
+    assert_eq!(file, json!({"center": {"on": true, "port": p, "store": "memory"}}));
 }
 
 #[tokio::test]
@@ -239,7 +240,7 @@ async fn state_off_stops_and_unshares() {
     wait_state(&a, WAIT, |r| r["outbox"]["dest"].is_null()).await;
     wait_log(a.home.path(), "state_sink", |v| v["from"] == "local" && v["on"] == false).await;
     let file: Value = serde_json::from_slice(&std::fs::read(a.home.path().join("services.json")).unwrap()).unwrap();
-    assert_eq!(file["state"]["on"], false, "{file}");
+    assert_eq!(file["center"]["on"], false, "{file}");
 }
 
 #[tokio::test]
@@ -326,7 +327,7 @@ async fn off_and_on_again_keeps_taking_changes() {
         wait_http_state(p, WAIT, |v| session_a(v, &a_fp).is_some_and(|s| s["state"] == state)).await;
     }
     // Saved: the next start has it.
-    let file = a.home.path().join("state").join("state.json");
+    let file = a.home.path().join("center").join("state.json");
     let saved = || {
         std::fs::read(&file).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|v| v["queue"].as_array().map(Vec::len)).unwrap_or(0)
     };
@@ -349,6 +350,42 @@ async fn off_and_on_again_keeps_taking_changes() {
     let q = wait_queue(p, WAIT, |q| q.len() >= 4).await;
     assert_eq!(shape(&q), [st("working", 2), st("done", 1), st("blocked", 1), st("working", 0)], "{q:?}");
     all_from(&q, &a_fp);
+}
+
+/// An older version kept its data in `local/state/`: after the upgrade the service starts with it,
+/// from `local/center/`.
+#[tokio::test]
+async fn an_old_state_dir_is_kept_after_upgrade() {
+    let key = rapp_wire::Key::new_local();
+    let p = free_port();
+    let a = start_on(29490, &key, |h| {
+        services(h, p, "disk", false);
+        term_json(h, "idle", 0);
+    })
+    .await;
+    let a_fp = fp_of(&a).await;
+    ipc(&a, json!({"cmd":"state","on":true})).await;
+    wait_state(&a, Duration::from_secs(5), |r| r["running"] == true).await;
+    wait_http_state(p, WAIT, |v| session_a(v, &a_fp).is_some_and(|s| s["state"] == "idle")).await;
+    term_json(a.home.path(), "working", 0);
+    wait_queue(p, WAIT, |q| !q.is_empty()).await;
+    let (center, old) = (a.home.path().join("center"), a.home.path().join("state"));
+    let saved = || std::fs::read(center.join("state.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|v| v["queue"].as_array().map(Vec::len)).unwrap_or(0);
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while saved() == 0 {
+        assert!(tokio::time::Instant::now() < deadline, "never saved");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    ipc(&a, json!({"cmd":"state","on":false})).await;
+    // What an older version left behind.
+    std::fs::rename(&center, &old).unwrap();
+
+    ipc(&a, json!({"cmd":"state","on":true})).await;
+    wait_state(&a, Duration::from_secs(5), |r| r["running"] == true).await;
+    let q = queue_of(p).await.expect("a queue");
+    assert_eq!(shape(&q), [st("working", 0)], "{q:?}");
+    all_from(&q, &a_fp);
+    assert!(center.join("state.json").exists() && !old.exists());
 }
 
 #[tokio::test]
