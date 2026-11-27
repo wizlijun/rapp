@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:rapp/paths.dart';
 import 'package:rapp/pages/ios_local_section.dart';
+import 'package:rapp/pages/state_section.dart';
+import 'package:rapp/state/state_sync.dart';
 import 'package:rapp/pages/rime_settings_section.dart';
 import 'package:rapp/embed/rime_glue.dart';
 import 'package:rapp_rime/rapp_rime.dart';
@@ -285,6 +287,19 @@ void main() {
       expect(find.byType(IosLocalSection), findsOneWidget);
       expect(find.byType(LocalSection), findsNothing);
       expect(find.byType(SharesSection), findsNothing);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('本机 shows the 中心服务 block, so the pad can see whether it found one', (tester) async {
+      hasKey = true;
+      final sync = FakeStateSync(tmp.path)..status = StateStatus.connected;
+      s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), stateSync: sync)..overview = true;
+      await pumpIos(tester);
+      s.togglePanel(PanelTab.devices);
+      await settle(tester);
+      expect(find.byType(IosLocalSection), findsOneWidget);
+      expect(find.byType(StateSection), findsOneWidget);
       await tester.pump(const Duration(seconds: 1));
       await tester.pumpWidget(const SizedBox());
     });

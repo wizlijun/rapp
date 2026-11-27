@@ -271,6 +271,8 @@ class _MainWindowState extends State<MainWindow> {
           builder: (context, _) =>
               IosLocalSection(hub: hub, prefs: state.prefs, onPrefs: state.savePrefs, data: state.data),
         ),
+      // Whether the pad found the network's 中心服务 (through its share), as on the desktop's 本机.
+      if (state.stateSync != null) StateSection(sync: state.stateSync!),
       ListenableBuilder(
         listenable: widget.state,
         builder: (context, _) => AppProfilesSection(store: widget.state.profiles, openFolder: _openFolder),
