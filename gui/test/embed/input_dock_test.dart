@@ -170,9 +170,9 @@ void main() {
     expect(stackBottomOf(stage: st, block: const Rect.fromLTWH(140, 10, 720, 600), keyboard: 0, stackHeight: 56),
         700 - 8 - 56);
     expect(desktopComposerAt(40), const InputPoint(0.5, 60, fromBottom: true));
-    expect(closedStackHeight(buttons: 0, upright: false), 0);
-    expect(closedStackHeight(buttons: 3, upright: false), 3 * stageButtonSize + 2 * 12);
-    expect(closedStackHeight(buttons: 3, upright: true), stageButtonSize);
+    expect(stackHeightOf(buttons: 0, upright: false), 0);
+    expect(stackHeightOf(buttons: 3, upright: false), 3 * stageButtonSize + 2 * 12);
+    expect(stackHeightOf(buttons: 3, upright: true), stageButtonSize);
   });
 
   test('stackUprightOf: a row on a portrait stage, or when the column has no room above the block', () {
@@ -274,7 +274,7 @@ void main() {
       final bottom = block(app).bottom;
       final text = tester.getRect(panel).bottom;
       expect(stage.height - text, anchor());
-      await tester.tap(boxToggle);
+      await tester.tap(stackToggle);
       await settle(tester);
       expect(bar, findsOneWidget);
       expect(block(app).bottom, bottom);
@@ -282,11 +282,11 @@ void main() {
       expect(tester.getRect(panel).bottom, text - barH(app) - 8);
     });
 
-    dockTest(p, 'the box toggle folds the quick area; no handle comes; the open text area falls to the anchor',
+    dockTest(p, 'the stack toggle folds the quick area; no handle comes; the open text area falls to the anchor',
         (tester) async {
       await openOn(tester, tsess);
       expect(bottomOf(tester, panel), anchor() + barH(tsess) + 8);
-      await tester.tap(boxToggle);
+      await tester.tap(stackToggle);
       await settle(tester);
       expect(s.prefs.quickHiddenTerm, isTrue);
       expect(bar, findsNothing);
@@ -608,10 +608,24 @@ void main() {
   }
 
   for (final p in [TargetPlatform.iOS, TargetPlatform.macOS, TargetPlatform.linux]) {
-    dockTest(p, 'text open — no stack toggle, the box one only', (tester) async {
+    dockTest(p, 'text open — the toggle stays beside 收起, none in the box', (tester) async {
       await openOn(tester, tsess);
-      expect(stackToggle, findsNothing);
-      expect(boxToggle, findsOneWidget);
+      expect(boxToggle, findsNothing);
+      expect(stackToggle, findsOneWidget);
+      final q = tester.getRect(stackToggle), o = tester.getRect(toggle);
+      if (p == TargetPlatform.iOS) {
+        expect(q.bottom, o.top - 12);
+        expect(q.center.dx, o.center.dx);
+      } else {
+        expect(o.left - q.right, 8);
+        expect(q.center.dy, o.center.dy);
+      }
+      expect(lit(tester, stackToggle), isTrue);
+      await tester.tap(stackToggle);
+      await settle(tester);
+      expect(s.prefs.quickHiddenTerm, isTrue);
+      expect(tsess.composer.open, isTrue);
+      expect(stackToggle, findsOneWidget);
     });
 
     dockTest(p, 'no toggle where the composer is not allowed', (tester) async {

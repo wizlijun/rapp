@@ -52,22 +52,15 @@ bool stackUprightOf({required Size stage, required Rect? block, required double 
 /// Off iOS, the block's default anchor: bottom centre, clear of the corner row of controls [rowHeight] tall.
 InputPoint desktopComposerAt(double rowHeight) => InputPoint(0.5, rowHeight + 20, fromBottom: true);
 
-/// The open stack's height: 语音 and 收起 in one row, one above the other, or 收起 alone.
-double openStackHeight(bool upright, bool voice) => upright || !voice ? stageButtonSize : 2 * stageButtonSize + 12;
-
-/// The closed stack's height: its [buttons] one above the other, or side by side in one row when [upright].
-double closedStackHeight({required int buttons, required bool upright}) =>
+/// The stack's height: its [buttons] one above the other, or side by side in one row when [upright].
+double stackHeightOf({required int buttons, required bool upright}) =>
     buttons == 0 ? 0 : upright ? stageButtonSize : buttons * stageButtonSize + (buttons - 1) * 12;
 
-/// The stack's height as a column: open ([openStackHeight]) or closed with its [buttons] ([closedStackHeight]).
-double stackColumnHeight({required bool open, required int buttons, required bool voice}) =>
-    open ? openStackHeight(false, voice) : closedStackHeight(buttons: buttons, upright: false);
-
-/// How many buttons the stack holds with the text area closed: 语音 (when [voice]), 输入 and the 快捷区 toggle, and
-/// 还原 while zoomed.
+/// How many buttons the stack holds: 语音 (when [voice]), 输入 (收起 while open) and the 快捷区 toggle, the text area
+/// open or not, and 还原 while zoomed with the text area closed.
 int stackButtonCount(RemoteSession s, {required bool voice}) {
   final button = s.composerAllowed;
-  return (button && voice ? 1 : 0) + (button ? 2 : 0) + (s.currentZoomed ? 1 : 0);
+  return (button && voice ? 1 : 0) + (button ? 2 : 0) + (s.currentZoomed && !s.composer.open ? 1 : 0);
 }
 
 /// Lays out a session's input dock over the whole stage: the block in a [FloatingComposer] at the session's place
@@ -75,8 +68,8 @@ int stackButtonCount(RemoteSession s, {required bool voice}) {
 ///
 /// The text area stays while it goes: it folds down into the block's bottom in [dockMove] and fades out over the
 /// last 100 ms; opened again before that is over, the same panel comes back from the height and the opacity it had.
-/// The 快捷区 follows [quickHidden] the same way. With both folded nothing stands where the block was: the 快捷区
-/// toggle waits in the [stack], beside 输入.
+/// The 快捷区 follows [quickHidden] the same way. Its toggle stands in the [stack], beside 输入 (收起 while open),
+/// whatever the text area does; with both folded nothing stands where the block was.
 class InputDock extends StatefulWidget {
   const InputDock(
       {super.key,
@@ -227,9 +220,8 @@ class InputDockState extends State<InputDock> with TickerProviderStateMixin {
               stage: c.biggest,
               block: panelPlaceOf(s).value,
               keyboard: k,
-              columnHeight: stackColumnHeight(open: _open, buttons: buttons, voice: widget.voice));
-          final stackHeight =
-              _open ? openStackHeight(upright, widget.voice) : closedStackHeight(buttons: buttons, upright: upright);
+              columnHeight: stackHeightOf(buttons: buttons, upright: false));
+          final stackHeight = stackHeightOf(buttons: buttons, upright: upright);
           final bottom = stackBottomOf(stage: c.biggest, block: panelPlaceOf(s).value, keyboard: k, stackHeight: stackHeight);
           final block = !s.composerAllowed
               ? const SizedBox.shrink()

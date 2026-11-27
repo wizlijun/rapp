@@ -175,25 +175,25 @@ void main() {
       }
     });
 
-    testWidgets('＋ and the toggle on the left, 发送 on the right: 40 square, even 8, one-line box 56', (tester) async {
+    testWidgets('＋ on the left, 发送 on the right, no 快捷区 toggle in the box: 40 square, even 8, one-line box 56',
+        (tester) async {
       big(tester);
       await tester.pumpWidget(layer());
       await tester.pump();
+      expect(find.byKey(const Key('quick-toggle')), findsNothing);
       final box = rect(tester, 'composer-box').deflate(1); // inside the 1 px border
       final plus = rect(tester, 'composer-plus'), send = rect(tester, 'composer-send');
-      final toggle = rect(tester, 'quick-toggle');
-      for (final r in [plus, toggle, send]) {
+      for (final r in [plus, send]) {
         expect(r.size, const Size(40, 40));
         expect(r.top - box.top, 8);
         expect(box.bottom - r.bottom, 8);
       }
       expect(plus.left - box.left, 8);
-      expect(toggle.left - plus.right, 4);
       expect(box.right - send.right, 8);
       expect(box.height, 56);
-      // The text starts 16 right of the toggle, as it ends 16 left of 发送.
+      // The text starts 16 right of ＋, as it ends 16 left of 发送.
       final editor = rect(tester, 'composer-field');
-      expect(editor.left, toggle.right + 16);
+      expect(editor.left, plus.right + 16);
       expect(send.left - editor.right, 16);
     });
 
@@ -208,7 +208,7 @@ void main() {
         await tester.pump();
         expect(rect(tester, 'composer-field').width, greaterThanOrEqualTo(120 - 1e-6), reason: 'stage $w');
         // Keep the requested 40..40*k size and the platform's existing density (compact on desktop).
-        for (final key in ['composer-plus', 'quick-toggle', 'composer-send']) {
+        for (final key in ['composer-plus', 'composer-send']) {
           final r = rect(tester, key);
           expect(r.width, closeTo(r.height, 1e-6), reason: '$key at $w');
           final button = find.byKey(Key(key));
@@ -224,7 +224,7 @@ void main() {
       await tester.pumpWidget(layer());
       await tester.pump();
       final k = es.composerScale;
-      for (final key in ['composer-plus', 'quick-toggle', 'composer-send']) {
+      for (final key in ['composer-plus', 'composer-send']) {
         expect(rect(tester, key).size, Size(40 * k, 40 * k), reason: key);
       }
       expect(rect(tester, 'composer-box').deflate(1).height, closeTo(56 * k, 1e-9));
@@ -246,7 +246,7 @@ void main() {
         es.setComposerZoom(zoom);
         await tester.pumpAndSettle();
         for (var i = 0; i < 2; i++) {
-          await tester.tap(find.byKey(const Key('quick-toggle')), kind: PointerDeviceKind.mouse);
+          await tester.tap(find.byKey(const Key('quick-toggle-stack')), kind: PointerDeviceKind.mouse);
           await tester.pumpAndSettle();
           final editable = find.descendant(of: fieldFinder, matching: find.byType(EditableText));
           final scroll = tester.state<ScrollableState>(find.descendant(of: editable, matching: find.byType(Scrollable)));
@@ -534,7 +534,7 @@ void main() {
       expect(find.text('写给 Safari'), findsOneWidget);
     });
 
-    testWidgets('tall: 发送 stays bottom right, ＋ and the toggle bottom left (W13)', (tester) async {
+    testWidgets('tall: 发送 stays bottom right, ＋ bottom left (W13)', (tester) async {
       big(tester);
       rs.composer.setDraft(List.generate(10, (i) => 'line $i').join('\n'));
       await tester.pumpWidget(layer());
@@ -547,10 +547,8 @@ void main() {
       expect(plus.size, const Size(40, 40));
       expect(send.bottom, box.bottom - 1 - 8); // 8 inside the 1 px border
       expect(plus.bottom, box.bottom - 1 - 8);
-      expect(rect(tester, 'quick-toggle').bottom, box.bottom - 1 - 8);
       expect(send.right, box.right - 1 - 8);
       expect(plus.left, box.left + 1 + 8);
-      expect(rect(tester, 'quick-toggle').left, plus.right + 4);
     });
 
     testWidgets('⌘V pastes what the runner answers at the cursor', (tester) async {
@@ -2382,10 +2380,13 @@ void main() {
       expect(tester.getRect(toggle).bottom, block().top - 8);
       final top = tester.getRect(find.byKey(const Key('quick-toggle-stack')));
       expect(cardRect(tester).bottom, top.top - 12);
+      // Open, the 快捷区 toggle stays on top of 收起 (bar-cmd addendum).
       s.composer.open = true;
       await tester.pumpAndSettle();
       expect(tester.getRect(toggle).bottom, block().top - 8);
-      expect(cardRect(tester).bottom, tester.getRect(toggle).top - 12);
+      final q = tester.getRect(find.byKey(const Key('quick-toggle-stack')));
+      expect(q.bottom, tester.getRect(toggle).top - 12);
+      expect(cardRect(tester).bottom, q.top - 12);
     });
   });
 }
