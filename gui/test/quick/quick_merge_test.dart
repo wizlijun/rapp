@@ -7,8 +7,9 @@ import 'package:rapp/quick/quick_prefs.dart';
 
 QuickDoc d(int at, [Object? data = 'x']) => QuickDoc(at, data);
 
-MergeStep go(QuickDoc local, int synced, QuickDoc? server, {int now = 10000, void Function(String)? log}) =>
-    decide(local: local, synced: synced, server: server, nowMs: now, log: log);
+MergeStep go(QuickDoc local, int synced, QuickDoc? server,
+    {int now = 10000, void Function(String)? log, String name = 'stars'}) =>
+    decide(local: local, synced: synced, server: server, nowMs: now, log: log, name: name);
 
 List<Object?> phrases(List<Phrase> l) => [for (final p in l) p.toJson()];
 Object? key(String id, String label, Chord c) => KeyAction(id, label: label, chord: c).toJson();
@@ -60,9 +61,7 @@ void main() {
     expect(logs, hasLength(1));
   });
   test('decide: an unreadable server doc is replaced by the local one', () {
-    bool readable(Object? v) => v is List;
-    final r = decide(
-        local: d(50, ['a']), synced: 100, server: d(200, 'garbage'), nowMs: 1, readable: readable) as Push;
+    final r = decide(local: d(50, ['a']), synced: 100, server: d(200, 'garbage'), nowMs: 1, name: 'stars') as Push;
     expect(r.base, 200);
     expect(r.doc.at, 201);
     expect(r.doc.data, ['a']);
@@ -163,6 +162,14 @@ void main() {
       final starred = ((r['stars'] as Push).doc.data as List).single as String;
       expect(starred, startsWith('k:mine'));
       expect(starred, isNot('k:mine'));
+    });
+    test('a built-in action whose id the server has with another face is not given a new id', () {
+      final r = firstJoin(
+        local: {'keys': d(50, [key('mode', '我改的', const Chord('m', ctrl: true))])},
+        server: {'keys': d(80, [key('mode', '切模式', const Chord('tab', shift: true))])},
+        nowMs: 60,
+      );
+      expect(r['keys'], isA<Adopt>()); // nothing to add: the service's action stands
     });
     test('first join: an unreadable server doc is replaced by the local one', () {
       final r = firstJoin(

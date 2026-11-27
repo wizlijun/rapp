@@ -34,18 +34,18 @@ class Keep extends MergeStep {
 /// The three-row table of §10.3, for a doc of a service this device already knows. [local] is the doc as it is,
 /// [synced] the `at` it had when it last agreed with this service (0 never), [server] the service's copy (null: none).
 /// A push takes `at = max(local.at, server.at + 1)` so a clock that runs behind never hides the change. [nowMs] is
-/// unused, kept for the signature. [readable] says whether a doc's data can be read (default: all can); a service copy
-/// that cannot be read counts as missing (§10.2), so a readable local doc is pushed over it.
+/// unused, kept for the signature. [name] is the doc's name (`phrases` `keys` `layout` `stars`): a service copy that
+/// [isDocReadable] rejects counts as missing (§10.2), so a readable local doc is pushed over it.
 MergeStep decide({
   required QuickDoc local,
   required int synced,
   required QuickDoc? server,
   required int nowMs,
   void Function(String)? log,
-  bool Function(Object?)? readable,
+  required String name,
 }) {
   if (server == null) return Push(local, 0);
-  if (readable != null && !readable(server.data) && readable(local.data)) {
+  if (!isDocReadable(name, server.data) && isDocReadable(name, local.data)) {
     return Push(QuickDoc(max(local.at, server.at + 1), local.data), server.at);
   }
   final changedHere = local.at > synced;
