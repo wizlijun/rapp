@@ -7,8 +7,10 @@ import '../ui/add_device_form.dart';
 import '../ui/lamp.dart';
 import '../ui/main_state.dart';
 import '../ui/os_mark.dart';
+import '../ui/term_restore_dialog.dart' show showTermRestore;
 import '../ui/overview_model.dart';
 import '../ui/session_block.dart';
+import '../ui/session_model.dart';
 import '../ui/tokens.dart';
 import 'phone_nav.dart';
 import 'widgets.dart';
@@ -24,6 +26,41 @@ class DeviceList extends StatefulWidget {
 
 class _DeviceListState extends State<DeviceList> {
   bool _adding = false;
+
+  /// A standby entry the user tapped: go in once it is open and current, not before.
+  String? _pending;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.state.addListener(_onState);
+  }
+
+  @override
+  void dispose() {
+    widget.state.removeListener(_onState);
+    _pending = null;
+    super.dispose();
+  }
+
+  void _onState() {
+    final key = _pending;
+    if (key == null) return;
+    final s = widget.state;
+    if (s.currentKey == key && s.entries.any((e) => e.key == key)) {
+      _pending = null;
+      widget.nav.enter(key);
+    }
+  }
+
+  void _tap(SessionEntry e) {
+    if (e.sid == null) {
+      _pending = e.key;
+    } else {
+      _pending = null;
+      widget.nav.enter(e.key);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -63,7 +100,7 @@ class _DeviceListState extends State<DeviceList> {
                   padding: const EdgeInsets.only(bottom: 12),
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(minHeight: phoneTap),
-                    child: SessionBlock(state: state, entry: e, onTap: () => widget.nav.enter(e.key)),
+                    child: SessionBlock(state: state, entry: e, onTap: () => _tap(e)),
                   ),
                 ),
               for (final f in state.idleFavorites.where((f) => f.device == c.id))
@@ -75,7 +112,10 @@ class _DeviceListState extends State<DeviceList> {
                       favorite: f,
                       label: state.labelOf(f),
                       verb: state.favoriteVerb(f),
-                      onTap: state.hubUsable && !c.offline ? () => state.openFavorite(f) : null,
+                      onTap: state.hubUsable && !c.offline ? () => state.favoriteVerb(f) == '恢复'
+                          ? showTermRestore(context, state, f.device)
+                          : state.openFavorite(f)
+                      : null,
                     ),
                   ),
                 ),
@@ -91,6 +131,7 @@ class _DeviceListState extends State<DeviceList> {
                   onAdded: (id) {
                     setState(() => _adding = false);
                     state.selectDevice(id);
+                    state.probe(id);
                   },
                 ),
               ),
