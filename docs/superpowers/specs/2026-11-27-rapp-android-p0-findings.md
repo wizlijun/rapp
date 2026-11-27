@@ -29,6 +29,7 @@
 |---|---|---|---|---|
 | 1 | 工具和空壳 | 过（两个模拟器都能装、能启动、截图有 `rApp P0 shell`；36 上第一次截图撞上 System UI 无响应弹框，再试后正常） | 不用 | 2026-11-27 |
 | 2 | `.so` | 过（九个名字都导出、四个 `LOAD` 段都是 `0x4000`、11.3 MB / strip 后 7.5 MB；依赖全部直接编过） | §6.2 小改：hub 的四个函数不用 `#[used] static` 就能导出 | 2026-11-27 |
+| 3 | 进程内 hub 和网络 | 过（两个模拟器都起得来 hub、出接入引导；放进 relay 和 key、加上这台 Mac 后在线；默认和只有 IPv4 两种状态下 relay 都解析成 `::ffff:` 映射并连上。真 IPv6 一半模拟器上测不了，留给实机） | §6.1 小改；§6.5 的 `systemOpen` 要安卓通道；§14.6 加一条 | 2026-11-27 |
 
 ## 1 工具和空壳
 
@@ -133,6 +134,64 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 
 **结论：过。** `.so` 编得出来，九个名字都在导出表里，四个 `LOAD` 段都按 `0x4000` 对齐，现有会话测试条数不变、全过。
 ## 3 进程内 hub 和网络
+
+日期 2026-11-27。探查分支 `probe/android-p0`，提交 81ec88d9。两台模拟器先后各做一遍（`rapp-p0-34`、`rapp-p0-36`，一次只开一台，36 冷启动后等 90 秒再装）。relay 的主机、key、设备 id 在本页一律写成 `relay`、`KEY`、`ID`；看 `hub.log`、`logcat`、`ip` 输出时都先过一个替换这三样的过滤器。
+
+**改了什么（详见文末补丁表）。**
+- `hub_ffi.dart`：`FfiHubTransport.start` 加 `String? library`；`null` 时还是 `DynamicLibrary.process()`（iOS 不变），安卓传 `'librapp_android.so'`，用 `DynamicLibrary.open`。`_stopOffThread(library)` 在另一个 isolate 里按名字重新打开库（`DynamicLibrary` 传不过 `Isolate.run`）。
+- `main.dart` 只加一行 `if (Platform.isAndroid) return mainAndroid();`。`main_android.dart` 从 `main_ios.dart` 抄：数据根 `<filesDir>/rapp`（Kotlin 通道 `rapp/android` 的 `paths` 给 `files`、`cache`），`ensureDeviceId(root, name: 'rApp P0 探查', os: 'android')`，hub 选项不变（hub-ffi 写死的 `owns_access`、`embed_only`、`dual_stack`、`map_ports`）。
+- `MainActivity.kt`：`rapp/android` 通道（`paths`、`deviceName`）。清单加 `INTERNET`、`ACCESS_NETWORK_STATE`、`android:allowBackup="false"`。
+- `rapp-android-ffi` 加 `rapp_p0_resolve(host, port)`（`catch_unwind` 包着，`rapp_hub_free_line` 释放），返回两行：`rapp_net::quic::getaddrinfo_v6` 的结果、`resolve_for(host:port, dual=true)` 的结果。为此 `rapp-net` 加了一行 `pub use sys::getaddrinfo_v6`。`cargo test -p rapp-android-ffi -p rapp-net` 全过（android-ffi 5 条），`clippy --all-targets -D warnings` 干净。
+- `.so` 用 `scripts/p0-android-so.sh`（`cargo ndk -t arm64-v8a -P 34 build --release -p rapp-android-ffi`，拷进 `gui/android/app/src/main/jniLibs/arm64-v8a/`，该目录被 `.gitignore` 忽略）。导出表多了 `rapp_p0_resolve`，共 10 个。
+- APK：`flutter build apk --debug --target-platform android-arm64`（JDK 21 + 本机代理，同第 1 节），113 MB。**AGP 打包时会 strip**：仓库里的 `.so` 11,375,704 字节，APK 里 `lib/arm64-v8a/librapp_android.so` 是 7,528,992 字节，`Stored`（不压缩）。第 2 节没看的那个问题答了。
+- `flutter analyze` 无问题。`flutter test test/` 前后都是 3651 条：改之前 `+3630 ~18 -3`，改之后 `+3631 ~18 -2`。两次都挂 `linux_detach_test.dart` 的两条（本机原有）；改之前还挂了 `service_client_test.dart` 的「ServiceMonitor share…」，改之后过了，这条和本次改动无关（时好时坏）。
+
+**第 3 步：hub 起来。**
+- 两台都起来了：`hub.log` 只有 `hub_start`（version 0.15.58）、`ports`、`ports_asked` 三行 info；`logcat` 里没有 `hub 起不来`。`files/rapp/local/` 下生成 `device.crt`、`device.key`、只有 `id` 的 `service.json`（0600）。
+- **第一次出的是全景，不是接入引导。** 原因：`PlatformCaps.forOs('android')` 落进桌面的默认项（`hasService`、`hasTray`……，`hubInProcess` 是 false），`MainWindow._needsAccess` 要 `caps.hubInProcess`。探查里在 `mainAndroid()` 开头写 `caps = const PlatformCaps(hubInProcess: true)` 绕过（没改 `platform_caps.dart`）。之后两台都出接入引导（「接入点」「key」「接入」）。
+- **`stderr` 到不了 logcat。** `main_ios.dart` 的 `_log` 用 `stderr.writeln`，安卓上这些字一行也看不到，「`logcat -s flutter` 里没有 `hub 起不来`」这一条就验不了。改成 `debugPrint` 后出现在 `flutter` 标签下。
+- **坑：`adb install -r` 后卡在启动画面。** 34 上把第 1 节的空壳 APK 用 `install -r` 覆盖成正式 APK，启动后一直是启动画面，`logcat` 有 `E flutter: Could not prepare isolate`、`Could not create root isolate`、`Could not launch engine`，Dart 一行没跑。`adb uninstall com.rapphub.rapp` 再装就好了。36 上同样的覆盖没出这个问题；之后两台在正式包和解析包之间 `install -r` 来回换了多次，也都没再出。只见过一次，原因没查。
+
+**第 4 步：放进 relay 和 key。**
+- 这台 Mac 的数据根是 `~/rapp`（没有 `RAPP_HOME`，没有指针文件）。`jq '{relay, key}' ~/rapp/local/service.json > <scratchpad>/p0-service.json`，`chmod 600`。
+- **和计划不同：合并，不覆盖。** 模拟器上的 `service.json` 已经有 `ensureDeviceId` 写的 `id`，整个覆盖会丢掉它。做法：`run-as … cat` 拉下来，`jq -s '.[0] * .[1]'` 合上 relay 和 key，再 `run-as com.rapphub.rapp sh -c 'cat > /data/user/0/com.rapphub.rapp/files/rapp/local/service.json'` 写回（**要写绝对路径**，`sh -c` 里的相对路径不是应用目录，报 `No such file or directory`）。之后字段是 `id,key,relay`，0600。hub 认这个文件，没再改。
+- **和计划不同：这台 Mac 不会自己出现。** 有了 relay 和 key 之后全景里只有「本机」、设备在线 1/1，`hub.log` 没有任何 relay 的行。hub 只探 `hosts.json` 里存过的主机；正常用法是在设备页「添加设备」填对方的 ID（`add_host` → `add_by_id`）。为了不让 ID 出现在界面和输入记录里，我没走界面，而是用 `jq '[{id: .id, name: "这台 Mac", password: ""}]' ~/rapp/local/service.json` 生成 `hosts.json` 写进 `files/rapp/local/`（0600），再冷启动。
+- 结果（两台一样）：全景里「这台 Mac」在线（苹果标记、0.15.52、正在跑的会话、「打开应用」），设备在线 2/2；`hub.log` 有 `route … path:"lan" result:"ok"` 和 `presence … online:true`，`ports` 映射了这台 Mac 的两个共享端口（28000、28001）。模拟器经 `10.0.2.2` 的 NAT 能直接连到 Mac 的局域网地址，所以「自动」走的是 lan，没走 relay。
+- 为了看 relay 那条路，把 `hosts.json` 里这台的 `route` 改成 `"relay"`（等于 hub 的 `set_route` 设成 relay）再冷启动：`route … path:"relay" result:"ok"`，`presence online:true`，界面同样在线。之后的网络测试都在强制 relay 下做。两台模拟器的 `hosts.json` 现在都留着 `route: relay`。
+- 全程 `hub.log` 没有 `warn`、`error` 行。
+
+**第 5 步：地址解析。**
+
+这台 Mac 存的 relay 是「IPv4 字面地址:端口」，不是域名。
+
+网络状态（两台一样，只有接口编号和临时地址不同）：
+
+| | 「默认」（开机后的样子） | 「只有 IPv4」（`adb root && adb shell sysctl -w net.ipv6.conf.all.disable_ipv6=1`） |
+|---|---|---|
+| IPv4 | `eth0` 10.0.2.15、`wlan0` 10.0.2.16；默认路由 `via 10.0.2.2`（表 1015、1016） | 同左 |
+| IPv6 地址 | 只有 `fec0::/64`（站内，已废弃的前缀）和 `fe80::`，**没有全局地址**；`lo` 有 `::1` | 全部没了，`lo` 的 `::1` 也没了 |
+| IPv6 默认路由 | `ip -6 route` 主表是空的；`ip -6 route show table all` 里有 `default via fe80::2`（表 1015、1016） | 没有 |
+
+命令：`adb shell ip -o addr`、`adb shell ip -6 route`、`adb shell ip -6 route show table all | grep default`、`adb shell ip -4 route show table all | grep default`。
+
+解析结果（`--dart-define=P0_PAGE=resolve` 的包，端口 443；四种组合——34/36 × 默认/只有 IPv4——**完全一样**）：
+
+| 主机 | `getaddrinfo_v6`（`AI_V4MAPPED\|AI_ADDRCONFIG`，`AF_INET6`） | `resolve_for(dual)` |
+|---|---|---|
+| relay | none | `::ffff:` 映射 |
+| `1.1.1.1` | none | `[::ffff:1.1.1.1]:443` |
+| `localhost` | none | `[::ffff:127.0.0.1]:443` |
+| `dns.google` | none | `[::ffff:198.18.2.250]:443` |
+
+- `getaddrinfo_v6` 在安卓（bionic）上四个都是 none，连数字地址 `1.1.1.1` 也是：**bionic 不按 `AI_V4MAPPED` 给映射地址**，至少在没有全局 IPv6 时如此。规格 §6.1「安卓的 C 库对 `AI_V4MAPPED` 的支持不确定」的答案：不能靠它。
+- `resolve_for(dual)` 不靠它：先普通解析，有 IPv4 地址且有 IPv4 路由就自己拼 `::ffff:a.b.c.d`。计划里说的「按 IPv4 解析、自己拼 `::ffff:`」的那一支**本来就在 `resolve_for` 里**，安卓走的就是这一支，不用另加。
+- `dns.google` 解析出 `198.18.2.250`：这是 Mac 上 TUN + fake-ip 代理的假地址（198.18.0.0/15），模拟器的 DNS 经 Mac 转发。不影响 relay（relay 是字面地址）。
+- 换回正式包冷启动（强制 relay）：两台在两种状态下都是 `route … path:"relay" result:"ok"`、`presence online:true`，界面上这台 Mac 在线。「只有 IPv4」下连 `::1` 都没有，hub 的双栈 UDP 套接字照样连上了 relay。
+- **双栈的真 IPv6 一半测不了**：「默认」状态没有全局 IPv6 地址，relay 也是 IPv4 字面地址。真 IPv6、只有 IPv6 的网络（NAT64；`getaddrinfo_v6` 那一支在 bionic 上帮不上）留给实机，已加进规格 §14.6。
+
+截图（scratchpad，不进仓库）：`p0-t3-access-setup-{34,36}.png`（接入引导）、`p0-t3-online-{34,36}.png`（lan 在线）、`p0-t3-online-relay-{34,36}.png`、`p0-t3-online-v4only-{34,36}.png`、`p0-t3-resolve-{default,v4only}-{34,36}.png`。
+
+**结论：过。** hub 在安卓进程里起得来、读得懂数据根、出接入引导；放进 relay 和 key、加上这台 Mac 后，两台模拟器在「默认」和「只有 IPv4」两种状态下都把 relay 解析成 `::ffff:` 映射地址并经 relay 连上。真 IPv6 留给实机。
 ## 4 进程内会话
 ## 5 键盘和触控板
 ## 6 语音
@@ -142,6 +201,18 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 
 | 文件和位置 | 改了什么 | 为什么 | P1 里它属于哪个接口 |
 |---|---|---|---|
+| `gui/lib/hub_ffi.dart` `_open`、`_Lib(lib)`、`_stopOffThread(library)`、`start(library:)` | 库由入口传名字，`null` = `DynamicLibrary.process()` | 安卓的 hub 在 `librapp_android.so` 里；`DynamicLibrary` 传不进 `Isolate.run`，所以传名字 | §6.1 `FfiHubTransport`（可以原样留下） |
+| `gui/lib/main.dart:40` | `if (Platform.isAndroid) return mainAndroid();` | 安卓入口 | 入口分流（原样留下） |
+| `gui/lib/main_android.dart` 整个文件 | 从 `main_ios.dart` 抄，去掉 Rime、等网络、`BackgroundWatch`、`FoldFullscreen`；`fullscreen: const NoFullscreen()`；没有 `localOs`、`localIme` | 最小能跑的安卓入口 | `main_android.dart`（§6.3、§6.4 一带）；和 `main_ios.dart` 的共用部分 P1 抽（§15.3） |
+| `main_android.dart` 开头 `caps = const PlatformCaps(hubInProcess: true)` | 旁路能力表 | `forOs('android')` 落进桌面默认，不出接入引导；`systemOpen` 留 false，因为它走 `iosChannel` | §6.5 `PlatformCaps.forOs` 的 `'android'` 项；`systemOpen` 要先接安卓通道 |
+| `main_android.dart` `const SessionPort? port = null` | 会话端口留空 | 第 4 项接 | §6.3 安卓的 `SessionPort` |
+| `main_android.dart` `_log` 用 `debugPrint` | 不用 `stderr.writeln` | 安卓上 stderr 到不了 logcat | 安卓入口的日志（或写文件） |
+| `gui/android/.../MainActivity.kt` | `rapp/android` 通道：`paths`（`filesDir`、`cacheDir`）、`deviceName`（写死 `rApp P0 探查`） | 数据根和设备名 | 安卓平台通道；`deviceName` P1 取真名（`Settings.Global.DEVICE_NAME` 之类） |
+| `gui/android/app/src/main/AndroidManifest.xml` | `INTERNET`、`ACCESS_NETWORK_STATE`、`allowBackup="false"` | 连网；身份密钥不进备份 | §6.4 Kotlin 壳的清单（还差 `dataExtractionRules`、网络安全配置） |
+| `rust/net/src/quic.rs` `pub use sys::getaddrinfo_v6;` | 公开给探查函数 | `rapp_p0_resolve` 要单独看这一支 | 不进 P1（探查用） |
+| `rust/android-ffi` `rapp_p0_resolve`；`Cargo.toml` 加 `rapp-net`、`tokio` | 返回 `getaddrinfo_v6` 和 `resolve_for(dual)` 两行 | 第 3 项的解析探查 | 不进 P1（探查用） |
+| `gui/lib/p0/p0_pages.dart` | `P0_PAGE=resolve` 页；`keys`、`speech`、`install` 占位 | 探查页 | 不进 P1 |
+| `scripts/p0-android-so.sh` | `cargo ndk` 出 `.so`、拷进 `jniLibs` | 每次改 Rust 后重编 | P1 的构建脚本（`build-android.sh` 之类） |
 
 ## 规格要改的地方
 
@@ -149,3 +220,9 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 - 带闸写入端的顺序：应是「等闸开、关闸（是帧时）、交给 sink」，不是「交给 sink 再关闸」，否则 ack 可能先到而丢掉（第 2 节）。
 - §6.2 规矩 2（恐慌不能穿过 FFI）要落到 `rapp-hub-ffi` 自己身上：在它的四个 `extern "C"` 函数（`hub-ffi/src/lib.rs` 第 40、121、128、145 行）里包 `catch_unwind`，P1 做，iOS 一起受益。`rapp-android-ffi` 按规格只能 `pub use`、不能写同名转调，自己包不了。
 - §6.2 规矩 1 已写「做成图片或决定丢掉之后就 ack」。补一句后果：忘了 ack（哪怕是丢掉的帧），会话就永远结束不了，`disconnected` 和 kind 2 都不会来（第 2 节）。
+- §6.1：「构造时传入库」改成「入口传库名，`null` 是 `process()`」：`DynamicLibrary` 传不进 `Isolate.run`，`_stopOffThread` 只能按名字重新打开（第 3 节）。
+- §6.1「安卓的 C 库对 `AI_V4MAPPED` 的支持不确定」有答案了：bionic 的 `getaddrinfo(AF_INET6, AI_V4MAPPED|AI_ADDRCONFIG)` 对 IPv4 主机（连 `1.1.1.1`）给 none；`resolve_for` 自己拼 `::ffff:` 的那一支够用，不用另加（第 3 节）。只有 IPv6 的网络留给实机。
+- §6.5：`'android'` 那一项写了 `systemOpen: true`，但 `systemOpen` 的四处用法（`main_window.dart:43`、`term_stage.dart:50`、`local_section.dart:43`、`data_section.dart:54`）都走 `iosChannel`。要么给安卓接一个通道，要么先不开。
+- 接入引导之后：放进 relay 和 key，主机不会自己出现，要在设备页按 ID 添加（和 iPad 一样）。§14 的验收步骤里「看到这台 Mac 在线」之前要写上这一步（第 3 节）。
+- §14.6 加一条：双栈的真 IPv6（全局地址、只有 IPv6 的网络）模拟器上测不了，实机上连一次 relay（已加）。
+- 安卓入口的日志不能用 `stderr`（logcat 看不到），用 `debugPrint` 或写文件。
