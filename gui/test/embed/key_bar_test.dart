@@ -1125,16 +1125,39 @@ void main() {
       ]));
       await tester.pumpWidget(bar(tsess, width: 900));
       expect(find.byKey(const Key('bar-k-ck')), findsOneWidget);
+      final dim = find.descendant(of: find.byKey(const Key('bar-k-ck')), matching: find.byType(Opacity));
+      expect(tester.widget<Opacity>(dim.first).opacity, .4, reason: 'drawn blocked/grey');
       await tester.tap(find.byKey(const Key('bar-k-ck')));
       await tester.pump();
       expect(term.calls.where((c) => c.$1 == 'keys'), isEmpty);
     });
 
-    iosTest('a synced layout with a missing action, 11 cells and a repeated id still draws', (tester) async {
+    iosTest('a synced row 1 of 11 distinct cells draws 9 of them and ⋯ at the end, no overflow', (tester) async {
       s.prefs.keyBarMore = true;
       s.quick.adopt('layout', const QuickDoc(9000, {
         'rows': [
-          ['esc', 'k:gone', 'tab', 'tab', 'cc', 'bksp', 'enter', 'k:search', 'k:search', 'pgup', 'pgdn'],
+          ['esc', 'tab', 'stab', 'cc', 'cr', 'co', 'ct', 'cb', 'cl', 'bksp', 'enter'],
+          ['left', 'down', 'right'],
+        ],
+      }));
+      await tester.pumpWidget(bar(tsess, width: 1000));
+      expect(tester.takeException(), isNull);
+      final row1 = tester.getTopLeft(k('esc')).dy;
+      final drawn = [
+        for (final id in ['esc', 'tab', 'stab', 'cc', 'cr', 'co', 'ct', 'cb', 'cl', 'bksp', 'enter', 'more'])
+          if (k(id).evaluate().isNotEmpty && tester.getTopLeft(k(id)).dy == row1) id,
+      ];
+      expect(drawn, ['esc', 'tab', 'stab', 'cc', 'cr', 'co', 'ct', 'cb', 'cl', 'more']);
+      expect(k('bksp'), findsNothing);
+      final xs = [for (final id in drawn) tester.getTopLeft(k(id)).dx];
+      expect(xs.last, xs.reduce((a, b) => a > b ? a : b), reason: '⋯ is last in the row');
+    });
+
+    iosTest('a synced layout with a missing action and repeated ids draws each once', (tester) async {
+      s.prefs.keyBarMore = true;
+      s.quick.adopt('layout', const QuickDoc(9000, {
+        'rows': [
+          ['esc', 'k:gone', 'tab', 'tab', 'cc', 'k:search', 'k:search'],
           ['left', 'down', 'right'],
         ],
       }));
@@ -1143,6 +1166,19 @@ void main() {
       expect(find.byKey(const Key('bar-k-search')), findsOneWidget);
       expect(find.byKey(const Key('bar-tab')), findsOneWidget);
       expect(find.byKey(const Key('bar-k-gone')), findsNothing);
+    });
+
+    iosTest('↑ not directly before ⋯: the user\'s order wins, ← ↓ → stay right-aligned under ⋯', (tester) async {
+      s.prefs.keyBarMore = true;
+      s.setKeyLayout(const KeyLayout([
+        ['esc', 'up', 'k:search'],
+        ['left', 'down', 'right'],
+      ]));
+      await tester.pumpWidget(bar(tsess, width: 900));
+      expect(tester.takeException(), isNull);
+      expect(tester.getTopLeft(k('right')).dx, tester.getTopLeft(k('more')).dx);
+      final col = tester.getSize(k('more')).width + keyBarGap;
+      expect(tester.getTopLeft(k('down')).dx, tester.getTopLeft(k('more')).dx - col);
     });
 
     iosTest('an empty second row hides ⋯', (tester) async {

@@ -395,7 +395,6 @@ class _KeyBarState extends State<KeyBar> {
       // A row made of the arrow block alone has nothing to share the rest: an empty cell holds the columns at the right.
       final children = <Widget>[if (ids.isNotEmpty && tail == ids.length) const Expanded(child: SizedBox())];
       for (final (i, id) in ids.indexed) {
-        if (i > 0 || children.isNotEmpty) children.add(const SizedBox(width: keyBarGap));
         final Widget view;
         final action = id.startsWith('k:') ? _actionOf(id.substring(2)) : null;
         final key = barKeys[id];
@@ -438,6 +437,7 @@ class _KeyBarState extends State<KeyBar> {
           onFire: (haptic, flags) => _fire(key, haptic: haptic, flags: flags),
           );
         }
+        if (children.isNotEmpty) children.add(const SizedBox(width: keyBarGap));
         children.add(i >= ids.length - tail ? SizedBox(width: column, child: view) : Expanded(child: view));
       }
       return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: children);
