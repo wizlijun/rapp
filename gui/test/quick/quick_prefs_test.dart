@@ -145,6 +145,34 @@ void main() {
     expect(q.usage, isEmpty);
     expect(File('$dir/quick.json.bad').existsSync(), isFalse);
   });
+  test('fresh install and 恢复默认 share one default: the commands without search, then the phrases', () {
+    expect(defaultQuickPhrases.whereType<StripCmd>().map((c) => c.id), isNot(contains('search')));
+    expect(defaultQuickPhrases, [
+      for (final id in builtinCmdOrder) if (id != 'search') StripCmd(id),
+      ...defaultPhrases,
+    ]);
+    expect(QuickPrefs.migrate(defaultStripItems).phrases, defaultQuickPhrases);
+  });
+  test('hostile docs never throw, in load or adopt; bad entries are dropped', () {
+    final dir = Directory.systemTemp.createTempSync().path;
+    final hostile = {
+      'v': 1,
+      'phrases': {'at': 3, 'data': [5, null, {'text': 7}, {'kind': 'cmd', 'id': 7, 'per': 'x'}, {'kind': 'cmd', 'id': 'new', 'per': {'codex': 7, '3': [1]}}]},
+      'keys': {'at': 4, 'data': [{'id': 5}, null, [], {'id': 'a', 'label': 'x', 'chord': 'ctrl+x', 'per': {'codex': 7, 'gemini': {'a': 1}}}]},
+      'layout': {'at': 5, 'data': {'rows': [[1, null, {}], 'x', 5, null]}},
+      'stars': {'at': 6, 'data': [1, null, {}, 'p:x']},
+      'usage': {'at': 7, 'data': {'2026-11-27': {'p:x': 'y', 'k:a': null}, 'x': 5, '5': [1]}},
+    };
+    File('$dir/quick.json').writeAsStringSync(jsonEncode(hostile));
+    late QuickPrefs q;
+    expect(() => q = QuickPrefs.load(dir, legacy: const [Phrase('旧')]), returnsNormally);
+    expect(q.layout.rows, isNotEmpty);
+    expect(q.stars, ['p:x']);
+    for (final n in [...quickDocNames, 'usage']) {
+      expect(() => q.adopt(n, QuickDoc(9, hostile[n] is Map ? (hostile[n] as Map)['data'] : null)), returnsNormally);
+      expect(() => q.adopt(n, const QuickDoc(9, {'rows': 'x', 'id': [], 'kind': 'cmd'})), returnsNormally);
+    }
+  });
   test('a local change bumps at, saves, notifies and tells onLocal; adopt does not tell', () {
     var t = DateTime.fromMillisecondsSinceEpoch(2000);
     final q = QuickPrefs.migrate(const [Phrase('a')], clock: () => t);

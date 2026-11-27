@@ -76,6 +76,10 @@ Chord? chordOfBarKey(String id) {
   );
 }
 
+/// The 常用语 doc of a fresh install, and what 恢复默认 brings back: gui.json's default list as migrated, so the
+/// commands without 搜历史 (spec §6.2), then the default phrases. One definition for both.
+List<StripItem> get defaultQuickPhrases => _migrateLists(defaultStripItems).phrases;
+
 /// [l] with a fresh id on every phrase that has none (Ruling 10).
 List<StripItem> _withIds(List<StripItem> l) =>
     [for (final it in l) it is Phrase && it.id == null ? it.withId(quickId()) : it];
@@ -136,7 +140,10 @@ class QuickPrefs extends ChangeNotifier {
     T doc<T>(String name, T? Function(Object?) parse, T Function() fallback) {
       final d = j![name];
       final a = d is Map ? d['at'] : null;
-      final v = d is Map && a is int && a >= 0 ? parse(d['data']) : null;
+      T? v;
+      try {
+        v = d is Map && a is int && a >= 0 ? parse(d['data']) : null;
+      } catch (_) {}
       if (v == null) {
         repaired = true;
         at[name] = 0;
@@ -287,18 +294,26 @@ class QuickPrefs extends ChangeNotifier {
 
   /// [d] takes the place of doc [name], `at` and all; bad data reads as the default. No [onLocal].
   void adopt(String name, QuickDoc d) {
+    T? read<T>(T? Function(Object?) parse) {
+      try {
+        return parse(d.data);
+      } catch (_) {
+        return null;
+      }
+    }
+
     switch (name) {
       case 'phrases':
-        final p = _phrasesFrom(d.data);
+        final p = read(_phrasesFrom);
         _phrases = p == null ? _migrateLists(_legacy).phrases : _withIds(p);
       case 'keys':
-        _keys = _keysFrom(d.data) ?? _migrateLists(_legacy).keys;
+        _keys = read(_keysFrom) ?? _migrateLists(_legacy).keys;
       case 'layout':
-        _layout = _layoutFrom(d.data) ?? KeyLayout.fallback;
+        _layout = read(_layoutFrom) ?? KeyLayout.fallback;
       case 'stars':
-        _stars = _starsFrom(d.data) ?? [];
+        _stars = read(_starsFrom) ?? [];
       case 'usage':
-        _usage = _usageFrom(d.data) ?? {};
+        _usage = read(_usageFrom) ?? {};
       default:
         return;
     }

@@ -6,6 +6,7 @@ import '../embed/key_bar_keys.dart';
 import '../embed/phrases.dart';
 import '../embed/strip_cmds.dart';
 import '../embed/strip_tools.dart';
+import '../quick/quick_prefs.dart';
 import '../ui/controls.dart';
 import '../ui/main_state.dart';
 import '../ui/tokens.dart';
@@ -351,7 +352,7 @@ class PhrasesPage extends StatelessWidget {
               RappButton.quiet(
                   key: const Key('phrase-reset'),
                   label: '恢复默认',
-                  onPressed: () => state.setStripItems(defaultStripItems)),
+                  onPressed: () => state.setStripItems(defaultQuickPhrases)),
             ]),
             const SizedBox(height: 16),
             Text('常用语发出后总会按一次回车。远端停在菜单或选择框上时，回车会选中当前高亮的那一项，点之前看一眼画面。',

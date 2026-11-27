@@ -8,6 +8,7 @@ import 'package:rapp/embed/strip_tools.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/pages/phrases_page.dart';
 import 'package:rapp/paths.dart';
+import 'package:rapp/quick/quick_prefs.dart';
 import 'package:rapp/ui/controls.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
@@ -91,7 +92,7 @@ void main() {
 
     await tester.tap(find.byKey(const Key('phrase-reset')));
     await tester.pumpAndSettle();
-    expect(s.quick.phrases, defaultStripItems);
+    expect(s.quick.phrases, defaultQuickPhrases);
   });
 
   group('commands on the page', () {
@@ -218,7 +219,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(k('phrase-reset'));
       await tester.pumpAndSettle();
-      expect(s.quick.phrases, defaultStripItems);
+      expect(s.quick.phrases, defaultQuickPhrases);
     });
   });
 }
