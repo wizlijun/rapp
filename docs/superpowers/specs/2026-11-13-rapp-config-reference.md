@@ -53,10 +53,10 @@
 | `$ROOT/shared/state_rules/*.json` | B | 用户或 agent 手放 | 无 | §2.5 |
 | `$ROOT/local/term.json` | A | GUI 经 IPC 改开关，可手改 | 无 | §2.10 |
 | `$ROOT/local/shares.json` | A（分享方） | `rapp share` / `rapp unshare`（经 IPC），可手改 | 无 | §2.11 |
-| `$ROOT/local/services.json` | A | `rapp state on\|off`（经 IPC），可手改 | 无 | §2.12 |
-| `$ROOT/local/state.json` | B（GUI） | GUI 设置里的「状态服务」，可手改 | 无（手填的地址可能是内网地址） | §2.15 |
+| `$ROOT/local/services.json` | A | `rapp center on\|off`（经 IPC），可手改 | 无 | §2.12 |
+| `$ROOT/local/state.json` | B（GUI） | GUI 设置里的「中心服务」，可手改 | 无（手填的地址可能是内网地址） | §2.15 |
 | `$ROOT/local/state-sinks.json` | A | 程序自管（rapp-service 写） | 无 | §2.13 |
-| `$ROOT/local/state/state.json` | A（开了状态服务的设备） | 程序自管（rapp-state 写） | 有（命令和路径） | §2.14 |
+| `$ROOT/local/center/state.json` | A（开了中心服务的设备） | 程序自管（rapp-center 写） | 有（命令和路径） | §2.14 |
 | `$ROOT/devices/<id>/device.json` | A / B | 程序自管（rapp-service 写，没有机密） | 无 | §2.6 |
 | `<旧配置目录>/data-root` | A / B | GUI「更改位置…」写，可手改 | 无 | §2.7 |
 | `$ROOT/clipboard/`、`$ROOT/files/clipboard/` | B | GUI 写，可手删 | 无（用户钉住的内容可能含私事） | §2.8 |
@@ -219,43 +219,43 @@ agent 规则：加、删分享走 `rapp share` / `rapp unshare`（或 IPC 的 `s
 
 ### 2.12 `$ROOT/local/services.json`（附带服务的开关和配置）
 
-谁读写：`rapp-service`（`rust/service/src/companion.rs`，`ServiceCfg`）。启动时读，开了的附带服务就拉起；IPC 的 `service`（命令行 `rapp state on|off`）先改这个文件、再起停程序，改的时候别的条目和字段原样保留。不进 git，没有机密。规格：《rapp-state 设计》§7。
+谁读写：`rapp-service`（`rust/service/src/companion.rs`，`ServiceCfg`）。启动时读，开了的附带服务就拉起；IPC 的 `service`（命令行 `rapp center on|off`，`rapp state` 是旧名，照样认）先改这个文件、再起停程序，改的时候别的条目和字段原样保留。不进 git，没有机密。规格：《rapp-state 设计》§7、《rapp-center 设计》。
 
-格式：对象，键是服务名，现在只有一个 `state`（`rapp-state`）。没有这个文件，或没有这一项，就是关。
+格式：对象，键是服务名，现在只有一个 `center`（`rapp-center`，中心服务）。旧版写的键是 `state`：只有 `state` 时照样认；开、关时写成 `center` 并去掉 `state`。没有这个文件，或两个键都没有，就是关。
 
 ```json
-{"state": {"on": true, "port": 8102, "store": "disk", "keep_days": 7, "keep_events": 1000}}
+{"center": {"on": true, "port": 8102, "store": "disk", "keep_days": 7, "keep_events": 1000}}
 ```
 
 | 字段 | 类型 | 没写时 | 取值 |
 |---|---|---|---|
-| `on` | 布尔 | 必填（项里只有它必须有） | `true`：`rapp-service` 起 `rapp-state`，通过健康检查后把它的端口分享出去（`kind: "state"`）；`false`：停掉，并撤掉这条分享 |
-| `port` | 整数 | `8102` | `rapp-state` 监听的端口（本机 `127.0.0.1`） |
-| `store` | 字符串 | 存盘（数据放 `local/state/`） | `"memory"`：不存盘，不传 `--data` |
+| `on` | 布尔 | 必填（项里只有它必须有） | `true`：`rapp-service` 起 `rapp-center`，通过健康检查后把它的端口分享出去（`kind: "state"`）；`false`：停掉，并撤掉这条分享 |
+| `port` | 整数 | `8102` | `rapp-center` 监听的端口（本机 `127.0.0.1`） |
+| `store` | 字符串 | 存盘（数据放 `local/center/`） | `"memory"`：不存盘，不传 `--data` |
 | `keep_days` | 整数 | `7` | 事件保留天数（`--keep-days`） |
 | `keep_events` | 整数 | `1000` | 队列最多留多少条（`--keep-events`） |
 
-读不懂（不是 JSON 对象，或 `state` 项不是上面的形状）：`service.log` 记一行 `services_json_invalid`（warn），当作全关。文件原样留着。起不来或中途退出：按退避重试，稳定跑 60 秒后退避重新计。
+读不懂（不是 JSON 对象，或 `center`／`state` 项不是上面的形状）：`service.log` 记一行 `services_json_invalid`（warn），当作全关。文件原样留着。起不来或中途退出：按退避重试，稳定跑 60 秒后退避重新计。
 
-生效：`rapp state on|off` 马上生效。手改要先停 `rapp-service`（§0.3）。
+生效：`rapp center on|off` 马上生效。手改要先停 `rapp-service`（§0.3）。
 
-agent 规则：开、关走 `rapp state on|off`，不直接改文件。
+agent 规则：开、关走 `rapp center on|off`，不直接改文件。
 
-### 2.13 `$ROOT/local/state-sinks.json`（已知的别的设备的状态服务）
+### 2.13 `$ROOT/local/state-sinks.json`（已知的别的设备的中心服务）
 
-谁读写：`rapp-service`（`rust/service/src/sink.rs`，`Sinks`）。收到别的设备的 `StateSink` 请求、或看到分享表里有 `kind: "state"` 的项时记下来；忘掉时删掉。格式：数组，每项一台设备：`[{"id": "<设备 ID>", "port": 8102}]`。没有这个文件就是一台都不知道。读不懂时当作空，下一次改变就覆盖它。本机自己的状态服务不记在这里。规格：《rapp-state 设计》§7.2。
+谁读写：`rapp-service`（`rust/service/src/sink.rs`，`Sinks`）。收到别的设备的 `StateSink` 请求、或看到分享表里有 `kind: "state"` 的项时记下来；忘掉时删掉。格式：数组，每项一台设备：`[{"id": "<设备 ID>", "port": 8102}]`。没有这个文件就是一台都不知道。读不懂时当作空，下一次改变就覆盖它。本机自己的中心服务不记在这里。规格：《rapp-state 设计》§7.2。
 
 agent 规则：程序自管，不要改。
 
-### 2.14 `$ROOT/local/state/state.json`（状态服务的数据）
+### 2.14 `$ROOT/local/center/state.json`（中心服务里状态队列的数据）
 
-谁读写：`rapp-state`（`services/state/src/disk.rs`）。路径来自 `rapp-service` 传的 `--data <local>/state`（`companion.rs` 的 `args`；`store` 为 `"memory"` 时不传，也就没有这个文件）。目录 0700，文件 0600，先写 `state.json.tmp` 再改名盖过去。内容是 `Store` 的序列化：各设备的会话快照、事件队列、去重用的收件记录、`keep_days`、`keep_events`。里面有各设备上程序的状态、命令和路径，算有机密。读不懂的文件改名成 `state.json.bad`，从空开始。规格：《rapp-state 设计》§7、§17 第 1 条。
+谁读写：`rapp-center`（`services/center/src/disk.rs`）。路径来自 `rapp-service` 传的 `--data <local>/center`；旧版的 `local/state/` 在第一次起服务前自动改名搬过来（`local/center/` 已经有了就不动旧的；搬不动就接着用旧目录，`service.log` 记一行）。这个目录里每块内置能力一个文件，状态队列是 `state.json`（`companion.rs` 的 `args`；`store` 为 `"memory"` 时不传，也就没有这个文件）。目录 0700，文件 0600，先写 `state.json.tmp` 再改名盖过去。内容是 `Store` 的序列化：各设备的会话快照、事件队列、去重用的收件记录、`keep_days`、`keep_events`。里面有各设备上程序的状态、命令和路径，算有机密。读不懂的文件改名成 `state.json.bad`，从空开始。规格：《rapp-state 设计》§7、§17 第 1 条，《rapp-center 设计》。
 
 agent 规则：程序自管，不要改；要清空就停服务后删这个目录。
 
-### 2.15 `$ROOT/local/state.json`（GUI 怎么找状态服务）
+### 2.15 `$ROOT/local/state.json`（GUI 怎么找中心服务）
 
-谁读写：GUI（`gui/lib/state/state_config.dart`，`StateConfig`）。设置里的「状态服务」块改它，用 `writePrivate` 写，文件 0600。三种写法：`{"mode":"auto"}`（自动找：本机有就用本机的，分享表里有 `kind: "state"` 的项就用那个）、`{"mode":"off"}`（不连）、`{"mode":"manual","url":"http://主机:端口"}`（手填，必须以 `http://` 或 `https://` 开头）。缺文件、读不懂、`mode` 不认识都当作 `auto`；`manual` 没有合法的 `url` 时按「没找到」处理。和 §2.14（服务自己的数据）不是一回事。规格：《rapp-state 设计》、`docs/superpowers/plans` 里 P2 计划。
+谁读写：GUI（`gui/lib/state/state_config.dart`，`StateConfig`）。设置里的「中心服务」块改它，用 `writePrivate` 写，文件 0600。三种写法：`{"mode":"auto"}`（自动找：本机有就用本机的，分享表里有 `kind: "state"` 的项就用那个）、`{"mode":"off"}`（不连）、`{"mode":"manual","url":"http://主机:端口"}`（手填，必须以 `http://` 或 `https://` 开头）。缺文件、读不懂、`mode` 不认识都当作 `auto`；`manual` 没有合法的 `url` 时按「没找到」处理。和 §2.14（服务自己的数据）不是一回事。规格：《rapp-state 设计》、`docs/superpowers/plans` 里 P2 计划。
 
 生效：GUI 里改马上重连；手改要重启 GUI。
 
@@ -400,7 +400,7 @@ relay 只能跑在 Linux 主机上（Mac 和 Windows 上的 Docker 在虚拟机�
 | `rapp-host` | `serve --app <标识> --token-env <变量> --port <端口>（默认 47800，0=随机）--bind <地址> --json`；`list-apps`；`check [--prompt]`；`version [--json]` | rapp-service（`Sources/RappCore/WorkerCLI.swift:97`） |
 | `rapp-client`（Swift、GTK） | `[connect] rapp://… [--token-env <变量>] [--json]`；`version [--json]` | rapp-hub |
 | `rapp-session` | 不收参数，从标准输入读 JSON 命令 | GUI |
-| `rapp-cli` | `share [端口…] [--allow 设备,设备] [--raw] [--note 备注]`（不带端口：列出本机的分享）；`unshare <端口>`；`hosts`；`pipe <名字> <端口>`；`state`（看状态服务）、`state on|off`（在这台上开、关状态服务，写 `services.json`，§2.12）（`rust/cli/src/args.rs`）。只和本机 `rapp-service` 的 IPC 说话。参数不对退出码 2，服务没在运行或命令失败退出码 1 | 用户；`~/.ssh/config` 的 `ProxyCommand rapp pipe %h %p`（端口分享规格 §9.4）。用户面对的名字是 `rapp`，怎么落到它上面归打包 |
+| `rapp-cli` | `share [端口…] [--allow 设备,设备] [--raw] [--note 备注]`（不带端口：列出本机的分享）；`unshare <端口>`；`hosts`；`pipe <名字> <端口>`；`center`（看中心服务）、`center on|off`（在这台上开、关中心服务，写 `services.json`，§2.12；`state` 是旧名，照样认）（`rust/cli/src/args.rs`）。只和本机 `rapp-service` 的 IPC 说话。参数不对退出码 2，服务没在运行或命令失败退出码 1 | 用户；`~/.ssh/config` 的 `ProxyCommand rapp pipe %h %p`（端口分享规格 §9.4）。用户面对的名字是 `rapp`，怎么落到它上面归打包 |
 
 agent 规则：`rapp-host`、`rapp-client`、`rapp-session` 是由上面的程序拉起的，一般不用手动跑；测试时只用自己起的实例，端口用临时端口，不用 47800、21116–21119、22026–22029。
 

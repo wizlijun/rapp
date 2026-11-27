@@ -36,7 +36,7 @@ void main() {
       final api = FakeSwitch()..onState = (_, _) async => throw Exception(why);
       await tester.pumpWidget(row(api));
       await tester.pumpAndSettle();
-      expect(find.text('状态服务'), findsNothing);
+      expect(find.text('中心服务'), findsNothing);
       expect(find.byType(Switch), findsNothing);
     });
   }
@@ -45,7 +45,7 @@ void main() {
     final api = FakeSwitch()..onState = (_, _) async => {'ok': true, 'on': true, 'running': true, 'port': 8102};
     await tester.pumpWidget(row(api));
     await tester.pumpAndSettle();
-    expect(find.text('状态服务'), findsOneWidget);
+    expect(find.text('中心服务'), findsOneWidget);
     expect(find.text('运行中，端口 8102'), findsOneWidget);
     expect(switchOn(tester), isTrue);
   });
@@ -149,13 +149,13 @@ void main() {
       };
     await tester.pumpWidget(row(api));
     await tester.pump();
-    expect(find.text('状态服务'), findsNothing);
+    expect(find.text('中心服务'), findsNothing);
     await tester.pump(const Duration(seconds: 9));
     expect(n, 1);
     await tester.pump(const Duration(seconds: 2));
     await tester.pump();
     expect(n, 2);
-    expect(find.text('状态服务'), findsOneWidget);
+    expect(find.text('中心服务'), findsOneWidget);
   });
 
   testWidgets('unknown op is not retried', (tester) async {
@@ -173,7 +173,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(seconds: 35));
       expect(api.calls, ['state 111111111 null']);
-      expect(find.text('状态服务'), findsNothing);
+      expect(find.text('中心服务'), findsNothing);
     });
   }
 
@@ -201,13 +201,13 @@ void main() {
     await tester.pump();
     gates[0].complete({'ok': true, 'on': true, 'running': true, 'port': 1});
     await tester.pump();
-    expect(find.text('状态服务'), findsNothing, reason: 'the superseded load does not win');
+    expect(find.text('中心服务'), findsNothing, reason: 'the superseded load does not win');
     await tester.pump(const Duration(seconds: 11));
     expect(gates, hasLength(3));
     gates[2].complete({'ok': true, 'on': false});
     await tester.pump();
     await tester.pump();
-    expect(find.text('状态服务'), findsOneWidget);
+    expect(find.text('中心服务'), findsOneWidget);
   });
 
   testWidgets('a localId change during a load leaves one retry chain', (tester) async {
@@ -250,7 +250,7 @@ void main() {
       StateServiceRow(key: UniqueKey(), api: api, to: null, nameOf: (id) => 'dev-$id', localId: '111111111'),
     ));
     await tester.pumpAndSettle();
-    expect(find.text('状态服务'), findsOneWidget);
+    expect(find.text('中心服务'), findsOneWidget);
     expect(find.text('已经有一个在 dev-222222222 上'), findsOneWidget);
     expect(tester.getSize(find.byType(Switch)).height, lessThanOrEqualTo(48));
     await tester.tap(find.byType(Switch));

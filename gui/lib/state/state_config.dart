@@ -1,4 +1,4 @@
-// `local/state.json`: how this app finds the rapp-state service. See the config reference, section on state.json.
+// `local/state.json`: how this app finds the center service (rapp-center). See the config reference, section on state.json.
 import 'dart:convert';
 import 'dart:io';
 

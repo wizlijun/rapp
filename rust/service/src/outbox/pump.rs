@@ -26,7 +26,7 @@ pub fn backoff(fails: u32) -> Duration {
     Duration::from_secs(s)
 }
 
-/// What the outbox is doing, for `rapp state`.
+/// What the outbox is doing, for `rapp center`.
 #[derive(Default, Clone, Debug, Serialize)]
 pub struct Stats {
     pub active: bool,
@@ -381,7 +381,7 @@ mod tests {
     }
 
     fn sample() -> Vec<(Value, u64)> {
-        include_str!("../../../../services/state/api/samples/term-lists.ndjson")
+        include_str!("../../../../services/center/api/samples/term-lists.ndjson")
             .lines()
             .map(|l| {
                 let v: Value = serde_json::from_str(l).unwrap();

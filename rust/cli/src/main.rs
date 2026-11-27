@@ -133,7 +133,7 @@ async fn main() {
             }
             print!("{}", say::hosts(&r));
         }
-        Cmd::State { on } => {
+        Cmd::Center { on } => {
             let mut c = json!({"cmd":"state"});
             if let Some(on) = on {
                 c["on"] = json!(on);
@@ -145,10 +145,10 @@ async fn main() {
             match on {
                 Some(true) if r["running"] != true => {
                     let e = r["error"].as_str().unwrap_or("");
-                    fail(&format!("没有成功：{}", if e.is_empty() { "状态服务没有起来" } else { e }));
+                    fail(&format!("没有成功：{}", if e.is_empty() { "中心服务没有起来" } else { e }));
                 }
-                Some(true) => println!("已打开状态服务"),
-                Some(false) => println!("已关掉状态服务"),
+                Some(true) => println!("已打开中心服务"),
+                Some(false) => println!("已关掉中心服务"),
                 None => {}
             }
             print!("{}", say::state(&r));

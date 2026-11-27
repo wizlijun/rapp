@@ -38,7 +38,7 @@ void main() {
 
   testWidgets('the three choices save to local/state.json', (t) async {
     await pump(t);
-    expect(find.text('状态服务'), findsOneWidget);
+    expect(find.text('中心服务'), findsOneWidget);
     expect(find.text('自动'), findsOneWidget);
     expect(find.text('关'), findsOneWidget);
 
@@ -105,7 +105,7 @@ void main() {
     await pump(t);
     final words = {
       StateStatus.unreachable: '连不上',
-      StateStatus.none: '没找到状态服务',
+      StateStatus.none: '没找到中心服务',
       StateStatus.off: '已关',
       StateStatus.connecting: '连接中…',
     };
@@ -140,7 +140,7 @@ void main() {
       ),
     ));
     expect(find.text('版本与升级'), findsOneWidget);
-    expect(find.text('状态服务'), findsOneWidget);
+    expect(find.text('中心服务'), findsOneWidget);
     expect(find.text('数据目录'), findsOneWidget);
     await t.tap(find.text('关'));
     await t.pump();

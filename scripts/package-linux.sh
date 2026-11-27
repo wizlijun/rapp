@@ -105,7 +105,7 @@ Devices-tab saved-terminal recovery, zsh/bash/fish OSC 7502 shell hooks with
 venv/conda reactivation and non-executing command prefill, secret-line filtering,
 and 新建 / Ctrl+Shift+T starting in the current or last terminal's directory),
 device headroom/load bars with 1-hour detail sparklines and Needs You resource
-warnings, companion state service (`rapp-state`), event outbox and cross-device
+warnings, companion state service (`rapp-center`), event outbox and cross-device
 StateSync / StateOut status queue, Needs You `推断` inferred waits, `别处开着`
 open-elsewhere session cards (`/v1/watch`, `/v1/seen`, `/v1/desk/<fp>`, 状态服务
 settings, and per-device `SetService` switches), intent-following
@@ -153,7 +153,7 @@ Linux can share ports and text terminals. New terminal windows require a graphic
 session, a supported terminal app, and a working systemd user manager.
 They run in separate transient user services and survive a rapp-service restart.
 Run `rapp share`, `rapp unshare`, `rapp hosts`, `rapp pipe`, `rapp term restore`
-(`--list` / `--forget` / `<number|name>...`), `rapp state` (`on` / `off`),
+(`--list` / `--forget` / `<number|name>...`), `rapp center` (`on` / `off`),
 `rapp load` (`pick` / `--top` / `--json`), or `rapp update`
 (`status` / `check` / `rollback`, with `--json`) for CLI access; on Linux
 online self-replacement is disabled (`not_launchd`, exit 7) and directs to the
@@ -203,7 +203,7 @@ sha256sums=('$(sha256sum "$archive" | cut -d' ' -f1)')
 package() {
   install -d "\$pkgdir/opt/rapp" "\$pkgdir/usr/bin"
   cp -a "\$srcdir/$name/." "\$pkgdir/opt/rapp/"
-  for binary in rapp rapp-client rapp-host rapp-hub rapp-service rapp-term rapp-state rapp-cli; do
+  for binary in rapp rapp-client rapp-host rapp-hub rapp-service rapp-term rapp-center rapp-cli; do
     ln -s "/opt/rapp/\$binary" "\$pkgdir/usr/bin/\$binary"
   done
   install -Dm644 "\$srcdir/$name/LICENSE" "\$pkgdir/usr/share/licenses/rapp-omarchy/LICENSE"

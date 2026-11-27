@@ -29,7 +29,7 @@ pub const WAIT: Duration = Duration::from_secs(10);
 pub const TEST_PORTS: (u16, u16) = (29800, 100);
 
 /// A temp dir with `rapp-host` / `rapp-client` / `rapp-term` symlinked to the fake workers, and
-/// `rapp-state` to the real state service. Windows: copies named `<name>.exe` (a symlink needs
+/// `rapp-center` to the real state service. Windows: copies named `<name>.exe` (a symlink needs
 /// admin rights or developer mode there, and `bins::find` looks for the `.exe` name).
 pub fn bins() -> TempDir {
     bins_with_host(env!("CARGO_BIN_EXE_fake-rapp-host"))
@@ -42,7 +42,7 @@ pub fn bins_with_host(program: &str) -> TempDir {
         ("rapp-host", program),
         ("rapp-client", env!("CARGO_BIN_EXE_fake-rapp-client")),
         ("rapp-term", env!("CARGO_BIN_EXE_fake-rapp-term")),
-        ("rapp-state", env!("CARGO_BIN_EXE_test-rapp-state")),
+        ("rapp-center", env!("CARGO_BIN_EXE_test-rapp-center")),
     ] {
         #[cfg(unix)]
         std::os::unix::fs::symlink(target, dir.path().join(name)).unwrap();

@@ -1,4 +1,4 @@
-//! Where the state service (`rapp-state`, a "sink") is, and telling the devices this one knows.
+//! Where the center service (`rapp-center`, a "sink") is, and telling the devices this one knows.
 //!
 //! A device learns of a sink from a share list carrying `kind: "state"` (`saw`), from another
 //! device's `StateSink` notice (`serve`), or from its own companion (`set_local`). Each change
