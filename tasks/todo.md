@@ -1737,3 +1737,30 @@ P0 探查已完成（2026-11-27），结论见 `docs/superpowers/specs/2026-11-2
 - [ ] 探查 4-5：验收第 3 条，A 上真 Claude Code 弹权限提示，手机点「允许」，A 的窗口大小和 B 的画面不变
 - [ ] 探查 3：看 `docs/superpowers/measurements/2026-11-27-rapp-phone-v1a-3-reading.md` 开头六组对照，说一句读不读得下去
 - 探查分支 `probe/phone-v1a-1` 和 worktree `.worktrees/phone-v1a-1` 留到真机数字填完；`probe/phone-v1a-2`、`-3`、`-4` 留给实现时取用
+
+### V1b 手机外壳（分支 feat/phone-v1b，2026-11-28 合进本机 main，未推）
+
+iOS 上短边 <600 用手机外壳（首页 / 会话里面 / 设备 / 设置），≥600 仍是 Pad 界面；Mac 上只有 `RAPP_PHONE_FORM=1` 才切。计划 `docs/superpowers/plans/2026-11-27-rapp-phone-v1b-shell.md`，验收记录 `docs/superpowers/measurements/2026-11-27-rapp-phone-v1b-check.md`。
+
+要真机的（用户动手）：
+
+- [ ] 计划 Task 12（跳过了）：Duo 真机开合日志填进探查 1 的操作单后，核对 `phoneFormSettle`（现在 250 ms），补开合顺序测试
+- [ ] 验收 1：Duo 开合操作单（验收记录「步骤 4」，约 5 分 30 秒，含 Q1 一秒出卡片）
+- [ ] iPhone 横屏；iPad 最窄分屏来回拖；三套主题和灰度实看；中心服务关掉时首页没有空格子
+- [ ] 手机会话里的输入区：贴在键盘上方的位置对不对（iPhone、Duo 外屏各看一次）
+- [ ] 开合时会不会闪一下（换外壳中间空一帧）
+- [ ] 开合时解锁密码框关掉后会重新弹出
+
+代定的（用户确认或改）：
+
+- [ ] R36：手机会话里的输入区按键沿用现在 48 / 40 高，没到手机规格的 56，等 V1c 重做输入时再改
+
+留着的小问题（终审复查说可以等）：
+
+- [ ] 换外壳那一空帧没涂底色，浅色主题下可能闪一下深色（`form.dart` 的 `SizedBox.expand()` 改成涂 `RappTokens.of(context).bg`）
+- [ ] `PhoneShell.initState` 的 post-frame 用的是捕获的 access，一帧内来了新的 access 会被写回旧值（改成回调里读 `_access`）
+- [ ] 每次展开后，不肯按舞台改大小的窗口（A 夹住了最小尺寸）会多试一次 resize（在 F11「最多一次」以内）
+- [ ] 重新弹解锁框时旧框还在淡出，约 150 ms 两个框叠着
+- [ ] 验收记录里「五分钟操作单」「不计入五分钟」两个标题还写五分钟（合计约 5 分 30 秒）
+- [ ] 矩阵没量打开后的输入区（文本区、快捷区、按键条、常用语条）在 2× 字号和窄屏、横屏下会不会溢出；也没在 iOS 平台下量按钮栈
+- [ ] 冷启动时首页可能先空一下再出「接入」（和 Pad 一样，R33）
