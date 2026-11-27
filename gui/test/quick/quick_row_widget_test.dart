@@ -1,5 +1,5 @@
-// The 快捷区 first row (quick-row spec §5): the chips in front (the starred, or every item by use count), and the two
-// menus 「按键▾」「常用语▾」 pinned at its right end.
+// The 快捷区 first row (quick-row spec §5, cmd-menu design): the chips in front (the starred, or every item by use
+// count), and the two menus 「命令▾」「常用语▾」 pinned at its right end.
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -8,19 +8,16 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/key_bar.dart';
-import 'package:rapp/embed/phrase_send.dart';
 import 'package:rapp/embed/phrase_strip.dart';
 import 'package:rapp/embed/phrases.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/strip_cmds.dart';
 import 'package:rapp/hub_client.dart';
-import 'package:rapp/pages/keys_page.dart';
+import 'package:rapp/pages/cmds_page.dart';
 import 'package:rapp/pages/phrases_page.dart';
-import 'package:rapp/quick/key_actions.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/quick/quick_row.dart';
 import 'package:rapp/quick/quick_usage.dart';
-import 'package:rapp/term/term_session_port.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/star_button.dart';
@@ -99,7 +96,7 @@ void main() {
         final k = w.key;
         return w is GestureDetector &&
             k is ValueKey<String> &&
-            (k.value.startsWith('phrase-') || k.value.startsWith('keyact-'));
+            k.value.startsWith('phrase-');
       }),
     );
     final els = f.evaluate().toList()
@@ -110,27 +107,34 @@ void main() {
     return [for (final e in els) ((e.widget.key!) as ValueKey<String>).value];
   }
 
-  /// quickRowOrder's answer for the state now, as chip keys (commands only with a tool, key actions only usable ones).
-  List<String> expectedKeys({required bool term, required bool tool}) {
+  /// quickRowOrder's answer for the state now, as chip keys (commands only with a tool).
+  List<String> expectedKeys({required bool tool}) {
     final q = s.quick;
     final order = quickRowOrder(
-      phraseRefs: [for (final p in q.phrases) refOf(p)],
-      keyRefs: [for (final a in q.keys) a.ref],
+      refs: [for (final p in q.phrases) refOf(p)],
       stars: q.stars,
       totals: usageTotals([q.usage, ...q.others.values], DateTime.now()),
     );
-    final out = <String>[];
-    for (final r in order) {
-      final i = q.phrases.indexWhere((it) => refOf(it) == r);
-      if (i >= 0) {
-        if (q.phrases[i] is Phrase || tool) out.add('phrase-$i');
-        continue;
-      }
-      for (final a in q.keys) {
-        if (a.ref == r && keyActionUsable(a, term: term, tool: tool ? s.stripToolOf(tsess) : null)) out.add('keyact-${a.id}');
-      }
-    }
-    return out;
+    return [
+      for (final r in order)
+        for (final (i, it) in q.phrases.indexed)
+          if (refOf(it) == r && (it is Phrase || tool)) 'phrase-$i',
+    ];
+  }
+
+  int indexOfCmd(String id) => s.quick.phrases.indexWhere((it) => it is StripCmd && it.id == id);
+
+  /// The rows of the open sheet, top to bottom, as `menu-p-<i>` keys.
+  List<String> sheetRows(WidgetTester tester) {
+    final els = find
+        .byWidgetPredicate((w) => w is ListTile && w.key is ValueKey<String> && (w.key! as ValueKey<String>).value.startsWith('menu-p-'))
+        .evaluate()
+        .toList()
+      ..sort((a, b) => (a.renderObject! as RenderBox)
+          .localToGlobal(Offset.zero)
+          .dy
+          .compareTo((b.renderObject! as RenderBox).localToGlobal(Offset.zero).dy));
+    return [for (final e in els) ((e.widget.key!) as ValueKey<String>).value];
   }
 
   /// The repeat window is on the wall clock.
@@ -139,30 +143,49 @@ void main() {
 
   int indexOfText(String text) => s.quick.phrases.indexWhere((p) => p is Phrase && p.text == text);
 
-  iosTest('no stars: the row is phrases by count then key actions; menus at the end', (tester) async {
-    s.recordUse('k:clear');
-    s.recordUse('k:clear');
-    s.recordUse(refOf(s.quick.phrases[indexOfText('进度')]));
+  iosTest('no stars: the row is every item by count, then list order; 命令▾ 常用语▾ at the end', (tester) async {
+    final jd = indexOfText('进度'), compact = indexOfCmd('compact');
+    s.recordUse(refOf(s.quick.phrases[jd]));
+    s.recordUse(refOf(s.quick.phrases[jd]));
+    s.recordUse(refOf(s.quick.phrases[compact]));
     await tester.pumpWidget(strip(tsess));
     final keys = rowKeys(tester);
-    expect(keys, expectedKeys(term: true, tool: true));
-    expect(keys.first, 'keyact-clear');
-    expect(keys[1], 'phrase-${indexOfText('进度')}');
-    // The rest by menu order: the commands, the phrases, then the key actions.
-    expect(keys[2], 'phrase-0');
-    expect(keys.last, 'keyact-newtab');
-    expect(ph('quick-menu-keys'), findsOneWidget);
-    expect(ph('quick-menu-phrases'), findsOneWidget);
+    expect(keys, expectedKeys(tool: true));
+    expect(keys.take(3), ['phrase-$jd', 'phrase-$compact', 'phrase-0']);
+    expect(keys, hasLength(s.quick.phrases.length));
+    expect(ph('quick-menu-keys'), findsNothing, reason: 'the 按键动作 are gone');
+    expect(find.text('按键▾'), findsNothing);
     expect(ph('phrases-all'), findsNothing);
-    expect(find.descendant(of: ph('quick-menu-keys'), matching: find.text('按键▾')), findsOneWidget);
+    expect(find.descendant(of: ph('quick-menu-cmds'), matching: find.text('命令▾')), findsOneWidget);
     expect(find.descendant(of: ph('quick-menu-phrases'), matching: find.text('常用语▾')), findsOneWidget);
-    // Pinned at the right end, as high as a chip, 按键▾ before 常用语▾.
+    // Pinned at the right end, as high as a chip, 命令▾ before 常用语▾.
     final list = tester.getRect(ph('phrase-strip-list'));
-    final kr = tester.getRect(ph('quick-menu-keys')), pr = tester.getRect(ph('quick-menu-phrases'));
-    expect(kr.left, greaterThanOrEqualTo(list.right));
-    expect(pr.left, greaterThan(kr.left));
-    expect(kr.height, phraseStripChip);
+    final cr = tester.getRect(ph('quick-menu-cmds')), pr = tester.getRect(ph('quick-menu-phrases'));
+    expect(cr.left, greaterThanOrEqualTo(list.right));
+    expect(pr.left, greaterThan(cr.left));
+    expect(cr.height, phraseStripChip);
     expect(pr.height, phraseStripChip);
+  });
+
+  iosTest('命令▾ lists the commands only, 搜历史 among them; 常用语▾ the phrases only; both in list order', (tester) async {
+    await tester.pumpWidget(strip(tsess));
+    final q = s.quick;
+    await tester.tap(ph('quick-menu-cmds'));
+    await tester.pumpAndSettle();
+    expect(find.text('命令'), findsOneWidget, reason: 'the sheet title');
+    expect(sheetRows(tester), [
+      for (final (i, it) in q.phrases.indexed)
+        if (it is StripCmd) 'menu-p-$i',
+    ]);
+    expect(find.descendant(of: ph('menu-p-${indexOfCmd('search')}'), matching: find.text('搜历史')), findsOneWidget);
+    Navigator.of(tester.element(ph('menu-settings'))).pop();
+    await tester.pumpAndSettle();
+    await tester.tap(ph('quick-menu-phrases'));
+    await tester.pumpAndSettle();
+    expect(sheetRows(tester), [
+      for (final (i, it) in q.phrases.indexed)
+        if (it is Phrase) 'menu-p-$i',
+    ]);
   });
 
   iosTest('starring in a menu: row shows only the starred, sheet stays, nothing sent', (tester) async {
@@ -184,41 +207,43 @@ void main() {
     Navigator.of(tester.element(ph('menu-settings'))).pop();
     await tester.pumpAndSettle();
     expect(rowKeys(tester), ['phrase-$i']);
-    // A star on a key action too, in star order.
-    await tester.tap(ph('quick-menu-keys'));
+    // A star on a command too, in star order.
+    final se = indexOfCmd('search');
+    await tester.tap(ph('quick-menu-cmds'));
     await tester.pumpAndSettle();
-    expect(find.descendant(of: ph('menu-k-search'), matching: find.text('⌃R')), findsOneWidget);
-    expect(tester.widget(ph('menu-star-k-search')), isA<StarButton>());
-    await tester.tap(ph('menu-star-k-search'));
+    expect(tester.widget(ph('menu-star-p-$se')), isA<StarButton>());
+    await tester.tap(ph('menu-star-p-$se'));
     await tester.pumpAndSettle();
     Navigator.of(tester.element(ph('menu-settings'))).pop();
     await tester.pumpAndSettle();
-    expect(rowKeys(tester), ['phrase-$i', 'keyact-search']);
+    expect(rowKeys(tester), ['phrase-$i', 'phrase-$se']);
     expect(term.calls.where((c) => c.$1 != 'composer'), isEmpty);
   });
 
   iosTest('tapping a menu row sends and closes; grey row explains and stays', (tester) async {
     fg('agy');
     await tester.pumpWidget(strip(tsess));
-    expect(ph('keyact-search'), findsNothing, reason: 'grey key actions are not on the row');
-    await tester.tap(ph('quick-menu-keys'));
+    final se = indexOfCmd('search'), mode = indexOfCmd('mode');
+    expect(find.ancestor(of: ph('phrase-$se'), matching: find.byWidgetPredicate((w) => w is Opacity && w.opacity < 1)),
+        findsOneWidget, reason: 'Antigravity has no 搜历史: grey on the row');
+    await tester.tap(ph('quick-menu-cmds'));
     await tester.pumpAndSettle();
-    expect(find.ancestor(of: ph('menu-k-search'), matching: find.byWidgetPredicate((w) => w is Opacity && w.opacity < 1)),
+    expect(find.ancestor(of: ph('menu-p-$se'), matching: find.byWidgetPredicate((w) => w is Opacity && w.opacity < 1)),
         findsOneWidget);
-    await tester.tap(ph('menu-k-search'));
+    await tester.tap(ph('menu-p-$se'));
     await tester.pumpAndSettle();
     expect(ph('menu-settings'), findsOneWidget, reason: 'a grey row keeps the sheet');
     expect(tester.widget<Text>(ph('menu-hint')).data, 'Antigravity 没有这个命令');
     expect(term.calls.where((c) => c.$1 == 'keys'), isEmpty);
     // Its star still works.
-    await tester.tap(ph('menu-star-k-search'));
+    await tester.tap(ph('menu-star-p-$se'));
     await tester.pumpAndSettle();
-    expect(s.quick.stars, ['k:search']);
-    await tester.tap(ph('menu-k-clear'));
+    expect(s.quick.stars, [refOf(s.quick.phrases[se])]);
+    await tester.tap(ph('menu-p-$mode'));
     await tester.pumpAndSettle();
     expect(ph('menu-settings'), findsNothing, reason: 'sent: the sheet closes');
-    expect(term.calls.where((c) => c.$1 == 'keys').last.$2['keys'], ['Ctrl-L']);
-    expect(usageTotals([s.quick.usage], DateTime.now())['k:clear'], 1);
+    expect(term.calls.where((c) => c.$1 == 'keys'), hasLength(1));
+    expect(usageTotals([s.quick.usage], DateTime.now())['p:mode'], 1);
     await waitRepeat(tester);
     // A phrase from 常用语▾ goes the same way.
     await tester.tap(ph('quick-menu-phrases'));
@@ -239,68 +264,47 @@ void main() {
     await tester.tap(ph('menu-settings'));
     await tester.pumpAndSettle();
     expect(find.byType(PhrasesPage), findsOneWidget);
-    expect(find.byType(KeysPage), findsNothing);
+    expect(find.byType(CmdsPage), findsNothing);
     Navigator.of(tester.element(find.byType(PhrasesPage))).pop();
     await tester.pumpAndSettle();
-    await tester.tap(ph('quick-menu-keys'));
+    await tester.tap(ph('quick-menu-cmds'));
     await tester.pumpAndSettle();
     await tester.tap(ph('menu-settings'));
     await tester.pumpAndSettle();
-    expect(find.byType(KeysPage), findsOneWidget);
+    expect(find.byType(CmdsPage), findsOneWidget);
     expect(find.byType(PhrasesPage), findsNothing);
-    expect(find.descendant(of: find.byType(AppBar), matching: find.text('按键')), findsOneWidget);
+    expect(find.descendant(of: find.byType(AppBar), matching: find.text('命令')), findsOneWidget);
   });
 
   iosTest('the order does not change while in use, but does when stars change', (tester) async {
-    fg('zsh', shell: true);
-    s.setStripItems([const Phrase('甲'), const Phrase('乙')]);
+    s.setStripItems([const Phrase('甲'), const Phrase('乙'), const StripCmd('search')]);
     await tester.pumpWidget(strip(tsess));
     final before = rowKeys(tester);
-    expect(before.take(3), ['phrase-0', 'phrase-1', 'keyact-search']);
+    expect(before, ['phrase-0', 'phrase-1', 'phrase-2']);
     for (var n = 0; n < 3; n++) {
-      await tester.tap(ph(before[2]));
+      await tester.tap(ph('phrase-2'));
       await tester.pump();
       await waitRepeat(tester);
     }
-    expect(usageTotals([s.quick.usage], DateTime.now())['k:search'], 3);
-    expect(term.calls.where((c) => c.$1 == 'keys'), hasLength(3));
+    expect(usageTotals([s.quick.usage], DateTime.now())['p:search'], 3);
+    expect(term.calls.where((c) => c.$1 == 'keys'), hasLength(3), reason: '搜历史 is ⌃R on Claude Code');
     expect(rowKeys(tester), before, reason: 'counts alone do not reorder');
     s.toggleStar(refOf(s.quick.phrases[1]));
     await tester.pump();
     expect(rowKeys(tester), ['phrase-1']);
     s.toggleStar(refOf(s.quick.phrases[1]));
     await tester.pump();
-    expect(rowKeys(tester).first, 'keyact-search', reason: 'stars changed: counted again');
+    expect(rowKeys(tester).first, 'phrase-2', reason: 'stars changed: counted again');
   });
 
   iosTest('the row shows with only the two menus when nothing fits', (tester) async {
     app.setProfile(const ResolvedProfile(phrases: true));
     s.setStripItems([const StripCmd('new')]); // a command, and no tool in front of an app
-    s.setKeyActions(const []);
     expect(phraseStripShown(s, app), isTrue);
     await tester.pumpWidget(strip(app));
     expect(rowKeys(tester), isEmpty);
-    expect(ph('quick-menu-keys'), findsOneWidget);
+    expect(ph('quick-menu-cmds'), findsOneWidget);
     expect(ph('quick-menu-phrases'), findsOneWidget);
-  });
-
-  iosTest('key action chip on a terminal sends its keys and counts a use', (tester) async {
-    await tester.pumpWidget(strip(tsess));
-    expect(term, isA<TermSessionPort>());
-    await tester.tap(ph('keyact-clear'));
-    await tester.pump();
-    expect(term.calls.where((c) => c.$1 == 'keys').single.$2['keys'], ['Ctrl-L']);
-    expect(find.descendant(of: ph('keyact-clear'), matching: find.byIcon(Icons.check)), findsOneWidget);
-    expect(usageTotals([s.quick.usage], DateTime.now())['k:clear'], 1);
-    await waitRepeat(tester);
-    // ⌘T goes through the stage's own shortcut.
-    final ran = <String>[];
-    tsess.termCommand = ran.add;
-    await tester.tap(ph('keyact-newtab'));
-    await tester.pump();
-    expect(ran, ['t']);
-    expect(usageTotals([s.quick.usage], DateTime.now())['k:newtab'], 1);
-    await waitRepeat(tester);
   });
 
   iosTest('long press: 打星 / 取消星标, and 移到最前 only on a starred item', (tester) async {
@@ -329,53 +333,16 @@ void main() {
     await tester.tap(ph('phrase-menu-star'));
     await tester.pumpAndSettle();
     expect(s.quick.stars, [rj]);
-    // A key action: 编辑 / 打星 / 删除.
-    s.toggleStar(rj);
-    await tester.pump();
-    await tester.longPress(ph('keyact-bg'));
-    await tester.pumpAndSettle();
-    expect(ph('keyact-menu-edit'), findsOneWidget);
-    expect(ph('keyact-menu-delete'), findsOneWidget);
-    expect(ph('phrase-menu-first'), findsNothing);
-    expect(find.descendant(of: ph('phrase-menu-star'), matching: find.text('打星')), findsOneWidget);
-    await tester.tap(ph('phrase-menu-star'));
-    await tester.pumpAndSettle();
-    expect(s.quick.stars, ['k:bg']);
-    await tester.longPress(ph('keyact-bg'));
-    await tester.pumpAndSettle();
-    expect(find.descendant(of: ph('phrase-menu-star'), matching: find.text('取消星标')), findsOneWidget);
-    expect(ph('phrase-menu-first'), findsNothing, reason: 'a key action has no 移到最前 (spec §5.1)');
-    await tester.tap(ph('keyact-menu-delete'));
-    await tester.pumpAndSettle();
-    expect(s.quick.keys.where((a) => a.id == 'bg'), isEmpty);
-    expect(s.quick.stars, isEmpty, reason: 'the deleted action takes its star');
-    expect(ph('keyact-bg'), findsNothing);
   });
 
-  iosTest('a key action with its own chord on codex says that chord where it cannot go', (tester) async {
-    // ⌘K on codex: a terminal has no ⌘ key and rApp has no ⌘K shortcut, so it is grey here; the plain chord ⌃R could go.
-    s.setKeyActions([
-      const KeyAction('x', label: '试试', chord: Chord('r', ctrl: true), per: {'codex': Chord('k', cmd: true)}),
-    ]);
-    fg('codex');
-    await tester.pumpWidget(strip(tsess));
-    await tester.tap(ph('quick-menu-keys'));
-    await tester.pumpAndSettle();
-    expect(find.descendant(of: ph('menu-k-x'), matching: find.text('⌘K')), findsOneWidget);
-    await tester.tap(ph('menu-k-x'));
-    await tester.pumpAndSettle();
-    expect(tester.widget<Text>(ph('menu-hint')).data, '这里发不了 ⌘K');
-    expect(term.calls.where((c) => c.$1 == 'keys'), isEmpty);
-  });
-
-  iosTest('no AI tool: the commands stay in 常用语▾, grey; a tap sends nothing, the star still works', (tester) async {
+  iosTest('no AI tool: the commands stay in 命令▾, grey; a tap sends nothing, the star still works', (tester) async {
     fg('zsh', shell: true);
     await tester.pumpWidget(strip(tsess));
     final i = s.quick.phrases.indexWhere((it) => it is StripCmd && it.id == 'new');
     final ref = refOf(s.quick.phrases[i]);
     expect(ph('phrase-$i'), findsNothing, reason: 'not on the row (spec §5.2)');
     term.calls.clear();
-    await tester.tap(ph('quick-menu-phrases'));
+    await tester.tap(ph('quick-menu-cmds'));
     await tester.pumpAndSettle();
     expect(ph('menu-p-$i'), findsOneWidget);
     expect(find.ancestor(of: ph('menu-p-$i'), matching: find.byWidgetPredicate((w) => w is Opacity && w.opacity < 1)),

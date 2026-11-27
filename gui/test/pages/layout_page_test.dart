@@ -4,11 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/key_bar_keys.dart';
 import 'package:rapp/hub_client.dart';
-import 'package:rapp/pages/keys_page.dart';
+import 'package:rapp/embed/phrases.dart';
+import 'package:rapp/embed/strip_cmds.dart';
+import 'package:rapp/pages/cmds_page.dart';
+import 'package:rapp/pages/layout_page.dart';
+import 'package:rapp/pages/phrases_page.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/quick/key_layout.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
+import 'package:rapp/ui/side_panel.dart';
 
 import '../fakes.dart';
 import '../ui/helpers.dart';
@@ -18,7 +23,7 @@ void main() {
   late MainState s;
 
   setUp(() {
-    tmp = Directory.systemTemp.createTempSync('keys_layout_test');
+    tmp = Directory.systemTemp.createTempSync('layout_page_test');
     Directory('${tmp.path}/local').createSync();
     File('${tmp.path}/local/service.json').writeAsStringSync('{"id":"dev1"}');
     s = MainState(hub: HubClient(FakeTransport()), data: DataDir(tmp.path), prefs: UiPrefs(), port: FakeSessionPort());
@@ -36,7 +41,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(wrap(Builder(
-      builder: (c) => TextButton(onPressed: () => openKeysPage(c, s), child: const Text('go')),
+      builder: (c) => TextButton(onPressed: () => openLayoutPage(c, s), child: const Text('go')),
     )));
     await tester.tap(find.text('go'));
     await tester.pumpAndSettle();
@@ -49,9 +54,21 @@ void main() {
   }
 
   List<List<String>> rows() => s.quick.layout.rows;
-  Set<String> ids() => {for (final a in s.quick.keys) a.id};
 
-  testWidgets('move PgUp to row 1, drop ⌘T, add an action: the bar follows', (tester) async {
+  testWidgets('the page is the layout only: no 按键动作, none to pick', (tester) async {
+    await open(tester);
+    expect(find.descendant(of: find.byType(AppBar), matching: find.text('键盘布局')), findsOneWidget);
+    expect(find.text('按键动作'), findsNothing);
+    expect(k('keys-add'), findsNothing);
+    expect(
+        find.byWidgetPredicate(
+            (w) => w.key is ValueKey<String> && (w.key! as ValueKey<String>).value.startsWith('layout-pick-k:')),
+        findsNothing);
+    expect(k('layout-pick-cr'), findsOneWidget);
+    expect(k('keys-restore-layout'), findsOneWidget);
+  });
+
+  testWidgets('move PgUp to row 1, drop ⌘T, add ⌃R: the bar follows', (tester) async {
     await open(tester);
     // PgUp is row 2 cell 5; moving across rows = delete it, then row 1's ＋.
     await tapK(tester, 'layout-cell-1-5');
@@ -62,12 +79,12 @@ void main() {
     expect(k('layout-delete'), findsOneWidget);
     await tapK(tester, 'layout-delete');
     await tapK(tester, 'layout-add-1');
-    await tapK(tester, 'layout-pick-k:search');
+    await tapK(tester, 'layout-pick-cr');
     const row0 = ['tab', 'esc', 'cc', 'bksp', 'enter', 'up', 'pgup'];
-    const row1 = ['copy', 'paste', 'cmd', 'ctrl', 'pgdn', 'left', 'down', 'right', 'k:search'];
+    const row1 = ['copy', 'paste', 'cmd', 'ctrl', 'pgdn', 'left', 'down', 'right', 'cr'];
     expect(rows(), [row0, row1]);
     // The real bar draws exactly this (⋯ closes row 1).
-    expect(keyBarRows(layout: s.quick.layout, more: true, actionIds: ids()), [
+    expect(keyBarRows(layout: s.quick.layout, more: true), [
       [...row0, 'more'],
       row1,
     ]);
@@ -228,5 +245,39 @@ void main() {
     await tester.pumpAndSettle();
     expect(rows()[1], KeyLayout.fallback.rows[1]);
     expect(rows()[0].toSet(), {'tab', 'esc', 'cc', 'bksp', 'enter', 'up'});
+  });
+
+  testWidgets('全局设置: 常用语 (phrases only), 命令, 键盘布局 rows, each opening its page', (tester) async {
+    s.setStripItems(defaultStripItems);
+    s.togglePanel();
+    await tester.pumpWidget(wrap(SidePanel(state: s, devicesTab: const Text('d'))));
+    await tester.pump();
+    final nPhrases = s.quick.phrases.whereType<Phrase>().length, nCmds = s.quick.phrases.whereType<StripCmd>().length;
+    expect(k('keys-settings'), findsNothing, reason: 'no 按键 row any more');
+    await tester.ensureVisible(k('layout-settings'));
+    expect(find.descendant(of: k('phrases-settings'), matching: find.text('$nPhrases 条')), findsOneWidget);
+    expect(find.descendant(of: k('cmds-settings'), matching: find.text('$nCmds 个')), findsOneWidget);
+    expect(find.descendant(of: k('cmds-settings'), matching: find.text('命令')), findsOneWidget);
+    expect(find.descendant(of: k('layout-settings'), matching: find.text('键盘布局')), findsOneWidget);
+    // In this order, one under the other.
+    final yp = tester.getTopLeft(k('phrases-settings')).dy, yc = tester.getTopLeft(k('cmds-settings')).dy;
+    final yl = tester.getTopLeft(k('layout-settings')).dy;
+    expect(yp < yc && yc < yl, isTrue);
+    await tester.ensureVisible(k('layout-settings'));
+    await tester.tap(k('layout-settings'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LayoutPage), findsOneWidget);
+    Navigator.of(tester.element(find.byType(LayoutPage))).pop();
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(k('cmds-settings'));
+    await tester.tap(k('cmds-settings'));
+    await tester.pumpAndSettle();
+    expect(find.byType(CmdsPage), findsOneWidget);
+    Navigator.of(tester.element(find.byType(CmdsPage))).pop();
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(k('phrases-settings'));
+    await tester.tap(k('phrases-settings'));
+    await tester.pumpAndSettle();
+    expect(find.byType(PhrasesPage), findsOneWidget);
   });
 }

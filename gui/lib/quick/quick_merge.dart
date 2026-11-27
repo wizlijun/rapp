@@ -5,7 +5,6 @@ import 'dart:math';
 
 import '../embed/phrases.dart';
 import '../embed/strip_cmds.dart';
-import 'key_actions.dart';
 import 'key_layout.dart';
 import 'quick_prefs.dart';
 
@@ -34,7 +33,7 @@ class Keep extends MergeStep {
 /// The three-row table of §10.3, for a doc of a service this device already knows. [local] is the doc as it is,
 /// [synced] the `at` it had when it last agreed with this service (0 never), [server] the service's copy (null: none).
 /// A push takes `at = max(local.at, server.at + 1)` so a clock that runs behind never hides the change. [nowMs] is
-/// unused, kept for the signature. [name] is the doc's name (`phrases` `keys` `layout` `stars`): a service copy that
+/// unused, kept for the signature. [name] is the doc's name (`phrases` `layout` `stars`): a service copy that
 /// [isDocReadable] rejects counts as missing (§10.2), so a readable local doc is pushed over it.
 MergeStep decide({
   required QuickDoc local,
@@ -86,8 +85,8 @@ bool isDocReadable(String name, Object? data) => switch (name) {
       _ => data is List,
     };
 
-/// The first meeting with a service, for the four shared docs at once (they depend on each other: stars and layout
-/// follow the ids phrases and keys were matched under). Missing docs in [local] are left out of the answer.
+/// The first meeting with a service, for the three shared docs at once (they depend on each other: stars follow the
+/// ids phrases were matched under). Missing docs in [local] are left out of the answer.
 Map<String, MergeStep> firstJoin({
   required Map<String, QuickDoc> local,
   required Map<String, QuickDoc> server,
@@ -96,7 +95,6 @@ Map<String, MergeStep> firstJoin({
   QuickDoc stamp(Object? data, QuickDoc s) => QuickDoc(max(nowMs, s.at + 1), data);
 
   List<StripItem>? phrasesOf(QuickDoc? d) => d?.data is List ? [for (final e in d!.data as List) ?stripItemFromJson(e)] : null;
-  List<KeyAction>? keysOf(QuickDoc? d) => d?.data is List ? [for (final e in d!.data as List) ?KeyAction.fromJson(e)] : null;
 
   // Phrases: the service's first, then what only this device has. Phrases are the same by text, commands by id.
   final remap = <String, String>{}; // local ref → service ref
@@ -128,41 +126,6 @@ Map<String, MergeStep> firstJoin({
     phrasesData = [for (final it in [...sp, ...extra]) it.toJson()];
   }
 
-  // Keys: by id; a user-added action under another id is the same when label and chord are.
-  Object? keysData;
-  final lk = keysOf(local['keys']), sk = keysOf(server['keys']);
-  if (lk != null && sk != null) {
-    final builtinIds = {for (final a in builtinKeyActions) a.id};
-    final ids = {for (final a in sk) a.id};
-    final byFace = {for (final a in sk) '${a.label}\u0000${a.chord.toJson()}': a};
-    final extra = <KeyAction>[];
-    for (final a in lk) {
-      final face = '${a.label}\u0000${a.chord.toJson()}';
-      if (ids.contains(a.id)) {
-        // Same id: the same action, unless it is a user-added one with another face on the service.
-        final mine = sk.firstWhere((x) => x.id == a.id);
-        if (builtinIds.contains(a.id) || '${mine.label}\u0000${mine.chord.toJson()}' == face) continue;
-        final twin = byFace[face];
-        if (twin != null) {
-          remap[a.ref] = twin.ref;
-        } else {
-          final fresh = KeyAction(_derivedId(a.id, face), label: a.label, chord: a.chord, per: a.per);
-          remap[a.ref] = fresh.ref;
-          ids.add(fresh.id);
-          extra.add(fresh);
-        }
-        continue;
-      }
-      final twin = builtinIds.contains(a.id) ? null : byFace[face];
-      if (twin != null) {
-        remap[a.ref] = twin.ref;
-      } else {
-        extra.add(a);
-      }
-    }
-    keysData = [for (final a in [...sk, ...extra]) a.toJson()];
-  }
-
   String renamed(String ref) => remap[ref] ?? ref;
 
   final out = <String, MergeStep>{};
@@ -185,14 +148,13 @@ Map<String, MergeStep> firstJoin({
     }
     final Object? merged = switch (name) {
       'phrases' => phrasesData,
-      'keys' => keysData,
       'stars' => l.data is List && s.data is List
           ? {
               ...[for (final e in s.data as List) if (e is String) e],
               ...[for (final e in l.data as List) if (e is String) renamed(e)],
             }.toList()
           : null,
-      'layout' => _mergeLayout(l.data, s.data, renamed),
+      'layout' => _mergeLayout(l.data, s.data),
       _ => null,
     };
     // A doc one side cannot read is the other side's.
@@ -205,13 +167,9 @@ Map<String, MergeStep> firstJoin({
   return out;
 }
 
-/// The service's layout, unless it is the default and this device's is not (then this device's, with its `k:` cells
-/// renamed to the service's ids).
-Object? _mergeLayout(Object? local, Object? server, String Function(String) renamed) {
+/// The service's layout, unless it is the default and this device's is not (then this device's).
+Object? _mergeLayout(Object? local, Object? server) {
   if (local is! Map || server is! Map) return null;
   final l = KeyLayout.fromJson(local), s = KeyLayout.fromJson(server);
-  if (s.isDefault && !l.isDefault) {
-    return KeyLayout([for (final r in l.rows) [for (final c in r) renamed(c)]]).toJson();
-  }
-  return s.toJson();
+  return (s.isDefault && !l.isDefault ? l : s).toJson();
 }

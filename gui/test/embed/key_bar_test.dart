@@ -14,7 +14,6 @@ import 'package:rapp/embed/phrases.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
-import 'package:rapp/quick/key_actions.dart';
 import 'package:rapp/quick/key_layout.dart';
 import 'package:rapp/quick/quick_prefs.dart';
 import 'package:rapp/paths.dart';
@@ -744,7 +743,7 @@ void main() {
       await tester.pumpWidget(bar(tsess, width: 900));
       expect(ph('phrase-0'), findsOneWidget);
       expect(find.text('继续'), findsOneWidget);
-      expect(ph('quick-menu-keys'), findsOneWidget);
+      expect(ph('quick-menu-cmds'), findsOneWidget);
       expect(ph('quick-menu-phrases'), findsOneWidget);
       expect(tester.getSize(find.byType(KeyBar)).height, 90);
       s.setPhraseStrip(false);
@@ -764,10 +763,10 @@ void main() {
 
     iosTest('no phrases: the strip still shows, its two menus alone', (tester) async {
       s.setStripItems(const []);
-      s.setKeyActions(const []);
       expect(phraseStripShown(s, tsess), isTrue);
       await tester.pumpWidget(bar(tsess, width: 900));
       expect(ph('phrase-0'), findsNothing);
+      expect(ph('quick-menu-cmds'), findsOneWidget);
       expect(ph('quick-menu-phrases'), findsOneWidget);
       expect(tester.getSize(find.byType(KeyBar)).height, 90);
       s.setPhraseStrip(false);
@@ -1089,14 +1088,14 @@ void main() {
       expect(tester.getTopLeft(k('left')).dx, lessThan(tester.getTopLeft(k('up')).dx));
     });
 
-    iosTest('a key action in row 1 draws, keeps the grid and ↑ stays over ←', (tester) async {
+    iosTest('a ⌃R key in row 1 draws, keeps the grid and ↑ stays over ←', (tester) async {
       s.prefs.keyBarMore = true;
       s.setKeyLayout(const KeyLayout([
-        ['esc', 'k:search', 'up'],
+        ['esc', 'cr', 'up'],
         ['left', 'down', 'right'],
       ]));
       await tester.pumpWidget(bar(tsess, width: 900));
-      expect(find.byKey(const Key('bar-k-search')), findsOneWidget);
+      expect(find.byKey(const Key('bar-cr')), findsOneWidget);
       expect(tester.getTopLeft(k('down')).dx, tester.getTopLeft(k('up')).dx);
       expect(tester.getTopLeft(k('right')).dx, tester.getTopLeft(k('more')).dx);
     });
@@ -1112,33 +1111,15 @@ void main() {
       expect(keyBarHeightOf(s, tsess), keyBarHeight(1) + (phraseStripShown(s, tsess) ? phraseStripHeight : 0));
     });
 
-    iosTest('a key action cell sends its chord (Ctrl-R) and counts no use', (tester) async {
+    iosTest('a 按键动作 cell an older version left in the layout is not drawn', (tester) async {
       s.setKeyLayout(const KeyLayout([
-        ['esc', 'k:search'],
+        ['esc', 'k:search', 'tab'],
         <String>[],
       ]));
       await tester.pumpWidget(bar(tsess, width: 900));
-      await tester.tap(find.byKey(const Key('bar-k-search')));
-      await tester.pump();
-      expect(termKeys(), [
-        ['Ctrl-R'],
-      ]);
-      expect(s.quick.usage.isEmpty, isTrue);
-    });
-
-    iosTest('an unusable key action (⌘K on a terminal) is drawn grey and sends nothing', (tester) async {
-      s.setKeyActions([const KeyAction('ck', label: '清屏', chord: Chord('k', cmd: true))]);
-      s.setKeyLayout(const KeyLayout([
-        ['esc', 'k:ck'],
-        <String>[],
-      ]));
-      await tester.pumpWidget(bar(tsess, width: 900));
-      expect(find.byKey(const Key('bar-k-ck')), findsOneWidget);
-      final dim = find.descendant(of: find.byKey(const Key('bar-k-ck')), matching: find.byType(Opacity));
-      expect(tester.widget<Opacity>(dim.first).opacity, .4, reason: 'drawn blocked/grey');
-      await tester.tap(find.byKey(const Key('bar-k-ck')));
-      await tester.pump();
-      expect(term.calls.where((c) => c.$1 == 'keys'), isEmpty);
+      expect(find.byKey(const Key('bar-k-search')), findsNothing);
+      expect(k('esc'), findsOneWidget);
+      expect(k('tab'), findsOneWidget);
     });
 
     iosTest('a synced row 1 of 11 distinct cells draws 9 of them and ⋯ at the end, no overflow', (tester) async {
@@ -1162,25 +1143,26 @@ void main() {
       expect(xs.last, xs.reduce((a, b) => a > b ? a : b), reason: '⋯ is last in the row');
     });
 
-    iosTest('a synced layout with a missing action and repeated ids draws each once', (tester) async {
+    iosTest('a synced layout with 按键动作 cells and repeated ids draws each real key once', (tester) async {
       s.prefs.keyBarMore = true;
       s.quick.adopt('layout', const QuickDoc(9000, {
         'rows': [
-          ['esc', 'k:gone', 'tab', 'tab', 'cc', 'k:search', 'k:search'],
+          ['esc', 'k:gone', 'tab', 'tab', 'cc', 'k:search', 'cr', 'cr'],
           ['left', 'down', 'right'],
         ],
       }));
       await tester.pumpWidget(bar(tsess, width: 900));
       expect(tester.takeException(), isNull);
-      expect(find.byKey(const Key('bar-k-search')), findsOneWidget);
+      expect(find.byKey(const Key('bar-cr')), findsOneWidget);
       expect(find.byKey(const Key('bar-tab')), findsOneWidget);
       expect(find.byKey(const Key('bar-k-gone')), findsNothing);
+      expect(find.byKey(const Key('bar-k-search')), findsNothing);
     });
 
     iosTest('↑ not directly before ⋯: the user\'s order wins, ← ↓ → stay right-aligned under ⋯', (tester) async {
       s.prefs.keyBarMore = true;
       s.setKeyLayout(const KeyLayout([
-        ['esc', 'up', 'k:search'],
+        ['esc', 'up', 'cr'],
         ['left', 'down', 'right'],
       ]));
       await tester.pumpWidget(bar(tsess, width: 900));

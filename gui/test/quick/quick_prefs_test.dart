@@ -4,36 +4,27 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/phrases.dart';
 import 'package:rapp/embed/strip_cmds.dart';
-import 'package:rapp/embed/strip_tools.dart';
-import 'package:rapp/quick/key_actions.dart';
 import 'package:rapp/quick/key_layout.dart';
 import 'package:rapp/quick/quick_prefs.dart';
 import 'package:rapp/quick/quick_usage.dart';
 
-AgentTool _tool(String id) => agentTools.firstWhere((t) => t.id == id);
-
 void main() {
-  test('migration: search moves to the keys, order kept, ids added, at 0', () {
+  test('migration: gui.json\'s list stays as it is, 搜历史 a command like the others, ids added, at 0', () {
     final q = QuickPrefs.migrate(defaultStripItems);
-    expect(q.phrases.whereType<StripCmd>().map((c) => c.id), isNot(contains('search')));
-    expect(q.phrases.length, defaultStripItems.length - 1);
-    expect(q.keys.map((a) => a.id), ['search', 'expand', 'bg', 'clear', 'newtab']);
+    expect(q.phrases.whereType<StripCmd>().map((c) => c.id), builtinCmdOrder);
+    expect(q.phrases.length, defaultStripItems.length);
     expect(q.phrases.whereType<Phrase>().every((p) => p.id != null), isTrue);
     for (final n in [...quickDocNames, 'usage']) {
       expect(q.atOf(n), 0);
     }
+    expect(quickDocNames, isNot(contains('keys')));
     expect(q.layout.rows, KeyLayout.fallback.rows);
   });
-  test('migration: a search changed to text stays a command', () {
-    final custom = StripCmd('search', per: {'codex': const CmdText('/history')});
-    final q = QuickPrefs.migrate([custom, Phrase('继续')]);
-    expect(q.phrases, [const StripCmd('mode'), custom, const Phrase('继续')]);
-    expect(q.keys.where((a) => a.id == 'search').length, 1);
-  });
-  test('migration: a search with only keys becomes the action with those keys', () {
-    final q = QuickPrefs.migrate([StripCmd('search', per: {'codex': const CmdKey('co')})]);
-    expect(q.phrases, [const StripCmd('mode')]); // only the added 切模式
-    expect(chordFor(q.keys.first, agentTools.firstWhere((t) => t.id == 'codex'))!.toJson(), 'ctrl+o');
+  test('migration: a search with keys or text of its own stays the command it was', () {
+    final keys = StripCmd('search', per: {'codex': const CmdKey('co')});
+    final text = StripCmd('search', label: '找', per: {'codex': const CmdText('/history')});
+    expect(QuickPrefs.migrate([keys, const Phrase('继续')]).phrases, [const StripCmd('mode'), keys, const Phrase('继续')]);
+    expect(QuickPrefs.migrate([text]).phrases, [const StripCmd('mode'), text]);
   });
   test('migration from gui.json adds 切模式 after 新对话', () {
     final q = QuickPrefs.migrate([const Phrase('a'), const StripCmd('new'), const StripCmd('model')]);
@@ -61,42 +52,38 @@ void main() {
     var t = DateTime.fromMillisecondsSinceEpoch(1000);
     final q = QuickPrefs.load(dir, legacy: defaultStripItems, clock: () => t);
     q.floor['stars'] = 5000;
-    q.toggleStar('k:search');
+    q.toggleStar('p:search');
     expect(q.atOf('stars'), 5000);
     final back = QuickPrefs.load(dir, legacy: const [], clock: () => t);
-    expect(back.stars, ['k:search']);
+    expect(back.stars, ['p:search']);
     expect(back.phrases.map(refOf), q.phrases.map(refOf));
   });
   test('at only ever grows', () {
     var t = DateTime.fromMillisecondsSinceEpoch(1000);
     final q = QuickPrefs.migrate(defaultStripItems, clock: () => t);
     // Adopted from a device whose clock runs ahead; this clock is behind it and no floor is known (after a restart).
-    q.adopt('stars', const QuickDoc(9000, ['k:mode']));
-    q.toggleStar('k:search');
+    q.adopt('stars', const QuickDoc(9000, ['p:mode']));
+    q.toggleStar('p:search');
     expect(q.atOf('stars'), greaterThan(9000));
     final was = q.atOf('stars');
-    q.toggleStar('k:bg');
+    q.toggleStar('p:bg');
     expect(q.atOf('stars'), greaterThan(was), reason: 'the same ms again');
     t = DateTime.fromMillisecondsSinceEpoch(500); // the clock went back
-    q.toggleStar('k:clear');
+    q.toggleStar('p:clear');
     expect(q.atOf('stars'), greaterThan(was + 1));
   });
-  test('deleting an action drops its star and its layout cell', () {
-    final q = QuickPrefs.migrate(const [])
-      ..setKeys([...builtinKeyActions, KeyAction('u1', label: 'X', chord: Chord.parse('ctrl+x')!)])
-      ..setLayout(const KeyLayout([['esc', 'k:u1'], []]))
-      ..toggleStar('k:u1');
-    q.setKeys(builtinKeyActions);
-    expect(q.stars, isEmpty);
-    expect(q.layout.rows[0], ['esc']);
+  test('a k: cell of the old 按键动作 in a layout is not drawn', () {
+    final q = QuickPrefs.migrate(const [])..setLayout(const KeyLayout([['esc', 'k:search', 'k:u1'], ['tab']]));
+    expect(q.layout.rows, [['esc'], ['tab']]);
   });
+
   test('a broken quick.json that cannot be set aside is never overwritten', () {
     final dir = Directory.systemTemp.createTempSync().path;
     File('$dir/quick.json').writeAsStringSync('{nope');
     File('$dir/quick.json.bad/x').createSync(recursive: true); // a folder in the way: the move fails
     final q = QuickPrefs.load(dir, legacy: [Phrase('继续')])..dirOf = () => dir;
-    q.toggleStar('k:esc');
-    expect(q.stars, ['k:esc'], reason: 'it still works in memory');
+    q.toggleStar('p:esc');
+    expect(q.stars, ['p:esc'], reason: 'it still works in memory');
     expect(File('$dir/quick.json').readAsStringSync(), '{nope', reason: 'the only copy of the user\'s file is kept');
     expect(q.lastSaveError, isNotNull, reason: 'the app can say the settings are not saved');
   });
@@ -105,13 +92,13 @@ void main() {
     final dir = Directory.systemTemp.createTempSync().path;
     final body = jsonEncode({
       'v': 2,
-      'stars': {'at': 5, 'data': ['k:esc']},
+      'stars': {'at': 5, 'data': ['p:esc']},
       'layout': {'at': 5, 'data': 'a shape this version does not know'},
     });
     File('$dir/quick.json').writeAsStringSync(body);
     final q = QuickPrefs.load(dir, legacy: const [])..dirOf = () => dir;
-    expect(q.stars, ['k:esc']);
-    q.toggleStar('k:tab');
+    expect(q.stars, ['p:esc']);
+    q.toggleStar('p:tab');
     expect(File('$dir/quick.json').readAsStringSync(), body);
     expect(q.lastSaveError, isNotNull);
   });
@@ -135,27 +122,6 @@ void main() {
 
   // ---- beyond the brief ----
 
-  test('migration: a search with no per is dropped, the built-in action stays as it was', () {
-    final q = QuickPrefs.migrate([const StripCmd('search'), const Phrase('继续')]);
-    expect(q.phrases, [const StripCmd('mode'), const Phrase('继续')]);
-    expect(q.keys, builtinKeyActions);
-  });
-  test('migration: keys of a search keep the built-in per for the tools it does not name; a cleared tool is off', () {
-    final q = QuickPrefs.migrate([
-      const StripCmd('search', per: {'codex': CmdKey('stab'), 'gemini': null, 'claude-code': CmdKey('pgup')}),
-    ]);
-    final a = q.keys.first;
-    expect(a.id, 'search');
-    expect(chordFor(a, _tool('codex'))!.toJson(), 'shift+tab');
-    expect(chordFor(a, _tool('claude-code'))!.toJson(), 'pgup');
-    expect(chordFor(a, _tool('gemini')), isNull);
-    expect(chordFor(a, _tool('agy')), isNull); // the built-in has none there
-    expect(a.chord.toJson(), 'ctrl+r');
-  });
-  test('migration: a renamed search keeps its name on the action', () {
-    final q = QuickPrefs.migrate([const StripCmd('search', label: '找')]);
-    expect(q.keys.first.label, '找');
-  });
   test('migration: phrases, other commands and their order stay; ids are new and distinct', () {
     final legacy = [const Phrase('a', put: true), const StripCmd('new'), const StripCmd('u9', label: '我的'), const Phrase('b')];
     final q = QuickPrefs.migrate(legacy);
@@ -176,11 +142,11 @@ void main() {
     final dir = Directory.systemTemp.createTempSync().path;
     String? where;
     final q = QuickPrefs.load(null, legacy: const [Phrase('a')])..dirOf = () => where;
-    q.toggleStar('k:mode');
+    q.toggleStar('p:mode');
     expect(File('$dir/quick.json').existsSync(), isFalse);
     where = dir;
-    q.toggleStar('k:bg');
-    expect(QuickPrefs.load(dir, legacy: const []).stars, ['k:mode', 'k:bg']);
+    q.toggleStar('p:bg');
+    expect(QuickPrefs.load(dir, legacy: const []).stars, ['p:mode', 'p:bg']);
   });
   test('migration writes quick.json at once, so the new ids stay', () {
     final dir = Directory.systemTemp.createTempSync().path;
@@ -200,25 +166,21 @@ void main() {
     File('$dir/quick.json').writeAsStringSync(jsonEncode({
       'v': 1,
       'phrases': {'at': 7, 'data': [{'text': '留着', 'id': 'aaaaaaaa'}]},
-      'keys': {'at': 8, 'data': 'nope'},
       'layout': 3,
       'stars': {'at': 9, 'data': ['p:aaaaaaaa']},
     }));
     final q = QuickPrefs.load(dir, legacy: [const Phrase('旧')]);
     expect(q.phrases, [const Phrase('留着')]);
     expect(q.atOf('phrases'), 7);
-    expect(q.keys, builtinKeyActions);
-    expect(q.atOf('keys'), 0);
     expect(q.layout.rows, KeyLayout.fallback.rows);
     expect(q.atOf('layout'), 0);
     expect(q.stars, ['p:aaaaaaaa']);
     expect(q.usage, isEmpty);
     expect(File('$dir/quick.json.bad').existsSync(), isFalse);
   });
-  test('fresh install and 恢复默认 share one default: the commands without search, then the phrases', () {
-    expect(defaultQuickPhrases.whereType<StripCmd>().map((c) => c.id), isNot(contains('search')));
+  test('fresh install and 恢复默认 share one default: every built-in command, 搜历史 too, then the phrases', () {
     expect(defaultQuickPhrases, [
-      for (final id in builtinCmdOrder) if (id != 'search') StripCmd(id),
+      for (final id in builtinCmdOrder) StripCmd(id),
       ...defaultPhrases,
     ]);
     expect(QuickPrefs.migrate(defaultStripItems).phrases, defaultQuickPhrases);
@@ -254,7 +216,7 @@ void main() {
       'keys': {'at': 4, 'data': [{'id': 5}, null, [], {'id': 'a', 'label': 'x', 'chord': 'ctrl+x', 'per': {'codex': 7, 'gemini': {'a': 1}}}]},
       'layout': {'at': 5, 'data': {'rows': [[1, null, {}], 'x', 5, null]}},
       'stars': {'at': 6, 'data': [1, null, {}, 'p:x']},
-      'usage': {'at': 7, 'data': {'2026-11-27': {'p:x': 'y', 'k:a': null}, 'x': 5, '5': [1]}},
+      'usage': {'at': 7, 'data': {'2026-11-27': {'p:x': 'y', 'p:a': null}, 'x': 5, '5': [1]}},
     };
     File('$dir/quick.json').writeAsStringSync(jsonEncode(hostile));
     late QuickPrefs q;
@@ -282,23 +244,23 @@ void main() {
     expect(q.atOf('layout'), 9000);
     expect(told, ['layout']);
     expect(notes, 2);
-    q.adopt('keys', const QuickDoc(10, 'bad'));
-    expect(q.keys, builtinKeyActions);
-    expect(q.atOf('keys'), 10);
+    q.adopt('keys', const QuickDoc(10, [])); // an old version's doc: not read
+    expect(q.atOf('keys'), 0);
+    expect(notes, 2);
     expect(q.docOf('layout').data, {'rows': [['tab'], <String>[]]});
   });
-  test('deleting a phrase drops its star, stars of the keys stay', () {
+  test('deleting a phrase drops its star, other stars stay', () {
     var t = DateTime.fromMillisecondsSinceEpoch(3000);
     final q = QuickPrefs.migrate(const [Phrase('a'), Phrase('b')], clock: () => t);
     final told = <String>[];
     q.onLocal = told.add;
-    final a = refOf(q.phrases[0]);
+    final a = refOf(q.phrases[1]), b = refOf(q.phrases[2]);
     q
       ..toggleStar(a)
-      ..toggleStar('k:mode');
+      ..toggleStar(b);
     told.clear();
-    q.setPhrases([q.phrases[1]]);
-    expect(q.stars, ['k:mode']);
+    q.setPhrases([q.phrases[0], q.phrases[2]]);
+    expect(q.stars, [b]);
     expect(told, ['phrases', 'stars']);
   });
   test('setPhrases gives a new phrase an id and keeps the ones it has', () {
@@ -310,25 +272,25 @@ void main() {
   });
   test('stars: toggle adds at the end and removes; starFirst moves to the front', () {
     final q = QuickPrefs.migrate(const [])
-      ..toggleStar('k:mode')
-      ..toggleStar('k:bg')
-      ..toggleStar('k:clear');
-    expect(q.stars, ['k:mode', 'k:bg', 'k:clear']);
-    q.toggleStar('k:bg');
-    expect(q.stars, ['k:mode', 'k:clear']);
-    q.starFirst('k:clear');
-    expect(q.stars, ['k:clear', 'k:mode']);
+      ..toggleStar('p:mode')
+      ..toggleStar('p:bg')
+      ..toggleStar('p:clear');
+    expect(q.stars, ['p:mode', 'p:bg', 'p:clear']);
+    q.toggleStar('p:bg');
+    expect(q.stars, ['p:mode', 'p:clear']);
+    q.starFirst('p:clear');
+    expect(q.stars, ['p:clear', 'p:mode']);
   });
   test('recordUse counts today and drops days past 30', () {
     var t = DateTime(2026, 11, 27, 10);
     final q = QuickPrefs.migrate(const [], clock: () => t);
     q.adopt('usage', QuickDoc(1, {
-      'k:mode': {'2026-10-01': 4},
+      'p:mode': {'2026-10-01': 4},
     }));
-    q.recordUse('k:mode');
-    q.recordUse('k:mode');
+    q.recordUse('p:mode');
+    q.recordUse('p:mode');
     expect(q.usage, {
-      'k:mode': {'2026-11-27': 2},
+      'p:mode': {'2026-11-27': 2},
     });
     expect(q.atOf('usage'), t.millisecondsSinceEpoch + 1); // two changes in the same ms: the second goes 1 above
   });
@@ -336,10 +298,98 @@ void main() {
     final q = QuickPrefs.migrate(const []);
     var notes = 0;
     q.addListener(() => notes++);
-    final Usage u = {'k:bg': {'2026-11-27': 1}};
+    final Usage u = {'p:bg': {'2026-11-27': 1}};
     q.setOthers({'dev2': u});
     expect(q.others['dev2'], u);
     expect(notes, 1);
+  });
+  group('a quick.json of 0.15.63/64, with its 按键动作 doc', () {
+    final day = DateTime(2026, 11, 27, 12);
+    Map<String, Object?> old({List<Object?>? phrases, Object? keys}) => {
+          'v': 1,
+          'phrases': {
+            'at': 7,
+            'data': phrases ??
+                [
+                  {'kind': 'cmd', 'id': 'new'},
+                  {'kind': 'cmd', 'id': 'mode'},
+                  {'kind': 'cmd', 'id': 'compact'},
+                  {'text': '继续', 'id': 'aaaaaaaa'},
+                ],
+          },
+          'keys': {'at': 8, 'data': keys ?? [{'id': 'search', 'label': '找', 'chord': 'ctrl+r'}, {'id': 'bg', 'label': '后台', 'chord': 'ctrl+b'}]},
+          'layout': {'at': 4, 'data': {'rows': [['esc', 'k:bg'], <String>[]]}},
+          'stars': {'at': 9, 'data': ['k:search', 'k:bg', 'p:aaaaaaaa']},
+          'usage': {'at': 5, 'data': {'k:search': {'2026-11-27': 2}, 'k:bg': {'2026-11-27': 1}, 'p:new': {'2026-11-26': 1}}},
+        };
+    String write(Map<String, Object?> j) {
+      final dir = Directory.systemTemp.createTempSync().path;
+      File('$dir/quick.json').writeAsStringSync(jsonEncode(j));
+      return dir;
+    }
+
+    test('搜历史 comes back as a command after the last one, with the name it was given', () {
+      final q = QuickPrefs.load(write(old()), legacy: const [], clock: () => day);
+      expect(q.phrases.map(refOf), ['p:new', 'p:mode', 'p:compact', 'p:search', 'p:aaaaaaaa']);
+      expect(q.phrases[3], const StripCmd('search', label: '找'));
+    });
+    test('its star and its counts carry over to the command; the other actions\' go', () {
+      final q = QuickPrefs.load(write(old()), legacy: const [], clock: () => day);
+      expect(q.stars, ['p:search', 'p:aaaaaaaa']);
+      expect(q.usage, {
+        'p:search': {'2026-11-27': 2},
+        'p:new': {'2026-11-26': 1},
+      });
+    });
+    test('the docs it changed move on so the sync sends them; the keys doc is gone, so it happens once', () {
+      final dir = write(old());
+      final q = QuickPrefs.load(dir, legacy: const [], clock: () => day);
+      final now = day.millisecondsSinceEpoch;
+      expect([q.atOf('phrases'), q.atOf('stars'), q.atOf('usage')], [now, now, now]);
+      expect(q.atOf('layout'), 4, reason: 'a k: cell is only not drawn');
+      final j = jsonDecode(File('$dir/quick.json').readAsStringSync()) as Map;
+      expect(j.containsKey('keys'), isFalse);
+      final back = QuickPrefs.load(dir, legacy: const [], clock: () => day.add(const Duration(hours: 1)));
+      expect(back.atOf('phrases'), now);
+      expect(back.phrases.map(refOf), q.phrases.map(refOf));
+    });
+    test('an unrenamed search comes back plain; one already among the commands is not added twice', () {
+      final plain = QuickPrefs.load(write(old(keys: [{'id': 'search', 'label': '搜历史', 'chord': 'ctrl+r'}])),
+          legacy: const [], clock: () => day);
+      expect(plain.phrases[3], const StripCmd('search'));
+      expect((plain.phrases[3] as StripCmd).label, isNull);
+      final had = QuickPrefs.load(
+          write(old(phrases: [
+            {'kind': 'cmd', 'id': 'search', 'per': {'codex': {'text': '/history'}}},
+            {'text': '继续', 'id': 'aaaaaaaa'},
+          ])),
+          legacy: const [],
+          clock: () => day);
+      expect(had.phrases.map(refOf), ['p:search', 'p:aaaaaaaa']);
+      expect(had.atOf('phrases'), 7);
+    });
+    test('an action list it cannot read still brings 搜历史 back', () {
+      final q = QuickPrefs.load(write(old(keys: [5, null, {'id': 7}])), legacy: const [], clock: () => day);
+      expect(q.phrases[3], const StripCmd('search'));
+    });
+  });
+  test('stars from a device still on 0.15.63/64: k:search is the command, other k: refs go', () {
+    final q = QuickPrefs.migrate(defaultStripItems);
+    q.adopt('stars', const QuickDoc(5, ['k:search', 'k:bg', 'p:new']));
+    expect(q.stars, ['p:search', 'p:new']);
+  });
+  test('counts of a device still on 0.15.63/64: k:search counts for the command, other k: refs go', () {
+    final q = QuickPrefs.migrate(defaultStripItems);
+    q.setOthers({
+      'dev2': {
+        'k:search': {'2026-11-27': 3},
+        'p:search': {'2026-11-27': 1, '2026-11-26': 1},
+        'k:bg': {'2026-11-27': 1},
+      },
+    });
+    expect(q.others['dev2'], {
+      'p:search': {'2026-11-27': 4, '2026-11-26': 1},
+    });
   });
   test('Phrase id: written when set, read back, not part of ==', () {
     const p = Phrase('a', id: 'abcdefgh');

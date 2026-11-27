@@ -137,7 +137,7 @@ void main() {
         ['left', 'right'],
       ]);
       link.docs['layout'] = QuickDoc(500, mine.toJson());
-      w.prefs.toggleStar('k:search'); // changed while not attached
+      w.prefs.toggleStar('p:search'); // changed while not attached
       w.attach(link);
       expect(w.sync.status, QuickSyncStatus.synced);
       expect(w.sync.hostId, 'mac-1');
@@ -146,7 +146,7 @@ void main() {
       expect(w.prefs.floor['layout'], 501);
       expect(link.puts.map((p) => p.name), ['stars']);
       expect(link.puts.single.base, 100);
-      expect(link.docs['stars']!.data, ['k:search']);
+      expect(link.docs['stars']!.data, ['p:search']);
       a.elapse(const Duration(seconds: 5));
       expect(link.puts, hasLength(1));
     });
@@ -159,18 +159,18 @@ void main() {
       w.inStep(link);
       w.attach(link);
       expect(link.puts, isEmpty);
-      w.prefs.toggleStar('k:search');
+      w.prefs.toggleStar('p:search');
       a.elapse(const Duration(milliseconds: 500));
-      w.prefs.toggleStar('k:mode');
+      w.prefs.toggleStar('p:mode');
       a.elapse(const Duration(milliseconds: 999));
       expect(link.puts, isEmpty);
       a.elapse(const Duration(milliseconds: 2));
       expect(link.puts, hasLength(1));
-      expect(link.puts.single.data, ['k:search', 'k:mode']);
+      expect(link.puts.single.data, ['p:search', 'p:mode']);
       a.elapse(const Duration(seconds: 5));
       expect(link.puts, hasLength(1));
       // the next change goes above what was pushed even at the same ms
-      w.prefs.toggleStar('k:bg');
+      w.prefs.toggleStar('p:model');
       expect(w.prefs.atOf('stars'), greaterThan(link.docs['stars']!.at));
     });
   });
@@ -181,17 +181,17 @@ void main() {
       final link = FakeLink();
       w.inStep(link);
       w.attach(link);
-      link.docs['stars'] = const QuickDoc(300, ['k:mode']); // written elsewhere, push not heard
-      w.prefs.toggleStar('k:search');
+      link.docs['stars'] = const QuickDoc(300, ['p:mode']); // written elsewhere, push not heard
+      w.prefs.toggleStar('p:search');
       a.elapse(const Duration(seconds: 2));
       expect(link.puts.map((p) => p.base), [100, 300]);
-      expect(link.docs['stars']!.data, ['k:search']);
-      expect(w.prefs.stars, ['k:search']);
+      expect(link.docs['stars']!.data, ['p:search']);
+      expect(w.prefs.stars, ['p:search']);
 
       // a service that is always a step ahead: three more rounds, then wait
       link.puts.clear();
       link.raceForever = true;
-      w.prefs.toggleStar('k:bg');
+      w.prefs.toggleStar('p:model');
       a.elapse(const Duration(seconds: 2));
       expect(link.puts, hasLength(4));
       a.elapse(const Duration(minutes: 5));
@@ -206,36 +206,36 @@ void main() {
       w.inStep(link);
       w.attach(link);
       a.elapse(const Duration(seconds: 10));
-      w.prefs.toggleStar('k:search'); // at t0 + 10 s, still in the debounce
-      link.docs['stars'] = QuickDoc(t0, const ['k:mode']);
+      w.prefs.toggleStar('p:search'); // at t0 + 10 s, still in the debounce
+      link.docs['stars'] = QuickDoc(t0, const ['p:mode']);
       w.sync.onPush({
         'what': 'prefs.stars',
-        'doc': {'at': t0, 'data': ['k:mode']},
+        'doc': {'at': t0, 'data': ['p:mode']},
       });
       a.flushMicrotasks();
-      expect(w.prefs.stars, ['k:search']);
+      expect(w.prefs.stars, ['p:search']);
       a.elapse(const Duration(seconds: 2));
-      expect(w.prefs.stars, ['k:search']);
-      expect(link.docs['stars']!.data, ['k:search']);
+      expect(w.prefs.stars, ['p:search']);
+      expect(link.docs['stars']!.data, ['p:search']);
       expect(link.puts.last.base, t0);
 
       // one at or below synced is ignored
       final pushes = link.puts.length;
       w.sync.onPush({
         'what': 'prefs.stars',
-        'doc': {'at': 100, 'data': ['k:clear']},
+        'doc': {'at': 100, 'data': ['p:compact']},
       });
       a.elapse(const Duration(seconds: 2));
-      expect(w.prefs.stars, ['k:search']);
+      expect(w.prefs.stars, ['p:search']);
       expect(link.puts, hasLength(pushes));
 
       // a newer one with nothing pending here is taken
       w.sync.onPush({
         'what': 'prefs.stars',
-        'doc': {'at': t0 + 999999, 'data': ['k:clear']},
+        'doc': {'at': t0 + 999999, 'data': ['p:compact']},
       });
       a.flushMicrotasks();
-      expect(w.prefs.stars, ['k:clear']);
+      expect(w.prefs.stars, ['p:compact']);
       expect(link.puts, hasLength(pushes));
     });
   });
@@ -247,24 +247,24 @@ void main() {
       w.inStep(link);
       final today = usageDay(w.clock());
       link.usage['dev-b'] = QuickDoc(5, {
-        'k:search': {today: 3},
+        'p:search': {today: 3},
       });
       w.attach(link);
       expect(w.prefs.others.keys, ['dev-b']);
-      expect(w.prefs.others['dev-b']!['k:search']![today], 3);
+      expect(w.prefs.others['dev-b']!['p:search']![today], 3);
 
-      w.prefs.recordUse('k:search');
+      w.prefs.recordUse('p:search');
       a.flushMicrotasks();
       a.elapse(const Duration(seconds: 10));
-      w.prefs.recordUse('k:search');
+      w.prefs.recordUse('p:search');
       a.elapse(const Duration(seconds: 10));
-      w.prefs.recordUse('k:mode');
+      w.prefs.recordUse('p:mode');
       a.elapse(const Duration(seconds: 30));
       expect(link.usagePuts, hasLength(1));
       a.elapse(const Duration(seconds: 11));
       expect(link.usagePuts, hasLength(2));
       expect(link.usagePuts.last.device, 'dev-a');
-      expect((link.usagePuts.last.data as Map)['k:search'], {today: 2});
+      expect((link.usagePuts.last.data as Map)['p:search'], {today: 2});
       a.elapse(const Duration(minutes: 5));
       expect(link.usagePuts, hasLength(2));
       expect(link.puts, isEmpty);
@@ -275,7 +275,7 @@ void main() {
         'doc': {
           'at': 9,
           'data': {
-            'k:bg': {today: 1},
+            'p:model': {today: 1},
           },
         },
       });
@@ -285,7 +285,7 @@ void main() {
         'doc': {'at': 1, 'data': {}},
       });
       expect(w.prefs.others.keys.toSet(), {'dev-b', 'dev-c'});
-      expect(w.prefs.usage['k:search']![today], 2);
+      expect(w.prefs.usage['p:search']![today], 2);
     });
   });
 
@@ -294,7 +294,7 @@ void main() {
       final w = World(a, device: null);
       final link = FakeLink();
       w.attach(link);
-      w.prefs.recordUse('k:search');
+      w.prefs.recordUse('p:search');
       a.elapse(const Duration(minutes: 3));
       expect(link.usagePuts, isEmpty);
     });
@@ -305,15 +305,15 @@ void main() {
       final w = World(a);
       final old = FakeLink(store: 's0');
       w.inStep(old, store: 's0');
-      w.prefs.adopt('stars', const QuickDoc(100, ['k:bg']));
+      w.prefs.adopt('stars', const QuickDoc(100, ['p:model']));
       final link = FakeLink(store: 's1');
-      link.docs['stars'] = const QuickDoc(50, ['k:mode']);
+      link.docs['stars'] = const QuickDoc(50, ['p:mode']);
       w.attach(link);
       // known service: 50 <= synced 100 and unchanged here would be a keep; a first join merges
-      expect(link.docs['stars']!.data, ['k:mode', 'k:bg']);
-      expect(w.prefs.stars, ['k:mode', 'k:bg']);
+      expect(link.docs['stars']!.data, ['p:mode', 'p:model']);
+      expect(w.prefs.stars, ['p:mode', 'p:model']);
       // the docs the service did not have went up as they were
-      expect({for (final p in link.puts) p.name}, {'phrases', 'keys', 'layout', 'stars'});
+      expect({for (final p in link.puts) p.name}, {'phrases', 'layout', 'stars'});
       final j = jsonDecode(File('${w.dir}/quick-sync.json').readAsStringSync()) as Map;
       expect(j['store'], 's1');
       expect((j['synced'] as Map)['stars'], link.docs['stars']!.at);
@@ -338,7 +338,7 @@ void main() {
       final link = FakeLink();
       final today = usageDay(w.clock());
       link.usage['dev-b'] = QuickDoc(5, {
-        'k:search': {today: 3},
+        'p:search': {today: 3},
       });
       w.attach(link);
       w.sync.detach(reachable: false);
@@ -354,14 +354,14 @@ void main() {
       for (final n in [...quickDocNames, 'usage']) {
         prefs2.adopt(n, w.prefs.docOf(n));
       }
-      prefs2.toggleStar('k:bg');
-      link.docs['stars'] = QuickDoc(prefs2.atOf('stars') + 10, const ['k:mode']);
+      prefs2.toggleStar('p:model');
+      link.docs['stars'] = QuickDoc(prefs2.atOf('stars') + 10, const ['p:mode']);
       link.puts.clear();
       final s2 = QuickSync(prefs: prefs2, localDir: w.dir, device: 'dev-a', clock: w.clock);
       expect(prefs2.others.keys, ['dev-b']);
       s2.attach(link);
       a.flushMicrotasks();
-      expect(prefs2.stars, ['k:mode']);
+      expect(prefs2.stars, ['p:mode']);
       expect(link.puts, isEmpty);
       s2.dispose();
     });
@@ -374,7 +374,7 @@ void main() {
       w.inStep(link);
       w.attach(link);
       link.failPuts = true;
-      w.prefs.toggleStar('k:search');
+      w.prefs.toggleStar('p:search');
       a.elapse(const Duration(seconds: 2));
       expect(link.puts, hasLength(1));
       a.elapse(const Duration(minutes: 5));
@@ -386,7 +386,7 @@ void main() {
       ]));
       a.elapse(const Duration(seconds: 2));
       expect({for (final p in link.puts.skip(1)) p.name}, {'stars', 'layout'});
-      expect(link.docs['stars']!.data, ['k:search']);
+      expect(link.docs['stars']!.data, ['p:search']);
     });
   });
 
@@ -398,17 +398,17 @@ void main() {
       expect(w.sync.status, QuickSyncStatus.local);
       w.attach(link);
       expect(w.sync.status, QuickSyncStatus.synced);
-      w.prefs.toggleStar('k:search');
+      w.prefs.toggleStar('p:search');
       w.sync.detach(reachable: false);
       expect(w.sync.status, QuickSyncStatus.waiting);
       a.elapse(const Duration(seconds: 5));
       expect(link.puts, isEmpty);
       w.sync.onPush({
         'what': 'prefs.stars',
-        'doc': {'at': t0 + 999999, 'data': ['k:clear']},
+        'doc': {'at': t0 + 999999, 'data': ['p:compact']},
       });
       a.flushMicrotasks();
-      expect(w.prefs.stars, ['k:search']);
+      expect(w.prefs.stars, ['p:search']);
       w.sync.detach(reachable: true);
       expect(w.sync.status, QuickSyncStatus.local);
 
@@ -422,7 +422,7 @@ void main() {
       // reattached: the edit made while away goes up
       w.attach(link);
       expect(w.sync.status, QuickSyncStatus.synced);
-      expect(link.docs['stars']!.data, ['k:search']);
+      expect(link.docs['stars']!.data, ['p:search']);
     });
   });
   test('an edit to another doc during a PUT is not overwritten by the stale step', () {
@@ -432,14 +432,14 @@ void main() {
       final gate = link.hold['layout'] = Completer<void>();
       w.sync.attach(link);
       a.flushMicrotasks();
-      expect(link.puts.map((p) => p.name), ['phrases', 'keys', 'layout']);
-      w.prefs.toggleStar('k:esc');
+      expect(link.puts.map((p) => p.name), ['phrases', 'layout']);
+      w.prefs.toggleStar('p:usage');
       gate.complete();
       a.flushMicrotasks();
-      expect(w.prefs.stars, ['k:esc']);
+      expect(w.prefs.stars, ['p:usage']);
       a.elapse(const Duration(seconds: 2));
-      expect(w.prefs.stars, ['k:esc']);
-      expect(link.docs['stars']!.data, ['k:esc']);
+      expect(w.prefs.stars, ['p:usage']);
+      expect(link.docs['stars']!.data, ['p:usage']);
     });
   });
 
@@ -458,15 +458,15 @@ void main() {
       a.flushMicrotasks();
       expect(w.prefs.atOf('stars'), ahead);
       final gate = link.hold['stars'] = Completer<void>();
-      w.prefs.toggleStar('k:search');
+      w.prefs.toggleStar('p:search');
       a.elapse(const Duration(milliseconds: 1001));
       expect(link.puts.single.at, ahead + 1);
-      w.prefs.toggleStar('k:bg'); // the clock is still behind the service
+      w.prefs.toggleStar('p:model'); // the clock is still behind the service
       link.hold.remove('stars');
       gate.complete();
       a.elapse(const Duration(seconds: 2));
-      expect(w.prefs.stars, ['k:search', 'k:bg']);
-      expect(link.docs['stars']!.data, ['k:search', 'k:bg']);
+      expect(w.prefs.stars, ['p:search', 'p:model']);
+      expect(link.docs['stars']!.data, ['p:search', 'p:model']);
     });
   });
 
@@ -477,18 +477,18 @@ void main() {
       w.inStep(link);
       w.attach(link);
       final gate = link.hold['stars'] = Completer<void>();
-      w.prefs.toggleStar('k:search');
+      w.prefs.toggleStar('p:search');
       a.elapse(const Duration(milliseconds: 1001));
       expect(link.puts, hasLength(1));
       final later = link.puts.single.at + 5000;
-      link.docs['stars'] = QuickDoc(later, const ['k:mode']);
+      link.docs['stars'] = QuickDoc(later, const ['p:mode']);
       w.sync.onPush({
         'what': 'prefs.stars',
-        'doc': {'at': later, 'data': ['k:mode']},
+        'doc': {'at': later, 'data': ['p:mode']},
       });
       gate.complete();
       a.elapse(const Duration(seconds: 2));
-      expect(w.prefs.stars, ['k:mode']);
+      expect(w.prefs.stars, ['p:mode']);
       expect(w.prefs.atOf('stars'), later);
     });
   });
@@ -500,7 +500,7 @@ void main() {
       w.inStep(link);
       final today = usageDay(w.clock());
       link.usage['dev-b'] = QuickDoc(5, {
-        'k:search': {today: 3},
+        'p:search': {today: 3},
       });
       final gate = link.holdAll = Completer<void>();
       w.sync.attach(link);
@@ -511,14 +511,14 @@ void main() {
         'doc': {
           'at': 9,
           'data': {
-            'k:search': {today: 7},
+            'p:search': {today: 7},
           },
         },
       });
       gate.complete();
       a.flushMicrotasks();
       expect(w.sync.status, QuickSyncStatus.synced);
-      expect(w.prefs.others['dev-b']!['k:search']![today], 7);
+      expect(w.prefs.others['dev-b']!['p:search']![today], 7);
     });
   });
 
@@ -534,11 +534,11 @@ void main() {
       w.sync.dispose();
       w.sync = w.make();
       expect(w.prefs.floor['stars'], ahead + 1, reason: 'the floor comes back from quick-sync.json');
-      w.prefs.toggleStar('k:search'); // while not attached yet
+      w.prefs.toggleStar('p:search'); // while not attached yet
       expect(w.prefs.atOf('stars'), greaterThan(ahead));
       w.attach(link);
       expect(link.puts.map((p) => p.name), ['stars']);
-      expect(link.docs['stars']!.data, ['k:search']);
+      expect(link.docs['stars']!.data, ['p:search']);
     });
   });
 }

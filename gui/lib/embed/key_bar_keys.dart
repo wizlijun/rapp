@@ -28,10 +28,6 @@ double keyBarHeight(int rows) => rows * keyBarKeyHeight + (rows - 1) * keyBarGap
 /// macOS key codes of the letters, for the ⌃-letter keys and ⌘T.
 const macLetterCodes = <String, int>{'a':0,'s':1,'d':2,'f':3,'h':4,'g':5,'z':6,'x':7,'c':8,'v':9,'b':11,'q':12,'w':13,'e':14,'r':15,'y':16,'t':17,'o':31,'u':32,'i':34,'p':35,'l':37,'j':38,'k':40,'n':45,'m':46};
 
-/// macOS key codes of the digit row, for the chords of the 按键动作 (kept apart from [macLetterCodes], which
-/// sendLatchedLetter reads: merging would change what a sticky modifier and a digit does).
-const macDigitCodes = <String, int>{'1':18,'2':19,'3':20,'4':21,'5':23,'6':22,'7':26,'8':28,'9':25,'0':29};
-
 const barKeys = <String, BarKey>{
   'esc': (id: 'esc', label: 'Esc', spoken: 'Esc', kind: BarKind.send, wire: 'Esc', code: 53, mods: 0, bit: null, repeats: false),
   'stab': (id: 'stab', label: '⇧Tab', spoken: 'Shift Tab', kind: BarKind.send, wire: 'Shift-Tab', code: 48, mods: latchShift, bit: null, repeats: false),
@@ -59,12 +55,12 @@ const barKeys = <String, BarKey>{
   'more': (id: 'more', label: '⋯', spoken: '更多按键', kind: BarKind.more, wire: null, code: null, mods: 0, bit: null, repeats: false),
 };
 
-/// The rows of the bar, each a list of cell ids, from [layout] cleaned against [actionIds] (bare ids of the 按键动作).
+/// The rows of the bar, each a list of cell ids, from [layout] cleaned.
 /// The default layout is the grouping of the key-bar-keys research (2026-11-25, bar-cmd 2026-11-27): first row Tab
 /// ⇧Tab Esc ⌃C ⌫ ⏎ ↑, then ⋯; [more] adds the second row, whose ← ↓ → stand under ↑ ⋯ as on a keyboard. ⋯ is added
 /// at the end of row 1 only when row 2 holds keys. No ⌄: the 快捷区 folds from its toggle beside 语音 and 输入 only.
-List<List<String>> keyBarRows({required KeyLayout layout, required bool more, Set<String> actionIds = const {}}) {
-  final rows = layout.cleaned(actionIds).rows;
+List<List<String>> keyBarRows({required KeyLayout layout, required bool more}) {
+  final rows = layout.cleaned().rows;
   if (rows[1].isEmpty) return [rows[0]];
   final first = [...rows[0], 'more'];
   return more ? [first, rows[1]] : [first];

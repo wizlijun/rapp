@@ -11,7 +11,6 @@ import 'package:rapp/embed/phrases.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/strip_cmds.dart' show refOf;
-import 'package:rapp/quick/key_actions.dart';
 import 'package:rapp/quick/key_layout.dart';
 import 'package:rapp/quick/quick_prefs.dart';
 import 'package:rapp/ui/app_profile_store.dart';
@@ -138,15 +137,13 @@ void main() {
     s.savePrefs();
     expect(UiPrefs.load(s.data.prefsDir()!).phrases, before);
     s.toggleStar(refOf(s.quick.phrases.single));
-    s.recordUse('k:expand');
+    s.recordUse('p:x');
     s.setKeyLayout(const KeyLayout([['esc'], []]));
-    s.setKeyActions(builtinKeyActions.take(2).toList());
-    s.starFirst('k:expand');
+    s.starFirst('p:x');
     final back = QuickPrefs.load(s.data.prefsDir()!, legacy: const []);
-    expect(back.stars, ['k:expand', refOf(s.quick.phrases.single)]);
-    expect(back.usage.keys, ['k:expand']);
+    expect(back.stars, ['p:x', refOf(s.quick.phrases.single)]);
+    expect(back.usage.keys, ['p:x']);
     expect(back.layout.rows[0], ['esc']);
-    expect(back.keys.map((a) => a.id), ['search', 'expand']);
   });
 
   test('setFirst persists and leaves the current grouping alone', () {
