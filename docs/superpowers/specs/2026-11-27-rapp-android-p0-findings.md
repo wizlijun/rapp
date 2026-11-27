@@ -522,7 +522,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 
 **分段的请求，两次测量的结果。** 参考页的原话：「Optional string to enable segmented session mode of the specified type, which can be EXTRA_AUDIO_SOURCE, EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS or EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS.」「When setting this extra, make sure the extra used as the string value here is also set in the same intent with proper value.」所以 `EXTRA_SEGMENTED_SESSION` 的值是另一个 extra 的名字，同一个 intent 里还要给那个 extra 设值。
 
-- 值给 `2000L`（`Long`）：36 的识别器**拒绝了**。`t6g-e36-seg-long-log.txt` 里的原样日志：`W Bundle : Key android.speech.extras.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS expected Integer but value was a java.lang.Long.  The default value 0 was returned.`，调用栈经过 `Intent.getIntExtra` 和 `GoogleTTSRecognitionService.onStartListening`，接着 `E RecognitionServiceInten: EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS is not set with positive value; ignoring EXTRA_SEGMENTED_SESSION`。也就是说这个识别器按 `int` 读这个 extra。第一次测量里 36 的分段那次是在这个状态下跑的（热词那次 `segmented` 是假，没带分段，它的日志里没有 `Bundle`、`ignoring` 行），`p0/t6f-e36-seg-log.txt` 里只有栈帧和最后一行 `E`，没有 `W Bundle` 那一行标题。
+- 值给 `2000L`（`Long`）：36 的识别器**拒绝了**。`t6g-e36-seg-long-log.txt` 里的原样日志：`W Bundle : Key android.speech.extras.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS expected Integer but value was a java.lang.Long.  The default value 0 was returned.`，调用栈经过 `Intent.getIntExtra` 和 `GoogleTTSRecognitionService.onStartListening`，接着 `E RecognitionServiceInten: EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS is not set with positive value; ignoring EXTRA_SEGMENTED_SESSION`。也就是说这个识别器按 `int` 读这个 extra。第一次测量里 36 的分段那次是在这个状态下跑的（热词那次 `segmented` 是假，没带分段，它的日志 `t6f-e36-hot-log.txt` 里没有 `W Bundle` 行，也没有 `ignoring EXTRA_SEGMENTED_SESSION`），`p0/t6f-e36-seg-log.txt` 里只有栈帧和最后一行 `E`，没有 `W Bundle` 那一行标题。
 - 值给 `2000`（`int`）：`p0/t6g-e36-seg-log.txt` 里没有 `W Bundle` 类型警告，也没有 `ignoring EXTRA_SEGMENTED_SESSION`：36 的识别器接受了这个请求。事件（`p0/t6g-e36-seg.txt`）：`ready`、`begin`，松手后来了一个 `segment`（`text: []`，空），然后 `error 7`、`end`；`rms` 只有 1 次、最大 -2.0，声音没有确认进入识别器。所以「请求被接受」有日志为证；「分段结果能收到」没有：唯一的 `segment` 是空的，没有文字。
 - 平板上同样的 `int` 请求（`p0/t6g-tab-seg.txt`、`-log.txt`）：和之前一样，`start` 之后没有任何回调，保存下来的日志只留了语音相关的行（其余系统行滤掉了），所以「没有 `W Bundle` 行」说明不了什么；平板的识别服务没有给第三方回调，所以不能说它接受或拒绝。
 
@@ -539,12 +539,12 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 
 下载这一步：当时在屏幕上看到「Download 普通话 (中国大陆) update」对话框、52.97 MB，我点了 Download；日志里看到过 `onEndTriggerModelDownload(): success`；这两处没有留文字证据（屏幕只有截图 `p0/t6f-e36-download.png`，日志没存）。下载之后再查 `support`（`p0/t6f-e36-support-after-download.txt`）：`installed` 仍是 `[en-US]`，`pending: [cmn-Hans-CN]`。语言包为什么没就绪，没查明。
 
-第二次测量（36；Mac 未锁屏，见 Mac 的服务日志 `t6-mac-lock-times.txt`，每次也用 `tools/locked` 查过）。这次三次运行的 `rms` 都只有 1 次、停在 -2.0，包括和第一次测量普通一段设置相同的那次（那次是 5 次、最大 10.0）：Mac 没锁，声音却没进识别器，原因不明，没有查出来。请求是否被接受只看日志，不依赖声音：
+第二次测量（36，20:18:29–20:20:12；Mac 未锁屏：Mac 的服务日志 `t6-mac-lock-times.txt` 里 20:16:14 解锁、20:22:40 才自动锁上（文件里是 UTC，加 9 小时），每次也用 `tools/locked` 查过）。两次在线运行（分段 `int`、普通一段）的 `rms` 都只有 1 次、停在 -2.0，包括和第一次测量普通一段设置相同的那次（那次是 5 次、最大 10.0）：Mac 没锁，这两次声音却没进识别器，原因不明，没有查出来。设备上那次不一样：`start` 后约 0.12 s 就 `error 13`，没有 `ready`，`rms` 0，没开始收音。请求是否被接受只看日志，不依赖声音：
 - 分段 `int`：见上，请求被接受，`rms` 1 次 -2.0，没有声音进入的证据。
 - 设备上 `cmn-Hans-CN`：`error 13`、`end`，之后没有 `ready`，松手时没有 `error 5`，日志里也没有 `no preceding #startListening`（`p0/t6g-e36-ondevice-cmn.txt`、`-log.txt`）：`stop` 只在会话还在时才调 `stopListening` 之后，`error 5` 没再出现。`error 5` 的原因：`stop` 在会话已经结束后又调了 `stopListening()`，是探查页自己引起的，不是识别器的行为。
 - 普通一段又跑了一次（`p0/t6g-e36-plain.txt`）：`rms` 1 次 -2.0，`error 7`，同样没有声音进入的证据。
 
-36 上没有拿到任何中文字。第一次测量里普通一段 `rms` 5 次、最大 10.0，识别器给的是「没有检测到语音」；其余几次 `rms` 都停在 -2.0，不能当成「分段/热词没效果」的证据。第一轮（Mac 当时锁屏、没有 `rms`）的 36 结果不再引用。
+36 上没有拿到任何中文字。第一次测量里普通一段 `rms` 5 次、最大 10.0，识别器给的是「没有检测到语音」；其余在线的几次（第一次测量的分段、热词，第二次测量的分段、普通一段）`rms` 都停在 -2.0，不能当成「分段/热词没效果」的证据。第一轮（Mac 当时锁屏、没有 `rms`）的 36 结果不再引用。
 
 **平板（实机）**（按规则是「不能用」，仍照要求试了；没有同意书、登录、下载或密码界面，这一条只靠截图，没有别的证据）：
 
@@ -576,7 +576,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
   - 12（`ERROR_LANGUAGE_NOT_SUPPORTED`）：只在第一轮见过（36 设备上，中文没装，`t6-e36-ondevice.txt`），之后没再试，没有日志摘录。
   - 11（`ERROR_SERVER_DISCONNECTED`）：只在第一轮见过，36（`t6-e36-hotwords.txt`）和平板（`t6-tab-plain2.txt`）都有；当时的探查页在创建前先 `destroy`，可能就是原因，之后的两次测量没有再出现，没验证。
   - 5（`ERROR_CLIENT`）：第一轮 36（`t6-e36-ondevice.txt`、`t6-e36-hotwords.txt`）和第一次测量 36 设备上（`t6f-e36-ondevice-cmn.txt`）都出现过；第一次测量那次，日志里有 `stopListening called with no preceding #startListening`，说明是探查页的 `stop` 在会话已结束后又调了 `stopListening()`，是页面自己引起的；第一轮的两次原因没查。加了 `listening` 判断之后，第二次测量没再出现（那次只有 `error 13` 后直接松手，没有别的事件）。
-- 识别时的时间（第一次测量，36，普通一段、分段、热词三次；`ready`、`begin` 从 `start` 事件起算，`error 7` 从松手 `up` 起算）：`ready` 0.027–0.038 s，`begin` 0.86–0.91 s，`error 7` 0.26–0.80 s；从按下 `down` 算 `ready` 约 0.029–0.041 s；没有结果，没有可量的首字时间。
+- 识别时的时间（第一次测量，36，普通一段、分段、热词三次；`ready`、`begin` 从 `start` 事件起算，`error 7` 从松手 `up` 起算）：`ready` 0.027–0.038 s（从 `start -> started` 那行算是 0.026–0.037 s），`begin` 0.86–0.91 s，`error 7` 0.26–0.80 s；从按下 `down` 算 `ready` 约 0.029–0.041 s；没有结果，没有可量的首字时间。
 - 国行平板（荣耀）：`probe` 有识别服务，`onDevice` 假，`support` 报 14，识别没有任何回调（六次）。规格 §11 写的「国行平板上多半走到第 3 条」不准确：这台平板按手算走的是规则 4（`support` 报 14），结论同样是不能用。
 
 ## 7 自己装自己
