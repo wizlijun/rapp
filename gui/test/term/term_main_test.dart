@@ -994,6 +994,27 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
     }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
+    testWidgets('the key bar\'s ⌘ locked and a held t: one terminal, the repeats do nothing', (tester) async {
+      await tester.pumpWidget(wrap(window()));
+      t.emit(listOf(shell: true, fg: 'zsh'));
+      await openTerm(tester, two);
+      hubAnswers(list: listOf(shell: true));
+      final rs = s.currentRemote!;
+      rs.keyLatch.tap(latchCmd);
+      rs.keyLatch.tap(latchCmd);
+      expect(rs.keyLatch.of(latchCmd), LatchState.locked);
+      Focus.of(tester.element(find.byKey(const Key('term-grid')))).requestFocus();
+      await tester.pump();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.keyT);
+      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyT);
+      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyT);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.keyT);
+      await settle(tester);
+      expect(t.sent.where((m) => m['cmd'] == 'open_term'), hasLength(1));
+      expect(term.calls.where((c) => c.$1 == 'keys' || c.$1 == 'type'), isEmpty);
+      await tester.pump(const Duration(seconds: 1));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
     testWidgets('termCommand: t opens one beside, x does nothing', (tester) async {
       await tester.pumpWidget(wrap(window()));
       t.emit(listOf(shell: true, fg: 'zsh'));

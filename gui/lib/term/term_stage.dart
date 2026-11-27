@@ -817,6 +817,8 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     // Its sticky ⌘: a letter is rApp's ⌘ shortcut ([_command]), a named key goes plain.
     final latch = widget.session.keyLatch;
     if (latch.flags & (latchCtrl | latchOpt | latchCmd) != 0 && input != null) {
+      // A held letter under ⌘ is one shortcut (as hardware ⌘T): its repeats do nothing.
+      if (e is KeyRepeatEvent && latch.flags & latchCmd != 0 && input is TermText) return KeyEventResult.handled;
       if (input case TermText(:final text) when RegExp(r'^[a-zA-Z]$').hasMatch(text)) {
         if (sendLatchedLetter(widget.state, widget.session, widget.port, text)) {
           _sentInput();

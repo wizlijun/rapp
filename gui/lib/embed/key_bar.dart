@@ -334,9 +334,9 @@ class _KeyBarState extends State<KeyBar> {
           widget.port.key(_sid, macLetterCodes['t']!, latchCmd);
         }
       case BarKind.more:
+        // Folding the second row takes its sticky ⌃ ⌘ with it ([MainState.setKeyBarMore]); this session's too, in
+        // case it is not in the session list.
         final more = widget.state.prefs.keyBarMore;
-        // Folding the second row takes its sticky ⌃ ⌘ with it: a lit key out of sight would turn the next letter
-        // into a combination nobody sees coming.
         if (more) _latch.releaseAll();
         widget.state.setKeyBarMore(!more);
       case BarKind.hide:

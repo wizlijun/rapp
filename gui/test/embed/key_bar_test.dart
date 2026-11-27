@@ -628,6 +628,24 @@ void main() {
       expect(s.appLatch.flags, 0, reason: 'opening the row lights nothing');
     });
 
+    iosTest('the 更多按键 switch turning the second row off lets go too: every terminal, and the app\'s ups go to A', (tester) async {
+      s.remote[tsess.sid] = tsess;
+      try {
+        s.prefs.keyBarMore = true;
+        await tester.pumpWidget(bar(app, width: 900));
+        await tap(tester, 'cmd');
+        tsess.keyLatch.tap(latchCtrl);
+        port.calls.clear();
+        s.setKeyBarMore(false);
+        await tester.pump();
+        expect(s.appLatch.flags, 0);
+        expect(appKeys(), [('up', 1, 55, 0)]);
+        expect(tsess.keyLatch.flags, 0);
+      } finally {
+        s.remote.remove(tsess.sid);
+      }
+    });
+
     iosTest('⌄ is the last key of the first row, ⋯ just before it', (tester) async {
       await tester.pumpWidget(bar(tsess));
       expect(k('hide'), findsOneWidget);

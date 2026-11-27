@@ -4709,8 +4709,15 @@ class MainState extends ChangeNotifier {
         ZoomKey.reset => 0,
       });
 
-  /// 按键区's ⋯: the second row open or closed; saved.
+  /// 按键区's ⋯: the second row open or closed; saved. Closing it (⋯ or the 更多按键 switch) lets go of every lit
+  /// ⌃ ⌘ (the app's, whose ups go to A, and each terminal's): a key out of sight must not stay down.
   void setKeyBarMore(bool v) {
+    if (!v) {
+      appLatch.releaseAll();
+      for (final rs in remote.values) {
+        rs.keyLatch.releaseAll();
+      }
+    }
     prefs.keyBarMore = v;
     _save();
   }
