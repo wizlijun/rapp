@@ -58,7 +58,8 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
     let mut piped: Option<Pipe> = None;
     // Set by `watch_load`: from then on the connection carries the load stream.
     let mut watching = false;
-    while piped.is_none() && !watching {
+    let mut watching_terms = false;
+    while piped.is_none() && !watching && !watching_terms {
         tokio::select! {
             line = lines.next_line() => {
                 let Some(line) = line? else { return Ok(()) };
@@ -112,6 +113,24 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
                         watching = true;
                         continue;
                     }
+                    // `term::follow_local` writes every line itself.
+                    "term_watch" => {
+                        watching_terms = true;
+                        continue;
+                    }
+                    "term_open" => {
+                        let mut req = json!({"op": "open", "app": cmd["app"].as_str().unwrap_or("")});
+                        for k in ["shell", "from"] {
+                            if let Some(v) = cmd[k].as_str() {
+                                req[k] = json!(v);
+                            }
+                        }
+                        crate::term::local(state, &req, Duration::from_secs(30)).await
+                    }
+                    "term_front" => {
+                        let req = json!({"op": "front", "term": cmd["term"].as_str().unwrap_or("")});
+                        crate::term::local(state, &req, Duration::from_secs(15)).await
+                    }
                     "term_saved" => crate::term::local(state, &json!({"op": "saved"}), Duration::from_secs(30)).await,
                     "term_restore" => {
                         let keys: Vec<String> = cmd["keys"]
@@ -138,6 +157,10 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
                 write_json(&mut w, &json!({"event":"changed"})).await?;
             }
         }
+    }
+    if watching_terms {
+        let mut near = tokio::io::join(lines.into_inner(), w);
+        return crate::term::follow_local(state, &mut near).await;
     }
     if watching {
         let mut near = tokio::io::join(lines.into_inner(), w);
