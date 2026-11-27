@@ -1696,6 +1696,7 @@ P0 探查已完成（2026-11-27），结论见 `docs/superpowers/specs/2026-11-2
 - [x] **hub 读到超过 64 KiB 的回复行就丢整条连接。** `watch_load` 的第一行带全部历史（每点 99–103 字节），Mac 服务起来约 52 分钟以后就超过 65,536 字节，hub 丢掉整条连接、会话跟着断。这是 `rust/hub`、`rust/net` 和 service 的共用代码，main 上没修；影响只在安卓探查的进程内会话里见过，桌面没测。真修法：给这条回复放大或去掉行长上限，或者把历史分块发。探查分支上的 `keeps_link`（`rust/hub/src/link.rs`，按错误文字判断）只是绕过，不进 P1。P1 接会话之前要修好。 `fix/hub-long-reply` 修了：余力回复放宽到 256 KiB，超长只让那一个请求失败、不丢连接。
 - [ ] 本机原有的测试失败（和安卓无关，P0 里两次都看到）：`gui/test/embed/linux_detach_test.dart` 的两条；`gui/test/service_client_test.dart` 的「ServiceMonitor share…」时好时坏。
 - 探查分支 `probe/android-p0`、worktree `.worktrees/android-p0` 和 `.worktrees/android-p0-docs` 留到 P1 计划写完，之后可以删。工具和两个 AVD（`rapp-p0-34`、`rapp-p0-36`）留给 P1。
+- [ ] `refactor/session-port`（`cab34ce3`，已推到 origin，只推了这个分支）Mac 门禁已过、整支审查已过，等 Linux 实机回归（接入、打字、拖动、复制粘贴、传文件、分离窗口，做法和标准见 P1a 计划 Task 8 Step 2）后合并；合并前先往「## Windows 版 A 段（地基）」一节记会话端口接口的位置（Task 8 Step 3a）；合并后 `git push origin --delete refactor/session-port`；P1b 在这之前不能合。
 
 未经实机验证（探查包已从模拟器和平板上卸掉，下面都在 P1 第一个包上做；编号同规格 §14.6）：
 
