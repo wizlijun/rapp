@@ -41,6 +41,113 @@ void main() {
     expect(await StateLink(Uri.parse('http://127.0.0.1:$port')).health(), isFalse);
   });
 
+  group('prefs', () {
+    Map<String, Object?> health({bool routes = true}) => {'name': 'rapp-state', 'v': 2, if (routes) 'routes': true};
+    final withPrefs = {
+      'routes': [
+        {'name': 'state', 'kind': 'builtin', 'v': 1},
+        {'name': 'prefs', 'kind': 'builtin', 'v': 1},
+      ],
+    };
+
+    test('prefs is true only when health has routes and /v1/routes lists prefs v1', () async {
+      handler = (r) => json(r, r.uri.path == '/v1/routes' ? withPrefs : health());
+      expect(await link.health(), isTrue);
+      expect(link.prefs, isTrue);
+      // no prefs entry
+      handler = (r) => json(r, r.uri.path == '/v1/routes' ? {'routes': [{'name': 'state', 'v': 1}]} : health());
+      expect(await link.health(), isTrue);
+      expect(link.prefs, isFalse);
+      // prefs with another version
+      handler = (r) => json(r, r.uri.path == '/v1/routes' ? {'routes': [{'name': 'prefs', 'v': 2}]} : health());
+      expect(await link.health(), isTrue);
+      expect(link.prefs, isFalse);
+      // routes 404
+      handler = (r) => json(r, r.uri.path == '/v1/routes' ? {'error': 'x'} : health(), r.uri.path == '/v1/routes' ? 404 : 200);
+      expect(await link.health(), isTrue);
+      expect(link.prefs, isFalse);
+      // health without routes: no /v1/routes call, and a stale true is cleared
+      handler = (r) => json(r, r.uri.path == '/v1/routes' ? withPrefs : health());
+      await link.health();
+      expect(link.prefs, isTrue);
+      final seen = <String>[];
+      handler = (r) {
+        seen.add(r.uri.path);
+        return json(r, r.uri.path == '/v1/routes' ? withPrefs : health(routes: false));
+      };
+      expect(await link.health(), isTrue);
+      expect(link.prefs, isFalse);
+      expect(seen, ['/v1/health']);
+      // garbage routes body
+      handler = (r) async {
+        if (r.uri.path == '/v1/routes') {
+          r.response.write('nope');
+          await r.response.close();
+        } else {
+          await json(r, health());
+        }
+      };
+      expect(await link.health(), isTrue);
+      expect(link.prefs, isFalse);
+    });
+
+    test('prefsAll parses the store, paths keep a manual base path', () async {
+      final seen = <String>[];
+      handler = (r) {
+        seen.add(r.uri.path);
+        return json(r, {'store': 'abcd', 'stars': {'at': 3, 'data': ['a']}});
+      };
+      final l = StateLink(base.replace(path: '/state'));
+      final all = await l.prefsAll();
+      l.close();
+      expect(all['store'], 'abcd');
+      expect(seen, ['/state/prefs/v1/all']);
+    });
+
+    test('putPref: 204 null, 409 doc, 500 error, body shape', () async {
+      String? method;
+      String? path;
+      Object? sent;
+      var status = 204;
+      handler = (r) async {
+        method = r.method;
+        path = r.uri.path;
+        sent = jsonDecode(await utf8.decoder.bind(r).join());
+        if (status == 409) return json(r, {'at': 9, 'data': {'k': 1}}, 409);
+        if (status == 500) return json(r, {'error': 'x'}, 500);
+        r.response.statusCode = 204;
+        await r.response.close();
+      };
+      expect(await link.putPref('stars', at: 5, base: 2, data: ['a']), isNull);
+      expect(method, 'PUT');
+      expect(path, '/prefs/v1/stars');
+      expect(sent, {'at': 5, 'base': 2, 'data': ['a']});
+      status = 409;
+      final d = await link.putPref('stars', at: 5, base: 2, data: ['a']);
+      expect(d!.at, 9);
+      expect(d.data, {'k': 1});
+      status = 500;
+      await expectLater(
+        link.putPref('stars', at: 5, base: 2, data: 1),
+        throwsA(isA<StateLinkError>().having((e) => e.status, 'status', 500)),
+      );
+    });
+
+    test('putUsage encodes the device id', () async {
+      String? raw;
+      Object? sent;
+      handler = (r) async {
+        raw = r.requestedUri.path;
+        sent = jsonDecode(await utf8.decoder.bind(r).join());
+        r.response.statusCode = 204;
+        await r.response.close();
+      };
+      await link.putUsage('my mac/1', at: 7, data: {'a': 1});
+      expect(raw, '/prefs/v1/usage/my%20mac%2F1');
+      expect(sent, {'at': 7, 'data': {'a': 1}});
+    });
+  });
+
   test('state and queue pass before and limit', () async {
     final seen = <String>[];
     handler = (r) {
