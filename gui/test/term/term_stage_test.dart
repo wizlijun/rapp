@@ -431,6 +431,27 @@ void main() {
     expect(selectionText(sel, model.lineAt, model.wrappedAt), 'bcd');
   });
 
+  testWidgets('termPage: a page of history at a time (screen rows less one), down back to the latest', (t) async {
+    model.apply(scr([for (var i = 0; i < 10; i++) 'row $i'], hist: 50, limit: 2000));
+    await show(t);
+    final page = session.termPage!;
+    expect(page(true), isTrue);
+    expect(model.offset, 9);
+    expect(page(true), isTrue);
+    expect(model.offset, 18);
+    expect(page(false), isTrue);
+    expect(page(false), isTrue);
+    expect(model.offset, 0);
+    expect(port.calls.where((c) => c.$1 == 'keys'), isEmpty);
+  });
+
+  testWidgets('termPage in the alternate screen: false (the program has the key), nothing scrolls', (t) async {
+    model.apply(scr([for (var i = 0; i < 10; i++) 'row $i'], hist: 50, limit: 2000, alt: true));
+    await show(t);
+    expect(session.termPage!(true), isFalse);
+    expect(model.offset, 0);
+  });
+
   testWidgets('a scroll in the alternate screen does nothing', (t) async {
     model.apply(scr([for (var i = 0; i < 10; i++) 'row $i'], hist: 50, limit: 2000, alt: true));
     await show(t);

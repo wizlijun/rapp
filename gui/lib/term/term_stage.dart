@@ -219,6 +219,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     widget.session.termCopy = _copy;
     widget.session.termTakesKey = _takesKey;
     widget.session.termCommand = _command;
+    widget.session.termPage = _page;
     _focus.addListener(_onFocus);
     HardwareKeyboard.instance.addHandler(_onKeys);
     _focusSeen = widget.state.termFocusTick;
@@ -247,6 +248,8 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       widget.session.termTakesKey = _takesKey;
       if (old.session.termCommand == _command) old.session.termCommand = null;
       widget.session.termCommand = _command;
+      if (old.session.termPage == _page) old.session.termPage = null;
+      widget.session.termPage = _page;
       _focusIfWanted();
       // The element is reused for the new session: a hold of the hotkey was on the old one, and ends there.
       _gateTimer?.cancel();
@@ -272,6 +275,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     if (widget.session.termCopy == _copy) widget.session.termCopy = null;
     if (widget.session.termTakesKey == _takesKey) widget.session.termTakesKey = null;
     if (widget.session.termCommand == _command) widget.session.termCommand = null;
+    if (widget.session.termPage == _page) widget.session.termPage = null;
     widget.state.removeListener(_onState);
     HardwareKeyboard.instance.removeHandler(_onKeys);
     _voiceEnds?.cancel();
@@ -512,6 +516,17 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     final m = _model;
     if (m == null || m.alt || m.screen.isEmpty || rows == 0 || !rows.isFinite) return;
     m.scrollBy(rows);
+  }
+
+  /// The key bar's PgUp / PgDn ([RemoteSession.termPage]): a screen of history less one row, so a line carries
+  /// over. The alternate screen (a full-screen program) has no history here: false, the key is the program's.
+  bool _page(bool up) {
+    final m = _model;
+    if (m == null || m.alt || m.screen.isEmpty) return false;
+    _stopFling();
+    final rows = math.max(1, m.screen.length - 1);
+    _scroll(up ? rows.toDouble() : -rows.toDouble());
+    return true;
   }
 
   void _onSignal(PointerSignalEvent e) {

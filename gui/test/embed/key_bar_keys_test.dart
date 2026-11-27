@@ -9,7 +9,7 @@ void main() {
       expect(keyBarRows(app: app, more: false), [
         ['tab', 'stab', 'esc', 'cc', 'up', 'down', 'bksp', 'enter', 'more', 'hide'],
       ], reason: 'app: $app');
-      expect(keyBarRows(app: app, more: true)[1], ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'left', 'right'],
+      expect(keyBarRows(app: app, more: true)[1], ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'left', 'right', 'pgup', 'pgdn'],
           reason: 'app: $app');
     }
   });

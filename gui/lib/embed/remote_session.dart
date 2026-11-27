@@ -67,6 +67,11 @@ class RemoteSession extends ChangeNotifier {
   /// is mounted.
   void Function(String letter)? termCommand;
 
+  /// A terminal stage's page of its own history, up or down (the key bar's PgUp / PgDn): true when it scrolled
+  /// (or was already at that end); false when the pane shows a full-screen program, whose own PageUp / PageDown the
+  /// key is then. Null while no stage is mounted.
+  bool Function(bool up)? termPage;
+
   /// A terminal's key bar modifiers (⌃ ⌘, sticky); the app's live in [MainState.appLatch].
   final keyLatch = ModifierLatch();
 
