@@ -81,8 +81,11 @@ Esc cancels; Tab edits before sending. Change the shortcut in the sidebar.
 AI correction learning and prompt/chat modes use the shared LLM endpoint.
 Gateway hotwords provide spelling context to local recognition on each recording.
 Cached correction rules fix recognized words locally before sending or editing.
-The input dock, quick-area toggle, regrouped key bar (first row ending with
-⋯ and ⌄; second row starting with ⌘C ⌘V and adding ⌃L), tool-aware phrase-strip
+The input dock, quick-area toggle, regrouped key bar (first row `Tab ⇧Tab Esc ⌃C
+⌫ ⏎ ↑ ⋯`; second row `⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →` with inverted-T arrows
+aligning `↓` under `↑` and `→` under `⋯`, terminal `PgUp`/`PgDn` history paging
+or alt-screen keys, terminal `⌘T`, sticky `⌘` + letter rApp shortcuts, and
+automatic `⌃`/`⌘` release when `⋯` folds), tool-aware phrase-strip
 commands (新对话 / 换模型 / 压缩 / 恢复 / 用量 / 搜历史 Ctrl-R for Claude Code,
 Codex, Gemini CLI, agy and opencode, hidden on plain shells and excluded from
 input history), overview Open App
@@ -113,13 +116,13 @@ present), remote macOS Terminal consent prompts with screen preservation,
 `Ctrl+Shift+V` Linux terminal paste with Wayland selection roundtrip, and the
 enlarged 3-line non-blocking `WaitCard` stage overlay (for slow `Ctrl+Shift+T`,
 新建, 恢复, standby 启动 and device-tab shell opens, with queued counts and
-automatic switch to a remote Mac's desktop on consent) share the macOS 0.15.55
+automatic switch to a remote Mac's desktop on consent) share the macOS 0.15.58
 layout and rules.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and
 reattach without reconnecting. This release uses protocol v16 (compatible with
-macOS 0.15.35–0.15.55); update both peers when coming from protocol v15. Incoming GUI
+macOS 0.15.35–0.15.58); update both peers when coming from protocol v15. Incoming GUI
 state rules are forwarded by the Linux client to compatible hosts (such as
 macOS 0.15.35+) and safely ignored by the Linux desktop/app host. Off-stage and
 hidden/minimized embedded or detached sessions pause pictures but keep activity

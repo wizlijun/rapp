@@ -1517,11 +1517,10 @@ macOS、Linux、Duo、iPad 各一遍。
 
 - **接线已合进本机 `main`（2026-11-27）。** 用户定的：Mac 门禁绿了就合，不等 Windows 门禁。对已有 crate 的改动（约 55 个文件）、`rust/host-windows/` 和 `rust/svc-windows/` 进成员表，都在 `main` 里了。这次合并改的是共用代码，算 macOS 的改动。
 - **Windows 那一支没验过。** `cfg(windows)` 里的代码在 Mac 上编不到，`scripts\check-windows.ps1` 一次都没跑过；`CLAUDE.md` 说这类代码要先过 Windows 门禁再合并，这一次是用户知情后放行的例外。Windows 机器装好后的第一件事就是在 `main` 上跑它，红了在 Windows 上修，按 `CLAUDE.md` 的 Windows 集成 session 推回来。
-- **Linux 那一支也没编过。** 动到 Linux 专有代码的只有 `rust/service/src/instance.rs`（加了几处 `#[cfg(target_os = "linux")]`，在 Linux 上不改变编进去的东西）和 testkit `service.rs` 里两处条件（Linux 上值不变）。Linux 的 session 下次合并 `origin/main` 时编一遍。
-
+- **Linux 那一支已编译验证通过（`0.15.58`，`9083e22d`）。** 全工作区 19 个 crate 在 Linux x86_64 下通过 `cargo clippy --workspace --all-targets -- -D warnings`（顺手清理 `rapp-client-gtk` `as_chunks_mut` 告警）、单测与 `testkit` 集成测试。
 - A 段做完后，一台 Windows 机器能：编出全部 Rust crate（`rapp-relay`、`rapp-host-linux`、`rapp-client-gtk`、`rapp-hub-ffi` 除外）、跑过测试和 clippy（`scripts\check-windows.ps1`）、编出 Flutter 界面、用 `scripts\stage-windows.ps1` 摆出开发用的版本目录、从 `bin\rapp.exe` 启动界面、当控制端连别的设备。
 - 还不能：当被控端（没有 `rapp-host`，D 段）、开文本终端（E 段）、自己升级（G 段）、有监督程序和系统服务（`rapp-svc`，C 段）、语音（H 段）、安装包（G 段）。
-- **给 Linux session 的发现**（规格 §6.1、§19.3 第 14 条）：`rust/service/src/workers.rs` 的 `permissions()` 没有把 `applications` 留下，`capabilities()` 读到的永远是“没有”，所以 Linux 被控端一直对外报不能开单个 app，控制端不显示它的 app 入口（`gui/lib/ui/device_apps.dart:16` 等四处）。有意还是漏了，由 Linux 的 session 判断；Windows 这次没有改它。
+- **给 Linux session 的发现**（规格 §6.1、§19.3 第 14 条）：`rust/service/src/workers.rs` 的 `permissions()` 没有把 `applications` 留下，`capabilities()` 读到的永远是“没有”，所以 Linux 被控端一直对外报不能开单个 app，控制端不显示它的 app 入口（`gui/lib/ui/device_apps.dart:16` 等四处）。有意还是漏了，由 Linux 的 session 判断；Windows 这次没有改它。（已由 Linux session 在 `9083e22d` 确认是 `0.15.9` 遗漏，并在 `#[cfg(target_os = "linux")]` 下补齐透传与单测。）
 - **要在实机上看的**（未验证）：
   - [ ] 1. 中文用户名（带空格）的账户下：`<数据根>\local` 的访问权限只有本人、SYSTEM、Administrators；数据根搬到 D 盘以后还是这样（规格 §13.2 的验收）。
   - [ ] 2. `cmd`、Windows PowerShell 5.1、Windows Terminal 里 `rapp --help` 的中文都不乱码（规格 §8.2【未验证】）。
@@ -1550,3 +1549,9 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 3 在一个真的程序里打字（中英文都打，每段超过 20 个字），字都到了，没丢也没重复
 - [ ] 4 从 Mac 粘贴文件到 Windows：文件落在 NTFS 的下载目录里。名字是保留名（如 `CON.txt`、`aux`）时改名为 `_CON.txt` 这类，同名再来时编号为 `_CON (2).txt`；SHA-256 和原文件一致
 - [ ] 5 锁屏后经系统服务解锁：B 端输入密码，A 真的解开；密码错时 A 保持锁着，B 端还显示「已锁」；日志里没有密码
+
+## Linux 0.15.56 与 0.15.58 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），将 Linux / Omarchy `x86_64` 产物依次构建并挂载至已发布的 [v0.15.56](https://github.com/wizlijun/rapp/releases/tag/v0.15.56) 与 [v0.15.58](https://github.com/wizlijun/rapp/releases/tag/v0.15.58) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.56`–`0.15.58`（`feat/bar-cmd`、`feat/windows-foundation`、`feat/bar-pgup`、`feat/quick-one`）并修复 Linux 被控端 `applications` 能力透传：快捷区精简重排为第一行 `Tab ⇧Tab Esc ⌃C ⌫ ⏎ ↑ ⋯`（移除 `⌄`）、第二行 `⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →`（倒 T 方向键对齐、终端 `PgUp`/`PgDn` 回滚翻页、粘滞 `⌘`+字母 rApp 快捷键及收起松开 `⌃`/`⌘`）；在 Linux 上完成 Windows A 段接线后的全工作区 19 个 crate `clippy -- -D warnings` 与测试验证；在 `rust/service/src/workers.rs` 以 `#[cfg(target_os = "linux")]` 修复 `permissions()` 漏拷 `applications` 的遗漏。
+- [x] `v0.15.58`（源码 `9083e22d`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01556-parity.md` 与 `docs/superpowers/plans/2026-11-27-linux-01558-parity.md`。
