@@ -16,6 +16,7 @@ import 'package:rapp/ui/workspace_store.dart';
 import 'package:rapp/ui/main_window.dart';
 import 'package:rapp/ui/fullscreen.dart';
 import 'package:rapp/service_client.dart';
+import 'package:rapp/state/state_sync.dart';
 import 'dart:async';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/overview.dart';
@@ -61,7 +62,12 @@ void main() {
 
   /// Builds the state, opens [apps] (`id/app`) in order and shows the overview.
   Future<void> boot(WidgetTester tester,
-      {List<String> apps = const [], bool embed = true, TermSessionPort? termPort, String? stateRules, DeviceOs? localOs}) async {
+      {List<String> apps = const [],
+      bool embed = true,
+      TermSessionPort? termPort,
+      String? stateRules,
+      DeviceOs? localOs,
+      StateSync? stateSync}) async {
     tester.view.physicalSize = const Size(1194, 834);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -93,6 +99,7 @@ void main() {
       clock: () => epoch,
       builtinStateRules: stateRules,
       localOs: localOs,
+      stateSync: stateSync,
     );
     await tester.runAsync(() async {
       for (var i = 0; i < 8; i++) {
@@ -1517,17 +1524,51 @@ void main() {
           findsNothing);
       expect(find.byKey(const Key('local-services')), findsOneWidget);
     });
+
+    testWidgets('Linux desktop: 本机 folds while idle, opens on inbound with 本机 · :8102 center status, and folds back',
+        (tester) async {
+      final sync = FakeStateSync(tmp.path)
+        ..status = StateStatus.connected
+        ..url = Uri.parse('http://127.0.0.1:8102');
+      addTearDown(sync.dispose);
+      await boot(tester, localOs: DeviceOs.omarchy, stateSync: sync);
+      s.toggleOverview();
+      final m = _Mon(localId: 'linux999', host: 'linux999')..set(const []);
+      addTearDown(m.dispose);
+      await tester.pumpWidget(wrap(SizedBox(width: 1194, height: 700, child: Overview(state: s, monitor: m))));
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsOneWidget);
+      expect(tester.getSize(find.byKey(const Key('column-local'))).width, 56);
+      expect(find.byKey(const Key('local-services')), findsNothing);
+
+      m.set(one);
+      await tester.pump();
+      await tester.pump();
+      expect(tester.getSize(find.byKey(const Key('column-local'))).width, 220);
+      expect(find.byKey(const Key('local-services')), findsOneWidget);
+      expect(find.text('本机 · :8102'), findsOneWidget);
+      expect(find.text('LLM 网关'), findsOneWidget);
+
+      m.set(const []);
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsOneWidget);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
   });
 }
 
 /// A monitor that never connects: the test sets who is connected in.
 class _Mon extends ServiceMonitor {
-  _Mon() : super(readToken: () async => null);
+  _Mon({this.localId, this.host}) : super(readToken: () async => null);
+  final String? localId;
+  final String? host;
 
   void set(List<ServiceSession> sessions) {
-    status = ServiceStatus(sessions: sessions);
+    status = ServiceStatus(id: localId, sessions: sessions);
     notifyListeners();
   }
+
+  @override
+  Future<String?> stateHost() async => host;
 }
 
 class _Fs implements FullscreenControl {
