@@ -1535,6 +1535,7 @@ macOS、Linux、Duo、iPad 各一遍。
 现状（2026-11-27）：在 Mac 上编过、测过，**接线已合进本机 `main`**（用户定的：Mac 门禁绿了就合）。**没在 Windows 上跑过。**
 
 - `main` 已合进分支（含 A 段接线 `5e39bb91`），成员表里 host-core、host-windows、svc-windows 都在。合并后的树上 Mac 门禁全绿：`cargo test --workspace`、clippy `-D warnings`、`swift test`、`flutter analyze`、`flutter test`（`linux_detach_test` 要先 `cargo build --release -p rapp-client-core --bin rapp-session`）。
+- **Linux x86_64 门禁已编译验证通过（`0.15.59`，`a1b9135c`）。** 全工作区 20 个 crate（含 `rapp-host-core` 及 `libz-sys` `stock-zlib`）通过 `cargo clippy --workspace --locked --all-targets -- -D warnings`，`rapp-host-core` 全部单测与 Swift 样本逐字节对拍，以及 `rapp-testkit` `host_service`（2 个）和 `host_session`（71 个）全部通过。
 - Swift 样本（`30cdd17a`）全部对上，deflate 和 Swift 逐字节相同（`libz-sys` 原版 zlib，加了 `stock-zlib`）；会话测试 71 个、服务对接 2 个都过。修的地方和逐条原因见 `rust/host-core/PORTING.md` 和分支的提交记录；样本和生成器一个没改。
 - 交接文档 3.2 节剩下的四条：窗口移不动和保持唤醒失败的两行日志已照 Swift 补上（平台接口 `move_to` 返回 bool、`stay_awake` 返回 `Option<String>`，计划同一提交改了）；焦点日志里的控件角色、规则看到的语言、焦点区测试的 8 点误差三条认下，写进 `PORTING.md` 第 4 部分。
 - 接下来：Windows 机器装好后在 `main` 上跑 `scripts\check-windows.ps1`（A、B 两段的接线都在 `main` 里了，不用再到分支上做）。`host-core` 是共用代码，这次合并算 macOS 的改动；macOS 的被控端还是 Swift 的 `rapp-host`，安装包里不带 `host-core`，行为不变。
@@ -1556,7 +1557,15 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] 对齐 macOS `0.15.56`–`0.15.58`（`feat/bar-cmd`、`feat/windows-foundation`、`feat/bar-pgup`、`feat/quick-one`）并修复 Linux 被控端 `applications` 能力透传：快捷区精简重排为第一行 `Tab ⇧Tab Esc ⌃C ⌫ ⏎ ↑ ⋯`（移除 `⌄`）、第二行 `⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →`（倒 T 方向键对齐、终端 `PgUp`/`PgDn` 回滚翻页、粘滞 `⌘`+字母 rApp 快捷键及收起松开 `⌃`/`⌘`）；在 Linux 上完成 Windows A 段接线后的全工作区 19 个 crate `clippy -- -D warnings` 与测试验证；在 `rust/service/src/workers.rs` 以 `#[cfg(target_os = "linux")]` 修复 `permissions()` 漏拷 `applications` 的遗漏。
 - [x] `v0.15.58`（源码 `9083e22d`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01556-parity.md` 与 `docs/superpowers/plans/2026-11-27-linux-01558-parity.md`。
 
+## Linux 0.15.59 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 直接挂载至已发布的 [v0.15.59](https://github.com/wizlijun/rapp/releases/tag/v0.15.59) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.59`（`feat/quick-stay`）并完成 Windows B 段 `rapp-host-core` 在 Linux x86_64 上的全量验证：快捷区开关在桌面端输入面板展开与收起时均固定在右下角按钮列（`[快捷区开关] [输入/收起] [语音]`）且鼠标点击不丢失焦点、选区与 Fcitx5/IBus 未上屏预编辑；补充 `gui/test/embed/input_dock_test.dart` Linux 桌面带语音常驻对齐测试；全工作区 20 个 crate（含 `rapp-host-core`、`libz-sys` `stock-zlib`、Swift 样本对拍及 `host_session` 71 项集成测试）与 3,648 项 Flutter 测试在 Linux 上全部通过。
+- [x] `v0.15.59`（源码 `a1b9135c`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01559-parity.md`。
+
 ## 中心服务 G1（规格 `docs/superpowers/specs/2026-11-27-rapp-center-design.md`，计划 `docs/superpowers/plans/2026-11-27-rapp-center-g1.md`，分支 `feat/center-g1`，2026-11-27）
+
+- **G3（`prefs`）不要另做**：2026-11-27 用户定，`prefs` 由快捷区第一行的第二期来做（分支 `feat/quick-row`，规格 `2026-11-27-rapp-quick-row-design.md` §10.2），同步五样：常用语、按键动作、键盘布局、星标、使用次数。合并规则以那份规格为准。中心服务规格 §8 已在那条分支上标成历史。
 
 - 状态服务改名为中心服务 `rapp-center`（源码 `services/center/`），改动如下：
   - 新加一个入口，内置能力放在它后面。现在只有一块 `state`，旧路径不变。
@@ -1570,6 +1579,28 @@ macOS、Linux、Duo、iPad 各一遍。
   - [ ] ③ 设置里显示的名字是「中心服务」
   - [ ] ④ 另一台装旧版 app 的设备连这台，状态照常显示
   - [ ] ⑤ 回滚到旧版后，中心服务是关的，队列是空的（已知后果：旧版只认 `services.json` 的 `state` 键和 `local/state/`。升级后改过开关的话，键已经换成 `center`，旧版就当它是关的；数据目录已经搬走，旧版只能从空队列开始。这些是 7 天内的临时数据，规格接受这个后果）
+- [x] 补漏（`fix/ios-center-section`，2026-11-27）：iPad / Duo 的本机页没有「中心服务」这一栏（P2 的计划要放，当时只加在了桌面版），看不出连没连上。现在本机页里有，和桌面一样：自动 / 关 / 手填地址，下面写 已连上 / 没找到中心服务 / 连不上
+  - [ ] ⑥ Duo 上打开设备 → 本机：有「中心服务」，选着「自动」；Mac 上开着中心服务时写「已连上 http://localhost:<分享号>」，Mac 上关掉后一会儿变成「没找到中心服务」
+
+## Linux 0.15.60 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 直接挂载至已发布的 [v0.15.60](https://github.com/wizlijun/rapp/releases/tag/v0.15.60) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.60`（`feat/center-g1` 中心服务 G1：`rapp-state` 改名 `rapp-center`）并修复两处 Linux 遗漏：在 `scripts/linux/rapp` 补齐 `rapp center [on|off]` 子命令转发至 `rapp-cli`（此前漏写会落入 `rapp-gui`；同步扩充 `scripts/test-linux-launcher.py`），并更新 `scripts/test-linux-bundle.py` 在隔离命名空间中端到端验证 `rapp center` 与 `rapp state` 输出一致、「中心服务」文案、`local/services.json` `center` 键、`local/center/` 目录、`GET /v1/health` v2、`GET /v1/routes` 及 `/state/v1/…` 前缀别名；全工作区 20 个 crate 与 3,649 项 Flutter 测试全部通过。
+- [x] `v0.15.60`（源码 `1f3c0d64`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01560-parity.md`。
+
+## 总览本机列：连上的服务（feat/overview-local-services）
+
+规格 `docs/superpowers/specs/2026-11-27-rapp-overview-local-services-design.md`，计划 `docs/superpowers/plans/2026-11-27-rapp-overview-local-services.md`（2026-11-27）。
+
+- [x] 本机列展开时，在会话和「正在被接入」下面、版本号上面多一组「连上的服务」：中心服务（在哪台设备 · 端口）和 LLM 网关（地址或探测失败的那句话），各带一盏灯；只看不点
+- [x] PC 上没人接入时本机列也折成 56px 竖条；有人接入自己展开，全部断开再折；手动开或折以后这次运行里不再自动改
+- 实机检查：
+  - [ ] ① PC 上没人接入，启动后本机是竖条
+  - [ ] ② 另一台设备接入，本机自己展开；断开后折回去
+  - [ ] ③ 手动折起或点开以后，接入有没有都不再自己变，重启 app 后恢复自动
+  - [ ] ④ 本机展开时，中心服务是绿灯，写「<设备> · :<端口>」；`rapp center off` 之后变成「没找到」或「已关」
+  - [ ] ⑤ LLM 网关是绿灯，写地址；把 key 改错，一分钟内变成红灯「key 不对」
+  - [ ] ⑥ Duo / iPad 上点开本机，两行都看得到
 
 ## 快捷区第一行（计划 `docs/superpowers/plans/2026-11-27-rapp-quick-row.md`，分支 `feat/quick-row`）
 

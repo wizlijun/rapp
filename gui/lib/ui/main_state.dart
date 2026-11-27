@@ -1171,13 +1171,17 @@ class MainState extends ChangeNotifier {
   /// The stage shows the overview wall instead of the current session's picture.
   bool overview = false;
 
-  /// The overview's 本机 column, folded when there is no local service (iPad/Duo), has been opened.
-  /// Kept for this run only, so leaving 全景 for an app and coming back does not fold it again.
-  bool localColumnOpen = false;
+  /// The user's open/fold of the overview's 本机 column this run; null until they touch it. Kept for this run only,
+  /// so leaving 全景 for an app and coming back keeps what they chose.
+  bool? localColumnPick;
+
+  /// Whether 本机 shows open: the user's pick, else open while someone is connected in ([inbound]; always false
+  /// on iPad/Duo, which have no local service).
+  bool localColumnOpen({required bool inbound}) => localColumnPick ?? inbound;
 
   void openLocalColumn(bool open) {
-    if (localColumnOpen == open) return;
-    localColumnOpen = open;
+    if (localColumnPick == open) return;
+    localColumnPick = open;
     notifyListeners();
   }
 
