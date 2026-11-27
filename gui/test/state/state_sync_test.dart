@@ -813,10 +813,10 @@ void main() {
       await settle();
       c.add({
         'what': 'prefs.stars',
-        'doc': {'at': DateTime.now().millisecondsSinceEpoch + 100000, 'data': ['k:mode']},
+        'doc': {'at': DateTime.now().millisecondsSinceEpoch + 100000, 'data': ['p:mode']},
       });
       await settle();
-      expect(qp.stars, ['k:mode']);
+      expect(qp.stars, ['p:mode']);
       sync.dispose();
     });
 
@@ -876,7 +876,7 @@ void main() {
         final first = links.single;
         first.puts.clear();
         sync.pause();
-        qp.toggleStar('k:esc');
+        qp.toggleStar('p:usage');
         fa.elapse(const Duration(seconds: 3));
         expect(first.puts, isEmpty, reason: 'nothing is sent over the link the pause closed');
         expect(quick.status, QuickSyncStatus.synced, reason: 'a pause is not an outage');

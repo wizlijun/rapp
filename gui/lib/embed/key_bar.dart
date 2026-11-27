@@ -17,8 +17,6 @@ import 'phrase_strip.dart';
 import 'composer_panel.dart' show seeThroughBox;
 import 'phrases.dart';
 import 'remote_session.dart';
-import '../quick/key_actions.dart';
-import 'phrase_send.dart';
 import 'session_port.dart';
 
 /// A repeating key starts repeating after this long held, then goes every [repeatEvery].
@@ -32,10 +30,7 @@ ModifierLatch keyLatchOf(MainState state, RemoteSession session) =>
     _isTerm(state, session) ? session.keyLatch : state.appLatch;
 
 List<List<String>> _rowsOf(MainState state, RemoteSession session) =>
-    keyBarRows(
-        layout: state.quick.layout,
-        more: state.prefs.keyBarMore,
-        actionIds: {for (final a in state.quick.keys) a.id});
+    keyBarRows(layout: state.quick.layout, more: state.prefs.keyBarMore);
 
 /// Whether [session] is of the terminal kind: a text terminal or a terminal app. The kind picks which quick-area
 /// pref it follows.
@@ -379,46 +374,10 @@ class _KeyBarState extends State<KeyBar> {
     );
   }
 
-  KeyAction? _actionOf(String id) {
-    for (final a in widget.state.quick.keys) {
-      if (a.id == id) return a;
-    }
-    return null;
-  }
-
   Widget _rowOf(List<String> ids) => KeyBarRow(ids: ids, cell: _cellOf);
 
   Widget? _cellOf(String id) {
-    final action = id.startsWith('k:') ? _actionOf(id.substring(2)) : null;
     final key = barKeys[id];
-    if (action != null) {
-      final tool = widget.state.stripToolOf(widget.session);
-      final usable = keyActionUsable(action, term: widget.port is TermSessionPort, tool: tool);
-      return _BarKeyView(
-        key: Key('bar-k-${action.id}'),
-        keyDef: (
-          id: id,
-          label: action.label,
-          spoken: action.label,
-          kind: BarKind.send,
-          wire: null,
-          code: null,
-          mods: 0,
-          bit: null,
-          repeats: false,
-        ),
-        sid: _sid,
-        state: LatchState.off,
-        blocked: _blocked || !usable,
-        onFire: (haptic, flags) {
-          if (_blocked || !usable) return null;
-          if (haptic) unawaited(HapticFeedback.selectionClick());
-          // Key-bar taps do not count usage (spec §9).
-          sendKeyAction(state: widget.state, session: widget.session, port: widget.port, a: action, tool: tool);
-          return null;
-        },
-      );
-    }
     if (key == null) return null; // an id nothing knows (cleaned layouts have none): draw nothing rather than crash
     return _BarKeyView(
       key: Key('bar-$id'),

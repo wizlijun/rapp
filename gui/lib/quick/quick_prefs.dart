@@ -1,16 +1,14 @@
-// The five 快捷区 docs of this device — 常用语和命令, 按键动作, 键盘布局, 星标, 次数 — in `<dir>/quick.json`, each
-// `{at, data}` with `at` in ms (quick-row spec §10.1). Built from gui.json's `phrases` the first time; the sync
-// (later tasks) reads [docOf] and writes through [adopt] and [floor].
+// The four 快捷区 docs of this device — 常用语和命令, 键盘布局, 星标, 次数 — in `<dir>/quick.json`, each `{at, data}`
+// with `at` in ms (quick-row spec §10.1). Built from gui.json's `phrases` the first time; the sync reads [docOf] and
+// writes through [adopt] and [floor]. The 按键动作 doc of 0.15.63/64 is read once and dropped (cmd-menu design).
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
-import '../embed/key_bar_keys.dart';
 import '../embed/phrases.dart';
 import '../embed/strip_cmds.dart';
-import 'key_actions.dart';
 import 'key_layout.dart';
 import 'quick_usage.dart';
 
@@ -23,67 +21,71 @@ class QuickDoc {
 }
 
 /// The docs every device shares; `usage` is per device and goes apart.
-const quickDocNames = ['phrases', 'keys', 'layout', 'stars'];
+const quickDocNames = ['phrases', 'layout', 'stars'];
 
 const _allNames = [...quickDocNames, 'usage'];
 
-const _wireKeys = {
-  'Esc': 'esc',
-  'Tab': 'tab',
-  'Enter': 'enter',
-  'Backspace': 'bksp',
-  'Left': 'left',
-  'Up': 'up',
-  'Down': 'down',
-  'Right': 'right',
-  'PageUp': 'pgup',
-  'PageDown': 'pgdn',
-};
-
-/// The chord a key-bar key sends, from its wire name (`Ctrl-O` → `ctrl+o`); null when it has none or a chord cannot
-/// say it.
-Chord? chordOfBarKey(String id) {
-  final wire = barKeys[id]?.wire;
-  if (wire == null) return null;
-  final parts = wire.split('-');
-  final base = parts.last;
-  final mods = parts.sublist(0, parts.length - 1);
-  if (mods.any((m) => !const {'Ctrl', 'Alt', 'Shift'}.contains(m))) return null;
-  final key = RegExp(r'^[A-Za-z0-9]$').hasMatch(base) ? base.toLowerCase() : _wireKeys[base];
-  if (key == null) return null;
-  return Chord(key, ctrl: mods.contains('Ctrl'), alt: mods.contains('Alt'), shift: mods.contains('Shift'));
+/// A random 8-character id of `[a-z0-9]`.
+String quickId() {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  final r = Random.secure();
+  return String.fromCharCodes([for (var i = 0; i < 8; i++) chars.codeUnitAt(r.nextInt(chars.length))]);
 }
 
-/// gui.json's list as the 常用语 doc and the 按键动作 doc (spec §10.1, Ruling P1). `StripCmd('search')` with a text
-/// anywhere stays a command; otherwise it leaves the list and its keys (and name) go to the `search` action.
-({List<StripItem> phrases, List<KeyAction> keys}) _migrateLists(List<StripItem> legacy) {
-  final builtin = builtinKeyActions.firstWhere((a) => a.id == 'search');
-  KeyAction? search;
-  final phrases = <StripItem>[];
-  for (final it in legacy) {
-    if (it is StripCmd && it.id == 'search' && !it.per.values.any((a) => a is CmdText)) {
-      search ??= KeyAction('search', label: it.label ?? builtin.label, chord: builtin.chord, per: {
-        ...builtin.per,
-        for (final e in it.per.entries) e.key: e.value is CmdKey ? chordOfBarKey((e.value as CmdKey).key) : null,
-      });
-      continue;
-    }
-    phrases.add(it);
-  }
-  // 切模式 used to be a key action (⇧Tab on the keyboard row); the old list never had it: add it once, after 新对话.
+/// gui.json's list as the 常用语 doc (spec §10.1): as it is, ids added, and 切模式 once (it used to be a key on the
+/// keyboard row; the old list never had it), after 新对话.
+List<StripItem> _migrateList(List<StripItem> legacy) {
+  final phrases = List.of(legacy);
   if (!phrases.any((it) => it is StripCmd && it.id == 'mode')) {
     final at = phrases.indexWhere((it) => it is StripCmd && it.id == 'new');
     phrases.insert(at < 0 ? 0 : at + 1, const StripCmd('mode'));
   }
-  return (
-    phrases: _withIds(phrases),
-    keys: [for (final a in builtinKeyActions) a.id == 'search' && search != null ? search : a],
-  );
+  return _withIds(phrases);
 }
 
-/// The 常用语 doc of a fresh install, and what 恢复默认 brings back: gui.json's default list as migrated, so the
-/// commands without 搜历史 (spec §6.2), then the default phrases. One definition for both.
-List<StripItem> get defaultQuickPhrases => _migrateLists(defaultStripItems).phrases;
+/// The 常用语 doc of a fresh install, and what 恢复默认 brings back: gui.json's default list as migrated, so every
+/// built-in command, 搜历史 too, then the default phrases. One definition for both.
+List<StripItem> get defaultQuickPhrases => _migrateList(defaultStripItems);
+
+/// The ref the old 搜历史 按键动作 had; it is the command `p:search` now. Any other `k:` ref is of an action that is gone.
+const _oldSearch = 'k:search';
+
+/// [stars] as this version reads them: `k:search` is `p:search`, other `k:` refs go.
+List<String> _starsNow(List<String> stars) =>
+    _dedupe([for (final s in stars) if (s == _oldSearch) 'p:search' else if (!s.startsWith('k:')) s]);
+
+/// [u] as this version reads it: the counts of `k:search` added to `p:search`'s, other `k:` refs dropped.
+Usage _usageNow(Usage u) {
+  if (!u.keys.any((r) => r.startsWith('k:'))) return u;
+  final out = <String, Map<String, int>>{
+    for (final e in u.entries)
+      if (!e.key.startsWith('k:')) e.key: Map.of(e.value),
+  };
+  final old = u[_oldSearch];
+  if (old != null) {
+    final days = out.putIfAbsent('p:search', () => <String, int>{});
+    old.forEach((d, n) => days[d] = (days[d] ?? 0) + n);
+  }
+  return out;
+}
+
+/// [phrases] with 搜历史 back as a command, after the last command, when it is not there (a quick.json of 0.15.63/64
+/// moved it to its 按键动作); the name the action was given goes with it. Null: nothing to add.
+List<StripItem>? _withSearch(List<StripItem> phrases, Object? keys) {
+  if (phrases.any((it) => it is StripCmd && it.id == 'search')) return null;
+  String? label;
+  if (keys is List) {
+    for (final e in keys) {
+      if (e is Map && e['id'] == 'search' && e['label'] is String) {
+        final l = (e['label'] as String).trim();
+        if (l.isNotEmpty && l != builtinCmds['search']!.label) label = l;
+        break;
+      }
+    }
+  }
+  final at = phrases.lastIndexWhere((it) => it is StripCmd) + 1;
+  return List.of(phrases)..insert(at, StripCmd('search', label: label));
+}
 
 /// [l] with an id on every phrase that has none (Ruling 10): a default phrase's text takes its fixed id while no
 /// other phrase of the list holds it, anything else a fresh one.
@@ -115,16 +117,6 @@ bool _needsIds(List<StripItem> l) => l.any((it) => it is Phrase && it.id == null
 
 List<StripItem>? _phrasesFrom(Object? j) => j is List ? [for (final e in j) ?stripItemFromJson(e)] : null;
 
-/// Bad actions dropped; an id is kept once, first place wins.
-List<KeyAction>? _keysFrom(Object? j) {
-  if (j is! List) return null;
-  final seen = <String>{};
-  return [
-    for (final e in j)
-      if (KeyAction.fromJson(e) case final a? when seen.add(a.id)) a,
-  ];
-}
-
 KeyLayout? _layoutFrom(Object? j) => j is Map && j['rows'] is List ? KeyLayout.fromJson(j) : null;
 
 List<String>? _starsFrom(Object? j) => j is List ? _dedupe([for (final e in j) if (e is String) e]) : null;
@@ -136,12 +128,8 @@ List<String> _dedupe(Iterable<String> l) {
   return [for (final s in l) if (seen.add(s)) s];
 }
 
-KeyLayout _without(KeyLayout l, Set<String> cells) =>
-    KeyLayout([for (final r in l.rows) [for (final c in r) if (!cells.contains(c)) c]]);
-
 class QuickPrefs extends ChangeNotifier {
-  QuickPrefs._(this._dir, this._clock, this._legacy, this._phrases, this._keys, this._layout, this._stars, this._usage,
-      Map<String, int> at)
+  QuickPrefs._(this._dir, this._clock, this._legacy, this._phrases, this._layout, this._stars, this._usage, Map<String, int> at)
       : _at = at;
 
   /// From `<dir>/quick.json`, or built from [legacy] (gui.json's `phrases`) when there is none. [dir] null (no device
@@ -186,10 +174,33 @@ class QuickPrefs extends ChangeNotifier {
       return v;
     }
 
-    final m = _migrateLists(legacy);
-    var phrases = doc('phrases', _phrasesFrom, () => m.phrases);
+    var phrases = doc('phrases', _phrasesFrom, () => _migrateList(legacy));
     if (_needsIds(phrases)) {
       phrases = _withIds(phrases);
+      repaired = true;
+    }
+    var stars = doc('stars', _starsFrom, () => <String>[]);
+    var usage = doc('usage', _usageFrom, () => <String, Map<String, int>>{});
+    if (j.containsKey('keys')) {
+      // Written by 0.15.63/64: 搜历史 back among the commands, its star and counts with it; the docs that changed move
+      // on so the sync sends them. The keys doc is not written again, so this happens once.
+      final now = clock().millisecondsSinceEpoch;
+      void moved(String name) => at[name] = max(now, at[name]! + 1);
+      final back = _withSearch(phrases, (j['keys'] is Map ? j['keys'] as Map : const {})['data']);
+      if (back != null) {
+        phrases = back;
+        moved('phrases');
+      }
+      final s2 = _starsNow(stars);
+      if (!listEquals(s2, stars)) {
+        stars = s2;
+        moved('stars');
+      }
+      final u2 = _usageNow(usage);
+      if (!identical(u2, usage)) {
+        usage = u2;
+        moved('usage');
+      }
       repaired = true;
     }
     final q = QuickPrefs._(
@@ -197,10 +208,9 @@ class QuickPrefs extends ChangeNotifier {
       clock,
       legacy,
       phrases,
-      doc('keys', _keysFrom, () => m.keys),
       doc('layout', _layoutFrom, () => KeyLayout.fallback),
-      doc('stars', _starsFrom, () => <String>[]),
-      doc('usage', _usageFrom, () => <String, Map<String, int>>{}),
+      stars,
+      usage,
       at,
     ).._keep = keep;
     if (repaired) q._save();
@@ -212,8 +222,7 @@ class QuickPrefs extends ChangeNotifier {
   /// [keep]: the file in [dir] is not to be written over; why, in words (see [load]).
   factory QuickPrefs.migrate(List<StripItem> legacy,
       {String? dir, DateTime Function() clock = DateTime.now, String? keep}) {
-    final m = _migrateLists(legacy);
-    final q = QuickPrefs._(dir, clock, legacy, m.phrases, m.keys, KeyLayout.fallback, [], {},
+    final q = QuickPrefs._(dir, clock, legacy, _migrateList(legacy), KeyLayout.fallback, [], {},
         {for (final n in _allNames) n: 0})
       .._keep = keep;
     q._save();
@@ -224,7 +233,6 @@ class QuickPrefs extends ChangeNotifier {
   final DateTime Function() _clock;
   final List<StripItem> _legacy;
   List<StripItem> _phrases;
-  List<KeyAction> _keys;
   KeyLayout _layout; // as stored; [layout] is it cleaned
   KeyLayout? _cleaned;
   List<String> _stars;
@@ -252,16 +260,13 @@ class QuickPrefs extends ChangeNotifier {
   /// Set when quick.json must stay as it was found (see [load]): every write is refused with this reason.
   String? _keep;
 
-  /// 常用语和命令, in strip order.
+  /// 常用语和命令, in list order (命令▾ and 常用语▾ each show their own kind).
   List<StripItem> get phrases => _phrases;
 
-  /// 按键动作, in menu order.
-  List<KeyAction> get keys => _keys;
+  /// The key bar's layout, cleaned.
+  KeyLayout get layout => _cleaned ??= _layout.cleaned();
 
-  /// The key bar's layout, cleaned against [keys].
-  KeyLayout get layout => _cleaned ??= _layout.cleaned({for (final a in _keys) a.id});
-
-  /// Refs (`p:` / `k:`) in the order they were starred.
+  /// Refs (`p:`) in the order they were starred.
   List<String> get stars => _stars;
 
   /// This device's own counts.
@@ -274,7 +279,6 @@ class QuickPrefs extends ChangeNotifier {
 
   QuickDoc docOf(String name) => QuickDoc(atOf(name), switch (name) {
         'phrases' => [for (final p in _phrases) p.toJson()],
-        'keys' => [for (final a in _keys) a.toJson()],
         'layout' => _layout.toJson(),
         'stars' => List<String>.of(_stars),
         'usage' => {for (final e in _usage.entries) e.key: Map<String, int>.of(e.value)},
@@ -288,21 +292,6 @@ class QuickPrefs extends ChangeNotifier {
     _phrases = _withIds(v);
     final have = {for (final it in _phrases) refOf(it)};
     _commit(['phrases', if (_dropStars('p:', have)) 'stars']);
-  }
-
-  /// The 按键动作 replaced (an id kept once); a deleted action's star and layout cells go with it (Ruling 7).
-  void setKeys(List<KeyAction> v) {
-    final seen = <String>{};
-    final gone = {for (final a in _keys) 'k:${a.id}'};
-    _keys = [for (final a in v) if (seen.add(a.id)) a];
-    gone.removeAll(_keys.map((a) => a.ref));
-    final names = ['keys'];
-    if (_layout.rows.any((r) => r.any(gone.contains))) {
-      _layout = _without(_layout, gone);
-      names.add('layout');
-    }
-    if (_dropStars('k:', {for (final a in _keys) a.ref})) names.add('stars');
-    _commit(names);
   }
 
   void setLayout(KeyLayout l) {
@@ -348,13 +337,11 @@ class QuickPrefs extends ChangeNotifier {
     switch (name) {
       case 'phrases':
         final p = read(_phrasesFrom);
-        _phrases = p == null ? _migrateLists(_legacy).phrases : _withIds(p);
-      case 'keys':
-        _keys = read(_keysFrom) ?? _migrateLists(_legacy).keys;
+        _phrases = p == null ? _migrateList(_legacy) : _withIds(p);
       case 'layout':
         _layout = read(_layoutFrom) ?? KeyLayout.fallback;
       case 'stars':
-        _stars = read(_starsFrom) ?? [];
+        _stars = _starsNow(read(_starsFrom) ?? []);
       case 'usage':
         _usage = read(_usageFrom) ?? {};
       default:
@@ -366,8 +353,9 @@ class QuickPrefs extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// A device still on 0.15.63/64 counts 搜历史 as `k:search`: read as the command's.
   void setOthers(Map<String, Usage> v) {
-    _others = Map.of(v);
+    _others = {for (final e in v.entries) e.key: _usageNow(e.value)};
     notifyListeners();
   }
 

@@ -1,4 +1,5 @@
-// The key bar's layout: two rows of cells, each a `barKeys` id (never `more`) or `k:<id>` of a 按键动作 (spec §8).
+// The key bar's layout: two rows of cells, each a `barKeys` id (never `more`) (quick-row spec §8; the `k:` cells of the
+// old 按键动作 are gone, cmd-menu design).
 // Pure data; [cleaned] makes any stored layout drawable.
 import '../embed/key_bar_keys.dart';
 
@@ -28,17 +29,13 @@ class KeyLayout {
     ]);
   }
 
-  /// Drops unknown cells, `more`, cells of missing actions ([actionIds] are bare ids) and repeats (an id is kept only
-  /// once, first place wins), caps the rows (10, and 9 for row 1 when row 2 holds keys, since ⋯ joins it); empty
-  /// rows both → [fallback].
-  KeyLayout cleaned(Set<String> actionIds) {
+  /// Drops unknown cells (an old `k:` one too), `more` and repeats (an id is kept only once, first place wins), caps
+  /// the rows (10, and 9 for row 1 when row 2 holds keys, since ⋯ joins it); empty rows both → [fallback].
+  KeyLayout cleaned() {
     final seen = <String>{};
     List<String> clean(List<String> row) => [
           for (final c in row)
-            if (c != 'more' &&
-                (barKeys.containsKey(c) || (c.startsWith('k:') && actionIds.contains(c.substring(2)))) &&
-                seen.add(c))
-              c,
+            if (c != 'more' && barKeys.containsKey(c) && seen.add(c)) c,
         ];
     final a = clean(rows.isNotEmpty ? rows[0] : const []);
     final b = clean(rows.length > 1 ? rows[1] : const []).take(keyRowMax).toList();

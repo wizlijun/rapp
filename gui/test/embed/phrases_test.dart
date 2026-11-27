@@ -68,4 +68,27 @@ void main() {
     a.phrases.add(const Phrase('x'));
     expect(UiPrefs().phrases, defaultStripItems);
   });
+
+  group('withKind: one kind written back into the mixed list (cmd-menu design)', () {
+    const n = StripCmd('new'), m = StripCmd('mode'), se = StripCmd('search');
+    const a = Phrase('甲'), b = Phrase('乙'), c = Phrase('丙');
+    final all = <StripItem>[n, a, m, b, se];
+
+    test('reorder touches only that kind\'s slots', () {
+      expect(withKind<StripCmd>(all, [se, n, m]), [se, a, n, b, m]);
+      expect(withKind<Phrase>(all, [b, a]), [n, b, m, a, se]);
+    });
+    test('fewer: that kind\'s last slots go, the other kind stays put (a delete removes the item itself)', () {
+      expect(withKind<StripCmd>(all, [n, se]), [n, a, se, b]);
+      expect(withKind<Phrase>(all, []), [n, m, se]);
+    });
+    test('a new one goes after that kind\'s last slot', () {
+      expect(withKind<Phrase>(all, [a, b, c]), [n, a, m, b, c, se]);
+      expect(withKind<StripCmd>(all, [n, m, se, const StripCmd('u1')]), [n, a, m, b, se, const StripCmd('u1')]);
+    });
+    test('none of that kind yet: at the end', () {
+      expect(withKind<Phrase>([n], [a]), [n, a]);
+      expect(withKind<StripCmd>([a], [n]), [a, n]);
+    });
+  });
 }

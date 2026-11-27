@@ -27,7 +27,6 @@ import '../history/input_recorder.dart';
 import '../hub_client.dart';
 import '../state/state_out.dart' show AppReport;
 import '../state/state_sync.dart';
-import '../quick/key_actions.dart' show KeyAction;
 import '../quick/key_layout.dart';
 import '../quick/quick_prefs.dart';
 import '../quick/quick_sync.dart';
@@ -396,7 +395,7 @@ class MainState extends ChangeNotifier {
   DataDir data;
   final UiPrefs prefs;
 
-  /// The 快捷区 docs (常用语和命令, 按键动作, 布局, 星标, 次数): quick.json, the strip's source since quick-row. gui.json's
+  /// The 快捷区 docs (常用语和命令, 布局, 星标, 次数): quick.json, the strip's source since quick-row. gui.json's
   /// `phrases` stays as it was for older versions and is no longer changed.
   final QuickPrefs quick;
 
@@ -4781,12 +4780,9 @@ class MainState extends ChangeNotifier {
     return true;
   }
 
-  /// The 按键动作 replaced; a deleted one leaves the stars and the layout.
-  void setKeyActions(List<KeyAction> v) => quick.setKeys(v);
-
   void setKeyLayout(KeyLayout l) => quick.setLayout(l);
 
-  /// [ref] (`p:<id>` / `k:<id>`) starred at the end, or unstarred.
+  /// [ref] (`p:<id>`) starred at the end, or unstarred.
   void toggleStar(String ref) => quick.toggleStar(ref);
 
   /// [ref] first among the stars.

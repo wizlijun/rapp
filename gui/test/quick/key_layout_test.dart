@@ -16,15 +16,15 @@ void main() {
     expect(KeyLayout.fallback.rows[0], isNot(contains('stab')));
   });
 
-  test('cleaning drops unknown, duplicate and missing-action cells and caps the rows', () {
-    final l = KeyLayout([['esc', 'nope', 'esc', 'k:gone', 'k:mine', 'more'], List.filled(12, 'tab')]).cleaned({'mine'});
-    expect(l.rows[0], ['esc', 'k:mine']);
+  test('cleaning drops unknown, duplicate and 按键动作 (k:) cells and caps the rows', () {
+    final l = KeyLayout([['esc', 'nope', 'esc', 'k:gone', 'k:search', 'more'], List.filled(12, 'tab')]).cleaned();
+    expect(l.rows[0], ['esc']);
     expect(l.rows[1], ['tab']);
     final ids = ['esc', 'tab', 'stab', 'cc', 'cr', 'co', 'ct', 'cb', 'cl', 'bksp'];
-    final wide = KeyLayout([ids, ['up']]).cleaned({});
+    final wide = KeyLayout([ids, ['up']]).cleaned();
     expect(wide.rows[0].length, 9);
-    expect(KeyLayout([ids, []]).cleaned({}).rows[0].length, 10);
-    expect(KeyLayout([[], []]).cleaned({}).rows, KeyLayout.fallback.rows);
+    expect(KeyLayout([ids, []]).cleaned().rows[0].length, 10);
+    expect(KeyLayout([[], []]).cleaned().rows, KeyLayout.fallback.rows);
     expect(KeyLayout.fromJson('junk').rows, KeyLayout.fallback.rows);
   });
 

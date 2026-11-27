@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/phrases.dart';
-import 'package:rapp/quick/key_actions.dart';
 import 'package:rapp/quick/key_layout.dart';
 import 'package:rapp/quick/quick_merge.dart';
 import 'package:rapp/quick/quick_prefs.dart';
@@ -12,7 +11,6 @@ MergeStep go(QuickDoc local, int synced, QuickDoc? server,
     decide(local: local, synced: synced, server: server, nowMs: now, log: log, name: name);
 
 List<Object?> phrases(List<Phrase> l) => [for (final p in l) p.toJson()];
-Object? key(String id, String label, Chord c) => KeyAction(id, label: label, chord: c).toJson();
 
 void main() {
   test('unchanged here, newer there: adopt', () {
@@ -74,26 +72,18 @@ void main() {
   group('first join', () {
     test('local at 0 adopts the server', () {
       final s = d(7, ['a']);
-      final r = firstJoin(local: {'stars': d(0, ['k:x'])}, server: {'stars': s}, nowMs: 100);
+      final r = firstJoin(local: {'stars': d(0, ['p:x'])}, server: {'stars': s}, nowMs: 100);
       expect((r['stars'] as Adopt).doc, same(s));
     });
-    test('both edited: phrases and keys merged, nothing lost, stars remapped and united', () {
+    test('both edited: phrases merged, nothing lost, stars remapped and united; a keys doc is not merged', () {
       final local = {
         'phrases': d(50, phrases([const Phrase('继续', id: 'L1'), const Phrase('只在本机', id: 'L2')])),
-        'keys': d(50, [
-          key('search', '搜历史', const Chord('r', ctrl: true)),
-          key('mine1', '我的', const Chord('g', ctrl: true)),
-          key('own2', '本机独有', const Chord('h', ctrl: true)),
-        ]),
-        'stars': d(50, ['p:L1', 'p:L2', 'k:mine1', 'k:own2', 'k:search']),
+        'stars': d(50, ['p:L1', 'p:L2']),
         'layout': d(50, KeyLayout.fallback.toJson()),
       };
       final server = {
         'phrases': d(80, phrases([const Phrase('继续', id: 'S1'), const Phrase('服务的', id: 'S2')])),
-        'keys': d(80, [
-          key('search', '搜历史', const Chord('r', ctrl: true)),
-          key('srv9', '我的', const Chord('g', ctrl: true)),
-        ]),
+        'keys': d(80, [{'id': 'search', 'label': '搜历史', 'chord': 'ctrl+r'}]),
         'stars': d(80, ['p:S2']),
         'layout': d(80, KeyLayout.fallback.toJson()),
       };
@@ -102,10 +92,9 @@ void main() {
       expect(p.base, 80);
       expect(p.doc.at, 81); // max(now 60, server 80 + 1)
       expect([for (final e in p.doc.data as List) (e as Map)['text']], ['继续', '服务的', '只在本机']);
-      final k = r['keys'] as Push;
-      expect([for (final e in k.doc.data as List) (e as Map)['id']], ['search', 'srv9', 'own2']);
+      expect(r.containsKey('keys'), isFalse);
       final st = r['stars'] as Push;
-      expect(st.doc.data, ['p:S2', 'p:S1', 'p:L2', 'k:srv9', 'k:own2', 'k:search']);
+      expect(st.doc.data, ['p:S2', 'p:S1', 'p:L2']);
       // layout identical to the server's: nothing to send
       expect(r['layout'], isA<Adopt>());
     });
@@ -133,43 +122,6 @@ void main() {
         nowMs: 99,
       );
       expect(((again['phrases'] as Push).doc.data as List)[1], list[1]);
-    });
-    test('a user action whose id the server uses for another face is kept under a new id; built-in ids are not renamed',
-        () {
-      final r = firstJoin(
-        local: {
-          'keys': d(50, [
-            key('search', '搜历史', const Chord('r', ctrl: true)),
-            key('mine', '独特', const Chord('k', ctrl: true)),
-            key('bg', '我的', const Chord('g', ctrl: true)),
-          ]),
-          'stars': d(50, ['k:mine']),
-        },
-        server: {
-          'keys': d(80, [
-            key('mine', '别的', const Chord('j', ctrl: true)),
-            key('srv', '我的', const Chord('g', ctrl: true)),
-          ]),
-          'stars': d(80, <String>[]),
-        },
-        nowMs: 60,
-      );
-      final ids = [for (final e in (r['keys'] as Push).doc.data as List) (e as Map)['id']];
-      expect(ids, hasLength(5));
-      expect(ids.sublist(0, 2), ['mine', 'srv']);
-      expect(ids, containsAll(['search', 'bg', ids[3]]));
-      // 'bg' is built in: never matched by face, kept as is
-      final starred = ((r['stars'] as Push).doc.data as List).single as String;
-      expect(starred, startsWith('k:mine'));
-      expect(starred, isNot('k:mine'));
-    });
-    test('a built-in action whose id the server has with another face is not given a new id', () {
-      final r = firstJoin(
-        local: {'keys': d(50, [key('bg', '我改的', const Chord('m', ctrl: true))])},
-        server: {'keys': d(80, [key('bg', '转后台', const Chord('b', ctrl: true))])},
-        nowMs: 60,
-      );
-      expect(r['keys'], isA<Adopt>()); // nothing to add: the service's action stands
     });
     test('first join: an unreadable server doc is replaced by the local one', () {
       final r = firstJoin(
@@ -204,26 +156,15 @@ void main() {
       expect(list, hasLength(3));
     });
     test('server default layout yields to a custom local one', () {
-      const custom = KeyLayout([['tab', 'esc'], ['k:mine1']]);
+      const custom = KeyLayout([['tab', 'esc'], ['left']]);
       final r = firstJoin(
-        local: {
-          'layout': d(5, custom.toJson()),
-          'keys': d(5, [key('mine1', '我的', const Chord('g', ctrl: true))]),
-        },
-        server: {
-          'layout': d(9, KeyLayout.fallback.toJson()),
-          'keys': d(9, [key('srv', '我的', const Chord('g', ctrl: true))]),
-        },
+        local: {'layout': d(5, custom.toJson())},
+        server: {'layout': d(9, KeyLayout.fallback.toJson())},
         nowMs: 1,
       );
       final l = r['layout'] as Push;
       expect(l.base, 9);
-      expect(l.doc.data, {
-        'rows': [
-          ['tab', 'esc'],
-          ['k:srv']
-        ]
-      });
+      expect(l.doc.data, custom.toJson());
     });
     test('server custom layout stays', () {
       const custom = KeyLayout([['tab'], ['esc']]);
