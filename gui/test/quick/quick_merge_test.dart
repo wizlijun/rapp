@@ -42,7 +42,8 @@ void main() {
     expect(logs, hasLength(1));
   });
   test('clock skew: server at ahead of now still lets a newer local change win', () {
-    // the service is far ahead of this clock; the local change (floored at server.at + 1 by QuickPrefs) is later
+    // The push branches only run when local.at > server.at, so max() cannot show here; the real floor (server.at + 1
+    // against a slow clock) lives in QuickPrefs.floor. This pins that a pushed at stays above the service's.
     final r = go(d(50001, 'mine'), 100, d(50000), now: 1000) as Push;
     expect(r.base, 50000);
     expect(r.doc.at, greaterThan(50000));
@@ -51,6 +52,20 @@ void main() {
     expect(r2.doc.at, 40000);
     final r3 = go(d(100), 50, d(50)) as Push;
     expect(r3.doc.at, greaterThan(50));
+  });
+  test('both changed with equal at: adopt and log', () {
+    final logs = <String>[];
+    final s = d(500, 'srv');
+    expect((go(d(500), 100, s, log: logs.add) as Adopt).doc, same(s));
+    expect(logs, hasLength(1));
+  });
+  test('decide: an unreadable server doc is replaced by the local one', () {
+    bool readable(Object? v) => v is List;
+    final r = decide(
+        local: d(50, ['a']), synced: 100, server: d(200, 'garbage'), nowMs: 1, readable: readable) as Push;
+    expect(r.base, 200);
+    expect(r.doc.at, 201);
+    expect(r.doc.data, ['a']);
   });
   test('no copy on the server: push with base 0', () {
     final r = go(d(5, 'mine'), 0, null) as Push;
@@ -94,6 +109,92 @@ void main() {
       expect(st.doc.data, ['p:S2', 'p:S1', 'p:L2', 'k:srv9', 'k:own2', 'k:search']);
       // layout identical to the server's: nothing to send
       expect(r['layout'], isA<Adopt>());
+    });
+    test('a local phrase whose id the server uses for different text is kept under a new id and its star follows it', () {
+      final r = firstJoin(
+        local: {
+          'phrases': d(50, phrases([const Phrase('继续吧', id: 'L1')])),
+          'stars': d(50, ['p:L1']),
+        },
+        server: {
+          'phrases': d(80, phrases([const Phrase('继续', id: 'L1')])),
+          'stars': d(80, <String>[]),
+        },
+        nowMs: 60,
+      );
+      final list = (r['phrases'] as Push).doc.data as List;
+      expect([for (final e in list) (e as Map)['text']], ['继续', '继续吧']);
+      final newId = (list[1] as Map)['id'] as String;
+      expect(newId, isNot('L1'));
+      expect((r['stars'] as Push).doc.data, ['p:$newId']);
+      // stable across retries
+      final again = firstJoin(
+        local: {'phrases': d(50, phrases([const Phrase('继续吧', id: 'L1')]))},
+        server: {'phrases': d(80, phrases([const Phrase('继续', id: 'L1')]))},
+        nowMs: 99,
+      );
+      expect(((again['phrases'] as Push).doc.data as List)[1], list[1]);
+    });
+    test('a user action whose id the server uses for another face is kept under a new id; built-in ids are not renamed',
+        () {
+      final r = firstJoin(
+        local: {
+          'keys': d(50, [
+            key('search', '搜历史', const Chord('r', ctrl: true)),
+            key('mine', '独特', const Chord('k', ctrl: true)),
+            key('mode', '我的', const Chord('g', ctrl: true)),
+          ]),
+          'stars': d(50, ['k:mine']),
+        },
+        server: {
+          'keys': d(80, [
+            key('mine', '别的', const Chord('j', ctrl: true)),
+            key('srv', '我的', const Chord('g', ctrl: true)),
+          ]),
+          'stars': d(80, <String>[]),
+        },
+        nowMs: 60,
+      );
+      final ids = [for (final e in (r['keys'] as Push).doc.data as List) (e as Map)['id']];
+      expect(ids, hasLength(5));
+      expect(ids.sublist(0, 2), ['mine', 'srv']);
+      expect(ids, containsAll(['search', 'mode', ids[3]]));
+      // 'mode' is built in: never matched by face, kept as is
+      final starred = ((r['stars'] as Push).doc.data as List).single as String;
+      expect(starred, startsWith('k:mine'));
+      expect(starred, isNot('k:mine'));
+    });
+    test('first join: an unreadable server doc is replaced by the local one', () {
+      final r = firstJoin(
+        local: {
+          'phrases': d(50, phrases([const Phrase('继续', id: 'L1')])),
+          'stars': d(0, ['p:L1']),
+          'layout': d(50, KeyLayout.fallback.toJson()),
+        },
+        server: {'phrases': d(80, 'garbage'), 'stars': d(80, 'x'), 'layout': d(80, 'y')},
+        nowMs: 60,
+      );
+      for (final n in ['phrases', 'stars', 'layout']) {
+        final p = r[n] as Push;
+        expect(p.base, 80);
+        expect(p.doc.at, 81);
+      }
+    });
+    test('first join: an unreadable local doc yields to the server', () {
+      final s = d(80, ['p:S']);
+      final r = firstJoin(local: {'stars': d(50, 'junk')}, server: {'stars': s}, nowMs: 1);
+      expect((r['stars'] as Adopt).doc, same(s));
+    });
+    test('a command on both sides is not duplicated', () {
+      final cmd = {'kind': 'cmd', 'id': 'mode'};
+      final r = firstJoin(
+        local: {'phrases': d(50, [cmd, const Phrase('a', id: 'L').toJson()])},
+        server: {'phrases': d(80, [cmd, const Phrase('b', id: 'S').toJson()])},
+        nowMs: 60,
+      );
+      final list = (r['phrases'] as Push).doc.data as List;
+      expect(list.where((e) => (e as Map)['kind'] == 'cmd'), hasLength(1));
+      expect(list, hasLength(3));
     });
     test('server default layout yields to a custom local one', () {
       const custom = KeyLayout([['tab', 'esc'], ['k:mine1']]);

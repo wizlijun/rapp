@@ -33,15 +33,21 @@ class Keep extends MergeStep {
 
 /// The three-row table of §10.3, for a doc of a service this device already knows. [local] is the doc as it is,
 /// [synced] the `at` it had when it last agreed with this service (0 never), [server] the service's copy (null: none).
-/// A push takes `at = max(local.at, server.at + 1)` so a clock that runs behind never hides the change.
+/// A push takes `at = max(local.at, server.at + 1)` so a clock that runs behind never hides the change. [nowMs] is
+/// unused, kept for the signature. [readable] says whether a doc's data can be read (default: all can); a service copy
+/// that cannot be read counts as missing (§10.2), so a readable local doc is pushed over it.
 MergeStep decide({
   required QuickDoc local,
   required int synced,
   required QuickDoc? server,
   required int nowMs,
   void Function(String)? log,
+  bool Function(Object?)? readable,
 }) {
   if (server == null) return Push(local, 0);
+  if (readable != null && !readable(server.data) && readable(local.data)) {
+    return Push(QuickDoc(max(local.at, server.at + 1), local.data), server.at);
+  }
   final changedHere = local.at > synced;
   if (server.at <= synced) {
     return changedHere ? Push(QuickDoc(max(local.at, server.at + 1), local.data), server.at) : const Keep();
@@ -64,6 +70,21 @@ bool isFirstJoin({
     synced == 0 ||
     (server != null && server.at < synced) ||
     (synced > 0 && server == null);
+
+/// [id] made distinct, the same way every time: a hash of [salt] appended.
+String _derivedId(String id, String salt) {
+  var h = 0x811c9dc5;
+  for (final u in salt.codeUnits) {
+    h = ((h ^ u) * 0x01000193) & 0xffffffff;
+  }
+  return '$id-${h.toRadixString(36)}';
+}
+
+/// Whether [data] is the shape doc [name] is stored in; anything else counts as missing (spec §10.2).
+bool isDocReadable(String name, Object? data) => switch (name) {
+      'layout' => data is Map && data['rows'] is List,
+      _ => data is List,
+    };
 
 /// The first meeting with a service, for the four shared docs at once (they depend on each other: stars and layout
 /// follow the ids phrases and keys were matched under). Missing docs in [local] are left out of the answer.
@@ -93,6 +114,12 @@ Map<String, MergeStep> firstJoin({
           if (it.id != null && twin.id != null && it.id != twin.id) remap['p:${it.id}'] = 'p:${twin.id}';
         } else if (taken.add(refOf(it))) {
           extra.add(it);
+        } else if (it.id != null) {
+          // The id is the service's for other text: keep the phrase under an id of its own.
+          final fresh = it.withId(_derivedId(it.id!, it.text));
+          remap['p:${it.id}'] = refOf(fresh);
+          taken.add(refOf(fresh));
+          extra.add(fresh);
         }
       } else if (it is StripCmd && !cmdIds.contains(it.id)) {
         extra.add(it);
@@ -110,8 +137,23 @@ Map<String, MergeStep> firstJoin({
     final byFace = {for (final a in sk) '${a.label}\u0000${a.chord.toJson()}': a};
     final extra = <KeyAction>[];
     for (final a in lk) {
-      if (ids.contains(a.id)) continue;
-      final twin = builtinIds.contains(a.id) ? null : byFace['${a.label}\u0000${a.chord.toJson()}'];
+      final face = '${a.label}\u0000${a.chord.toJson()}';
+      if (ids.contains(a.id)) {
+        // Same id: the same action, unless it is a user-added one with another face on the service.
+        final mine = sk.firstWhere((x) => x.id == a.id);
+        if (builtinIds.contains(a.id) || '${mine.label}\u0000${mine.chord.toJson()}' == face) continue;
+        final twin = byFace[face];
+        if (twin != null) {
+          remap[a.ref] = twin.ref;
+        } else {
+          final fresh = KeyAction(_derivedId(a.id, face), label: a.label, chord: a.chord, per: a.per);
+          remap[a.ref] = fresh.ref;
+          ids.add(fresh.id);
+          extra.add(fresh);
+        }
+        continue;
+      }
+      final twin = builtinIds.contains(a.id) ? null : byFace[face];
       if (twin != null) {
         remap[a.ref] = twin.ref;
       } else {
@@ -132,7 +174,12 @@ Map<String, MergeStep> firstJoin({
       out[name] = Push(l, 0);
       continue;
     }
-    if (l.at == 0) {
+    final lOk = isDocReadable(name, l.data), sOk = isDocReadable(name, s.data);
+    if (!sOk && lOk) {
+      out[name] = Push(stamp(l.data, s), s.at);
+      continue;
+    }
+    if (l.at == 0 || !lOk) {
       out[name] = Adopt(s);
       continue;
     }
