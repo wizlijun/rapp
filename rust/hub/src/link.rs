@@ -706,7 +706,10 @@ impl Hub {
         match link {
             Link::Quic { conn, .. } => exchange(conn, &[op]).await,
             Link::Relay => {
-                let Some((relay, key)) = self.relay().await? else { bail!("relay not set: add the host as id@ip") };
+                let relay = tokio::time::timeout(RELAY_WAIT, self.relay())
+                    .await
+                    .unwrap_or_else(|_| Err(self.relay_timed_out()))?;
+                let Some((relay, key)) = relay else { bail!("relay not set: add the host as id@ip") };
                 let (pipe, r, _) = self.relay_hello(&relay, &key, host, op).await?;
                 Ok((pipe, r))
             }

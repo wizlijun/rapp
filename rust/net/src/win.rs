@@ -18,6 +18,7 @@ use windows_sys::Win32::Security::{
     TOKEN_QUERY, TOKEN_USER,
 };
 use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+use windows_sys::Win32::Media::timeBeginPeriod;
 use windows_sys::Win32::System::Console::{GetConsoleWindow, SetConsoleOutputCP};
 use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows_sys::Win32::System::Threading::{CreateMutexW, GetCurrentProcess, GetCurrentProcessId, OpenProcessToken};
@@ -105,6 +106,17 @@ pub fn console_utf8() {
             SetConsoleOutputCP(CP_UTF8);
         }
     }
+}
+
+/// Requests 1 ms timer resolution for this process (instead of Windows's 15.625 ms default), once.
+pub fn high_res_timers() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        // SAFETY: plain call without pointers; the OS cleans up the request at process exit.
+        unsafe {
+            timeBeginPeriod(1);
+        }
+    });
 }
 
 /// Whether this process has a console window.

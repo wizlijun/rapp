@@ -95,6 +95,8 @@ pub async fn run(listen: SocketAddr, upstream: SocketAddr, p: Profile, stats: Ar
 
 /// Like `run`, on an already bound socket (lets a caller learn the port of `:0` before serving).
 pub async fn serve(sock: UdpSocket, upstream: SocketAddr, p: Profile, stats: Arc<ProxyStats>) -> Result<()> {
+    #[cfg(windows)]
+    rapp_net::win::high_res_timers();
     let main = Arc::new(sock);
     let ctx = Ctx { main: main.clone(), start: Instant::now(), stats };
     let mut sessions: HashMap<SocketAddr, Session> = HashMap::new();

@@ -28,6 +28,7 @@ data-encoding = "2"
 # Windows only (spec §8): the system calls of `rapp-net`'s `win` module, and its dual-stack socket.
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Media",
     "Win32_Security",
     "Win32_Security_Authorization",
     "Win32_Storage_FileSystem",
