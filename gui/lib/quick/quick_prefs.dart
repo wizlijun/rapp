@@ -146,7 +146,8 @@ class QuickPrefs extends ChangeNotifier {
 
   /// From `<dir>/quick.json`, or built from [legacy] (gui.json's `phrases`) when there is none. [dir] null (no device
   /// id yet): nothing is read or written. An unreadable file is moved to `quick.json.bad` and rebuilt; a bad doc alone
-  /// goes back to its default with `at` 0 (Ruling 11). Never throws.
+  /// goes back to its default with `at` 0 (Ruling 11); one that cannot be moved aside, or one written by a newer
+  /// version (`v` above 1), is used as far as it reads but never written over. Never throws.
   static QuickPrefs load(String? dir, {required List<StripItem> legacy, DateTime Function() clock = DateTime.now}) {
     if (dir == null) return QuickPrefs.migrate(legacy, clock: clock);
     final f = File('$dir/quick.json');
@@ -159,9 +160,14 @@ class QuickPrefs extends ChangeNotifier {
     if (j == null) {
       try {
         f.renameSync('$dir/quick.json.bad');
-      } catch (_) {}
+      } catch (_) {
+        // The user's only copy: kept as it is, and this run's settings live in memory.
+        return QuickPrefs.migrate(legacy, dir: dir, clock: clock, keep: '快捷区设置文件读不了，也挪不开，原样留着');
+      }
       return QuickPrefs.migrate(legacy, dir: dir, clock: clock);
     }
+    final ver = j['v'];
+    final keep = ver is int && ver > 1 ? '快捷区设置文件是更新的版本写的，原样留着' : null;
     final at = <String, int>{};
     var repaired = false;
     T doc<T>(String name, T? Function(Object?) parse, T Function() fallback) {
@@ -196,17 +202,20 @@ class QuickPrefs extends ChangeNotifier {
       doc('stars', _starsFrom, () => <String>[]),
       doc('usage', _usageFrom, () => <String, Map<String, int>>{}),
       at,
-    );
+    ).._keep = keep;
     if (repaired) q._save();
     return q;
   }
 
   /// The docs as gui.json's list gives them, every `at` 0 (spec §10.1); written at once when [dir] is set, so the
   /// new phrase ids stay.
-  factory QuickPrefs.migrate(List<StripItem> legacy, {String? dir, DateTime Function() clock = DateTime.now}) {
+  /// [keep]: the file in [dir] is not to be written over; why, in words (see [load]).
+  factory QuickPrefs.migrate(List<StripItem> legacy,
+      {String? dir, DateTime Function() clock = DateTime.now, String? keep}) {
     final m = _migrateLists(legacy);
     final q = QuickPrefs._(dir, clock, legacy, m.phrases, m.keys, KeyLayout.fallback, [], {},
-        {for (final n in _allNames) n: 0});
+        {for (final n in _allNames) n: 0})
+      .._keep = keep;
     q._save();
     return q;
   }
@@ -236,6 +245,12 @@ class QuickPrefs extends ChangeNotifier {
 
   /// Told when quick.json could not be written.
   void Function(Object error)? onSaveError;
+
+  /// The last write's error, null once one works: a write at the start fails before anyone sets [onSaveError].
+  Object? lastSaveError;
+
+  /// Set when quick.json must stay as it was found (see [load]): every write is refused with this reason.
+  String? _keep;
 
   /// 常用语和命令, in strip order.
   List<StripItem> get phrases => _phrases;
@@ -384,6 +399,11 @@ class QuickPrefs extends ChangeNotifier {
   void _save() {
     final dir = dirOf != null ? dirOf!() : _dir;
     if (dir == null) return;
+    if (_keep != null) {
+      lastSaveError = FileSystemException(_keep!, '$dir/quick.json');
+      onSaveError?.call(lastSaveError!);
+      return;
+    }
     try {
       Directory(dir).createSync(recursive: true);
       final tmp = File('$dir/quick.json.tmp');
@@ -396,7 +416,9 @@ class QuickPrefs extends ChangeNotifier {
           },
       }));
       tmp.renameSync('$dir/quick.json');
+      lastSaveError = null;
     } catch (e) {
+      lastSaveError = e;
       onSaveError?.call(e);
     }
   }
