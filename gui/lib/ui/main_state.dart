@@ -1184,6 +1184,7 @@ class MainState extends ChangeNotifier {
   void setPhone({required bool form, bool inSession = false}) {
     if (form == _phoneForm && inSession == _phoneInSession) return;
     final entering = form && !_phoneForm;
+    final leaving = !form && _phoneForm;
     _phoneForm = form;
     _phoneInSession = inSession;
     if (entering) {
@@ -1195,6 +1196,12 @@ class MainState extends ChangeNotifier {
       corner = null;
       overview = false;
       logs = false;
+    }
+    if (leaving) {
+      // A size taken in the phone form was never sent: the Pad's next stage size is judged afresh (F11).
+      for (final rs in remote.values) {
+        rs.policy.forget();
+      }
     }
     _applyFps();
     notifyListeners();

@@ -98,6 +98,32 @@ void main() {
     });
   });
 
+  // A session entered on the phone took the old Pad stage size while the phone form held the send back; back on
+  // the Pad, the same stage size must still be judged (and sent once), not taken as nothing new.
+  test('unfold to the same pad size resizes a session entered on the phone', () {
+    env((a, port, st) {
+      st.stageSize(const Size(1194, 834));
+      port.emit(const ReadyEvent(2, 'App'));
+      port.emit(WindowsEvent(2, [rw(7)]));
+      a.elapse(const Duration(seconds: 1));
+      st.setPhone(form: true);
+      st.select('111/a');
+      port.emit(const ReadyEvent(1, 'App'));
+      port.emit(WindowsEvent(1, [rw(3)]));
+      a.elapse(const Duration(seconds: 1));
+      final before = resizes(port).length;
+      st.setPhone(form: false);
+      st.stageSize(const Size(1194, 834));
+      a.elapse(const Duration(seconds: 1));
+      expect(resizes(port).length, before + 1);
+      expect(resizes(port).last['sid'], 1);
+      // Still once: the same size again is nothing new.
+      st.stageSize(const Size(1194, 834));
+      a.elapse(const Duration(seconds: 1));
+      expect(resizes(port).length, before + 1);
+    });
+  });
+
   test('home pauses pictures', () {
     env((a, port, st) {
       port.emit(const TrafficEvent(2, 900, 3));
