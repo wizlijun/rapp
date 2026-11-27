@@ -31,8 +31,8 @@ void _streamTrace(SessionHost host, int worker, String stage, String detail) {
   );
 }
 
-class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
-  LinuxSessionPort(
+class WorkerSessionPort extends SessionPort with WidgetsBindingObserver {
+  WorkerSessionPort(
     this.executable, {
     Future<void> Function()? framePresented,
     SessionHost? host,
@@ -355,7 +355,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
       _emit(ComposerInsertEvent(sid, PasteResult(text: ch), letter: true));
       return true;
     }
-    final code = linuxMacKeyCode(event.physicalKey);
+    final code = hidMacKeyCode(event.physicalKey);
     if (code == null) return false;
     final down = event is! KeyUpEvent;
     // A once latch belongs to the entire hardware stroke (repeat and release included).
@@ -1475,7 +1475,7 @@ RemoteWindow _withPicture(RemoteWindow w, RemoteWindow? p) => RemoteWindow(
 );
 
 /// Physical USB HID positions -> Mac key codes, independent of the local layout.
-int? linuxMacKeyCode(PhysicalKeyboardKey key) {
+int? hidMacKeyCode(PhysicalKeyboardKey key) {
   const letters = [
     0,
     11,

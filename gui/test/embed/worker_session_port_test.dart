@@ -6,7 +6,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rapp/embed/linux_session_port.dart';
+import 'package:rapp/embed/worker_session_port.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/session_protocol.dart';
 import 'package:rapp/embed/voice_key_gate.dart';
@@ -32,7 +32,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   englishFirstTests();
   testWidgets('Linux picture voice holds cancel, edit and preserve ordinary Alt combinations', (t) async {
-    final port = LinuxSessionPort('unused', framePresented: () async {});
+    final port = WorkerSessionPort('unused', framePresented: () async {});
     final proc = (await t.runAsync(() => Process.start('cat', const [])))!;
     port.seedSessionForTest(3, proc);
     final phases = <VoiceKeyPhase>[];
@@ -106,16 +106,16 @@ void main() {
   });
 
   test('physical keyboard mapping includes Command, arrows and punctuation', () {
-    expect(linuxMacKeyCode(PhysicalKeyboardKey.keyA), 0);
-    expect(linuxMacKeyCode(PhysicalKeyboardKey.keyZ), 6);
-    expect(linuxMacKeyCode(PhysicalKeyboardKey.controlLeft), 55);
-    expect(linuxMacKeyCode(PhysicalKeyboardKey.arrowLeft), 123);
-    expect(linuxMacKeyCode(PhysicalKeyboardKey.bracketLeft), 33);
-    expect(linuxMacKeyCode(PhysicalKeyboardKey.metaLeft), isNull);
+    expect(hidMacKeyCode(PhysicalKeyboardKey.keyA), 0);
+    expect(hidMacKeyCode(PhysicalKeyboardKey.keyZ), 6);
+    expect(hidMacKeyCode(PhysicalKeyboardKey.controlLeft), 55);
+    expect(hidMacKeyCode(PhysicalKeyboardKey.arrowLeft), 123);
+    expect(hidMacKeyCode(PhysicalKeyboardKey.bracketLeft), 33);
+    expect(hidMacKeyCode(PhysicalKeyboardKey.metaLeft), isNull);
   });
 
   testWidgets("Ctrl+Enter is rApp's: not sent to A", (tester) async {
-    final port = LinuxSessionPort('unused', framePresented: () async {});
+    final port = WorkerSessionPort('unused', framePresented: () async {});
     final proc = await tester.runAsync(() => Process.start('cat', const []));
     port.seedSessionForTest(3, proc!);
     KeyDownEvent down(PhysicalKeyboardKey p, LogicalKeyboardKey l) =>
@@ -162,7 +162,7 @@ void main() {
   }, skip: Platform.isWindows);
 
   testWidgets('state_rules goes to rapp-session as it is; an oversized pack is dropped', (tester) async {
-    final port = LinuxSessionPort('unused', framePresented: () async {});
+    final port = WorkerSessionPort('unused', framePresented: () async {});
     final proc = await tester.runAsync(() => Process.start('cat', const []));
     port.seedSessionForTest(3, proc!);
     await tester.runAsync(() async {
@@ -182,7 +182,7 @@ void main() {
 
   testWidgets('a compose letter opens the draft with it; digits, Ctrl+letter and compose off go to A',
       (tester) async {
-    final port = LinuxSessionPort('unused', framePresented: () async {});
+    final port = WorkerSessionPort('unused', framePresented: () async {});
     final proc = await tester.runAsync(() => Process.start('cat', const []));
     port.seedSessionForTest(3, proc!);
     final events = <SessionEvent>[];
@@ -247,7 +247,7 @@ void main() {
 
   testWidgets('before the panel takes the keys, a space or digit after the letter goes into the draft too',
       (tester) async {
-    final port = LinuxSessionPort('unused', framePresented: () async {});
+    final port = WorkerSessionPort('unused', framePresented: () async {});
     final proc = await tester.runAsync(() => Process.start('cat', const []));
     port.seedSessionForTest(3, proc!);
     final events = <SessionEvent>[];
@@ -303,7 +303,7 @@ void main() {
       return call.method == 'init' ? true : null;
     });
     final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-    final port = LinuxSessionPort(worker, framePresented: () async {});
+    final port = WorkerSessionPort(worker, framePresented: () async {});
     final events = StreamIterator(port.events);
     Socket? peer;
     try {
@@ -368,7 +368,7 @@ void main() {
 
   test('v16 state_rules and appState roundtrip through real Linux worker', () async {
     final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-    final port = LinuxSessionPort(worker, framePresented: () async {});
+    final port = WorkerSessionPort(worker, framePresented: () async {});
     final events = StreamIterator(port.events);
     Socket? peer;
     final wire = <int>[];
@@ -410,7 +410,7 @@ void main() {
 
   test('real Linux worker decodes full/delta, crops titlebar, sends input and closes on EOF', () async {
     final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-    final port = LinuxSessionPort(worker, framePresented: () async {});
+    final port = WorkerSessionPort(worker, framePresented: () async {});
     final events = StreamIterator(port.events);
     Socket? peer;
     var metadataEvents = 0;
@@ -493,7 +493,7 @@ void main() {
   test('stalled renderer does not delay remote errors or disconnect', () async {
     final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
     final gate = Completer<void>();
-    final port = LinuxSessionPort(worker, framePresented: () => gate.future);
+    final port = WorkerSessionPort(worker, framePresented: () => gate.future);
     final events = StreamIterator(port.events);
     Socket? peer;
     try {
@@ -526,7 +526,7 @@ void main() {
 
   test('ending while the worker is starting cancels it and allows a new start', () async {
     final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-    final port = LinuxSessionPort(worker, framePresented: () async {});
+    final port = WorkerSessionPort(worker, framePresented: () async {});
     final events = StreamIterator(port.events);
     Socket? peer;
     try {
@@ -549,7 +549,7 @@ void main() {
 
   test('Linux resource copies survive session end and retain more than 20 text clips', () async {
     final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-    final port = LinuxSessionPort(worker, framePresented: () async {});
+    final port = WorkerSessionPort(worker, framePresented: () async {});
     final events = StreamIterator(port.events);
     Socket? peer;
     String? clipboard;
@@ -589,7 +589,7 @@ void main() {
   }, skip: !Platform.isLinux || !File(worker).existsSync() ? 'Build rapp-session first on Linux' : false);
 
   test('pin_save preserves text; pin_load restores text and image copies', () async {
-    final port = LinuxSessionPort('/nonexistent-worker', framePresented: () async {});
+    final port = WorkerSessionPort('/nonexistent-worker', framePresented: () async {});
     final dir = Directory.systemTemp.createTempSync('rapp-pin-');
     try {
       final copy = port.seedCopyForTest('# 钉住\n原文');
@@ -617,7 +617,7 @@ void main() {
     'composer waits for matching ack, keeps refused text and settles on disconnect',
     () async {
       final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-      final port = LinuxSessionPort(worker, framePresented: () async {});
+      final port = WorkerSessionPort(worker, framePresented: () async {});
       final events = StreamIterator(port.events);
       final replies = <ComposerDone>[];
       final observer = port.events.listen((e) {
@@ -701,7 +701,7 @@ void main() {
     'expired clip pick reports a visible reason instead of doing nothing',
     () async {
       final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-      final port = LinuxSessionPort(worker, framePresented: () async {});
+      final port = WorkerSessionPort(worker, framePresented: () async {});
       final events = StreamIterator(port.events);
       Socket? peer;
       try {
@@ -737,7 +737,7 @@ void main() {
   test('malformed frame closes only the affected session', () async {
     final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
     final second = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-    final port = LinuxSessionPort(worker, framePresented: () async {});
+    final port = WorkerSessionPort(worker, framePresented: () async {});
     final events = StreamIterator(port.events);
     Socket? peer, healthy;
     try {
@@ -776,10 +776,10 @@ void englishFirstTests() {
       logicalKey: LogicalKeyboardKey.shiftLeft, timeStamp: Duration.zero);
 
   /// What the worker received, as `cmd` or `cmd:down` strings, in order.
-  Future<List<String>> sent(Future<void> Function(LinuxSessionPort port) body) async {
+  Future<List<String>> sent(Future<void> Function(WorkerSessionPort port) body) async {
     final process = await Process.start('cat', const []);
     final output = process.stdout.transform(utf8.decoder).transform(const LineSplitter()).toList();
-    final port = LinuxSessionPort('unused', framePresented: () async {});
+    final port = WorkerSessionPort('unused', framePresented: () async {});
     port.seedSessionForTest(3, process);
     try {
       await body(port);

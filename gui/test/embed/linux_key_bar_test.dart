@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/key_bar.dart';
-import 'package:rapp/embed/linux_session_port.dart';
+import 'package:rapp/embed/worker_session_port.dart';
 import 'package:rapp/embed/modifier_latch.dart';
 import 'package:rapp/embed/session_port.dart';
 
@@ -16,10 +16,10 @@ const aUp = KeyUpEvent(physicalKey: PhysicalKeyboardKey.keyA,
     logicalKey: LogicalKeyboardKey.keyA, timeStamp: Duration.zero);
 
 Future<List<(int, int, bool)>> keysDuring(
-    Future<void> Function(LinuxSessionPort, List<SessionEvent>) body) async {
+    Future<void> Function(WorkerSessionPort, List<SessionEvent>) body) async {
   final process = await Process.start('cat', const []);
   final output = process.stdout.transform(utf8.decoder).transform(const LineSplitter()).toList();
-  final port = LinuxSessionPort('unused', framePresented: () async {});
+  final port = WorkerSessionPort('unused', framePresented: () async {});
   port.seedSessionForTest(3, process);
   final events = <SessionEvent>[];
   final sub = port.events.listen(events.add);

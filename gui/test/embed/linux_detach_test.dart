@@ -3,9 +3,9 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rapp/embed/linux_session_port.dart';
+import 'package:rapp/embed/worker_session_port.dart';
 import 'package:rapp/embed/session_port.dart';
-import 'linux_session_port_test.dart' as wire;
+import 'worker_session_port_test.dart' as wire;
 
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
@@ -24,7 +24,7 @@ void main() {
       return null;
     });
     final process = await Process.start('cat', const []);
-    final port = LinuxSessionPort('/bin/cat', framePresented: () async {});
+    final port = WorkerSessionPort('/bin/cat', framePresented: () async {});
     final events = <SessionEvent>[];
     final sub = port.events.listen(events.add);
     try {
@@ -57,7 +57,7 @@ void main() {
       return null;
     });
     final process = await Process.start('cat', const []);
-    final port = LinuxSessionPort('/bin/cat', framePresented: () async {});
+    final port = WorkerSessionPort('/bin/cat', framePresented: () async {});
     final events = <SessionEvent>[];
     final sub = port.events.listen(events.add);
     try {
@@ -106,7 +106,7 @@ void main() {
       return null;
     });
     final process = await Process.start('cat', const []);
-    final port = LinuxSessionPort('/bin/cat', framePresented: () async {});
+    final port = WorkerSessionPort('/bin/cat', framePresented: () async {});
     final events = <SessionEvent>[];
     final sub = port.events.listen(events.add);
     try {
@@ -153,7 +153,7 @@ void main() {
       });
       final presentationStarted = Completer<void>();
       final stalledPresentation = Completer<void>();
-      final port = LinuxSessionPort(
+      final port = WorkerSessionPort(
         File('../rust/target/release/rapp-session').absolute.path,
         framePresented: () {
           if (!presentationStarted.isCompleted) presentationStarted.complete();
