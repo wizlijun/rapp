@@ -1555,3 +1555,18 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），将 Linux / Omarchy `x86_64` 产物依次构建并挂载至已发布的 [v0.15.56](https://github.com/wizlijun/rapp/releases/tag/v0.15.56) 与 [v0.15.58](https://github.com/wizlijun/rapp/releases/tag/v0.15.58) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
 - [x] 对齐 macOS `0.15.56`–`0.15.58`（`feat/bar-cmd`、`feat/windows-foundation`、`feat/bar-pgup`、`feat/quick-one`）并修复 Linux 被控端 `applications` 能力透传：快捷区精简重排为第一行 `Tab ⇧Tab Esc ⌃C ⌫ ⏎ ↑ ⋯`（移除 `⌄`）、第二行 `⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →`（倒 T 方向键对齐、终端 `PgUp`/`PgDn` 回滚翻页、粘滞 `⌘`+字母 rApp 快捷键及收起松开 `⌃`/`⌘`）；在 Linux 上完成 Windows A 段接线后的全工作区 19 个 crate `clippy -- -D warnings` 与测试验证；在 `rust/service/src/workers.rs` 以 `#[cfg(target_os = "linux")]` 修复 `permissions()` 漏拷 `applications` 的遗漏。
 - [x] `v0.15.58`（源码 `9083e22d`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01556-parity.md` 与 `docs/superpowers/plans/2026-11-27-linux-01558-parity.md`。
+
+## 中心服务 G1（规格 `docs/superpowers/specs/2026-11-27-rapp-center-design.md`，计划 `docs/superpowers/plans/2026-11-27-rapp-center-g1.md`，分支 `feat/center-g1`，2026-11-27）
+
+- 状态服务改名为中心服务 `rapp-center`（源码 `services/center/`），改动如下：
+  - 新加一个入口，内置能力放在它后面。现在只有一块 `state`，旧路径不变。
+  - 新加 `GET /v1/routes`，health 升到 v2；状态接口另有一份 `/state/v1/…` 前缀的路径可用。
+  - 命令改成 `rapp center on|off`，原来的 `rapp state` 照样能用。界面上的名字改成「中心服务」。
+  - `services.json` 的键改成 `center`，旧键 `state` 照样认，下次写入时换成新键。数据目录从 `local/state/` 自动搬到 `local/center/`。
+- 对外的名字一个没变：health 的 `name:"rapp-state"`、Host `rapp-state`、IPC `{"cmd":"state"}`、分享的 `kind:"state"` 都和原来一样，所以新旧版本的 app 和发件箱可以混用。
+- 实机检查：
+  - [ ] ① 从 0.15.x 升级后，中心服务仍是开着的，队列里的东西还在（`local/state/` 已变成 `local/center/`）
+  - [ ] ② `rapp center` 和 `rapp state` 输出一样
+  - [ ] ③ 设置里显示的名字是「中心服务」
+  - [ ] ④ 另一台装旧版 app 的设备连这台，状态照常显示
+  - [ ] ⑤ 回滚到旧版后，中心服务是关的，队列是空的（已知后果：旧版只认 `services.json` 的 `state` 键和 `local/state/`。升级后改过开关的话，键已经换成 `center`，旧版就当它是关的；数据目录已经搬走，旧版只能从空队列开始。这些是 7 天内的临时数据，规格接受这个后果）

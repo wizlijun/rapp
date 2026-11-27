@@ -218,7 +218,7 @@ rapp emit（G8）          ┘                                    给：/v1/stat
 
 | 接口 | 做什么 |
 |---|---|
-| `GET /v1/health` | `{"name":"rapp-state","v":1}`。发件箱和 app 用它确认对面真是状态服务 |
+| `GET /v1/health` | `{"name":"rapp-state","service":"rapp-center","v":2,"routes":true}`（服务已改名 rapp-center，`name` 不变）。发件箱和 app 用它确认对面真是中心服务 |
 | `POST /v1/events` | 收事件（§7.4）。重复的（发送者、`epoch`、`n`）丢掉。204 |
 | `GET /v1/state` | 当前全貌：设备、各会话的状态和“看过”时间、`needs`、桌面 |
 | `GET /v1/queue?before=<游标>&limit=<n>` | 队列，新的在前，最多 200 条一页。每条带一个标识 `eid`（`<发送者>:<epoch>:<n>`） |
@@ -227,7 +227,8 @@ rapp emit（G8）          ┘                                    给：/v1/stat
 | `PUT /v1/desk/<app 的设备指纹>` | 这台 app 现在开着的会话清单，整份替换。每项：被控设备的 `fp` 和 `id`、app 标识（终端是会话 id）、显示名 |
 
 - 都是 JSON，UTF-8。出错回 `{"error":"…"}` 和合适的状态码。
-- 接口的定义放 `services/state/api/`，和事件格式在一起。进阶用户照着它就能写自己的服务，或者写脚本去读（G6）。
+- 接口的定义放 `services/center/api/`，和事件格式在一起。进阶用户照着它就能写自己的服务，或者写脚本去读（G6）。
+- 中心服务还有 `GET /v1/routes`（列出内置能力）；上面每条状态接口也能用 `/state` 前缀访问，如 `/state/v1/queue`，根下的旧路径永久保留。见 `services/center/api/routes.md` 和《rapp-center 设计》。
 
 ### 8.4 配置
 
@@ -293,13 +294,13 @@ rapp emit info  "开始跑第 3 轮"
 ```
 services/
   README.md          这一类是什么、进来的条件
-  state/             rapp-state
+  center/            rapp-center（中心服务，原 rapp-state）
     Cargo.toml       package.workspace = "../../rust"
     src/
     tests/
     api/             事件格式、接口定义、样例文件
     README.md        怎么单独跑、配置、接口
-  llm/               以后并进来的 rapp-llm（位置先留着）
+  llm/               经中心服务转发挂上，见《rapp-center 设计》§9
 ```
 
 - 放在顶层而不是 `rust/` 里：`rust/` 是平铺的本体 crate，放进去看不出“可选”；rapp-llm 是 Node 的，放不进 `rust/`。
