@@ -31,7 +31,7 @@
 | 2 | `.so` | 过（九个名字都导出、四个 `LOAD` 段都是 `0x4000`、11.3 MB / strip 后 7.5 MB；依赖全部直接编过） | §6.2 小改：hub 的四个函数不用 `#[used] static` 就能导出 | 2026-11-27 |
 | 3 | 进程内 hub 和网络 | 过（两个模拟器都起得来 hub、出接入引导；放进 relay 和 key、加上这台 Mac 后在线；默认和只有 IPv4 两种状态下 relay 都解析成 `::ffff:` 映射并连上。relay 是 IPv4 字面地址，域名解析没测到；真 IPv6 一半模拟器上测不了，留给实机） | §6.1 小改（`AI_V4MAPPED` 那个问题不用回答）；§6.5 的 `systemOpen` 要安卓通道；§14.6 加一条 | 2026-11-27 |
 | 4 | 进程内会话、节流 | 过（门禁两轮在模拟器 34、模拟器 36、平板实机上都过：慢速 200 ms 时 `p0 fps` 平均 4.4–4.7，traffic `frames` 平均 28.9–29.6，后 6 次减前 6 次的 PSS 是 −10.6 / −5.9 / −7.9 MB（1 MB = 1000 dumpsys KB），都在 40 MB 以内；P0Moving 的动画面、颜色和 TextEdit 打字在 34、36、平板上都过，打字经写作条发出；**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（桌面会话）；会话自己断的原因是 hub 的 64 KiB 行上限，探查里绕过后会话撑过 250 s） | 待定；hub 读到超过 64 KiB 的回复行（`watch_load` 首行）就丢整条连接，这段是 main 上的共用代码；会话因此断开只在探查的进程内会话里见过，桌面没测；绕过后，建流时首行已超上限（Mac 服务起来约 55 分钟以后）余力就到不了安卓控制端，早于这个时间建流就到得了 | 2026-11-27 |
-| 5 | 键盘和触控板 | 部分过（Ctrl+C/V 在空白区到得了 App：34、36 用 `uinput` 带真修饰键，`ctrl=1`，**过**；平板用 `input keycombination`，字母到达但该命令不带修饰键状态，`ctrl=0`，`isControlPressed` 要用户真键盘证实；文本框有焦点时 Ctrl+字母到不了 `HardwareKeyboard` 处理器（三处一致，原因未查）；Meta 组合都被系统拿走，到不了 App；滚轮 `PointerScrollEvent kind=mouse`；触控板双指和捏合模拟器上测不了，平板上没触控板，留给实机） | §14.6 加第 9 条（已加）；写作条/文本框里的 Ctrl 快捷键不能靠全局处理器 | 2026-11-27 |
+| 5 | 键盘和触控板 | 部分过。计划里的过关条件（Ctrl+C/V 在空白区到得了 App，`isControlPressed` 为真）在 34、36 上**过**（`uinput`，内核级，`ctrl=1`）；**平板（实机）上这一项没做，等用户用真键盘按**：键到得了，但 `input keycombination` 的字母 `metaState` 为 0、平板上 `uinput` 被拒，注入显示不了修饰键状态，真机上的过关没有确认。文本框有焦点、软键盘打开时（36 上重做）Ctrl+C/V/A/Z/X 都到、`ctrl=1`；原先「到不了」是点歪了位置（没点进文本框），结论撤回，Ctrl+SPACE 和单按字母的现象原因没查明。Meta 组合都被系统拿走，到不了 App。滚轮 `PointerScrollEvent kind=mouse`，34、36、平板都有；触控板双指和捏合模拟器上测不出，平板上没触控板，留给实机 | §14.6 加第 9 条（已加，含用户的一分钟真键盘检查） | 2026-11-27 |
 | 8 | 数字 | 过（大小只量了模拟器 34 的包，单位 MiB，1 MiB = 1,048,576 字节：APK 28.15；三个 `.so` 分别 7.88 / 11.04 / 7.18；34 上没开会话时 PSS 约 86.7 MiB，开着静态 2560×1600 桌面会话时 6 次平均约 215.2 MiB。Task 4G 的 PSS 单位是 MB = 1000 dumpsys KB：模拟器 36 没会话 89.1、静态单应用会话（TextEdit）158.6；平板没会话 209.0、静态单应用会话 445.7。release 动画面 30 s 平均 `p0 fps`：平板 26.1（屏幕 60 Hz）；模拟器 34 是 26.0、模拟器 36 是 25.1（模拟器，只作参考）。强制 relay 的 fps 没量） | 待定 | 2026-11-27 |
 
 ## 1 工具和空壳
@@ -375,57 +375,86 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 
 **两种注入，结果不一样，先看这个：**
 
-- `adb shell input keycombination 113 31`（CTRL_LEFT + C）：`input` 命令发出的事件 `metaState` 是 0。Flutter 收到的是 Ctrl 按下（`ctrl=1`），随后**自己补一个 Ctrl 抬起**，再收到字母键，此时 `ctrl=0`。所以用这个命令，字母键行永远是 `ctrl=0`，这是注入工具的毛病，不是平台吞了修饰键。物理键 ID 也是 `0x11000000xx` 这种「Key with ID」，不是 HID 用法码。
+- `adb shell input keycombination 113 31`（CTRL_LEFT + C）：这个命令发出的字母键事件 `metaState` 是 0。Flutter 先收到 Ctrl 按下（`ctrl=1`），随后一个 Ctrl 抬起，再收到字母键，此时 `ctrl=0`；物理键 ID 是 `0x11000000xx` 这种「Key with ID」，不是 HID 用法码。那个「Ctrl 抬起」查了引擎源码：Android 嵌入层 `KeyEmbedderResponder.java` 的 `synchronizePressingKey`（由 `handleEventImpl` 对每个修饰键调用）以**事件自带的 `getMetaState()`** 为准，记录里 Ctrl 还按着而事件的 `metaState` 说没按，就在字母键之前合成一个 Ctrl 抬起事件（该函数开头注释：让修饰键状态与「真实状态」一致）。所以看到的现象和源码一致；这是读源码得出的，没有用别的办法单独验证。结论：`keycombination` 的字母键行 `ctrl=0` 是注入工具的限制，不能当作「平台丢了修饰键」，也不能当作「真键盘会这样」。
 - `adb shell uinput`（只在模拟器上用）：注册一个虚拟键盘，发内核级的 `EV_KEY`，修饰键状态是真的，物理键是 HID 用法码（`Key C(0x70006)`）。命令格式是一行行 JSON：`register`（`configuration` 里类型 100 = 事件类型、101 = 键码，键码是 Linux 的：LEFTCTRL 29、LEFTMETA 125、C 46…）、`delay`、`inject`（字段名是 `events`，不是 `data`）。**平板上不用 `uinput`**（权限层拒绝，没试别的办法），所以平板上的「ctrl=1」只能靠真键盘，见下。
 
-**结果：**
+**结果（每个键单列；「平板（实机）」是真机，其余两台是模拟器；全部是注入，不是用户手按的）：**
 
-| 组合 | 镜像 | 焦点在哪 | App 收到了什么 | 系统有没有做别的事 | 来源 |
-|---|---|---|---|---|---|
-| Ctrl + C、V、X、Z、A、T、W | 34 | 空白区 | 到达：`logical=Key C…` 等，`ctrl=1`（`uinput`） | 没有 | 注入 |
-| Ctrl + C、V、X、Z、A、T、W | 36 | 空白区 | 到达，`ctrl=1`（`uinput`） | 没有 | 注入 |
-| Ctrl + C、V、X、Z、A、T、W | 平板 | 空白区 | 到达：先 `Control Left` 按下 `ctrl=1`，随后字母键 `ctrl=0`（`keycombination` 的限制，见上） | 没有 | 注入 |
-| Ctrl + TAB | 34、36 | 空白区 | 到达，`logical=Tab`，`ctrl=1` | 没有 | 注入 |
-| Ctrl + TAB | 平板 | 空白区 | 到达（`Control Left` 然后 `Tab`，`ctrl=0` 同上）；第二次注入时输入法出来了（`mInputShown=true`） | 输入法打开 | 注入 |
-| Ctrl + SPACE | 34、36 | 空白区 | 到达，`ctrl=1` | 没有 | 注入 |
-| Ctrl + SPACE | 平板 | 空白区 | 只到 `Control Left`，空格没到 | 输入法弹出（`mInputShown=true`）：系统拿走 Ctrl+空格切换输入法 | 注入 |
-| Ctrl + ENTER | 34、36 | 空白区 | 到达，`ctrl=1` | 没有 | 注入 |
-| Ctrl + ENTER | 平板 | 空白区 | 到达（`Control Left`、`Enter`，`ctrl=0` 同上） | 没有 | 注入 |
-| Ctrl + C、V、X、Z、A、T、W、TAB | 34、36、平板 | 文本框 | **没到**：一行 `p0 key` 都没有，连 `Control Left` 也没有 | 没看到系统在做别的事；`mInputShown` 全程 `false`（没有开软键盘，硬件键盘在时 Android 默认不弹，34 上把 `show_ime_with_hard_keyboard` 设成 1 也没弹出来） | 注入 |
-| Ctrl + SPACE、ENTER | 34、36、平板 | 文本框 | 到达（同空白区）；平板上 Ctrl+空格 到的只有 `Control Left` | 平板：同上 | 注入 |
-| Meta + C | 34 | 空白区、文本框 | 没到 | 前台变成别的应用（权限弹窗或添加账号，随时机而变） | 注入 |
-| Meta + C | 36 | 空白区、文本框 | 没到 | 日历打开 | 注入 |
-| Meta + C | 平板 | 空白区、文本框 | 没到 | 联系人打开（荣耀系统快捷键） | 注入 |
-| Meta + TAB、Meta + ENTER | 34、36、平板 | 空白区、文本框 | 没到 | 回到桌面（启动器在前台） | 注入 |
-| Meta 单按 | 34、36、平板 | 空白区、文本框 | 没到（App 里没有 `Meta` 的行）；`ctrl` 之外也没有别的 | 34：回桌面；36：启动器的搜索框弹出（键盘出来，`mInputShown=true`）；平板：回桌面（我随后重新拉起 App） | 注入 |
+空白区（上半屏取焦点）：
 
-**过关判定（规格 §14.1）：** Ctrl+C 和 Ctrl+V 在焦点于空白区时到得了 App 并且 `isControlPressed` 为真：
+| 组合 | 34 | 36 | 平板（实机） |
+|---|---|---|---|
+| Ctrl + C | 到，`ctrl=1`（`uinput`） | 到，`ctrl=1` | 到：`Control Left` 按下 `ctrl=1`，字母 `ctrl=0`（`keycombination` 的限制） |
+| Ctrl + V | 到，`ctrl=1` | 到，`ctrl=1` | 同上，字母 `ctrl=0` |
+| Ctrl + X | 到，`ctrl=1` | 到，`ctrl=1` | 同上，字母 `ctrl=0` |
+| Ctrl + Z | 到，`ctrl=1` | 到，`ctrl=1` | 同上，字母 `ctrl=0` |
+| Ctrl + A | 到，`ctrl=1` | 到，`ctrl=1` | 同上，字母 `ctrl=0` |
+| Ctrl + T | 到，`ctrl=1` | 到，`ctrl=1` | 同上，字母 `ctrl=0` |
+| Ctrl + W | 到，`ctrl=1` | 到，`ctrl=1` | 同上，字母 `ctrl=0` |
+| Ctrl + TAB | 到，`ctrl=1` | 到，`ctrl=1` | 到（`Control Left` 然后 `Tab`，`ctrl=0`）；第二次注入时输入法出来了 |
+| Ctrl + SPACE | 到，`ctrl=1` | 到，`ctrl=1` | 只到 `Control Left`，空格没到；输入法弹出（系统拿走 Ctrl+空格切输入法） |
+| Ctrl + ENTER | 到，`ctrl=1` | 到，`ctrl=1` | 到（`Control Left`、`Enter`，`ctrl=0`） |
 
-- 34、36：**过**（`uinput`，内核级，修饰键状态是真的）。
-- 平板：**能到达，`isControlPressed` 的部分这次没法证明**。`keycombination` 不带修饰键状态，字母键行 `ctrl=0`；`uinput` 平板上不让用。要靠用户的蓝牙键盘手按一次（§14.6 第 9 条，已加）。到达这一点是确定的。
+Meta 组合和 Meta 单按（空白区、文本框一样）：
+
+| 组合 | 镜像 | App 收到 | 系统做了什么 |
+|---|---|---|---|
+| Meta + C | 34 | 没到 | 启动器的应用抽屉（「Search apps」）打开，App 退到后面（`topResumedActivity` 是 `QuickstepLauncher`，截图为证）。更早几次跑时前台是权限弹窗或添加账号，那是前一个组合留下的焦点漂移，不是 Meta+C 本身 |
+| Meta + C | 36 | 没到 | 日历打开 |
+| Meta + C | 平板（实机） | 没到 | 联系人打开（荣耀系统快捷键） |
+| Meta + TAB、Meta + ENTER | 34、36、平板（实机） | 没到 | 回到桌面（启动器在前台）；34 上 Meta + TAB 复测也是启动器在前台 |
+| Meta 单按 | 34、36、平板（实机） | 没到（App 里没有 `Meta` 的行） | 34：回桌面；36：启动器搜索框弹出并拿走窗口焦点；平板：回桌面（我随后重新拉起 App） |
+
+**文本框有焦点时（修复 1 重做；原先的行作废）：**
+
+原先文本框那几行**没有按任务书的条件做**：软键盘从头到尾没开（`mInputShown=false`），而且在 36 上点的位置落在文本框上方的空隙里，文本框并没有拿到焦点（34 和平板用的是同一个点击公式，没有逐台核对）。那几行「Ctrl+字母到不了 `HardwareKeyboard`」的结论撤回，其中「改用 `Shortcuts`/`Actions`」的建议也一并删除（`HardwareKeyboard` 的处理器先于焦点树，事件到不了处理器，`Shortcuts` 也看不到，这个建议本身不成立）。
+
+重做在 36 上（`uinput` 虚拟键盘；`settings put secure show_ime_with_hard_keyboard 1`，只在模拟器上设；点在文本框里，`dumpsys input_method` 确认 `mInputShown=true`，截图里软键盘在）。每步单独注入，逐步读 `p0 key`（证据 `p0/t5f-e36-text-order.txt`）：
+
+| 步骤 | 结果 |
+|---|---|
+| 1 只按 Ctrl | 到：`Control Left` 按下 `ctrl=1`，抬起 `ctrl=0` |
+| 2 Ctrl + C | 到：`Key C` 按下 `ctrl=1`，抬起 |
+| 3 Ctrl + SPACE | 只到 `Control Left`，空格没到（输入法拿走，和平板上空白区的现象一样） |
+| 4 Ctrl + C（再按） | 到，`ctrl=1` |
+| 5 单按 c（无 Ctrl） | 没有 `p0 key` 行，文本框里也看不到字（原因没查；大概是输入法接走了，没有验证） |
+| 6 Ctrl + C（再按） | 到，`ctrl=1` |
+| 7 Ctrl + V、8 Ctrl + A、9 Ctrl + Z、10 Ctrl + X | 各自都到，`ctrl=1` |
+
+结论：软键盘打开、文本框有焦点时，`uinput` 注入的 Ctrl+C/V/A/Z/X 都到了 `HardwareKeyboard` 的处理器，`ctrl=1`；上面的顺序（Ctrl 单按、Ctrl+SPACE、单按字母之后）没有影响。「先发一个普通键」这一步在这台 36 上用不着（步骤 5、6 已经是「普通键之后再 Ctrl+C」，照常到）。
+
+原先「一行都没有」的现象能复现，条件是点在文本框外的空隙里（`p0/t5f-e36-text-miss.txt`：点 y=770，Ctrl+C、Ctrl+V 都没有任何 `p0 key` 行，包括 `Control Left`）。为什么那种状态下连 Ctrl 单独的事件都没有、而当时 Ctrl+SPACE、Ctrl+ENTER 却到了，**原因没查明**。
+
+没做到的部分：平板和 34 上的文本框没有重做（平板不用 `uinput`，也不改它的设置；真键盘按键是否到文本框，留给实机真键盘复测）。「原因没查明，留给实机真键盘复测」适用于 Ctrl+SPACE、单按字母这两处。
+
+**过关判定（规格 §14.1）：** Ctrl+C 和 Ctrl+V 在焦点于空白区时到得了 App，并且 `isControlPressed` 为真：
+
+- 34、36：**过**（`uinput`，内核级，修饰键状态是真的）。这是计划里的过关条件，两个模拟器都满足。
+- 平板（实机）：**没做，等用户（要用真键盘按）**。键到得了 App（`Control Left` 和字母都到），但 `keycombination` 发的字母 `metaState` 为 0，平板上 `uinput` 又被权限层拒绝（没有 root），所以注入没法显示修饰键状态。**真机上的这一项过关没有得到确认。**用户的一分钟检查：把配对的蓝牙键盘接上，打开探查包的 keys 页（已装在平板上），在空白区点一下，按 Ctrl+C、Ctrl+V，读屏幕上的行：字母行 `ctrl=1` 为过。已写进规格 §14.6 第 9 条。
 - 没有为此换设计。
 
 **Meta 几行（规格 U8）：** 三个目标上 Meta 的组合都到不了 App（系统先拿走了），所以 `_remoteKey` 里 `isMetaPressed` 丢弃的那条路径在这里根本走不到。保留着不碍事。
 
-**文本框里 Ctrl+字母到不了 `HardwareKeyboard` 的处理器：** 三个目标一致，原因没有查实（嫌疑：输入法在 Flutter 之前吃掉了 Ctrl 快捷键）。对 P1 的意思：文本框有焦点时（写作条、设备页的输入框）靠 `HardwareKeyboard` 全局处理器拦 Ctrl+C/V 之类**不可靠**；要做，改成 `Shortcuts`/`Actions` 挂在文本框的焦点上，或者接受文本框自己的剪贴板行为。
+**给 P1 的一行：** 如果真键盘上字母键到达时没有修饰键状态（`isControlPressed` 为假），App 该怎么办，现在没有证据，等上面那个真键盘检查的结果再定；在那之前不要为此写任何绕过逻辑。
 
 **在这个镜像上测的时候踩到的坑（P1 写测试脚本时有用）：**
 
 - 36 上 Meta 单按会让启动器弹出搜索覆盖层，并**拿走窗口焦点**；之后注入的键全落到搜索框里（屏幕上能看到 `ccc`）。每个组合前要 `am force-stop` 启动器或按 BACK 并点一下 App 取回焦点，用 `dumpsys window | grep mCurrentFocus`（多块显示时有几行，有一行是 `null`，要看全部）确认焦点在 `com.rapphub.rapp`。
 - 平板上刚点完取焦点后，第一批 `keycombination` 有时一个字都不到 App；先发一个普通键（探查里用 `KEYCODE_SHIFT_RIGHT`）再发组合，之后就稳了。原因没查。
-- 平板的显示是横的 3000×1920，`wm size` 却报 1920×3000；点击坐标要用截图的 PNG 尺寸。
+- 平板的显示是横的 3000×1920，`wm size` 却报 1920×3000；点击坐标要用截图的 PNG 尺寸。模拟器 36 同理：横向 2560×1600，文本框在屏幕约 y=880，不是屏幕的 48% 处。
 
-**滚轮和触控板：**
+**滚轮和触控板（修复 1：`Listener` 改成 `HitTestBehavior.translucent` 后重测，探查包是 probe `a20bdbf9` 的 keys 页）：**
 
 | 项 | 镜像 | Flutter 收到的 | 来源 |
 |---|---|---|---|
-| 鼠标滚轮竖向滚一格 | 36、平板 | `p0 ptr scroll kind=mouse delta=-0.0,192.0`，即 `PointerScrollEvent`，`kind` 是 mouse | 注入（`adb shell input mouse scroll <x> <y> --axis VSCROLL,-3`） |
-| 鼠标滚轮 | 34 | `input` 没有 `scroll` 子命令（API 34），没记下用 `uinput` 虚拟鼠标的结果 | 没记 |
-| 触控板双指滚动 | 34、36 | 没收到任何 `p0 ptr`。`uinput` 注册的虚拟触控板系统认了（`Classes: TOUCH | TOUCH_MT | TOUCHPAD`，`Sources: MOUSE | TOUCHPAD`），发了两指同向移动，Flutter 没有任何事件 | 注入。**模拟器上测不了，留给实机** |
+| 鼠标滚轮竖向滚一格 | 36、平板（实机） | `p0 ptr scroll kind=mouse delta=-0.0,192.0`，即 `PointerScrollEvent`，`kind` 是 mouse | 注入（`adb shell input mouse scroll <x> <y> --axis VSCROLL,-3`）；36 上复测还是一样 |
+| 鼠标滚轮 | 36 | 同上：`uinput` 虚拟鼠标滚轮 +3 得 `delta=-0.0,-192.0`，-3 得 `delta=-0.0,192.0` | `uinput` 虚拟鼠标 |
+| 鼠标滚轮 | 34 | 同上：+3 得 `delta=-0.0,-192.0`，-3 得 `delta=-0.0,192.0`（`input` 没有 `scroll` 子命令，所以用 `uinput` 虚拟鼠标；证据 `p0/t5f-e34-ptr.txt`） | `uinput` 虚拟鼠标 |
+| 触控板双指滚动 | 34、36 | 改成 `translucent` 后复测，仍然没收到任何 `p0 ptr`。`uinput` 虚拟触控板系统认了（`dumpsys input`：`Classes: TOUCH \| TOUCH_MT \| TOUCHPAD \| EXTERNAL`），Flutter 没有事件 | 注入。**模拟器上测不了，留给实机** |
 | 触控板捏合 | 34、36 | 同上，没有任何事件 | 注入。**模拟器上测不了，留给实机** |
-| 触控板双指滚动、捏合 | 平板 | 没做，等用户：平板上不能用 `uinput`；这台机器上也没有触控板（`dumpsys input` 里只有蓝牙鼠标、键盘和触摸屏） | 没做 |
+| 触控板双指滚动、捏合 | 平板（实机） | 没做，等用户：平板上不能用 `uinput`；这台机器上也没有触控板（`dumpsys input` 里只有蓝牙鼠标、键盘和触摸屏） | 没做 |
 
-`uinput` 触控板最多试了三种写法（两个镜像，约半小时），没成功，不排除是我的事件序列不对（缺什么 `INPUT_PROP`、分辨率之类）；结论只是「这种方式没测出来」。§14.6 第 9 条已加，要在有触控板的实机上看 Flutter 收到 `PointerPanZoom*` 还是 `PointerScrollEvent`。
+触控板这一项，修复 1 里又试了一次（`translucent` 之后，36 和 34 各一次，两指同向滚动和两指张开），还是没有事件。不排除是我的事件序列不对；结论只是「这种方式没测出来」。§14.6 第 9 条已加，要在有触控板的实机上看 Flutter 收到 `PointerPanZoom*` 还是 `PointerScrollEvent`。
 
 ## 6 语音
 ## 7 自己装自己
@@ -514,5 +543,5 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 - §6.5：`'android'` 那一项写了 `systemOpen: true`，但 `systemOpen` 的四处用法（`main_window.dart:43`、`term_stage.dart:50`、`local_section.dart:43`、`data_section.dart:54`）都走 `iosChannel`。要么给安卓接一个通道，要么先不开。
 - 接入引导之后：放进 relay 和 key，主机不会自己出现，要在设备页按 ID 添加（和 iPad 一样）。§14 的验收步骤里「看到这台 Mac 在线」之前要写上这一步（第 3 节）。
 - §14.6 加一条：双栈的真 IPv6（全局地址、只有 IPv6 的网络）模拟器上测不了，实机上连一次 relay（已加）。
-- §14.6 第 9 条（已加）：触控板双指滚动、捏合在模拟器上测不了；外接实体键盘上 Ctrl+C/V 的 `isControlPressed` 要手按一次。文本框有焦点时 Ctrl+字母到不了 `HardwareKeyboard` 全局处理器（第 5 节），§6.4 或键盘部分不能依赖它。
+- §14.6 第 9 条（已加）：触控板双指滚动、捏合在模拟器上测不了；平板上 Ctrl+C/V 的 `isControlPressed` 要用户用真键盘按一次（P0 里平板只能注入，没证实）。文本框里的 Ctrl 快捷键：软键盘打开时 36 上到得了 `HardwareKeyboard`（第 5 节），先前「到不了」的说法已撤回。
 - 安卓入口的日志不能用 `stderr`（logcat 看不到），用 `debugPrint` 或写文件。
