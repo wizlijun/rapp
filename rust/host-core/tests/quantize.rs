@@ -9,7 +9,7 @@ use rapp_host_core::quantize::quantize;
 #[test]
 fn quantize_matches_swift() {
     let records = fixture_records("quantize.bin");
-    assert!(!records.is_empty() && records.len() % 2 == 0, "quantize.bin holds input/output pairs");
+    assert!(!records.is_empty() && records.len().is_multiple_of(2), "quantize.bin holds input/output pairs");
     let mut failures = Vec::new();
     for (n, pair) in records.chunks(2).enumerate() {
         let (in_tag, input) = &pair[0];

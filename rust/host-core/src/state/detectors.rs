@@ -372,7 +372,7 @@ fn is_ring(c: &Block, gw: usize) -> bool {
     let Some(hole) = largest_block(&holes, w, h) else { return false };
     let aspect = hole.w() as f64 / hole.h() as f64;
     let fill = hole.points.len() as f64 / (hole.w() * hole.h()) as f64;
-    aspect >= 0.7 && aspect <= 1.43 && fill >= 0.6 && fill < 0.88 && hole.w() as f64 >= 0.5 * w as f64
+    (0.7..=1.43).contains(&aspect) && (0.6..0.88).contains(&fill) && hole.w() as f64 >= 0.5 * w as f64
 }
 
 /// The shape in `rect` and how sure the guess is.
@@ -426,7 +426,7 @@ pub fn shape(image: &RuleImage, rect: RuleRect) -> (ShapeName, f64) {
     let h = k.h();
     let fill = k.points.len() as f64 / (w * h) as f64;
     let aspect = w as f64 / h as f64;
-    if !(aspect >= 0.7 && aspect <= 1.43) {
+    if !(0.7..=1.43).contains(&aspect) {
         return (ShapeName::Other, 0.0);
     }
     let centre = ((k.y0 + h / 2) * gw as i64 + (k.x0 + w / 2)) as usize;

@@ -68,6 +68,6 @@ pub fn global_frame(w: &WindowInfo, display: Rect) -> Rect {
 }
 
 /// The raw window a table entry came from.
-pub fn raw_for<'a>(raw: &'a [RawWindow], id: u32) -> Option<&'a RawWindow> {
+pub fn raw_for(raw: &[RawWindow], id: u32) -> Option<&RawWindow> {
     raw.iter().find(|w| w.id == id)
 }

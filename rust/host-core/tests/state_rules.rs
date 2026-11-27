@@ -139,7 +139,7 @@ fn disc(img: &mut RuleImage, x: i64, y: i64, size: i64, c: Rgb) {
         for px in 0..size {
             let dx = px as f64 + 0.5 - r;
             let dy = py as f64 + 0.5 - r;
-            if !(dx * dx + dy * dy < r * r)
+            if dx * dx + dy * dy >= r * r
                 || x + px < 0
                 || y + py < 0
                 || x + px >= img.width as i64

@@ -1697,11 +1697,11 @@ fn app_session_started_locked_waits_then_shows() {
     // Nothing opens or is captured while A is locked.
     assert!(c.quiet_for(host_time(2.5), |m| !is_frame(m)).is_ok());
     let open = format!("open app {FAKE_APP}");
-    assert!(!platform.log().iter().any(|l| *l == open));
+    assert!(!platform.log().contains(&open));
     send_unlock(&mut c, "fixture-start");
     c.wait_for(|m| matches!(m, Incoming::ScreenLocked(false)));
     c.wait_for(is_frame);
-    assert!(platform.log().iter().any(|l| *l == open));
+    assert!(platform.log().contains(&open));
     // The size did not change, so no second `ready` and no error.
     assert!(c.quiet_for(host_time(1.0), |m| !matches!(m, Incoming::Ready(..) | Incoming::Error(_))).is_ok());
 }
@@ -1958,7 +1958,7 @@ fn window_commands_reach_the_platform() {
     c.send(&client::packet(14, id.to_le_bytes().to_vec()));
     c.send(&client::packet(15, id.to_le_bytes().to_vec()));
     let close = format!("close {id}");
-    let log = wait_log(&platform, |l| l.iter().any(|x| *x == close));
+    let log = wait_log(&platform, |l| l.contains(&close));
     // The content size B asked for plus the 28 pt title row.
     assert!(log.iter().any(|x| x.starts_with(&format!("resize {id} to 640x"))), "{log:?}");
     assert!(log.iter().any(|x| x.starts_with(&format!("move {id} to "))), "{log:?}");

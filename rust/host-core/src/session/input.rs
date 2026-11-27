@@ -115,11 +115,11 @@ impl Session {
     /// most every 0.25 s (the same pacing as the yield gate's).
     pub(crate) fn input_blocked_by(&mut self, by: String) {
         let now = self.now();
-        if self.blocked_event_at.map_or(true, |at| now - at >= INPUT_REPORT_EVERY) {
+        if self.blocked_event_at.is_none_or(|at| now - at >= INPUT_REPORT_EVERY) {
             self.blocked_event_at = Some(now);
             self.inner.out.emit(&WorkerEvent::InputBlocked { by: by.clone() });
         }
-        if self.blocked_notice_at.map_or(true, |at| now - at >= BLOCKED_NOTICE_EVERY) {
+        if self.blocked_notice_at.is_none_or(|at| now - at >= BLOCKED_NOTICE_EVERY) {
             self.blocked_notice_at = Some(now);
             self.send(Message::InputBlocked { by });
         }

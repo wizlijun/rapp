@@ -122,7 +122,7 @@ pub fn app_opened_worth_telling(
         return false;
     }
     let Some(since) = since_input else { return false };
-    since >= 0.0 && since <= APP_OPENED_WINDOW
+    (0.0..=APP_OPENED_WINDOW).contains(&since)
 }
 
 /// Whether a focused element is a password field. Only its role and subrole are looked at,

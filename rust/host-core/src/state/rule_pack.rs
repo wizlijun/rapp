@@ -315,7 +315,7 @@ impl RulePack {
         let mut rev = 0i64;
         if let Some(raw) = v.get("rev") {
             match raw.as_number() {
-                Some(n) if n == n.trunc() && n >= 0.0 && n <= 2147483647.0 => rev = n as i64,
+                Some(n) if n == n.trunc() && (0.0..=2147483647.0).contains(&n) => rev = n as i64,
                 _ => return Err(RuleError::NotAPack("rev".into())),
             }
         }

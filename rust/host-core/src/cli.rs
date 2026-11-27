@@ -124,7 +124,7 @@ pub fn parse_host_arguments(
     env: &dyn Fn(&str) -> Option<String>,
 ) -> Result<HostCommand, CodecError> {
     let subcommand = args.first().map(String::as_str).unwrap_or("");
-    let tail = if args.is_empty() { &args[..] } else { &args[1..] };
+    let tail = if args.is_empty() { args } else { &args[1..] };
     match subcommand {
         "list-apps" | "check" | "version" | "lock" => {
             let bare: &[&str] = if subcommand == "check" { &["--prompt"] } else { &[] };

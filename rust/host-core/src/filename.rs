@@ -47,7 +47,7 @@ fn cut_units(s: &str, units: usize) -> &str {
 /// 5. the result is cut to `NAME_UNITS` UTF-16 units, keeping the extension;
 /// 6. an empty result, `.` or `..` becomes `file`.
 pub fn portable_file_name(raw: &str) -> String {
-    let last = raw.split(|c| c == '/' || c == '\\').filter(|p| !p.is_empty()).last().unwrap_or("");
+    let last = raw.split(['/', '\\']).rfind(|p| !p.is_empty()).unwrap_or("");
     let mut name: String = last.chars().map(|c| if illegal(c) { '_' } else { c }).collect();
     strip_trailing(&mut name);
 

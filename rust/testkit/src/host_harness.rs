@@ -370,6 +370,7 @@ impl Controller {
     }
 
     /// The next message within 10 s; `None` once the host closed the connection (or nothing came).
+    #[allow(clippy::should_implement_trait)] // waits with a deadline, so not `Iterator::next`
     pub fn next(&mut self) -> Option<Incoming> {
         self.next_within(MESSAGE_WAIT)
     }
