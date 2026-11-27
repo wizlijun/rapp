@@ -718,4 +718,40 @@ mod tests {
         assert_eq!(level(&h, "disk:/"), Level::Normal);
     }
 
+
+    #[test]
+    fn history_of_720_widest_points_stays_under_half_the_history_line() {
+        // point() writes only at, cpu, gpu, the mem ratio, the heat level and the tightest disk's ratio.
+        // Each is its longest form: a 10-digit at; an f32 0.1 widened to f64 has 17 decimals; ratios that do not divide; top heat level.
+        let mut h = History::new();
+        for i in 0..KEEP {
+            h.push(Sample {
+                at: 4_000_000_000 + i as u64,
+                cpu: Some(Cpu {
+                    pct: 0.1,
+                    cores: 8,
+                    load1: None,
+                }),
+                gpu: Some(0.1),
+                mem: Some(Mem {
+                    total: 9_876_543_211,
+                    avail: 1_234_567_891,
+                    swap_used: None,
+                    pressure: None,
+                }),
+                heat: Some(Heat {
+                    level: HeatLevel::Critical,
+                    celsius: None,
+                }),
+                disks: vec![disk(9_876_543_211, 1_234_567_891)],
+                ..Default::default()
+            });
+        }
+        let line = serde_json::to_vec(&h.history_json()).unwrap().len();
+        // About 95,000 bytes: over 64 KiB (the case being fixed), under half of HISTORY_LINE.
+        assert!(
+            rapp_net::line::MAX_LINE < line && line < rapp_net::line::HISTORY_LINE / 2,
+            "{line}"
+        );
+    }
 }

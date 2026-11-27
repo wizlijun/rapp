@@ -14,7 +14,7 @@ use quinn::{Connection, Endpoint};
 use rapp_conn::relay::{refused_key, Found, RelayConn};
 use rapp_conn::{e2e_connect, quic_facts, read_welcome, send_hello, Accepted, Me, Pipe, Role};
 use rapp_net::addr::{is_private, split_host_ref};
-use rapp_net::line::{read_json, write_json};
+use rapp_net::line::{read_json, read_json_max, write_json, LineTooLong, HISTORY_LINE, MAX_LINE};
 use rapp_net::log::Lvl;
 use rapp_net::msg::Op;
 use rapp_net::quic::{bi, connect, ALPN_PEER};
@@ -133,6 +133,19 @@ fn reply_wait(op: &Op) -> Duration {
     }
 }
 
+/// The longest reply line read for `op`: the load history is longer than an ordinary reply.
+fn reply_limit(op: &Op) -> usize {
+    match op {
+        Op::WatchLoad | Op::Load { history: true, .. } => HISTORY_LINE,
+        _ => MAX_LINE,
+    }
+}
+
+/// Whether the failure is a reply too long: the stream is spoiled, but the link under it is fine. By type, not by text.
+fn link_kept(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<LineTooLong>().is_some()
+}
+
 /// Whether `op` may be sent again after a try that may have reached the host. Not when doing it twice does it twice:
 /// each `open_term` opens a terminal window, and a second `end_term` answers that the terminal is gone.
 fn repeatable(op: &Op) -> bool {
@@ -146,7 +159,7 @@ async fn exchange(conn: &Connection, lines: &[&Op]) -> Result<(Pipe, Value)> {
         write_json(&mut s, l).await?;
     }
     let wait = lines.last().map_or(REPLY_WAIT, |op| reply_wait(op));
-    let reply = tokio::time::timeout(wait, read_json(&mut s)).await.map_err(|_| anyhow!("no reply"))??;
+    let reply = tokio::time::timeout(wait, read_json_max(&mut s, lines.last().map_or(MAX_LINE, |op| reply_limit(op)))).await.map_err(|_| anyhow!("no reply"))??;
     Ok((s, reply))
 }
 
@@ -687,7 +700,7 @@ impl Hub {
         write_json(&mut pipe, op).await?;
         let wait = async {
             let accepted = read_welcome(&mut pipe, &facts, Some(key), &host.id, known.as_ref()).await?;
-            let r = read_json(&mut pipe).await?;
+            let r = read_json_max(&mut pipe, reply_limit(op)).await?;
             anyhow::Ok((r, accepted))
         };
         let (r, accepted) = tokio::time::timeout(reply_wait(op), wait).await.map_err(|_| anyhow!("no reply"))??;
@@ -886,6 +899,8 @@ impl Hub {
         // repeatable may go out on a new one.
         if let Some(link) = cached.filter(|l| !l.closed()) {
             match self.send_on(host, &link, op).await {
+                // A reply too long is that one reply's fault; the link is fine, so keep it and do not retry.
+                Err(e) if link_kept(&e) => return Err(e),
                 // The relay was just dialed and did not answer: a forced host has no other way to go.
                 Err(e) if host.forced_relay() && is_relay_unreachable(&e) => {
                     self.forget(&host.id);
@@ -912,7 +927,9 @@ impl Hub {
         match self.send_on(host, &link, op).await {
             Ok(x) => finish(x, link.path()),
             Err(e) => {
-                self.forget_if_dead(&host.id, &link, op);
+                if !link_kept(&e) {
+                    self.forget_if_dead(&host.id, &link, op);
+                }
                 Err(e)
             }
         }
@@ -980,6 +997,8 @@ mod tests {
     use super::{cacheable, finish, dial_order, is_refusal, must_forget, probe_asks_relay, repeatable, reply_wait, unreached};
     use super::{OPEN_TERM_WAIT, REPLY_WAIT};
     use rapp_net::msg::Op;
+    use super::{link_kept, reply_limit};
+    use rapp_net::line::{LineTooLong, HISTORY_LINE, MAX_LINE};
 
     /// One tap on 新建 opened two windows: the hub sent `open_term` again on a new link after a slow answer.
     #[test]
@@ -1093,5 +1112,20 @@ mod tests {
         assert_eq!(order(&["[::1]:22028", "192.168.1.5:22028"]), ["192.168.1.5:22028"]);
         assert_eq!(order(&["127.0.0.1:22028"]), ["127.0.0.1:22028"]);
         assert_eq!(order(&["127.0.0.1:1", "127.0.0.2:2"]), ["127.0.0.1:1", "127.0.0.2:2"]);
+    }
+
+    #[test]
+    fn reply_limit_widens_only_the_load_history() {
+        assert_eq!(reply_limit(&Op::WatchLoad), HISTORY_LINE);
+        assert_eq!(reply_limit(&Op::Load { history: true, top: false }), HISTORY_LINE);
+        assert_eq!(reply_limit(&Op::Load { history: false, top: false }), MAX_LINE);
+        assert_eq!(reply_limit(&Op::Ping), MAX_LINE);
+    }
+
+    #[test]
+    fn link_kept_only_for_a_too_long_line() {
+        assert!(link_kept(&anyhow::Error::new(LineTooLong(MAX_LINE))));
+        assert!(!link_kept(&anyhow::anyhow!("line longer than 65536 bytes"))); // same text does not count
+        assert!(!link_kept(&anyhow::anyhow!("stream closed")));
     }
 }
