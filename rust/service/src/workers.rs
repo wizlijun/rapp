@@ -150,6 +150,10 @@ fn permissions(v: &Value) -> Value {
     let mut p = json!({"screen_recording": v["screen_recording"] == true, "accessibility": v["accessibility"] == true});
     if v["platform"] == "linux" {
         p["platform"] = json!("linux");
+        #[cfg(target_os = "linux")]
+        if let Some(apps) = v["applications"].as_bool() {
+            p["applications"] = json!(apps);
+        }
         if let Some(error) = v["error"].as_str() { p["error"] = json!(error); }
     }
     p
@@ -431,5 +435,16 @@ mod os_tests {
     fn os_name_is_this_build() {
         assert_eq!(os_name(), os_name());
         assert!(["macos", "windows", "linux", "omarchy"].contains(&os_name()), "{}", os_name());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_permissions_preserve_applications_flag() {
+        use super::permissions;
+        use serde_json::json;
+        let yes = permissions(&json!({"screen_recording": true, "accessibility": true, "platform": "linux", "applications": true}));
+        assert_eq!(yes["applications"], json!(true));
+        let no = permissions(&json!({"screen_recording": true, "accessibility": true, "platform": "linux", "applications": false}));
+        assert_eq!(no["applications"], json!(false));
     }
 }

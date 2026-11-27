@@ -972,8 +972,13 @@ void main() {
         expect(find.descendant(of: k('copy'), matching: find.bySemanticsLabel('复制')), findsOneWidget);
         expect(find.descendant(of: k('paste'), matching: find.bySemanticsLabel('粘贴')), findsOneWidget);
         expect(k('cd'), findsNothing);
+        expect(k('hide'), findsNothing);
         expect(k('cmdt'), findsOneWidget);
         expect(k('cmd'), findsOneWidget);
+        expect(k('pgup'), findsOneWidget);
+        expect(k('pgdn'), findsOneWidget);
+        expect((tester.getCenter(k('down')).dx - tester.getCenter(k('up')).dx).abs(), lessThan(0.5));
+        expect((tester.getCenter(k('right')).dx - tester.getCenter(k('more')).dx).abs(), lessThan(0.5));
         await tester.pumpWidget(bar(app, width: 720));
         port.calls.clear();
         await tap(tester, 'cmdt');

@@ -157,7 +157,7 @@ with tempfile.TemporaryDirectory(prefix='rapp-bundle-') as td, EchoServer(('127.
                         apps = ask({'cmd': 'apps', 'id': host})
                         expected_os = 'omarchy' if Path('/usr/share/omarchy/shell').exists() else 'linux'
                         assert apps.get('os') == expected_os, apps
-                        assert apps['capabilities']['applications'] is False, apps
+                        assert apps['capabilities']['applications'] is (status['permissions'].get('applications') is True), apps
                         assert any(a['app'] == 'desktop:' and a['displays'] for a in apps['apps']), apps
                         opened = ask({'cmd': 'open', 'id': host, 'app': 'desktop:', 'embed': True})
                         with socket.create_connection(('127.0.0.1', opened['port']), timeout=10) as view:
