@@ -205,7 +205,10 @@ class _PhraseStripState extends State<PhraseStrip> {
     if (!mounted || pick == null) return;
     switch (pick) {
       case 'edit':
-        await openKeysPage(context, widget.state);
+        final r = await editKeyAction(context, start: a);
+        if (r != null && mounted) {
+          widget.state.setKeyActions([for (final k in widget.state.quick.keys) if (k.id == a.id) r else k]);
+        }
       case 'star':
         widget.state.toggleStar(a.ref);
       case 'delete':
