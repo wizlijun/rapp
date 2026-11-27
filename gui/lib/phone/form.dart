@@ -141,6 +141,8 @@ class _FormSwitchState extends State<FormSwitch> with WidgetsBindingObserver {
   void _unfold() {
     final s = widget.state;
     final spot = unfoldLanding(spot: _spot, phoneEntered: widget.entered?.call());
+    // Sheets and dialogs of the phone form do not stay above the Pad (R21).
+    Navigator.maybeOf(context, rootNavigator: true)?.popUntil((r) => r.isFirst);
     // The Pad's stage size goes through the policy after the old one was judged once, so at most one resize goes out.
     s.setPhone(form: false);
     final key = spot.key;

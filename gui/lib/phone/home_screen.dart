@@ -15,6 +15,23 @@ import 'widgets.dart';
 const _maxRows = 5;
 const _maxWorking = 3;
 
+/// The one home model of the phone: the home page and the fold (what waits) both read it.
+HomeModel phoneHomeModel(MainState s, PhoneNav nav) {
+  final sync = s.stateSync;
+  final needs = s.needs;
+  return buildHome(
+    needs: needs,
+    lists: s.hub?.termLists ?? const {},
+    serviceSessions: sync?.sessionRows ?? const [],
+    serviceRows: sync?.rows ?? const [],
+    fromService: sync != null && s.needsFromService,
+    offline: {for (final n in needs) if (n.kind == NeedKind.device) n.target},
+    gotIt: nav.gotIt,
+    deviceName: s.deviceName,
+    sessionKeyOf: (d, t) => '$d/$t',
+  );
+}
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.state, required this.nav});
   final MainState state;
@@ -61,22 +78,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   bool get _offline => _s.netDown || !_s.hubUsable;
 
-  HomeModel _model() {
-    final lists = _s.hub?.termLists ?? const {};
-    final sync = _s.stateSync;
-    final needs = _s.needs;
-    return buildHome(
-      needs: needs,
-      lists: lists,
-      serviceSessions: sync?.sessionRows ?? const [],
-      serviceRows: sync?.rows ?? const [],
-      fromService: sync != null && _s.needsFromService,
-      offline: {for (final n in needs) if (n.kind == NeedKind.device) n.target},
-      gotIt: _nav.gotIt,
-      deviceName: _s.deviceName,
-      sessionKeyOf: (d, t) => '$d/$t',
-    );
-  }
+  HomeModel _model() => phoneHomeModel(_s, _nav);
 
   void _goLook(HomeItem item) {
     setState(() => _nav.cameFrom = null);
