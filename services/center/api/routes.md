@@ -2,10 +2,10 @@
 
 ## GET /v1/routes
 
-200 `{"routes":[{"name":"state","kind":"builtin","v":1}]}`
+200 `{"routes":[{"name":"state","kind":"builtin","v":1},{"name":"prefs","kind":"builtin","v":1}]}`
 
 - `name`: the prefix. A builtin answers under `/<name>/v1/…`; `state` also answers at the root
-  (`/v1/…`, `api/http.md`).
+  (`/v1/…`, `api/http.md`). `prefs` is the shared quick-area settings (`api/prefs.md`).
 - `kind`: `builtin`, a part of `rapp-center` itself (the only kind for now).
 - `v`: the version of that builtin's API.
 

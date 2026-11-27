@@ -10,6 +10,7 @@ use hyper::{Request, Response};
 use tokio::task::JoinHandle;
 
 use crate::entry::{Body, Ctx};
+use crate::prefs::PrefsBlock;
 use crate::state::StateBlock;
 use crate::Config;
 
@@ -37,5 +38,5 @@ pub(crate) trait Builtin: Send + Sync + 'static {
 
 /// Every builtin, in the order `/v1/routes` lists them.
 pub(crate) fn table(cfg: &Config) -> Vec<Arc<dyn Builtin>> {
-    vec![Arc::new(StateBlock::new(cfg.keep_days, cfg.keep_events))]
+    vec![Arc::new(StateBlock::new(cfg.keep_days, cfg.keep_events)), Arc::new(PrefsBlock::new())]
 }
