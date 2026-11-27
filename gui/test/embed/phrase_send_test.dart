@@ -3,7 +3,9 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/phrase_send.dart';
+import 'package:rapp/embed/modifier_latch.dart';
 import 'package:rapp/embed/phrases.dart';
+import 'package:rapp/quick/key_actions.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/strip_cmds.dart';
@@ -173,6 +175,103 @@ void main() {
       expect(cmd(const StripCmd('search'), session: s), PhraseOutcome.offline);
       expect(cmd(const StripCmd('new'), session: s), PhraseOutcome.offline);
       expect(tp.calls.where((c) => c.$1 == 'keys' || c.$1 == 'paste'), isEmpty);
+    });
+  });
+
+  group('key actions', () {
+    final claude = agentTools.firstWhere((t) => t.id == 'claude-code');
+    final opencode = agentTools.firstWhere((t) => t.id == 'opencode');
+    final search = builtinKeyActions.firstWhere((a) => a.id == 'search');
+    late FakeTermSessionPort tp;
+    setUp(() {
+      tp = FakeTermSessionPort()..seed(1);
+    });
+    PhraseOutcome act(KeyAction a, {AgentTool? tool, SessionPort? p, RemoteSession? session}) =>
+        sendKeyAction(state: state, session: session ?? rs, port: p ?? tp, a: a, tool: tool, now: now);
+    List<(String, Map<String, Object?>)> keys() => tp.calls.where((c) => c.$1 == 'keys').toList();
+
+    test('key action on a terminal sends the wire name', () {
+      expect(act(search, tool: claude), PhraseOutcome.sent);
+      expect(keys(), hasLength(1));
+      expect(keys().single.$2['keys'], ['Ctrl-R']);
+    });
+
+    test('cmd+t on a terminal runs rApp own ⌘T', () {
+      final got = <String>[];
+      rs.termCommand = got.add;
+      const a = KeyAction('nt', label: '新建', chord: Chord('t', cmd: true));
+      expect(keyActionUsable(a, term: true), isTrue);
+      expect(act(a), PhraseOutcome.sent);
+      expect(got, ['t']);
+      expect(keys(), isEmpty);
+    });
+
+    test('cmd+t without a registered stage is missing and starts no window', () {
+      const a = KeyAction('nt', label: '新建', chord: Chord('t', cmd: true));
+      expect(act(a), PhraseOutcome.missing);
+      expect(act(search), PhraseOutcome.sent, reason: 'no repeat window was started');
+    });
+
+    test('cmd+k on a terminal is missing', () {
+      const a = KeyAction('k', label: 'K', chord: Chord('k', cmd: true));
+      expect(keyActionUsable(a, term: true), isFalse);
+      expect(keyActionUsable(a, term: false), isTrue);
+      expect(act(a), PhraseOutcome.missing);
+      expect(tp.calls.where((c) => c.$1 == 'keys'), isEmpty);
+    });
+
+    test('key action in an app sends the mac code', () {
+      expect(act(search, p: port), PhraseOutcome.sent);
+      final c = port.calls.last;
+      expect(c.$1, 'key');
+      expect(c.$2['keyCode'], 15);
+      expect(c.$2['modifiers'], latchCtrl);
+    });
+
+    test('key action ignores and keeps the sticky latch', () {
+      state.appLatch.tap(latchOpt);
+      expect(state.appLatch.flags, latchOpt);
+      expect(act(search, p: port), PhraseOutcome.sent);
+      expect(port.calls.last.$2['modifiers'], latchCtrl);
+      expect(state.appLatch.flags, latchOpt);
+    });
+
+    test('key action goes while a round is busy, not when offline', () async {
+      rs.composer.submitText('先发的');
+      expect(rs.composer.busy, isTrue);
+      expect(act(search), PhraseOutcome.sent);
+      expect(keys(), hasLength(1));
+    });
+
+    test('the repeat window applies, and only a send starts it', () {
+      expect(act(search), PhraseOutcome.sent);
+      clock = clock.add(const Duration(milliseconds: 500));
+      expect(act(search), PhraseOutcome.tooSoon);
+      expect(keys(), hasLength(1));
+    });
+
+    test('per-tool null is missing', () {
+      expect(keyActionUsable(search, term: true, tool: opencode), isFalse);
+      expect(act(search, tool: opencode), PhraseOutcome.missing);
+      expect(keys(), isEmpty);
+    });
+
+    testWidgets('offline refuses', (tester) async {
+      tr.emit({'event': 'hosts', 'hosts': [{'id': '111', 'name': 'mini'}]});
+      await tester.runAsync(() async {
+        tr.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            tr.emit({'event': 'opened', 'sid': 1, 'id': m['id'], 'app': m['app'], 'path': 'lan', 'port': 5001, 'token': 'tk', 'req': m['req']});
+          }
+        };
+        state.openOrSwitch('111', 'Safari', 'Safari');
+        for (var i = 0; i < 4; i++) {
+          await Future<void>.delayed(Duration.zero);
+        }
+      });
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      expect(act(search, session: state.currentRemote!), PhraseOutcome.offline);
+      expect(keys(), isEmpty);
     });
   });
 }

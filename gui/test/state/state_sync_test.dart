@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/quick/quick_prefs.dart';
+import 'package:rapp/quick/quick_sync.dart';
 import 'package:rapp/state/state_config.dart';
 import 'package:rapp/state/state_link.dart';
 import 'package:rapp/state/state_out.dart';
@@ -25,6 +27,8 @@ class CountOut extends StateOut {
 class FakeLink extends StateLink {
   FakeLink(super.base);
   bool healthy = true;
+  bool hasPrefs = false;
+  int prefsAllCalls = 0;
   Map<String, Object?> stateBody = {'devices': [], 'needs': []};
   Map<String, Object?> queueBody = {'events': [], 'more': false};
   Object? seenError;
@@ -43,7 +47,20 @@ class FakeLink extends StateLink {
   Future<bool> health() async {
     healthCalls++;
     calls.add('health');
+    prefs = hasPrefs;
     return healthy;
+  }
+
+  @override
+  Future<QuickDoc?> putPref(String name, {required int at, required int base, required Object? data}) async => null;
+
+  @override
+  Future<void> putUsage(String device, {required int at, required Object? data}) async {}
+
+  @override
+  Future<Map<String, Object?>> prefsAll() async {
+    prefsAllCalls++;
+    return {'store': 's1'};
   }
 
   @override
@@ -730,6 +747,114 @@ void main() {
     await settle();
     expect(out.snapshot!['desks'], isEmpty);
     sync.dispose();
+  });
+
+  group('quick sync', () {
+    late QuickPrefs qp;
+    late QuickSync quick;
+    setUp(() {
+      qp = QuickPrefs.migrate(const []);
+      quick = QuickSync(prefs: qp, localDir: dir.path, device: 'dev-a');
+    });
+    tearDown(() => quick.dispose());
+
+    StateSync makeQ() => sync = StateSync(
+          localDir: dir.path,
+          find: () async => found,
+          quick: quick,
+          link: (u) {
+            final l = configure(FakeLink(u));
+            links.add(l);
+            return l;
+          },
+        );
+
+    test('a service with prefs: synced; without: local; dropped: waiting', () async {
+      configure = (l) => l..hasPrefs = true;
+      makeQ().start();
+      await settle();
+      links.single.watchCtl.add({'what': 'hello'});
+      await settle();
+      expect(quick.status, QuickSyncStatus.synced);
+      expect(links.single.prefsAllCalls, 1);
+      links.single.watchCtl.addError('boom');
+      await settle();
+      expect(quick.status, QuickSyncStatus.waiting);
+      sync.dispose();
+
+      links.clear();
+      configure = (l) => l;
+      makeQ().start();
+      await settle();
+      links.single.watchCtl.add({'what': 'hello'});
+      await settle();
+      expect(quick.status, QuickSyncStatus.local);
+      sync.dispose();
+    });
+
+    test('a pushed prefs doc changes the local prefs', () async {
+      configure = (l) => l..hasPrefs = true;
+      makeQ().start();
+      await settle();
+      final c = links.single.watchCtl;
+      c.add({'what': 'hello'});
+      await settle();
+      c.add({
+        'what': 'prefs.stars',
+        'doc': {'at': DateTime.now().millisecondsSinceEpoch + 100000, 'data': ['k:mode']},
+      });
+      await settle();
+      expect(qp.stars, ['k:mode']);
+      sync.dispose();
+    });
+
+    test('refresh reconnects and fetches /prefs/v1/all again', () async {
+      configure = (l) => l..hasPrefs = true;
+      makeQ().start();
+      await settle();
+      links.single.watchCtl.add({'what': 'hello'});
+      await settle();
+      sync.refresh();
+      await settle();
+      links.last.watchCtl.add({'what': 'hello'});
+      await settle();
+      expect(links.fold<int>(0, (a, l) => a + l.prefsAllCalls), 2);
+      sync.dispose();
+    });
+
+    test('a failed first try after refresh keeps the quick line synced', () {
+      fakeAsync((fa) {
+        configure = (l) => l..hasPrefs = true;
+        makeQ().start();
+        fa.flushMicrotasks();
+        links.single.watchCtl.add({'what': 'hello'});
+        fa.flushMicrotasks();
+        expect(quick.status, QuickSyncStatus.synced);
+        final seen = <QuickSyncStatus>[];
+        quick.addListener(() => seen.add(quick.status));
+        sync.pause();
+        configure = (l) => l
+          ..hasPrefs = true
+          ..healthy = false;
+        sync.refresh();
+        fa.flushMicrotasks();
+        expect(links, hasLength(2));
+        expect(quick.status, QuickSyncStatus.synced, reason: 'one failed try after a refresh is not an outage yet');
+        fa.elapse(const Duration(seconds: 2, milliseconds: 100));
+        expect(links, hasLength(3));
+        expect(quick.status, QuickSyncStatus.waiting, reason: 'the second one is');
+        expect(seen, [QuickSyncStatus.waiting]);
+        sync.dispose();
+      });
+    });
+
+    test('off goes back to local', () async {
+      const StateConfig(StateMode.off).save(dir.path);
+      makeQ().start();
+      await settle();
+      expect(quick.status, QuickSyncStatus.local);
+      sync.dispose();
+    });
   });
 }
 

@@ -5,6 +5,7 @@ import 'dart:async';
 import '../ui/main_state.dart';
 import 'composer_model.dart';
 import 'phrases.dart';
+import '../quick/key_actions.dart';
 import '../term/term_session_port.dart';
 import 'key_bar.dart';
 import 'key_bar_keys.dart';
@@ -121,4 +122,49 @@ PhraseOutcome sendStripCmd({
     case null:
       return PhraseOutcome.missing;
   }
+}
+
+/// Whether [a] can go on [tool] at all: it has a chord there, and a terminal can express it (a wire name, or one of
+/// rApp's own ⌘ letters; whether the stage has registered that callback is checked when it is sent). An app takes any.
+bool keyActionUsable(KeyAction a, {required bool term, AgentTool? tool}) {
+  final c = chordFor(a, tool);
+  if (c == null) return false;
+  return !term || c.termWire != null || c.termCommand != null;
+}
+
+/// One tap on the key action [a] for [session], read as [tool] has it. Shares the repeat window and the offline check
+/// with [sendPhrase]; a busy round does not matter (a key does not go through the composer), and the modifier latch is
+/// neither read nor cleared.
+PhraseOutcome sendKeyAction({
+  required MainState state,
+  required RemoteSession session,
+  required SessionPort port,
+  required KeyAction a,
+  AgentTool? tool,
+  DateTime Function() now = DateTime.now,
+}) {
+  final t = now();
+  final last = _lastPhrase[session];
+  if (last != null && t.difference(last) < phraseRepeatWindow) return PhraseOutcome.tooSoon;
+  if (state.isDetaching(session.sid) || state.sendBlocked(session.sid)) return PhraseOutcome.offline;
+  final chord = chordFor(a, tool);
+  if (chord == null) return PhraseOutcome.missing;
+  if (port is TermSessionPort) {
+    final letter = chord.termCommand;
+    final wire = chord.termWire;
+    if (letter != null) {
+      final run = session.termCommand;
+      if (run == null) return PhraseOutcome.missing;
+      run(letter);
+    } else if (wire != null) {
+      port.sendKeys(session.sid, [termWire(wire, 0)]);
+    } else {
+      return PhraseOutcome.missing;
+    }
+  } else {
+    final k = chord.macKey;
+    port.key(session.sid, k.code, k.mods);
+  }
+  _lastPhrase[session] = t;
+  return PhraseOutcome.sent;
 }

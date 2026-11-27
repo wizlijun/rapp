@@ -1,50 +1,12 @@
 //! The entry's own paths: health, the routes list, and each builtin under its prefix.
 
+mod common;
+
 use std::net::SocketAddr;
 
-use rapp_center::{serve, Config};
+use common::{get, post, put, request, start, unix_now};
+use rapp_center::Config;
 use serde_json::{json, Value};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
-
-async fn start(cfg: Config) -> SocketAddr {
-    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = l.local_addr().unwrap();
-    tokio::spawn(serve(cfg, l));
-    addr
-}
-
-async fn get(addr: SocketAddr, path: &str) -> (u16, Value) {
-    request(addr, "GET", path, "").await
-}
-
-async fn post(addr: SocketAddr, path: &str, body: &str) -> (u16, Value) {
-    request(addr, "POST", path, body).await
-}
-
-async fn put(addr: SocketAddr, path: &str, body: &str) -> (u16, Option<Value>) {
-    let (c, v) = request(addr, "PUT", path, body).await;
-    (c, if v.is_null() { None } else { Some(v) })
-}
-
-async fn request(addr: SocketAddr, method: &str, path: &str, body: &str) -> (u16, Value) {
-    let mut s = TcpStream::connect(addr).await.unwrap();
-    let req = format!(
-        "{method} {path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
-        body.len()
-    );
-    let _ = s.write_all(req.as_bytes()).await;
-    let mut buf = Vec::new();
-    let _ = s.read_to_end(&mut buf).await;
-    let text = String::from_utf8(buf).unwrap();
-    let (head, body) = text.split_once("\r\n\r\n").unwrap();
-    let status = head.split_whitespace().nth(1).unwrap().parse().unwrap();
-    (status, if body.is_empty() { Value::Null } else { serde_json::from_str(body).unwrap() })
-}
-
-fn unix_now() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
-}
 
 /// Two states of session `s` on device `aa`, dated now.
 async fn post_sample(addr: SocketAddr) {
@@ -60,9 +22,9 @@ async fn health_is_v2_and_says_it_has_routes() {
 }
 
 #[tokio::test]
-async fn routes_lists_the_state_builtin() {
+async fn routes_lists_the_builtins() {
     let addr = start(Config::default()).await;
-    assert_eq!(get(addr, "/v1/routes").await, (200, json!({"routes":[{"name":"state","kind":"builtin","v":1}]})));
+    assert_eq!(get(addr, "/v1/routes").await, (200, json!({"routes":[{"name":"state","kind":"builtin","v":1},{"name":"prefs","kind":"builtin","v":1}]})));
     assert_eq!(request(addr, "POST", "/v1/routes", "").await.0, 405);
 }
 

@@ -2,14 +2,15 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/key_bar_keys.dart';
 import 'package:rapp/embed/modifier_latch.dart';
+import 'package:rapp/quick/key_layout.dart';
 
 void main() {
-  test('first row: Tab ⇧Tab Esc ⌃C ⌫ ⏎, then ↑ and ⋯ at the end; more adds the second row, ← ↓ → under ↑ ⋯', () {
+  test('first row: Tab Esc ⌃C ⌫ ⏎, then ↑ and ⋯ at the end; more adds the second row, ← ↓ → under ↑ ⋯', () {
     for (final app in [false, true]) {
-      expect(keyBarRows(app: app, more: false), [
-        ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more'],
+      expect(keyBarRows(layout: KeyLayout.fallback, more: false), [
+        ['tab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more'],
       ], reason: 'app: $app');
-      expect(keyBarRows(app: app, more: true)[1],
+      expect(keyBarRows(layout: KeyLayout.fallback, more: true)[1],
           ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'pgup', 'pgdn', 'left', 'down', 'right'],
           reason: 'app: $app');
     }
@@ -37,7 +38,7 @@ void main() {
 
   test('no ⌥ and no ⌃-letter keys on the bar; the ⌃-letters stay in barKeys for the 常用语条 commands', () {
     for (final app in [false, true]) {
-      final ids = {for (final row in keyBarRows(app: app, more: true)) ...row};
+      final ids = {for (final row in keyBarRows(layout: KeyLayout.fallback, more: true)) ...row};
       for (final gone in ['opt', 'co', 'cr', 'ct', 'cb', 'cl']) {
         expect(ids.contains(gone), isFalse, reason: '$gone, app: $app');
       }
@@ -47,7 +48,7 @@ void main() {
 
   test('no key is on the bar twice', () {
     for (final app in [false, true]) {
-      final ids = [for (final row in keyBarRows(app: app, more: true)) ...row];
+      final ids = [for (final row in keyBarRows(layout: KeyLayout.fallback, more: true)) ...row];
       expect(ids.toSet().length, ids.length, reason: 'app: $app');
     }
   });
@@ -58,12 +59,10 @@ void main() {
   });
 
   test('every id in a row is in barKeys; ⌃C is Ctrl-C and 8+ctrl', () {
-    for (final app in [false, true]) {
-      for (final more in [false, true]) {
-        for (final row in keyBarRows(app: app, more: more)) {
-          for (final id in row) {
-            expect(barKeys.containsKey(id), isTrue, reason: 'unknown key id $id');
-          }
+    for (final more in [false, true]) {
+      for (final row in keyBarRows(layout: KeyLayout.fallback, more: more)) {
+        for (final id in row) {
+          expect(barKeys.containsKey(id), isTrue, reason: 'unknown key id $id');
         }
       }
     }

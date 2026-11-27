@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import '../embed/traffic_label.dart' show formatRate;
 import '../embed/voice_hotkey.dart';
 import '../embed/voice_key_gate.dart';
+import '../pages/keys_page.dart';
 import '../pages/phrases_page.dart';
 import 'controls.dart';
 import 'voice_learned_row.dart';
@@ -272,7 +273,20 @@ class _Footer extends StatelessWidget {
                 height: rowHeight,
                 child: Row(children: [
                   Expanded(child: Text('常用语', style: small)),
-                  Text(state.prefs.phraseStrip ? '${state.prefs.phrases.length} 条' : '已关', style: small.copyWith(color: t.muted)),
+                  Text(state.prefs.phraseStrip ? '${state.quick.phrases.length} 条' : '已关', style: small.copyWith(color: t.muted)),
+                  Icon(Icons.chevron_right, color: t.muted, size: 18),
+                ]),
+              ),
+            ),
+            InkWell(
+              key: const Key('keys-settings'),
+              borderRadius: BorderRadius.circular(t.r),
+              onTap: () => openKeysPage(context, state),
+              child: SizedBox(
+                height: rowHeight,
+                child: Row(children: [
+                  Expanded(child: Text('按键', style: small)),
+                  Text('${state.quick.keys.length} 个', style: small.copyWith(color: t.muted)),
                   Icon(Icons.chevron_right, color: t.muted, size: 18),
                 ]),
               ),

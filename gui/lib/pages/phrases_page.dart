@@ -6,8 +6,11 @@ import '../embed/key_bar_keys.dart';
 import '../embed/phrases.dart';
 import '../embed/strip_cmds.dart';
 import '../embed/strip_tools.dart';
+import '../quick/quick_prefs.dart';
+import 'quick_sync_line.dart';
 import '../ui/controls.dart';
 import '../ui/main_state.dart';
+import '../ui/star_button.dart';
 import '../ui/tokens.dart';
 
 Future<void> openPhrasesPage(BuildContext context, MainState state) => Navigator.of(context)
@@ -72,7 +75,7 @@ class _PhraseEditorState extends State<_PhraseEditor> {
           RappButton.primary(
             key: const Key('phrase-save'),
             label: '保存',
-            onPressed: _ok ? () => Navigator.of(context).pop(Phrase(_text.text.trim(), put: _put)) : null,
+            onPressed: _ok ? () => Navigator.of(context).pop(Phrase(_text.text.trim(), put: _put, id: widget.start?.id)) : null,
           ),
         ]),
       ]),
@@ -254,7 +257,7 @@ class PhrasesPage extends StatelessWidget {
   final MainState state;
 
   void _put(int? i, StripItem item) {
-    final l = List.of(state.prefs.phrases);
+    final l = List.of(state.quick.phrases);
     if (i == null || i >= l.length) {
       l.add(item);
     } else {
@@ -264,7 +267,7 @@ class PhrasesPage extends StatelessWidget {
   }
 
   Future<void> _edit(BuildContext context, int? i) async {
-    final cur = i == null ? null : state.prefs.phrases[i];
+    final cur = i == null ? null : state.quick.phrases[i];
     final StripItem? r = cur is StripCmd ? await editStripCmd(context, c: cur) : await editPhrase(context, p: cur as Phrase?);
     if (r != null) _put(i, r);
   }
@@ -283,7 +286,8 @@ class PhrasesPage extends StatelessWidget {
       body: ListenableBuilder(
         listenable: state,
         builder: (context, _) {
-          final l = state.prefs.phrases;
+          final l = state.quick.phrases;
+          final stars = state.quick.stars;
           return ListView(padding: const EdgeInsets.all(16), children: [
             RappSwitchRow(
               switchKey: const Key('phrase-strip-switch'),
@@ -313,7 +317,7 @@ class PhrasesPage extends StatelessWidget {
                       color: Colors.red.withValues(alpha: .7),
                       child: const Text('删除', style: TextStyle(color: Colors.white)),
                     ),
-                    onDismissed: (_) => state.setStripItems(List.of(state.prefs.phrases)..removeAt(i)),
+                    onDismissed: (_) => state.setStripItems(List.of(state.quick.phrases)..removeAt(i)),
                     child: ListTile(
                       key: Key('phrase-row-$i'),
                       contentPadding: EdgeInsets.zero,
@@ -335,10 +339,14 @@ class PhrasesPage extends StatelessWidget {
                               ? Text('放进输入框', style: TextStyle(color: t.muted))
                               : null,
                       onTap: () => _edit(context, i),
-                      trailing: ReorderableDragStartListener(
-                        index: i,
-                        child: Icon(Icons.drag_handle, color: t.muted),
-                      ),
+                      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                        StarButton(
+                          key: Key('phrases-star-$i'),
+                          starred: stars.contains(refOf(p)),
+                          onPressed: () => state.toggleStar(refOf(p)),
+                        ),
+                        ReorderableDragStartListener(index: i, child: Icon(Icons.drag_handle, color: t.muted)),
+                      ]),
                     ),
                   ),
               ],
@@ -351,13 +359,14 @@ class PhrasesPage extends StatelessWidget {
               RappButton.quiet(
                   key: const Key('phrase-reset'),
                   label: '恢复默认',
-                  onPressed: () => state.setStripItems(defaultStripItems)),
+                  onPressed: () => state.setStripItems(defaultQuickPhrases)),
             ]),
             const SizedBox(height: 16),
             Text('常用语发出后总会按一次回车。远端停在菜单或选择框上时，回车会选中当前高亮的那一项，点之前看一眼画面。',
                 style: TextStyle(color: t.muted)),
             const SizedBox(height: 8),
             Text('命令只在文字终端里认出 Claude Code、Codex 等工具时出现。', style: TextStyle(color: t.muted)),
+            QuickSyncLine(state: state),
           ]);
         },
       ),
