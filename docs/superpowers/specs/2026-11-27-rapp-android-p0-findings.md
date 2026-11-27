@@ -30,7 +30,7 @@
 | 1 | 工具和空壳 | 过（两个模拟器都能装、能启动、截图有 `rApp P0 shell`；36 上第一次截图撞上 System UI 无响应弹框，再试后正常） | 不用 | 2026-11-27 |
 | 2 | `.so` | 过（九个名字都导出、四个 `LOAD` 段都是 `0x4000`、11.3 MB / strip 后 7.5 MB；依赖全部直接编过） | §6.2 小改：hub 的四个函数不用 `#[used] static` 就能导出 | 2026-11-27 |
 | 3 | 进程内 hub 和网络 | 过（两个模拟器都起得来 hub、出接入引导；放进 relay 和 key、加上这台 Mac 后在线；默认和只有 IPv4 两种状态下 relay 都解析成 `::ffff:` 映射并连上。relay 是 IPv4 字面地址，域名解析没测到；真 IPv6 一半模拟器上测不了，留给实机） | §6.1 小改（`AI_V4MAPPED` 那个问题不用回答）；§6.5 的 `systemOpen` 要安卓通道；§14.6 加一条 | 2026-11-27 |
-| 4 | 进程内会话、节流 | 过，模拟器 36 的打字除外（门禁两轮在模拟器 34、模拟器 36、平板实机上都过：慢速 200 ms 时 `p0 fps` 平均 4.4–4.7，traffic `frames` 平均 28.9–29.6，后 6 次减前 6 次的 PSS 是 −10.6 / −5.9 / −7.9 MB（1 MB = 1000 dumpsys KB），都在 40 MB 以内；P0Moving 的动画面、颜色在 34、36、平板上都过；TextEdit 打 `p0probe` 在 34、平板上过，**在 36 上没过：Mac 文档收到的是 `p0robe`，少了第二个 p**，丢在哪一段没查明（第 4 节 Task 4G）；打字都经写作条发出；**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（桌面会话）；会话自己断的原因是 hub 的 64 KiB 行上限，探查里绕过后会话撑过 250 s） | 待定；hub 读到超过 64 KiB 的回复行（`watch_load` 首行）就丢整条连接，这段是 main 上的共用代码；会话因此断开只在探查的进程内会话里见过，桌面没测；绕过后，建流时首行已超上限（Mac 服务起来约 52 分钟以后，量到的区间是 51.5–55 分钟）余力就到不了安卓控制端，早于这个时间建流就到得了；Mac 服务重启后从头算 | 2026-11-27 |
+| 4 | 进程内会话、节流 | 过，模拟器 36 的打字除外（门禁两轮在模拟器 34、模拟器 36、平板实机上都过：慢速 200 ms 时 `p0 fps` 平均 4.4–4.7，traffic `frames` 平均 28.9–29.6，后 6 次减前 6 次的 PSS 是 −10.6 / −5.9 / −7.9 MB（1 MB = 1000 dumpsys KB），都在 40 MB 以内；P0Moving 的动画面、颜色在 34、36、平板上都过；TextEdit 打 `p0probe` 在 34、平板上过，**在 36 上不稳：重复 9 次，`input text 'p0probe'` 3 次里到齐 2 次，逐键 `input keyevent` 3 次里到齐 1 次，另一串 `a1abba` 1 次到齐；少字的几次，写作条里已经少了，到 Mac 的字和写作条一致，没有再丢**（第 4 节「模拟器 36 打字重复测量」；没用真键盘测过）；打字都经写作条发出；**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（桌面会话）；会话自己断的原因是 hub 的 64 KiB 行上限，探查里绕过后会话撑过 250 s） | 待定；hub 读到超过 64 KiB 的回复行（`watch_load` 首行）就丢整条连接，这段是 main 上的共用代码；会话因此断开只在探查的进程内会话里见过，桌面没测；绕过后，建流时首行已超上限（Mac 服务起来约 52 分钟以后，量到的区间是 51.5–55 分钟）余力就到不了安卓控制端，早于这个时间建流就到得了；Mac 服务重启后从头算 | 2026-11-27 |
 | 5 | 键盘和触控板 | 部分过。计划里的过关条件（Ctrl+C/V 在空白区到得了 App，`isControlPressed` 为真）在 34、36 上**过**（`uinput`，内核级，`ctrl=1`）；**平板（实机）上这一项没做，等用户用真键盘按**：键到得了，但 `input keycombination` 的字母 `metaState` 为 0、平板上 `uinput` 被拒，注入显示不了修饰键状态，真机上的过关没有确认。文本框有焦点、软键盘打开时（36 上重做）Ctrl+C/V/A/Z/X 都到、`ctrl=1`；原先「到不了」是点歪了位置（没点进文本框），结论撤回，Ctrl+SPACE 和单按字母的现象原因没查明。Meta 组合都被系统拿走，到不了 App。滚轮 `PointerScrollEvent kind=mouse`，34、36、平板都有；触控板双指和捏合模拟器上测不出，平板上没触控板，留给实机 | §14.6 加第 9 条（已加，含用户的一分钟真键盘检查） | 2026-11-27 |
 | 6 | 语音 | 部分过：三个目标按规格 §11 的四条规则手算都是「不能用」（34 的结果符合要求；36 和平板是别的原因，见第 6 节）；**36 的「按住说话能出字」没过**：设备上识别器没装中文（`installed` 只有 `en-US`）、在线路径 `checkRecognitionSupport` 报 14，实际按住说话收到 `ready`、`begin` 后是 `error 7`，没出字；**平板（实机）三次普通一段都没出字**（一次什么回调都没有、一次 `error 11`、一次又没有）；分段、热词只在 36 上试了：不报错、也没出字，无法判断是否生效 | 要改：规则 2 靠 `checkRecognitionSupport` 在非设备上识别器上永远报 14，实际走不到；语言标签是 `cmn-Hans-CN` 不是 `zh-CN`（见「规格要改的地方」） | 2026-11-27 |
 | 7 | 自己装自己 | 部分过：两个模拟器过（`versionCode` 9001 → 9002，`canInstall` 起点是否、开开关后是；装完 App 被杀、没自己重启（34 上没查到「打开」通知，36 没查）；`success` 回调没观察到，页面也观察不了（进程死了，日志在内存里）；数据文件和开关都还在；装完缓存里的包还在）；哈希不对的四个条件在 34 和平板上都过；**平板（实机）装不下去：荣耀多出安全检测、`已了解…` 勾选、锁屏密码三层，密码不能替用户输，没做，等用户** | §13.2 第 4 步已改（装完不重启）；§13.2 加一句荣耀的多层确认（见「规格要改的地方」） | 2026-11-27 |
@@ -200,7 +200,7 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 **结论：过。** hub 在安卓进程里起得来、读得懂数据根、出接入引导；放进 relay 和 key、加上这台 Mac 后，两台模拟器在「默认」和「只有 IPv4」两种状态下都把 relay 解析成 `::ffff:` 映射地址并经 relay 连上。注意这台 Mac 存的 relay 是 IPv4 字面地址，**relay 的域名解析这次没测到**；真 IPv6 和只有 IPv6 的网络也留给实机。
 ## 4 进程内会话
 
-**状态：过，模拟器 36 的打字除外。** 门禁两轮（对照、慢速 200 ms）在模拟器 34、模拟器 36、平板实机上都做了，都过，见本节末「Task 4G」。36 上 TextEdit 打 `p0probe`，Mac 收到的是 `p0robe`，少一个字符，没过；34、平板上打字过。**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（续做 1 的 `p0/t4e-desktop-static-34.png`，桌面会话）；36 和平板只看了 P0Moving 的画面在动、颜色对，没有和 Mac 屏幕逐处对照。之后探查不再开桌面会话，因为用户正通过桌面会话在用这台 Mac。下面续做、续做 2 里写「没做」的，都由 Task 4G 补上了（强制 relay 的 fps 除外，按安排不量）。
+**状态：过，模拟器 36 的打字除外。** 门禁两轮（对照、慢速 200 ms）在模拟器 34、模拟器 36、平板实机上都做了，都过，见本节末「Task 4G」。36 上 TextEdit 打 `p0probe` 不稳：先后 7 次 `p0probe`（`input text` 4 次、逐键 3 次）里 4 次少一个字符（`p0robe`、`pprobe`），逐键输入也少，不只是 `adb shell input text`；少的字在写作条里就没有了；34、平板上打字过。**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（续做 1 的 `p0/t4e-desktop-static-34.png`，桌面会话）；36 和平板只看了 P0Moving 的画面在动、颜色对，没有和 Mac 屏幕逐处对照。之后探查不再开桌面会话，因为用户正通过桌面会话在用这台 Mac。下面续做、续做 2 里写「没做」的，都由 Task 4G 补上了（强制 relay 的 fps 除外，按安排不量）。
 
 做法：`gui/lib/embed/session_ffi.dart`（新）接 `rapp-android-ffi` 的 `rapp_session_open/send/ack/close/free`。帧包用 `asTypedList(finalizer: rapp_session_free)` 零拷贝交给 Dart。`ackedPackets` 是 `async*`：交出一个帧包，等 `slow`，再 `ack`。这样消费方暂停时不 ack，Rust 的闸也就不放下一帧。`SessionWorker.ffi` 和 `LinuxSessionPort.ffi` 是这两个共用文件里新加的构造函数，旧路径不动。`main_android.dart` 用 `LinuxSessionPort.ffi('librapp_android.so', downloads: () => '<数据根>/files/transfers', slow: P0_SLOW_MS)`。日志每秒打一行 `p0 fps=N`，traffic 事件打 `p0 traffic frames=N`。
 
@@ -295,7 +295,7 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 
 教训：只要 Mac 上没有别的会话，探查结束自己的会话就会锁屏。所以要重开画面源，得先开一个新会话再关旧的。
 
-**没做**（Mac 锁着；除强制 relay 的 fps 外，后来都由 Task 4G 做了，见本节末；36 的打字做了但没过，少一个字符）：
+**没做**（Mac 锁着；除强制 relay 的 fps 外，后来都由 Task 4G 做了，见本节末；36 的打字做了但不稳，偶尔少一个字符）：
 - 门禁两轮（对照、慢速 200 ms）；
 - release 30 s 平均 fps；
 - 强制 relay 的 fps；
@@ -330,7 +330,7 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 |---|---|---|---|---|
 | P0Moving 的动画面、颜色 | 模拟器 36 | 色块在动，颜色对。强制 relay 和局域网各看了一次 | 过 | `p0/t4g-moving-36-relay.png`、`p0/t4g-moving-36.png` |
 | 同上 | 平板（实机） | 色块在动，颜色对，局域网 | 过 | `p0/t4g-moving-tab.png` |
-| TextEdit 里打 `p0probe` | 模拟器 36 | 点文档会弹出写作条。`adb -s emulator-5554 shell input text 'p0probe'` 进了写作条，回车（keyevent 66）只在写作条里换行、不发送，点写作条的发送按钮才发到 Mac。字到了 Mac 的文档里，但**少了第二个 p**：osascript 读回来是 `p0robe` 加一个换行（`od -c`：`p 0 r o b e \n`），截图里文档那行也是 `p0robe`，两者一致。少的这个字是在 `input text` 送键、写作条收字、还是发到 Mac 这几段里丢的，没查明（经过见表下） | 没过（少一个字符） | `p0/t4g-p0probe-36.png` |
+| TextEdit 里打 `p0probe` | 模拟器 36 | 点文档会弹出写作条。`adb -s emulator-5554 shell input text 'p0probe'` 进了写作条，回车（keyevent 66）只在写作条里换行、不发送，点写作条的发送按钮才发到 Mac。字到了 Mac 的文档里，但**少了第二个 p**：osascript 读回来是 `p0robe` 加一个换行（`od -c`：`p 0 r o b e \n`），截图里文档那行也是 `p0robe`，两者一致。少的这个字是在 `input text` 送键、写作条收字、还是发到 Mac 这几段里丢的，没查明（经过见表下） | 没过（少一个字符；重复测量见表下） | `p0/t4g-p0probe-36.png` |
 | 同上 | 平板（实机） | 要绕开拼音输入法，经过见表下。文档显示 `p0probe`，osascript 读到的也是 | 过 | `p0/t4g-p0probe-tab.png`、`p0/t4g-tab-x1.png` |
 
 **模拟器 36 打字的经过（UTC）。**
@@ -340,6 +340,23 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 - 第二次（唯一到了 Mac 的一次）：09:49:18Z 点文档，等 1.5 s，`input text 'p0probe'`，等 1 s，点发送按钮，之后每 2 s 读一次文档，09:49:24Z 读到 `p0robe` 加换行；读完才截图，就是现在的 `p0/t4g-p0probe-36.png`，显示 `p0robe`。截图和读回来的是同一次，不是画面慢了一帧。
 - 第二次没在点发送前截写作条，所以不知道写作条里是不是已经少了 p。
 - 不重做：要开到 Mac 的会话，而 Mac 现在锁着。
+
+**模拟器 36 打字重复测量（UTC 2026-11-27 10:52–10:54Z，release 包，局域网，TextEdit 单应用会话，空白文档）。** 每次：点文档，输入，keyevent 66，点写作条的发送按钮，用 osascript 读文档并经 `od -c` 保存。读回来末尾的 `\n \n \n` 是回车换的行加 osascript 自己的换行，不是多打的字。每次输入时 `mInputShown=true`（输入前 `false`），`show_ime_with_hard_keyboard` 是 1，没改任何设置。
+
+| 组 | 命令 | 次数 | 到齐 | 少字的几次读回来是 |
+|---|---|---|---|---|
+| A | `adb -s emulator-5554 shell input text 'p0probe'` | 3 | 2 | 第 1 次 `p 0 r o b e`（少第二个 p）。第 1 次点文档用的是 `input tap 1200 700`，第 2、3 次是 `input tap 1200 400`；第 1 次在发送前截了图，写作条里已经是 `p0robe` |
+| B | `adb -s emulator-5554 shell input keyevent KEYCODE_P KEYCODE_0 KEYCODE_P KEYCODE_R KEYCODE_O KEYCODE_B KEYCODE_E`（逐键） | 3 | 1 | 第 2、3 次都是 `p p r o b e`（少 `0`）；第 2 次发送前截图，写作条里已经是 `pprobe`，输入法候选栏有 `pprobe`、`p0robe` |
+| C | `adb -s emulator-5554 shell input text 'a1abba'` | 1 | 1 | 没少：`a 1 a b b a` |
+
+结论只到这里：
+- 少字不止出在 `adb shell input text`：逐键输入 3 次里也少了 2 次。
+- 少的字在写作条里就没有了（A 第 1 次、B 第 2 次有截图）；发送到 Mac 这一段没发现再丢字。
+- 少的是 `0` 或第二个 `p`，不是固定位置，也不是每次都少。`a1abba` 只有 1 次，不能说它不少。
+- 用的是 `adb` 注入，不是真键盘，真键盘会不会少字没测。34 和平板上的那几次没有重复。
+- 原因没查明：可能在写作条收字，也可能在模拟器输入法（输入法候选栏里有 `p0robe`、`pprobe`），没有分开测。
+
+证据：`p0/t4t-e36-a1.txt`、`t4t-e36-a2.txt`、`t4t-e36-a3.txt`、`t4t-e36-b1.txt`、`t4t-e36-b2.txt`、`t4t-e36-b3.txt`、`t4t-e36-c1.txt`（读回来的 `od -c`、`mInputShown`、`show_ime_with_hard_keyboard`、起止时间）；截图 `t4t-a1-typed.png`、`t4t-a1-enter.png`、`t4t-e36-b2-typed.png` 等。
 
 平板和模拟器不同：平板的输入法是荣耀拼音，`input text` 打进去的字母会被拼成候选。经过：
 - 第一次 `input text 'p0probe'`：写作条里是 `p0`，拼音候选栏是 `robe`，**这里也少了第二个 p**，还没发送、和 Mac 无关（`p0/t4g-type-tab.png`）。
@@ -700,7 +717,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 - §13.2 第 4 步（第 7 项，已改一句）：装完 App 是被系统杀掉、不会自己重启（模拟器 34、36 都是；「打开」通知只在 34 上查过），写成「装完 App 被系统杀掉，用户再点图标；更新器靠下次启动时的 `versionCode` 判断成败」（第 7 节）。
 - 建议（待用户定，没改规格）：§13.2 的流程和文案要为荣耀的三层确认留位置：安全检测、必须勾的 `已了解…`、锁屏密码。这影响「在 App 里点一下就更新」的说法；平板上没走完，用户走一遍后再定（第 7 节）。
 - 安卓入口的日志不能用 `stderr`（logcat 看不到），用 `debugPrint` 或写文件。
-- §14.6 加一条（P1 待查）：`adb shell input text` 快速送字时会不会少字。Task 4G 里 `input text 'p0probe'` 在模拟器 36 上到 Mac 的是 `p0robe`，平板上拼音候选里也少了同一个 p；34 上没少。要查清是送键、写作条收字还是发到 Mac 哪一段丢的（第 4 节 Task 4G）。
+- §14.6 加一条（P1 待查）：`adb shell input text` 快速送字时会不会少字。`input text 'p0probe'` 在模拟器 36 上到 Mac 的是 `p0robe`，平板上拼音候选里也少了同一个 p；34 上没少。36 上重复测量，`input text` 3 次里少 1 次，逐键 `input keyevent` 3 次里少 2 次，少的字在写作条里就没有了。要查清是写作条收字还是模拟器输入法丢的，真键盘也要测（第 4 节「模拟器 36 打字重复测量」）。
 - §11 规则 2 靠 `checkRecognitionSupport` 问「在线是否支持中文」：模拟器 36（带 Google）和平板上，不带设备上识别器路径时它都报 14（`ERROR_CANNOT_CHECK_SUPPORT`），规则 4 又把 14 判成不能用，所以规则 2 在这三个目标上没有一个能走通。建议（待定）：规则 2 改成「有默认识别器就按能用，真按下去出 `error` 时给提示」，或者把识别器的试一小段当作判断；不要靠这个查询。
 - §11 规则 1 的语言字符串：36 的 `supported` 里中文写作 `cmn-Hans-CN`、`cmn-Hant-TW`，没有 `zh-CN`；比较时要认 `cmn-Hans-CN`（以及 `zh-CN`、`zh-Hans-CN`）。
 - §11：`createOnDeviceSpeechRecognizer` 在没有设备上识别器时抛 `UnsupportedOperationException`，要先用 `isOnDeviceRecognitionAvailable` 挡住或 try/catch；`checkRecognitionSupport` 没有识别服务时回调不来，要加超时（第 6 节）。
