@@ -111,27 +111,27 @@ class _PhraseStripState extends State<PhraseStrip> {
     return stripHint(o, tool: tool);
   }
 
-  /// One tap on [p].
-  PhraseOutcome _tap(Phrase p, String ref) =>
-      _done(sendPhrase(state: widget.state, session: widget.session, port: widget.port, p: p), ref);
+  /// One tap on [p]. [say] false: a menu sheet tells the refusal itself, so the strip keeps quiet (here and below).
+  PhraseOutcome _tap(Phrase p, String ref, {bool say = true}) =>
+      _done(sendPhrase(state: widget.state, session: widget.session, port: widget.port, p: p), ref, say: say);
 
   /// One tap on the command [c]: grey ones say what is missing.
-  PhraseOutcome _tapCmd(StripCmd c, String ref) {
+  PhraseOutcome _tapCmd(StripCmd c, String ref, {bool say = true}) {
     final tool = _tool;
     if (tool == null) return PhraseOutcome.missing;
-    if (actionFor(c, tool) == null) return _done(PhraseOutcome.missing, ref, tool: tool);
+    if (actionFor(c, tool) == null) return _done(PhraseOutcome.missing, ref, tool: tool, say: say);
     final o = sendStripCmd(state: widget.state, session: widget.session, port: widget.port, c: c, tool: tool);
-    return _done(o, ref, tool: tool);
+    return _done(o, ref, tool: tool, say: say);
   }
 
   /// One tap on the key action [a].
-  PhraseOutcome _tapKey(KeyAction a) {
+  PhraseOutcome _tapKey(KeyAction a, {bool say = true}) {
     final tool = _tool;
     final o = sendKeyAction(state: widget.state, session: widget.session, port: widget.port, a: a, tool: tool);
-    return _done(o, a.ref, tool: tool, key: a);
+    return _done(o, a.ref, tool: tool, key: a, say: say);
   }
 
-  PhraseOutcome _done(PhraseOutcome o, String ref, {AgentTool? tool, KeyAction? key}) {
+  PhraseOutcome _done(PhraseOutcome o, String ref, {AgentTool? tool, KeyAction? key, bool say = true}) {
     if (!mounted) return o;
     switch (o) {
       case PhraseOutcome.sent:
@@ -145,7 +145,7 @@ class _PhraseStripState extends State<PhraseStrip> {
       case PhraseOutcome.put:
         widget.state.recordUse(ref);
       case PhraseOutcome.offline || PhraseOutcome.busy || PhraseOutcome.missing:
-        final h = _why(o, tool: tool, key: key);
+        final h = say ? _why(o, tool: tool, key: key) : null;
         if (h != null) _say(h);
       case PhraseOutcome.tooSoon:
         break;
@@ -297,7 +297,7 @@ class _PhraseStripState extends State<PhraseStrip> {
                         ref: refOf(it),
                         title: it.labelOf(),
                         grey: actionFor(it, tool!) == null,
-                        onTap: () => use(refOf(it), () => _tapCmd(it, refOf(it))),
+                        onTap: () => use(refOf(it), () => _tapCmd(it, refOf(it), say: false)),
                       )
                     else if (it is Phrase)
                       row(
@@ -306,7 +306,7 @@ class _PhraseStripState extends State<PhraseStrip> {
                         ref: refOf(it),
                         title: it.text,
                         put: it.put,
-                        onTap: () => use(refOf(it), () => _tap(it, refOf(it))),
+                        onTap: () => use(refOf(it), () => _tap(it, refOf(it), say: false)),
                       ),
                 ],
               _Kind.keys => [
@@ -318,7 +318,7 @@ class _PhraseStripState extends State<PhraseStrip> {
                         ref: a.ref,
                         title: a.label,
                         chord: chordFor(a, tool)?.label,
-                        onTap: () => use(a.ref, () => _tapKey(a), why: (o) => _why(o, tool: tool, key: a)),
+                        onTap: () => use(a.ref, () => _tapKey(a, say: false), why: (o) => _why(o, tool: tool, key: a)),
                       )
                     else
                       row(
