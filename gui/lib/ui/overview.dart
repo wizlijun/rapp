@@ -298,7 +298,9 @@ class _LocalFold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) =>
-      state.localColumnOpen(inbound: monitor?.status?.sessions.isNotEmpty ?? false)
+      state.localColumnOpen(
+          inbound: monitor?.status?.sessions.isNotEmpty ?? false,
+          terms: MainState.localTermRows(monitor?.localTerms).isNotEmpty)
       ? _Column(state: state, col: col, monitor: monitor, onFold: () => state.openLocalColumn(false))
       : _FoldedColumn(col: col, onOpen: () => state.openLocalColumn(true));
 }
