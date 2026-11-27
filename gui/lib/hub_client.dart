@@ -243,7 +243,8 @@ class TermList {
 int _int(Object? v) => v is num ? v.toInt() : 0;
 String? _str(Object? v) => v is String ? v : null;
 
-TermList _termList(Map<String, dynamic> m, String fallbackId) {
+/// A `TermList` as a device (or this machine's service, `term_watch`) sends it; [fallbackId] when it carries no `id`.
+TermList termListFromJson(Map<String, dynamic> m, String fallbackId) {
   final id = '${m['id'] ?? fallbackId}';
   if (m['off'] == true) return TermList(id, off: true);
   if (m['error'] != null) return TermList(id, error: '${m['error']}');
@@ -476,7 +477,7 @@ class HubClient extends ChangeNotifier implements ServiceSwitchApi {
 
   Future<TermList> terms(String id) async {
     final m = await _request({'cmd': 'terms', 'id': id}, 'terms');
-    return termLists[id] ?? _termList(m, id);
+    return termLists[id] ?? termListFromJson(m, id);
   }
 
   /// Each online device's load from its watch (device-load spec §10); a device that went offline, is too old or
@@ -734,7 +735,7 @@ class HubClient extends ChangeNotifier implements ServiceSwitchApi {
         _paths.clear();
         loads.clear();
       case 'terms':
-        if (m['id'] != null) termLists['${m['id']}'] = _termList(m, '${m['id']}');
+        if (m['id'] != null) termLists['${m['id']}'] = termListFromJson(m, '${m['id']}');
       case 'load' when m['req'] is! int && m['id'] != null:
         _onLoad('${m['id']}', m);
       case 'labels':

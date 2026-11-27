@@ -39,6 +39,11 @@ class FakeService {
   /// service does.
   List<Map<String, dynamic>>? loadLines;
 
+  /// What each `term_watch` writes: the nth watch gets the nth batch (the last batch again after that). A batch
+  /// whose last line is not `ok` closes the connection after it, as the service does; null: `unknown cmd`.
+  List<List<Map<String, dynamic>>>? termWatches;
+  var _termWatchN = 0;
+
   int get port => server.port;
 
   Future<void> start() async {
@@ -106,6 +111,19 @@ class FakeService {
         case 'watch_load':
           s.write('{"ok":false,"error":"unknown cmd"}\n');
           s.destroy();
+        case 'term_watch' when termWatches != null:
+          final all = termWatches!;
+          final batch = all[_termWatchN < all.length ? _termWatchN : all.length - 1];
+          _termWatchN++;
+          for (final l in batch) {
+            s.write('${jsonEncode(l)}\n');
+          }
+          if (batch.isNotEmpty && batch.last['ok'] != true) s.destroy();
+        case 'term_watch':
+          s.write('{"ok":false,"error":"unknown cmd"}\n');
+          s.destroy();
+        case 'term_open' || 'term_front':
+          s.write('${jsonEncode(replies[m['cmd']] ?? {'ok': true, if (m['cmd'] == 'term_open') 'id': 'term:pty:n'})}\n');
         case 'labels' || 'set_label' || 'reset_label' when labels != null:
           final l = labels!;
           if (m['cmd'] == 'set_label') {
@@ -467,7 +485,7 @@ void main() {
       await m.updateDismiss('0.5.0');
       await m.updateRollback();
       await m.permissionsReset();
-      expect(svc.received.map((r) => r['cmd']).where((c) => c != 'status' && c != 'subscribe' && c != 'labels' && c != 'watch_load'),
+      expect(svc.received.map((r) => r['cmd']).where((c) => c != 'status' && c != 'subscribe' && c != 'labels' && c != 'watch_load' && c != 'term_watch'),
           ['set_update', 'update_check', 'update_apply', 'update_dismiss', 'update_rollback', 'permissions_reset']);
       await svc.stop();
       m.dispose();
@@ -508,6 +526,142 @@ void main() {
       expect(m.load, isNull);
       expect(m.running, isTrue);
       expect(svc.received.where((r) => r['cmd'] == 'watch_load').length, 1);
+      await svc.stop();
+      m.dispose();
+    });
+
+    Map<String, dynamic> terms(List<String> ids) => {
+          'ok': true,
+          'terms': [for (final id in ids) {'id': id, 'name': id.substring(9), 'command': 'zsh', 'host': null}],
+          'hosts': [
+            {'host': null, 'launchers': ['Terminal']},
+          ],
+        };
+    int termWatches(FakeService svc) => svc.received.where((r) => r['cmd'] == 'term_watch').length;
+
+    test('term_watch fills localTerms from its own connection and follows each line', () async {
+      final svc = FakeService('tok-tw')
+        ..termWatches = [
+          [terms(['term:pty:a']), terms(['term:pty:a', 'term:pty:b'])],
+        ];
+      await svc.start();
+      final m = ServiceMonitor(readToken: () async => 'tok-tw', port: svc.port, retry: const Duration(milliseconds: 50));
+      m.start();
+      await until(() => m.localTerms?.terms.length == 2);
+      expect(m.localTerms!.terms.map((r) => r.id), ['term:pty:a', 'term:pty:b']);
+      expect(m.localTerms!.hosts.single.launchers, ['Terminal']);
+      expect(svc.received.where((r) => r['cmd'] == 'term_watch').single, {'cmd': 'term_watch'});
+      // The service restarts: the list goes with the rest and is asked for again.
+      svc.dropAll();
+      await until(() => !m.running);
+      expect(m.localTerms, isNull);
+      await until(() => m.localTerms != null);
+      expect(termWatches(svc), 2);
+      await svc.stop();
+      m.dispose();
+    });
+
+    test('a term_watch that ends with an error clears localTerms and is opened again on changed', () async {
+      final svc = FakeService('tok-te')
+        ..termWatches = [
+          [terms(['term:pty:a']), {'ok': false, 'error': 'terminal sessions are off'}],
+          [terms(['term:pty:c'])],
+        ];
+      await svc.start();
+      final m = ServiceMonitor(
+          readToken: () async => 'tok-te', port: svc.port, retry: const Duration(milliseconds: 50), rewatchGap: Duration.zero);
+      m.start();
+      await until(() => termWatches(svc) == 1 && m.localTerms == null);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(m.localTerms, isNull);
+      svc.pushChanged();
+      await until(() => m.localTerms?.terms.single.id == 'term:pty:c');
+      expect(termWatches(svc), 2);
+      // Watching again: a changed asks nothing more.
+      svc.pushChanged();
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(termWatches(svc), 2);
+      await svc.stop();
+      m.dispose();
+    });
+
+    test('after an ended term_watch, changed events within the gap ask once', () async {
+      final svc = FakeService('tok-tg')
+        ..termWatches = [
+          [{'ok': false, 'error': 'terminal sessions are off'}],
+        ];
+      await svc.start();
+      final m = ServiceMonitor(
+          readToken: () async => 'tok-tg', port: svc.port, retry: const Duration(milliseconds: 50), rewatchGap: const Duration(hours: 1));
+      m.start();
+      await until(() => termWatches(svc) == 1);
+      svc.pushChanged();
+      svc.pushChanged();
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(termWatches(svc), 1);
+      expect(m.localTerms, isNull);
+      await svc.stop();
+      m.dispose();
+    });
+
+    test('a changed within the gap is not lost: the watch is opened once when the gap is over', () async {
+      final svc = FakeService('tok-tl')
+        ..termWatches = [
+          [{'ok': false, 'error': 'terminal sessions are off'}],
+          [terms(['term:pty:on'])],
+        ];
+      await svc.start();
+      final m = ServiceMonitor(
+          readToken: () async => 'tok-tl',
+          port: svc.port,
+          retry: const Duration(milliseconds: 50),
+          rewatchGap: const Duration(milliseconds: 400));
+      m.start();
+      await until(() => termWatches(svc) == 1);
+      // Terminals turned on again right away: its changed comes inside the gap, and nothing else follows.
+      svc.pushChanged();
+      svc.pushChanged();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(termWatches(svc), 1);
+      await until(() => m.localTerms?.terms.single.id == 'term:pty:on');
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      expect(termWatches(svc), 2);
+      await svc.stop();
+      m.dispose();
+    });
+
+    test("an old service's unknown cmd is not asked again until reconnect", () async {
+      final svc = FakeService('tok-to');
+      await svc.start();
+      final m = ServiceMonitor(
+          readToken: () async => 'tok-to', port: svc.port, retry: const Duration(milliseconds: 50), rewatchGap: Duration.zero);
+      m.start();
+      await until(() => termWatches(svc) == 1);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      svc.pushChanged();
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(termWatches(svc), 1);
+      expect(m.localTerms, isNull);
+      // A restarted service may be a newer one: asked afresh.
+      svc.dropAll();
+      await until(() => termWatches(svc) == 2);
+      await svc.stop();
+      m.dispose();
+    });
+
+    test('termOpen and termFront send the right json', () async {
+      final svc = FakeService('tok-tf');
+      await svc.start();
+      final m = ServiceMonitor(readToken: () async => 'tok-tf', port: svc.port, retry: const Duration(milliseconds: 50));
+      m.start();
+      await until(() => m.status != null);
+      expect(await m.termOpen(app: 'Terminal', from: 'last'), 'term:pty:n');
+      expect(svc.received.where((r) => r['cmd'] == 'term_open').single, {'cmd': 'term_open', 'app': 'Terminal', 'from': 'last'});
+      await m.termFront('term:pty:a');
+      expect(svc.received.where((r) => r['cmd'] == 'term_front').single, {'cmd': 'term_front', 'term': 'term:pty:a'});
+      svc.replies['term_front'] = {'ok': false, 'error': 'not-found'};
+      await expectLater(
+          m.termFront('term:pty:a'), throwsA(isA<ServiceException>().having((e) => e.message, 'message', 'not-found')));
       await svc.stop();
       m.dispose();
     });
