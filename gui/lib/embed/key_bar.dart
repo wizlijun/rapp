@@ -17,6 +17,7 @@ import 'phrase_strip.dart';
 import 'composer_panel.dart' show seeThroughBox;
 import 'phrases.dart';
 import 'remote_session.dart';
+import '../quick/key_layout.dart';
 import 'session_port.dart';
 
 /// A repeating key starts repeating after this long held, then goes every [repeatEvery].
@@ -30,7 +31,7 @@ ModifierLatch keyLatchOf(MainState state, RemoteSession session) =>
     _isTerm(state, session) ? session.keyLatch : state.appLatch;
 
 List<List<String>> _rowsOf(MainState state, RemoteSession session) =>
-    keyBarRows(app: !_isTerm(state, session), more: state.prefs.keyBarMore);
+    keyBarRows(layout: KeyLayout.fallback, more: state.prefs.keyBarMore);
 
 /// Whether [session] is of the terminal kind: a text terminal or a terminal app. The kind picks which quick-area
 /// pref it follows.
