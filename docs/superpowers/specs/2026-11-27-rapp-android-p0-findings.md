@@ -30,9 +30,9 @@
 | 1 | 工具和空壳 | 过（两个模拟器都能装、能启动、截图有 `rApp P0 shell`；36 上第一次截图撞上 System UI 无响应弹框，再试后正常） | 不用 | 2026-11-27 |
 | 2 | `.so` | 过（九个名字都导出、四个 `LOAD` 段都是 `0x4000`、11.3 MB / strip 后 7.5 MB；依赖全部直接编过） | §6.2 小改：hub 的四个函数不用 `#[used] static` 就能导出 | 2026-11-27 |
 | 3 | 进程内 hub 和网络 | 过（两个模拟器都起得来 hub、出接入引导；放进 relay 和 key、加上这台 Mac 后在线；默认和只有 IPv4 两种状态下 relay 都解析成 `::ffff:` 映射并连上。relay 是 IPv4 字面地址，域名解析没测到；真 IPv6 一半模拟器上测不了，留给实机） | §6.1 小改（`AI_V4MAPPED` 那个问题不用回答）；§6.5 的 `systemOpen` 要安卓通道；§14.6 加一条 | 2026-11-27 |
-| 4 | 进程内会话、节流 | 过（门禁两轮在模拟器 34、模拟器 36、平板实机上都过：慢速 200 ms 时 `p0 fps` 平均 4.4–4.7，traffic `frames` 平均 28.9–29.6，后 6 次减前 6 次的 PSS 是 −10.6 / −5.9 / −7.9 MB（1 MB = 1000 dumpsys KB），都在 40 MB 以内；P0Moving 的动画面、颜色和 TextEdit 打字在 34、36、平板上都过，打字经写作条发出；**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（桌面会话）；会话自己断的原因是 hub 的 64 KiB 行上限，探查里绕过后会话撑过 250 s） | 待定；hub 读到超过 64 KiB 的回复行（`watch_load` 首行）就丢整条连接，这段是 main 上的共用代码；会话因此断开只在探查的进程内会话里见过，桌面没测；绕过后，建流时首行已超上限（Mac 服务起来约 55 分钟以后）余力就到不了安卓控制端，早于这个时间建流就到得了 | 2026-11-27 |
+| 4 | 进程内会话、节流 | 过，模拟器 36 的打字除外（门禁两轮在模拟器 34、模拟器 36、平板实机上都过：慢速 200 ms 时 `p0 fps` 平均 4.4–4.7，traffic `frames` 平均 28.9–29.6，后 6 次减前 6 次的 PSS 是 −10.6 / −5.9 / −7.9 MB（1 MB = 1000 dumpsys KB），都在 40 MB 以内；P0Moving 的动画面、颜色在 34、36、平板上都过；TextEdit 打 `p0probe` 在 34、平板上过，**在 36 上没过：Mac 文档收到的是 `p0robe`，少了第二个 p**，丢在哪一段没查明（第 4 节 Task 4G）；打字都经写作条发出；**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（桌面会话）；会话自己断的原因是 hub 的 64 KiB 行上限，探查里绕过后会话撑过 250 s） | 待定；hub 读到超过 64 KiB 的回复行（`watch_load` 首行）就丢整条连接，这段是 main 上的共用代码；会话因此断开只在探查的进程内会话里见过，桌面没测；绕过后，建流时首行已超上限（Mac 服务起来约 52 分钟以后，量到的区间是 51.5–55 分钟）余力就到不了安卓控制端，早于这个时间建流就到得了；Mac 服务重启后从头算 | 2026-11-27 |
 | 5 | 键盘和触控板 | 部分过。计划里的过关条件（Ctrl+C/V 在空白区到得了 App，`isControlPressed` 为真）在 34、36 上**过**（`uinput`，内核级，`ctrl=1`）；**平板（实机）上这一项没做，等用户用真键盘按**：键到得了，但 `input keycombination` 的字母 `metaState` 为 0、平板上 `uinput` 被拒，注入显示不了修饰键状态，真机上的过关没有确认。文本框有焦点、软键盘打开时（36 上重做）Ctrl+C/V/A/Z/X 都到、`ctrl=1`；原先「到不了」是点歪了位置（没点进文本框），结论撤回，Ctrl+SPACE 和单按字母的现象原因没查明。Meta 组合都被系统拿走，到不了 App。滚轮 `PointerScrollEvent kind=mouse`，34、36、平板都有；触控板双指和捏合模拟器上测不出，平板上没触控板，留给实机 | §14.6 加第 9 条（已加，含用户的一分钟真键盘检查） | 2026-11-27 |
-| 8 | 数字 | 过（大小只量了模拟器 34 的包，单位 MiB，1 MiB = 1,048,576 字节：APK 28.15；三个 `.so` 分别 7.88 / 11.04 / 7.18；34 上没开会话时 PSS 约 86.7 MiB，开着静态 2560×1600 桌面会话时 6 次平均约 215.2 MiB。Task 4G 的 PSS 单位是 MB = 1000 dumpsys KB：模拟器 36 没会话 89.1、静态单应用会话（TextEdit）158.6；平板没会话 209.0、静态单应用会话 445.7。release 动画面 30 s 平均 `p0 fps`：平板 26.1（屏幕 60 Hz）；模拟器 34 是 26.0、模拟器 36 是 25.1（模拟器，只作参考）。强制 relay 的 fps 没量） | 待定 | 2026-11-27 |
+| 8 | 数字 | 部分过：强制 relay 的 fps 没量；APK、`.so` 大小只量了模拟器 34 的包，模拟器 36 和平板没量（装的是同一个 APK）。量了的（大小只量了模拟器 34 的包，单位 MiB，1 MiB = 1,048,576 字节：APK 28.15；三个 `.so` 分别 7.88 / 11.04 / 7.18；34 上没开会话时 PSS 约 86.7 MiB，开着静态 2560×1600 桌面会话时 6 次平均约 215.2 MiB。Task 4G 的 PSS 单位是 MB = 1000 dumpsys KB：模拟器 36 没会话 89.1、静态单应用会话（TextEdit）158.6；平板没会话 209.0、静态单应用会话 445.7。release 动画面 30 s 平均 `p0 fps`：平板 26.1（屏幕 60 Hz）；模拟器 34 是 26.0、模拟器 36 是 25.1（模拟器，只作参考）。「静态」单应用会话里每秒仍到 3–7 帧，PSS 6 次之间摆动大，平均数只作大概） | 待定 | 2026-11-27 |
 
 ## 1 工具和空壳
 
@@ -198,7 +198,7 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 **结论：过。** hub 在安卓进程里起得来、读得懂数据根、出接入引导；放进 relay 和 key、加上这台 Mac 后，两台模拟器在「默认」和「只有 IPv4」两种状态下都把 relay 解析成 `::ffff:` 映射地址并经 relay 连上。注意这台 Mac 存的 relay 是 IPv4 字面地址，**relay 的域名解析这次没测到**；真 IPv6 和只有 IPv6 的网络也留给实机。
 ## 4 进程内会话
 
-**状态：过。** 门禁两轮（对照、慢速 200 ms）在模拟器 34、模拟器 36、平板实机上都做了，都过，见本节末「Task 4G」。**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（续做 1 的 `p0/t4e-desktop-static-34.png`，桌面会话）；36 和平板只看了 P0Moving 的画面在动、颜色对，没有和 Mac 屏幕逐处对照。之后探查不再开桌面会话，因为用户正通过桌面会话在用这台 Mac。下面续做、续做 2 里写「没做」的，都由 Task 4G 补上了（强制 relay 的 fps 除外，按安排不量）。
+**状态：过，模拟器 36 的打字除外。** 门禁两轮（对照、慢速 200 ms）在模拟器 34、模拟器 36、平板实机上都做了，都过，见本节末「Task 4G」。36 上 TextEdit 打 `p0probe`，Mac 收到的是 `p0robe`，少一个字符，没过；34、平板上打字过。**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（续做 1 的 `p0/t4e-desktop-static-34.png`，桌面会话）；36 和平板只看了 P0Moving 的画面在动、颜色对，没有和 Mac 屏幕逐处对照。之后探查不再开桌面会话，因为用户正通过桌面会话在用这台 Mac。下面续做、续做 2 里写「没做」的，都由 Task 4G 补上了（强制 relay 的 fps 除外，按安排不量）。
 
 做法：`gui/lib/embed/session_ffi.dart`（新）接 `rapp-android-ffi` 的 `rapp_session_open/send/ack/close/free`。帧包用 `asTypedList(finalizer: rapp_session_free)` 零拷贝交给 Dart。`ackedPackets` 是 `async*`：交出一个帧包，等 `slow`，再 `ack`。这样消费方暂停时不 ack，Rust 的闸也就不放下一帧。`SessionWorker.ffi` 和 `LinuxSessionPort.ffi` 是这两个共用文件里新加的构造函数，旧路径不动。`main_android.dart` 用 `LinuxSessionPort.ffi('librapp_android.so', downloads: () => '<数据根>/files/transfers', slow: P0_SLOW_MS)`。日志每秒打一行 `p0 fps=N`，traffic 事件打 `p0 traffic frames=N`。
 
@@ -246,7 +246,7 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 
 **绕过留下没修的：** 它只保住了连接，`watch_load` 照样失败，大约每分钟一次。余力（负载）数据要等真修法。
 
-**更正（Task 4G）：** 上面原来写的「余力一直到不了安卓控制端」不对。首行的长短跟着 Mac 服务的运行时长涨：历史最多 720 个点（1 小时），点少的时候首行在上限以内，余力是到得了的。Task 4G 里 Mac 服务 08:02:39Z 起来，用 `scratchpad/tools/load-size.py`（只读连本机 IPC，发 `{"cmd":"load","history":true}`）量首行：08:54:10Z 是 65,477 字节、618 个点（还在 65,536 以内）；08:57:40Z 是 69,651 字节、660 个点（超了）。所以大约在服务起来 55 分钟以后才撞上限。`watch_load` 是一条流（`rust/hub/src/load.rs` 的 `follow`）：只有建流时的第一行带历史，之后每行只是一个点。所以看的是**建流那一刻**的历史长短：平板的 hub 在 08:3x 起来、那时首行还短，09:02:36Z 全景里仍看得到余力一行（`p0/t4g-tab-ov.png`，「内存 剩 27%」）；34、36 在 09:14–09:26Z 才连上，首行已超上限，看不到。结论：建流时 Mac 服务起来不到约 55 分钟，余力到得了、之后一直在；晚于这个时间建流就到不了，每分钟重试一次也一样失败，要等真修法。
+**更正（Task 4G）：** 上面原来写的「余力一直到不了安卓控制端」不对。首行的长短跟着 Mac 服务的运行时长涨：历史最多 720 个点（1 小时），点少的时候首行在上限以内，余力是到得了的。Task 4G 里 Mac 服务 08:02:39Z 起来，用 `scratchpad/tools/load-size.py`（只读连本机 IPC，发 `{"cmd":"load","history":true}`）量首行：08:54:10Z 是 65,477 字节、618 个点（还在 65,536 以内）；08:57:40Z 是 69,651 字节、660 个点（超了）（`p0/t4g-load-size.txt`，事后从终端输出抄下来的）。算一下：08:54:10Z 离服务起来 3,091 s（51.5 分钟）、618 个点，08:57:40Z 离起来 3,301 s（55.0 分钟）、660 个点，都是每 5.00 s 一个点；两次之间每多一个点多 4,174 / 42 ≈ 99 字节，所以 619 个点就约 65,576 字节、超过 65,536。撞上限大约在服务起来 **52 分钟**（约 619–620 个点），量到的能确定的区间是 51.5–55 分钟。历史存在服务进程的内存里（`rust/service/src/load/rules.rs` 的 `ring: VecDeque`，最多 `KEEP = 720` 个），Mac 服务一重启历史就清空、这 52 分钟从头算：09:47:12Z Mac rApp 自动升级（见下面「Mac 自动升级」）就是一次重启（这条是读代码得出的，重启后没再量首行）。`watch_load` 是一条流：只有建流时的第一行带历史，之后每行只是一个点（**读代码推断**：hub 一侧 `rust/hub/src/load.rs` 的 `follow` 先交第一行再循环读；service 一侧 `rust/service/src/load/serve.rs:59` 注释写第一行是回复，之后每个采样一行。没在新起的服务上实测过）。所以看的是**建流那一刻**的历史长短：平板的 hub 在 08:3x 起来、那时首行还短，09:02:36Z 全景里仍看得到余力一行（`p0/t4g-tab-ov.png`，「内存 剩 27%」）；34、36 在 09:14–09:26Z 才连上，首行已超上限，看不到。结论：建流时 Mac 服务起来不到约 52 分钟，余力到得了、之后一直在；晚于这个时间建流就到不了，每分钟重试一次也一样失败，要等真修法。
 
 **慢速开关改成运行时读。** `ackedPackets` 加了 `slowNow`，每帧重新读；`FfiSession` 每秒用 libc 的 `__system_property_get` 读一次系统属性 `debug.rapp.p0_slow_ms`。这样同一个包、同一个会话里，`adb -s emulator-5554 shell setprop debug.rapp.p0_slow_ms 200` 和 `… 0` 就能在慢速和对照之间切换，不用重装、不用断会话（断会话会触发 Mac 自动锁屏）。日志在切换时打 `p0 slow=Nms`。新测试先红后绿：`p0/t4c-red.txt`、`p0/t4c-green.txt`。
 
@@ -293,7 +293,7 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 
 教训：只要 Mac 上没有别的会话，探查结束自己的会话就会锁屏。所以要重开画面源，得先开一个新会话再关旧的。
 
-**没做**（Mac 锁着；除强制 relay 的 fps 外，后来都由 Task 4G 做完，见本节末）：
+**没做**（Mac 锁着；除强制 relay 的 fps 外，后来都由 Task 4G 做了，见本节末；36 的打字做了但没过，少一个字符）：
 - 门禁两轮（对照、慢速 200 ms）；
 - release 30 s 平均 fps；
 - 强制 relay 的 fps；
@@ -328,10 +328,24 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 |---|---|---|---|---|
 | P0Moving 的动画面、颜色 | 模拟器 36 | 色块在动，颜色对。强制 relay 和局域网各看了一次 | 过 | `p0/t4g-moving-36-relay.png`、`p0/t4g-moving-36.png` |
 | 同上 | 平板（实机） | 色块在动，颜色对，局域网 | 过 | `p0/t4g-moving-tab.png` |
-| TextEdit 里打 `p0probe` | 模拟器 36 | 点文档会弹出写作条。`adb -s emulator-5554 shell input text 'p0probe'` 进了写作条，回车（keyevent 66）只在写作条里换行、不发送，点写作条的发送按钮才发到 Mac。用 osascript 读 Mac 上的文档，内容是 `p0probe` 加一个换行。截图里文档那行看起来是 `p0robe`，原因没查，以 Mac 上读到的为准 | 过 | `p0/t4g-p0probe-36.png` |
-| 同上 | 平板（实机） | 见下一行。文档显示 `p0probe`，osascript 读到的也是 | 过 | `p0/t4g-p0probe-tab.png`、`p0/t4g-tab-x1.png` |
+| TextEdit 里打 `p0probe` | 模拟器 36 | 点文档会弹出写作条。`adb -s emulator-5554 shell input text 'p0probe'` 进了写作条，回车（keyevent 66）只在写作条里换行、不发送，点写作条的发送按钮才发到 Mac。字到了 Mac 的文档里，但**少了第二个 p**：osascript 读回来是 `p0robe` 加一个换行（`od -c`：`p 0 r o b e \n`），截图里文档那行也是 `p0robe`，两者一致。少的这个字是在 `input text` 送键、写作条收字、还是发到 Mac 这几段里丢的，没查明（经过见表下） | 没过（少一个字符） | `p0/t4g-p0probe-36.png` |
+| 同上 | 平板（实机） | 要绕开拼音输入法，经过见表下。文档显示 `p0probe`，osascript 读到的也是 | 过 | `p0/t4g-p0probe-tab.png`、`p0/t4g-tab-x1.png` |
 
-平板和模拟器不同：平板的输入法是荣耀拼音，`input text` 打进去的字母会被拼成候选（`p0/t4g-type-tab.png`–`t4g-type-tab5.png`）。绕法：先 `input text 'p0'`，再 `input text 'probe'`，keyevent 66 把原字母上屏，再一个 keyevent 66 把写作条里的字发到 Mac。真键盘、真用户打字没试。
+**模拟器 36 打字的经过（UTC）。**
+- 09:43:14Z 用 osascript 把文档清空。09:46:14Z 在 36 上开 TextEdit 单应用会话。
+- 第一次：09:46:42Z 点文档（`input tap 1200 700`），`input text 'p0probe'`，3 s 后截图、读文档；09:47:13Z keyevent 66，读回来只有换行（空文档）；09:47:36Z 点发送按钮，09:47:51Z 起每 5 s 读一次共 6 次，都是空的。这一次正赶上 09:47:11Z Mac 服务重启（下面「Mac 自动升级」），没到 Mac。截图文件被后面覆盖了，这一次写作条里是什么没有留证据。
+- 09:48:54Z 点「重连」，TextEdit 会话重新开起来。
+- 第二次（唯一到了 Mac 的一次）：09:49:18Z 点文档，等 1.5 s，`input text 'p0probe'`，等 1 s，点发送按钮，之后每 2 s 读一次文档，09:49:24Z 读到 `p0robe` 加换行；读完才截图，就是现在的 `p0/t4g-p0probe-36.png`，显示 `p0robe`。截图和读回来的是同一次，不是画面慢了一帧。
+- 第二次没在点发送前截写作条，所以不知道写作条里是不是已经少了 p。
+- 不重做：要开到 Mac 的会话，而 Mac 现在锁着。
+
+平板和模拟器不同：平板的输入法是荣耀拼音，`input text` 打进去的字母会被拼成候选。经过：
+- 第一次 `input text 'p0probe'`：写作条里是 `p0`，拼音候选栏是 `robe`，**这里也少了第二个 p**，还没发送、和 Mac 无关（`p0/t4g-type-tab.png`）。
+- 用退格（keyevent 67）清掉拼音、留下 `p0`（`t4g-type-tab4.png`），再 `input text 'probe'`。
+- 第一个 keyevent 66：拼音输入法把原字母 `probe` 上屏到写作条，写作条变成 `p0probe`，不发送（`t4g-type-tab5.png`）。
+- 第二个 keyevent 66：写作条里的 `p0probe` 发到 Mac，osascript 读回来是 `p0probe`（`t4g-p0probe-tab.png`）。
+- 和 36 不一样：36 上 keyevent 66 只在写作条里换行，要点发送按钮；平板上回车直接发送。为什么不一样没查。
+- 两台都是 `p0` 后面那个 p 没了，34 上（第 4 节前面）同样的 `input text 'p0probe'` 没少字。真键盘、真用户打字没试。
 
 **B 门禁。**
 - 命令：每台用 `adb -s <目标> shell setprop debug.rapp.p0_slow_ms 0`（对照）或 `200`（慢速），等 30 s，再每 10 s 取一次 `dumpsys meminfo com.rapphub.rapp` 的 `TOTAL PSS` 和最后几行 `p0 fps`、`p0 traffic`，共 18 次（`scratchpad/tools/gate-run.sh`，里面调 `sample.sh <out> 18 10`）。fps 和 frames 的平均取 18 次采样里记下的 54 个秒。
@@ -349,7 +363,13 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 | 模拟器 36 | 对照 0 ms | 09:30:40–09:34:07 | 192.1 MB | 194.2 MB | +2.0 MB | 26.0 | 29.8 | — | `p0/t4g-ctl-36.txt` |
 | 模拟器 36 | 慢速 200 ms | 09:34:07–09:37:34 | 182.9 MB | 175.0 MB | −7.9 MB | 4.6 | 29.5 | 过 | `p0/t4g-slow-36.txt` |
 
-平板和模拟器不同：平板的 PSS 高得多，门禁时 470–492 MB，模拟器 175–202 MB；对照轮平板的 fps 23.4，比两个模拟器（25.4、26.0）低一点。慢速轮三台表现一样。
+平板和模拟器不同：平板的 PSS 高得多，门禁时 470–492 MB，模拟器 175–202 MB；对照轮平板的 fps 平均 23.4，比两个模拟器（25.4、26.0）低，但**不说明平板画得慢**：
+- `p0/t4g-ctl-tab.txt` 第 3–5 次采样（第 22–45 行，08:54:17–08:54:40Z）的 9 秒里 `p0 fps` 是 5、3、2、4、5、9、8、8、12，同一时间 traffic `frames` 也只有 4、3、2、6、3、8、7、9、9：是 Mac 那边来的帧少了，不是平板画不过来。
+- 前两次采样是 24–29，第 6–18 次是 22–30。去掉第 3–5 次，其余 45 秒平均 26.9。
+- 平板单独量的 30 s fps 是 26.1（第 8 节），和模拟器差不多。
+- 那 9 秒为什么来的帧少没查。同一时间 08:54:10Z 我在 Mac 上跑了一次量 `watch_load` 首行的脚本，这只是时间上碰巧挨着，没证实有关系。
+
+慢速轮三台表现一样。
 
 **34 的第一轮对照作废。** 同一个 app 有两个控制端时，后开的会顶掉先开的（`session_end reason "taken over"`）。被顶掉的安卓控制端大约 2 分钟后会自己重连、再顶回去：平板 08:47:28Z 被 34 顶掉，08:49:36Z 回来，34 那轮因此被打断（`p0/t4g-ctl-34-void.txt`，不引用里面的数）。之后都先结束另一台上的会话，再开下一台。
 
@@ -360,7 +380,7 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 - 会话结束后顶栏显示「P0 Moving 意外结束：closed」，其实是我从 ⋯ →「结束会话」→「再点一次确认」正常结束的。确认要在一两秒内点，晚了就失效。
 - P0Moving 的日志在 09:01–09:02Z（门禁轮之后）有两次把焦点还给 `com.apple.loginwindow`，窗口位置没变。
 
-**Mac 自动升级。** 09:47:09Z Mac 上的 rApp 下载了 0.15.66，09:47:11Z 服务停下，09:47:12Z 新版本起来（`update_applied` 0.15.64 → 0.15.66）。所有会话都以 `service stopped` 结束，包括我的 P0Moving 和 TextEdit，也包括几个不是我开的终端会话和一个桌面会话。所以 09:47:11Z–09:48:54Z 之间 Mac 上一个会话都没有，这不是我关的；Mac 没锁。36 上显示 `host disconnected: failed to fill whole buffer`。断开的卡片上点「结束会话」和「再点一次确认」都没用（和上面「界面上看到的问题」一样）；点「重连」，再从 ⋯ 结束就可以了。第一次在 36 上打字正赶上这次重启，丢了；重连后又打了一次（TextEdit 会话 09:48:54Z 开）。
+**Mac 自动升级。** 09:47:09Z Mac 上的 rApp 下载了 0.15.66，09:47:11Z 服务停下，09:47:12Z 新版本起来（`update_applied` 0.15.64 → 0.15.66）。所有会话都以 `service stopped` 结束，包括我的 P0Moving 和 TextEdit，也包括几个不是我开的终端会话和一个桌面会话。所以 09:47:11Z–09:48:54Z 之间 Mac 上一个会话都没有，这不是我关的；Mac 没锁。36 上显示 `host disconnected: failed to fill whole buffer`。断开的卡片上点「结束会话」和「再点一次确认」都没用（和上面「界面上看到的问题」一样）；点「重连」，再从 ⋯ 结束就可以了。第一次在 36 上打字正赶上这次重启，丢了；重连后又打了一次（TextEdit 会话 09:48:54Z 开），这次到了 Mac，但收到的是 `p0robe`（见上面「模拟器 36 打字的经过」）。
 
 **锁屏和顶掉次数（Task 4G）。**
 - 自动锁屏 1 次，是最后一次关会话：09:55:14Z 关掉模拟器 36，09:55:44Z 它的 TextEdit 会话 `connection lost`，09:55:54Z `auto_lock`。这一次按安排接受。
@@ -460,7 +480,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 ## 7 自己装自己
 ## 8 数字
 
-**状态：过。** release 30 s fps、模拟器 36、平板实机由 Task 4G 补上了，见本节末「Task 4G」；强制 relay 的 fps 按安排不量。大小只量了模拟器 34 的 release 包（续做时重编的带绕过的包，和上午那个差 1,072 字节，都是 `librapp_android.so` 多出来的）。
+**状态：部分过。** release 30 s fps、模拟器 36、平板实机的 PSS 由 Task 4G 补上了，见本节末「Task 4G」；没量的：强制 relay 的 fps（按安排不量），模拟器 36 和平板上的 APK、`.so` 大小。大小只量了模拟器 34 的 release 包（续做时重编的带绕过的包，和上午那个差 1,072 字节，都是 `librapp_android.so` 多出来的）。
 
 - release APK：`flutter build apk --release --target-platform android-arm64`，大小 29,522,135 字节（28.15 MiB）。本节 MiB = 1,048,576 字节；`dumpsys meminfo` 的 KB 是 1,024 字节。
 - `unzip -lv` 看三个 `.so`（都是 Stored，不压缩）：
@@ -498,6 +518,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 **PSS。**
 - 命令：`adb -s <目标> shell dumpsys meminfo com.rapphub.rapp` 取 `TOTAL PSS`，每 10 s 一次共 6 次（`scratchpad/tools/sample.sh <out> 6 10`）。
 - **静态 PSS 是单应用会话（TextEdit，文档不动）的**，和上面模拟器 34 那个 2560×1600 桌面会话的 PSS 不是一回事，不能直接比。
+- 「静态」不是没有帧：文档不动时每秒仍到几帧，采样时记下的 `p0 fps` 在 36 上是 4–6，平板上是 3–7。6 次之间摆动也大：36 是 140.2–173.3 MB，平板是 415.9–463.4 MB。平均数只作大概。
 
 | 目标 | 情形 | 6 次（KB） | 平均 | 证据 |
 |---|---|---|---:|---|
@@ -525,7 +546,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 | `gui/android/.../MainActivity.kt` | `rapp/android` 通道：`paths`（`filesDir`、`cacheDir`）、`deviceName`（写死 `rApp P0 探查`） | 数据根和设备名 | 安卓平台通道；`deviceName` P1 取真名（`Settings.Global.DEVICE_NAME` 之类） |
 | `gui/android/app/src/main/AndroidManifest.xml` | `INTERNET`、`ACCESS_NETWORK_STATE`、`allowBackup="false"` | 连网；身份密钥不进备份 | §6.4 Kotlin 壳的清单（还差 `dataExtractionRules`、网络安全配置） |
 | `gui/lib/embed/session_ffi.dart` `ackedPackets(slowNow:)`、`p0SlowFromProperty()`、`FfiSession._readSlow()`、`_count` 里的 `_size` | ack 前的等待每帧读 `slowNow()`；每秒从系统属性 `debug.rapp.p0_slow_ms` 读一次（`__system_property_get`）；属性没设或不是数字时用 `main_android.dart` 的 `P0_SLOW_MS`。`p0 fps` 行带上帧头里的宽高（`size=WxH`） | 同一个会话里切换慢速和对照，不断会话（断了 Mac 会自动锁屏） | 不进 P1（探查用）；ack 本身属于 §6.3 `SessionLink` |
-| `rust/hub/src/link.rs` `request()` 两处 + 新函数 `keeps_link`、`op_name` | 连接还开着、错误是 `line longer than` 时只交回错误、记 `p0_keep_link`（带请求名 `op`），不 `forget` / `forget_if_dead` | `watch_load` 首行超 64 KiB 时 hub 丢整条连接（第 4 节续做）。丢连接这段是所有平台共用的 hub 代码；会话因此全断只在探查的进程内会话里见过，桌面没测 | 不属于 §6.3 的任何安卓接口，**不进 P1，真修法在 main**（共用的 hub：`rust/hub`、`rust/net`、service 的 `watch_load` 回复）。撞上的只有 `watch_load`，首行 75,125 字节（第 4 节续做 2）。绕过之后，建流时 `watch_load` 首行若已超上限（Mac 服务起来约 55 分钟以后，历史点超过约 620 个），就约每分钟失败一次，余力到不了安卓控制端；建流时历史还短就到得了、之后一直在（第 4 节「更正」）。要等真修法 |
+| `rust/hub/src/link.rs` `request()` 两处 + 新函数 `keeps_link`、`op_name` | 连接还开着、错误是 `line longer than` 时只交回错误、记 `p0_keep_link`（带请求名 `op`），不 `forget` / `forget_if_dead` | `watch_load` 首行超 64 KiB 时 hub 丢整条连接（第 4 节续做）。丢连接这段是所有平台共用的 hub 代码；会话因此全断只在探查的进程内会话里见过，桌面没测 | 不属于 §6.3 的任何安卓接口，**不进 P1，真修法在 main**（共用的 hub：`rust/hub`、`rust/net`、service 的 `watch_load` 回复）。撞上的只有 `watch_load`，首行 75,125 字节（第 4 节续做 2）。绕过之后，建流时 `watch_load` 首行若已超上限（Mac 服务起来约 52 分钟以后，历史点超过约 619 个；服务重启后从头算），就约每分钟失败一次，余力到不了安卓控制端；建流时历史还短就到得了、之后一直在（第 4 节「更正」）。要等真修法 |
 | `rust/net/src/quic.rs` `pub use sys::getaddrinfo_v6;` | 公开给探查函数 | `rapp_p0_resolve` 要单独看这一支 | 不进 P1（探查用） |
 | `rust/android-ffi` `rapp_p0_resolve`；`Cargo.toml` 加 `rapp-net`、`tokio` | 返回 `getaddrinfo_v6` 和 `resolve_for(dual)` 两行 | 第 3 项的解析探查 | 不进 P1（探查用） |
 | `gui/lib/p0/p0_pages.dart` | `P0_PAGE=resolve` 页；`P0_PAGE=keys` 页（`KeysPage`、`formatKeyEvent`、`formatPointerEvent`）；`speech`、`install` 占位 | 探查页 | 不进 P1 |
@@ -545,3 +566,4 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 - §14.6 加一条：双栈的真 IPv6（全局地址、只有 IPv6 的网络）模拟器上测不了，实机上连一次 relay（已加）。
 - §14.6 第 9 条（已加）：触控板双指滚动、捏合在模拟器上测不了；平板上 Ctrl+C/V 的 `isControlPressed` 要用户用真键盘按一次（P0 里平板只能注入，没证实）。文本框里的 Ctrl 快捷键：软键盘打开时 36 上到得了 `HardwareKeyboard`（第 5 节），先前「到不了」的说法已撤回。
 - 安卓入口的日志不能用 `stderr`（logcat 看不到），用 `debugPrint` 或写文件。
+- §14.6 加一条（P1 待查）：`adb shell input text` 快速送字时会不会少字。Task 4G 里 `input text 'p0probe'` 在模拟器 36 上到 Mac 的是 `p0robe`，平板上拼音候选里也少了同一个 p；34 上没少。要查清是送键、写作条收字还是发到 Mac 哪一段丢的（第 4 节 Task 4G）。
