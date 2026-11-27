@@ -38,7 +38,7 @@ rApp 是远程控制软件，macOS 版在用，Mac 发版 session 盯着 `main` 
 这一段只修 Swift 的样本生成器，**不修 Rust 草稿**，Rust 留给 Windows 那边。
 
 1. 在两个 worktree 里各 `git merge main`。
-2. 做探针 C1（计划 P 任务 2）：Rust 的压缩结果能不能和 Swift 逐字节相同。计划 B 任务 3 要用它的结论。结果写进 `docs/superpowers/specs/2026-11-26-rapp-windows-probe-results.md`。探针的规矩照计划 P：代码只放在分支 `probe/windows-C1` 上，不合进 `main`。
+2. 做探针 C1（计划 P 任务 2）：Rust 的压缩结果能不能和 Swift 逐字节相同。计划 B 任务 3 要用它的结论。结果写进 `docs/superpowers/specs/2026-11-26-rapp-windows-probe-results.md`。探针的规矩照计划 P：代码只放在分支 `probe/windows-c1` 上，不合进 `main`。
 3. 在 `feat/windows-host-core` 上生成样本：`RAPP_WRITE_FIXTURES=1 swift test --filter 'Fixtures/'`。
    - 生成器在 `Tests/RappCoreTests/HostCoreFixtures/` 下，是没编译过的草稿，先修到编得过。
    - 生成器只调用 `Sources/RappCore/` 的代码。符号在测试里看不到时照计划 B 任务 2 的办法绕，**不改 Swift 的访问级别**，不改 `Sources/`。
