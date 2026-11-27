@@ -63,7 +63,7 @@ void main() {
     await tapK(tester, 'layout-delete');
     await tapK(tester, 'layout-add-1');
     await tapK(tester, 'layout-pick-k:search');
-    const row0 = ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up', 'pgup'];
+    const row0 = ['tab', 'esc', 'cc', 'bksp', 'enter', 'up', 'pgup'];
     const row1 = ['copy', 'paste', 'cmd', 'ctrl', 'pgdn', 'left', 'down', 'right', 'k:search'];
     expect(rows(), [row0, row1]);
     // The real bar draws exactly this (⋯ closes row 1).
@@ -81,17 +81,17 @@ void main() {
     await open(tester);
     await tapK(tester, 'layout-cell-0-0'); // Tab
     await tapK(tester, 'layout-pick-esc'); // esc sits at 0-2
-    expect(rows()[0], ['esc', 'stab', 'cc', 'bksp', 'enter', 'up']);
+    expect(rows()[0], ['esc', 'cc', 'bksp', 'enter', 'up']);
     expect(rows()[1], KeyLayout.fallback.rows[1]);
-    // Across rows: ⇧Tab replaced by ⌘C, which leaves row 2.
+    // Across rows: ⌃C replaced by ⌘C, which leaves row 2.
     await tapK(tester, 'layout-cell-0-1');
     await tapK(tester, 'layout-pick-copy');
-    expect(rows()[0], ['esc', 'copy', 'cc', 'bksp', 'enter', 'up']);
+    expect(rows()[0], ['esc', 'copy', 'bksp', 'enter', 'up']);
     expect(rows()[1], ['paste', 'cmdt', 'cmd', 'ctrl', 'pgup', 'pgdn', 'left', 'down', 'right']);
     // Moving forward in the same row: the later duplicate goes, the replaced cell keeps its place.
     await tapK(tester, 'layout-cell-0-0');
     await tapK(tester, 'layout-pick-up');
-    expect(rows()[0], ['up', 'copy', 'cc', 'bksp', 'enter']);
+    expect(rows()[0], ['up', 'copy', 'bksp', 'enter']);
     final all = [...rows()[0], ...rows()[1]];
     expect(all.toSet().length, all.length);
   });
@@ -181,7 +181,7 @@ void main() {
     final to = tester.getCenter(k('layout-cell-0-3'));
     await tester.timedDragFrom(from, to - from, const Duration(milliseconds: 400));
     await tester.pumpAndSettle();
-    expect(rows()[0], ['stab', 'esc', 'cc', 'tab', 'bksp', 'enter', 'up']);
+    expect(rows()[0], ['esc', 'cc', 'bksp', 'tab', 'enter', 'up']);
     expect(rows()[1], KeyLayout.fallback.rows[1]);
     // Dragged towards the other row: nothing crosses (the drag stays horizontal, and a drop is taken only in its own row).
     final f2 = tester.getCenter(k('layout-cell-0-0'));
@@ -189,6 +189,6 @@ void main() {
     await tester.timedDragFrom(f2, t2 - f2, const Duration(milliseconds: 400));
     await tester.pumpAndSettle();
     expect(rows()[1], KeyLayout.fallback.rows[1]);
-    expect(rows()[0].toSet(), {'tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up'});
+    expect(rows()[0].toSet(), {'tab', 'esc', 'cc', 'bksp', 'enter', 'up'});
   });
 }

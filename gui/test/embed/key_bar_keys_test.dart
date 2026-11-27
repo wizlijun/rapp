@@ -5,10 +5,10 @@ import 'package:rapp/embed/modifier_latch.dart';
 import 'package:rapp/quick/key_layout.dart';
 
 void main() {
-  test('first row: Tab ⇧Tab Esc ⌃C ⌫ ⏎, then ↑ and ⋯ at the end; more adds the second row, ← ↓ → under ↑ ⋯', () {
+  test('first row: Tab Esc ⌃C ⌫ ⏎, then ↑ and ⋯ at the end; more adds the second row, ← ↓ → under ↑ ⋯', () {
     for (final app in [false, true]) {
       expect(keyBarRows(layout: KeyLayout.fallback, more: false), [
-        ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more'],
+        ['tab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more'],
       ], reason: 'app: $app');
       expect(keyBarRows(layout: KeyLayout.fallback, more: true)[1],
           ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'pgup', 'pgdn', 'left', 'down', 'right'],

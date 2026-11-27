@@ -133,7 +133,7 @@ void main() {
     testWidgets('mixed list: tags, subtitles, and the note', (tester) async {
       await open(tester);
       expect(k('phrase-cmd-tag-0'), findsOneWidget);
-      expect(k('phrase-cmd-tag-6'), findsNothing);
+      expect(k('phrase-cmd-tag-7'), findsNothing);
       expect(find.textContaining('Claude Code /clear · Codex /new'), findsOneWidget);
       expect(find.textContaining('Codex ⌃R'), findsOneWidget);
       expect(find.text('命令只在文字终端里认出 Claude Code、Codex 等工具时出现。'), findsOneWidget);
@@ -144,26 +144,26 @@ void main() {
       await tester.drag(k('phrase-row-7'), const Offset(-600, 0));
       await tester.pumpAndSettle();
       expect([for (final c in cmds()) c.id], builtinCmdOrder);
-      expect(s.quick.phrases.take(6).every((e) => e is StripCmd), isTrue);
+      expect(s.quick.phrases.take(7).every((e) => e is StripCmd), isTrue);
       expect(s.quick.phrases, hasLength(defaultStripItems.length - 1));
     });
 
     testWidgets('editing a phrase keeps the commands', (tester) async {
       await open(tester);
-      await tester.tap(k('phrase-row-6'));
+      await tester.tap(k('phrase-row-7'));
       await tester.pumpAndSettle();
       await tester.enterText(k('phrase-text'), '改了');
       await tester.tap(k('phrase-save'));
       await tester.pumpAndSettle();
       expect([for (final c in cmds()) c.id], builtinCmdOrder);
-      expect(s.quick.phrases[6], const Phrase('改了'));
+      expect(s.quick.phrases[7], const Phrase('改了'));
     });
 
     testWidgets('dragging a phrase before a command reorders the whole list', (tester) async {
       await open(tester);
-      final first = s.quick.phrases[6];
-      final handle = find.descendant(of: k('phrase-row-6'), matching: find.byIcon(Icons.drag_handle));
-      await tester.drag(handle, const Offset(0, -6 * 72.0 - 40));
+      final first = s.quick.phrases[7];
+      final handle = find.descendant(of: k('phrase-row-7'), matching: find.byIcon(Icons.drag_handle));
+      await tester.drag(handle, const Offset(0, -7 * 72.0 - 40));
       await tester.pumpAndSettle();
       expect(s.quick.phrases.first, first);
       expect(s.quick.phrases[1], isA<StripCmd>());

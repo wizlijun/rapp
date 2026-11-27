@@ -82,13 +82,13 @@ void main() {
 
   testWidgets('edit keeps the id; swipe deletes; drag reorders', (tester) async {
     await open(tester);
-    await tester.tap(k('keys-row-mode'));
+    await tester.tap(k('keys-row-bg'));
     await tester.pumpAndSettle();
-    await tester.enterText(k('keyact-name'), '换模式');
+    await tester.enterText(k('keyact-name'), '换后台');
     await tapK(tester, 'keyact-save');
-    final m = s.quick.keys.firstWhere((a) => a.id == 'mode');
-    expect(m.label, '换模式');
-    expect(m.chord, const Chord('tab', shift: true));
+    final m = s.quick.keys.firstWhere((a) => a.id == 'bg');
+    expect(m.label, '换后台');
+    expect(m.chord, const Chord('b', ctrl: true));
     expect(s.quick.keys.map((a) => a.id).toList(), builtinKeyActions.map((a) => a.id).toList());
 
     s.toggleStar('k:clear');
@@ -98,8 +98,8 @@ void main() {
     expect(s.quick.keys.any((a) => a.id == 'clear'), isFalse);
     expect(s.quick.stars, isNot(contains('k:clear')));
 
-    // search, mode, expand, bg, newtab are left; drag search down past two rows.
-    expect(s.quick.keys.map((a) => a.id).toList(), ['search', 'mode', 'expand', 'bg', 'newtab']);
+    // search, expand, bg, newtab are left; drag search down past two rows.
+    expect(s.quick.keys.map((a) => a.id).toList(), ['search', 'expand', 'bg', 'newtab']);
     final rowH = tester.getRect(k('keys-row-search')).height;
     final handle = find.descendant(of: k('keys-row-search'), matching: find.byIcon(Icons.drag_handle));
     final g = await tester.startGesture(tester.getCenter(handle));
@@ -110,7 +110,7 @@ void main() {
     await tester.pump();
     await g.up();
     await tester.pumpAndSettle();
-    expect(s.quick.keys.map((a) => a.id).toList(), ['mode', 'expand', 'search', 'bg', 'newtab']);
+    expect(s.quick.keys.map((a) => a.id).toList(), ['expand', 'bg', 'search', 'newtab']);
   });
 
   testWidgets('edit keeps per (and the id) on the page', (tester) async {

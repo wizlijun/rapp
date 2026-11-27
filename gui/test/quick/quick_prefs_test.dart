@@ -17,7 +17,7 @@ void main() {
     final q = QuickPrefs.migrate(defaultStripItems);
     expect(q.phrases.whereType<StripCmd>().map((c) => c.id), isNot(contains('search')));
     expect(q.phrases.length, defaultStripItems.length - 1);
-    expect(q.keys.map((a) => a.id), ['search', 'mode', 'expand', 'bg', 'clear', 'newtab']);
+    expect(q.keys.map((a) => a.id), ['search', 'expand', 'bg', 'clear', 'newtab']);
     expect(q.phrases.whereType<Phrase>().every((p) => p.id != null), isTrue);
     for (final n in [...quickDocNames, 'usage']) {
       expect(q.atOf(n), 0);

@@ -25,7 +25,7 @@
 
 ```
 ┌ 继续  搜历史  进度  跑下测试 …→            │按键▾│常用语▾│ ┐  ← 第一行（常用语条）
-┌ Tab ⇧Tab Esc ⌃C ⌫ ⏎ ↑ ⋯                               ┐  ← 键盘布局 第 1 行
+┌ Tab Esc ⌃C ⌫ ⏎ ↑ ⋯                               ┐  ← 键盘布局 第 1 行
 ┌ ⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →                          ┐  ← 键盘布局 第 2 行（⋯ 展开）
 ```
 
@@ -37,7 +37,7 @@
 | 条里的内容 | `UiPrefs.phrases`（`gui/lib/ui/prefs.dart:93`）：`StripItem` 列表，混着 `Phrase`（文字）和 `StripCmd`（命令，按 AI 工具发不同的文字或键，`gui/lib/embed/strip_cmds.dart`）。内置 6 条命令，其中「搜历史」发 ⌃R（`CmdKey('cr')`），其余发文字 |
 | 显示条件 | `phraseStripShown`（`gui/lib/embed/key_bar.dart:56`）：`phrase_strip` 开、是文字终端或 App 配置开了常用语条、且有能显示的项 |
 | 管理页 | `gui/lib/pages/phrases_page.dart`：开关、拖动排序、左滑删除、编辑、新增、恢复默认 |
-| 快捷键盘 | `keyBarRows`（`gui/lib/embed/key_bar_keys.dart:65`）写死：第 1 行 `tab stab esc cc bksp enter up more`，`⋯`（`more`，存 `key_bar_more`）展开第 2 行 `copy paste cmdt cmd ctrl pgup pgdn left down right`。10 列网格，`keyBarTail` 把末尾的 ↑ / ← ↓ → 排成倒 T |
+| 快捷键盘 | `keyBarRows`（`gui/lib/embed/key_bar_keys.dart:65`）写死：第 1 行 `tab stab esc cc bksp enter up more`（今天的样子；新默认去掉 `stab`，见 §8、§6.2），`⋯`（`more`，存 `key_bar_more`）展开第 2 行 `copy paste cmdt cmd ctrl pgup pgdn left down right`。10 列网格，`keyBarTail` 把末尾的 ↑ / ← ↓ → 排成倒 T |
 | 键的定义 | `barKeys`（`key_bar_keys.dart:30`）：每个键有终端的 wire 名和 macOS 键码。终端 wire 名支持任意 `Ctrl-` `Alt-` `Shift-` 前缀加键名或字符（`rust/term/src/keys.rs:46`） |
 | 存哪 | 全部在每台设备自己的 `gui.json`，不同步 |
 | rapp-state | `services/state/`：HTTP（`/v1/health` `/v1/state` `/v1/watch` 等，`services/state/api/http.md`），存盘在 `local/state/`。app 一侧 `gui/lib/state/state_sync.dart`（发现、连接、watch）、`state_link.dart`（HTTP+SSE 客户端） |
@@ -122,11 +122,12 @@ KeyAction { id, label, chord, per? }
 | id | 名字 | 键 | 说明 |
 |---|---|---|---|
 | `search` | 搜历史 | ⌃R | 从内置命令里搬过来（今天是 `builtinCmds['search']`），id 不变，星标和次数跟着走 |
-| `mode` | 切模式 | ⇧Tab | |
 | `expand` | 展开输出 | ⌃O | |
 | `bg` | 转后台 | ⌃B | |
 | `clear` | 清屏 | ⌃L | |
 | `newtab` | 新标签 | ⌘T | 终端上是 rApp 自己的 ⌘T（同 `cmdt` 键） |
+
+⇧Tab 切模式 2026-11-27 按用户要求归到常用语菜单的内置命令（§7），不在按键动作里。`stab` 仍是 `barKeys` 里的键，用户想放回键盘布局自己加。
 
 这几个的名字是按 Claude Code 的含义起的【我定的】；实现时照各工具文档核一遍，某个工具上含义不同的，用 `per` 标成 null 或改键（同常用语条命令 spec §7 的做法）。
 
@@ -134,7 +135,7 @@ KeyAction { id, label, chord, per? }
 
 | 键 | Claude Code | Codex | Gemini CLI |
 |---|---|---|---|
-| ⇧Tab 切模式 | 轮换权限模式 | 文档里没写，按“没反应”处理 | 轮换批准模式（agent 忙时跳过） |
+| ⇧Tab 切模式 | 已归到常用语菜单的内置命令，核对结果见命令表（常用语条命令 spec §7） | | |
 | ⌃O 展开输出 | 开关记录视图，展开折叠行 | 复制最近一条完成的回复（不破坏数据） | 展开/折叠内容块 |
 | ⌃B 转后台 | 把运行中的 Bash 和 agent 转后台 | 文档里没写 | 开关当前后台 shell 的显示 |
 | ⌃L 清屏 | 只重绘屏幕，对话保留 | 只清终端画面，对话保留，任务进行中禁用 | 清屏并重绘 |
@@ -178,7 +179,7 @@ Layout { rows: [[id…], [id…]] }
 - 每格是 `barKeys` 的 id，或按键动作的 id（显示它的名字，太长截断）【我定的】。
 - 每行最多 10 格（`keyBarColumns`），`⋯` 也占一格：`⋯` 不进布局数据，第 2 行非空时自动排在第 1 行末尾，这时第 1 行最多 9 格。
 - 倒 T 照旧由 `keyBarTail` 认出来：一行末尾正好是 ↑（下一行末尾是 ← ↓ →）时那几个键占一列一格，否则所有格平分。
-- 默认就是今天的两行。数据坏了、空了、有不认得的 id 时：丢掉不认得的格；两行都空就用默认。
+- 默认是今天的两行，只是第 1 行去掉 ⇧Tab（2026-11-27 用户要求，它归到常用语菜单的「切模式」命令）：第 1 行 `tab esc cc bksp enter up`，`stab` 仍能在布局编辑器里加回来；已存的自定义布局不动。数据坏了、空了、有不认得的 id 时：丢掉不认得的格；两行都空就用默认。
 
 ### 8.2 编辑
 
@@ -214,7 +215,7 @@ Layout { rows: [[id…], [id…]] }
 - **迁移**：`quick.json` 不存在时，从 `gui.json` 的 `phrases` 建：
   - `StripCmd('search')`：它的 `per` 里没有任何改成文字的（今天用户可以改），就拿出来变成按键动作 `search`（`per` 里的 `CmdKey` 换成对应的 chord）；有改成文字的就留在常用语里当命令，按键动作里照样放一个内置 `search`。
   - 用户自己加的命令（不管发文字还是发键）都留在常用语里。
-  - 其余照搬，常用语补 id；`keys` 是内置 6 个（`search` 已在就不重复）；`layout` 是默认；`stars`、`usage` 空。
+  - 其余照搬，常用语补 id；`keys` 是内置 5 个（`search` 已在就不重复）；`layout` 是默认；`stars`、`usage` 空。
   - 迁移出来的五份 `at` 记成 0：表示“还是出厂/升级时的样子，没有被这台改过”，第一次接上服务时让位给服务上已有的（§10.3）。
   - `gui.json` 里的 `phrases` 留着不删（旧版本还读它），以后只读 `quick.json`【我定的】。
 - `phrase_strip`（开关）、`key_bar_more`、`phrase_cmds_seeded` 留在 `gui.json`，不同步。
@@ -292,7 +293,7 @@ P1 合并后就能发，不用等 P2。
 3. 次数相同时常用语菜单的排在按键菜单前面（§5.2）。
 4. 菜单在各平台都是底部弹出（§5.4）。
 5. 按键动作的 `per` 第一版不能在设置页编辑（§6.1）。
-6. 内置 6 个按键动作和名字（§6.2）。
+6. 内置 5 个按键动作和名字（§6.2）；⇧Tab 切模式在常用语菜单的命令里。
 7. 按键动作不吃 sticky 修饰键（§6.3）。
 8. 布局里能放按键动作；所有设备一份布局（§8.1、§3）。
 9. 常用语补 id（§9）。

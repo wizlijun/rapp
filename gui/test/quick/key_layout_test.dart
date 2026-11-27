@@ -6,13 +6,14 @@ import 'package:rapp/quick/key_layout.dart';
 void main() {
   test('default layout gives today’s rows', () {
     expect(keyBarRows(layout: KeyLayout.fallback, more: true), [
-      ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more'],
+      ['tab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more'],
       ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'pgup', 'pgdn', 'left', 'down', 'right'],
     ]);
     expect(keyBarRows(layout: KeyLayout.fallback, more: false), [
-      ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more'],
+      ['tab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more'],
     ]);
     expect(KeyLayout.fallback.isDefault, isTrue);
+    expect(KeyLayout.fallback.rows[0], isNot(contains('stab')));
   });
 
   test('cleaning drops unknown, duplicate and missing-action cells and caps the rows', () {

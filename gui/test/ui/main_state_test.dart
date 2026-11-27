@@ -138,15 +138,15 @@ void main() {
     s.savePrefs();
     expect(UiPrefs.load(s.data.prefsDir()!).phrases, before);
     s.toggleStar(refOf(s.quick.phrases.single));
-    s.recordUse('k:mode');
+    s.recordUse('k:expand');
     s.setKeyLayout(const KeyLayout([['esc'], []]));
     s.setKeyActions(builtinKeyActions.take(2).toList());
-    s.starFirst('k:mode');
+    s.starFirst('k:expand');
     final back = QuickPrefs.load(s.data.prefsDir()!, legacy: const []);
-    expect(back.stars, ['k:mode', refOf(s.quick.phrases.single)]);
-    expect(back.usage.keys, ['k:mode']);
+    expect(back.stars, ['k:expand', refOf(s.quick.phrases.single)]);
+    expect(back.usage.keys, ['k:expand']);
     expect(back.layout.rows[0], ['esc']);
-    expect(back.keys.map((a) => a.id), ['search', 'mode']);
+    expect(back.keys.map((a) => a.id), ['search', 'expand']);
   });
 
   test('setFirst persists and leaves the current grouping alone', () {

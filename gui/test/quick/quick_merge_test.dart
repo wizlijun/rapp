@@ -141,7 +141,7 @@ void main() {
           'keys': d(50, [
             key('search', '搜历史', const Chord('r', ctrl: true)),
             key('mine', '独特', const Chord('k', ctrl: true)),
-            key('mode', '我的', const Chord('g', ctrl: true)),
+            key('bg', '我的', const Chord('g', ctrl: true)),
           ]),
           'stars': d(50, ['k:mine']),
         },
@@ -157,16 +157,16 @@ void main() {
       final ids = [for (final e in (r['keys'] as Push).doc.data as List) (e as Map)['id']];
       expect(ids, hasLength(5));
       expect(ids.sublist(0, 2), ['mine', 'srv']);
-      expect(ids, containsAll(['search', 'mode', ids[3]]));
-      // 'mode' is built in: never matched by face, kept as is
+      expect(ids, containsAll(['search', 'bg', ids[3]]));
+      // 'bg' is built in: never matched by face, kept as is
       final starred = ((r['stars'] as Push).doc.data as List).single as String;
       expect(starred, startsWith('k:mine'));
       expect(starred, isNot('k:mine'));
     });
     test('a built-in action whose id the server has with another face is not given a new id', () {
       final r = firstJoin(
-        local: {'keys': d(50, [key('mode', '我改的', const Chord('m', ctrl: true))])},
-        server: {'keys': d(80, [key('mode', '切模式', const Chord('tab', shift: true))])},
+        local: {'keys': d(50, [key('bg', '我改的', const Chord('m', ctrl: true))])},
+        server: {'keys': d(80, [key('bg', '转后台', const Chord('b', ctrl: true))])},
         nowMs: 60,
       );
       expect(r['keys'], isA<Adopt>()); // nothing to add: the service's action stands

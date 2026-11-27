@@ -124,6 +124,10 @@ void main() {
     });
 
     iosTest('⇧Tab sends Shift-Tab; ⌃C sends Ctrl-C', (tester) async {
+    s.setKeyLayout(const KeyLayout([
+      ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up'],
+      ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'pgup', 'pgdn', 'left', 'down', 'right'],
+    ])); // ⇧Tab is not in the default row any more; put it back
       await tester.pumpWidget(bar(tsess));
       await tap(tester, 'stab');
       await tap(tester, 'cc');
@@ -271,6 +275,10 @@ void main() {
   group('app', () {
     setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →
     iosTest('⇧Tab sends key(48, latchShift); ⌃ then ↑ sends key(126, latchCtrl) after keyEvent(59, down)', (tester) async {
+    s.setKeyLayout(const KeyLayout([
+      ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up'],
+      ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'pgup', 'pgdn', 'left', 'down', 'right'],
+    ])); // ⇧Tab is not in the default row any more; put it back
       await tester.pumpWidget(bar(app, width: 900));
       await tap(tester, 'stab');
       expect(appKeys(), [('key', 1, 48, latchShift)]);
@@ -577,11 +585,11 @@ void main() {
       ]);
     });
 
-    iosTest('left to right: Tab ⇧Tab Esc ⌃C ⌫ ⏎ ↑ ⋯, no ⌄', (tester) async {
+    iosTest('left to right: Tab Esc ⌃C ⌫ ⏎ ↑ ⋯, no ⌄', (tester) async {
       await tester.pumpWidget(bar(tsess));
       expect(k('hide'), findsNothing);
       expect(find.descendant(of: find.byType(KeyBar), matching: find.bySemanticsLabel('收起快捷区')), findsNothing);
-      const order = ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more'];
+      const order = ['tab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more'];
       final xs = [for (final id in order) tester.getCenter(k(id)).dx];
       for (var i = 1; i < xs.length; i++) {
         expect(xs[i], greaterThan(xs[i - 1]), reason: '${order[i]} is right of ${order[i - 1]}');
@@ -958,14 +966,14 @@ void main() {
       }
     });
 
-    testWidgets('Linux: first row has 8 keys ending in ↑ ⋯; second row has ⌘C ⌘V ⌘T ⌘ ⌃', (tester) async {
+    testWidgets('Linux: first row has 7 keys ending in ↑ ⋯; second row has ⌘C ⌘V ⌘T ⌘ ⌃', (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.linux;
       try {
         tester.view.physicalSize = const Size(1000, 900);
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.reset);
         await tester.pumpWidget(bar(tsess, width: 720));
-        const first = ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more'];
+        const first = ['tab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more'];
         final xs = [for (final id in first) tester.getCenter(k(id)).dx];
         for (var i = 1; i < xs.length; i++) {
           expect(xs[i], greaterThan(xs[i - 1]), reason: '${first[i]} right of ${first[i - 1]}');

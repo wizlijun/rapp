@@ -141,11 +141,10 @@ class KeyAction {
 Chord? chordFor(KeyAction a, AgentTool? tool) =>
     tool != null && a.per.containsKey(tool.id) ? a.per[tool.id] : a.chord;
 
-/// The six actions a fresh install holds, in menu order. `search` follows the per-tool table the 常用语条 had
+/// The five actions a fresh install holds, in menu order. `search` follows the per-tool table the 常用语条 had
 /// (agy and opencode have no such key); the others were checked on 2026-11-27 and none does harm on any tool (spec §6.2).
 const builtinKeyActions = <KeyAction>[
   KeyAction('search', label: '搜历史', chord: Chord('r', ctrl: true), per: {'agy': null, 'opencode': null}),
-  KeyAction('mode', label: '切模式', chord: Chord('tab', shift: true)),
   KeyAction('expand', label: '展开输出', chord: Chord('o', ctrl: true)),
   KeyAction('bg', label: '转后台', chord: Chord('b', ctrl: true)),
   KeyAction('clear', label: '清屏', chord: Chord('l', ctrl: true)),

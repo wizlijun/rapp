@@ -10,7 +10,7 @@ class KeyLayout {
   final List<List<String>> rows;
 
   static const fallback = KeyLayout([
-    ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up'],
+    ['tab', 'esc', 'cc', 'bksp', 'enter', 'up'],
     ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'pgup', 'pgdn', 'left', 'down', 'right'],
   ]);
 

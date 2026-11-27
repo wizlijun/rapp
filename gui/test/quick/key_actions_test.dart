@@ -32,7 +32,8 @@ void main() {
     expect(Chord.parse('shift+tab')!.macKey, (code: 48, mods: latchShift));
   });
   test('builtin actions and per-tool chords', () {
-    expect(builtinKeyActions.map((a) => a.id), ['search', 'mode', 'expand', 'bg', 'clear', 'newtab']);
+    expect(builtinKeyActions.map((a) => a.id), ['search', 'expand', 'bg', 'clear', 'newtab']);
+    expect(builtinKeyActions, hasLength(5));
     final search = builtinKeyActions.first;
     expect(chordFor(search, null)!.toJson(), 'ctrl+r');
     expect(chordFor(search, agentTools.firstWhere((t) => t.id == 'opencode')), isNull);

@@ -84,11 +84,12 @@ void main() {
 
   iosTest('claude in front: the commands come first, with 「命令：」 semantics', (tester) async {
     await tester.pumpWidget(strip(tsess));
-    // Nothing counted yet: the five commands lead the row, then the phrases; 搜历史 is a 按键动作 now, not among them.
+    // Nothing counted yet: the six commands lead the row, then the phrases; 搜历史 is a 按键动作 now, not among them.
     expect(find.descendant(of: ph('phrase-0'), matching: find.text('新对话')), findsOneWidget);
-    expect(find.descendant(of: ph('phrase-4'), matching: find.text('用量')), findsOneWidget);
-    expect(find.descendant(of: ph('phrase-5'), matching: find.text('继续')), findsOneWidget);
-    final xs = [for (var i = 0; i <= 5; i++) tester.getTopLeft(ph('phrase-$i')).dx];
+    expect(find.descendant(of: ph('phrase-1'), matching: find.text('切模式')), findsOneWidget);
+    expect(find.descendant(of: ph('phrase-5'), matching: find.text('用量')), findsOneWidget);
+    expect(find.descendant(of: ph('phrase-6'), matching: find.text('继续')), findsOneWidget);
+    final xs = [for (var i = 0; i <= 6; i++) tester.getTopLeft(ph('phrase-$i')).dx];
     expect(xs, [...xs]..sort());
     expect(xs.first, tester.getTopLeft(ph('phrase-strip-list')).dx);
     expect(find.bySemanticsLabel('命令：新对话'), findsOneWidget);
@@ -102,8 +103,8 @@ void main() {
     s.setStripItems(List.of(s.quick.phrases)); // notify
     await tester.pumpWidget(strip(tsess));
     expect(find.text('新对话'), findsNothing);
-    // 搜历史 went to the 按键动作 (quick-row): 继续 is the sixth of the list.
-    expect(find.descendant(of: ph('phrase-5'), matching: find.text('继续')), findsOneWidget);
+    // 搜历史 went to the 按键动作 (quick-row): 继续 is the seventh of the list.
+    expect(find.descendant(of: ph('phrase-6'), matching: find.text('继续')), findsOneWidget);
     expect(keyBarHeightOf(s, tsess), h);
   });
 
@@ -135,7 +136,7 @@ void main() {
 
   iosTest('long press on a command: 编辑 · 打星 · 删除 (移到最前 once starred); 打星 and 删除 keep the order', (tester) async {
     await tester.pumpWidget(strip(tsess));
-    await tester.longPress(ph('phrase-2'));
+    await tester.longPress(ph('phrase-3'));
     await tester.pumpAndSettle();
     expect(ph('phrase-menu-put'), findsNothing);
     expect(ph('phrase-menu-edit'), findsOneWidget);
@@ -144,14 +145,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(s.quick.stars, ['p:compact']);
     expect((s.quick.phrases.first as StripCmd).id, 'new', reason: 'a star leaves the list as it was');
-    await tester.longPress(ph('phrase-2'));
+    await tester.longPress(ph('phrase-3'));
     await tester.pumpAndSettle();
     expect(ph('phrase-menu-first'), findsOneWidget);
     await tester.tap(ph('phrase-menu-delete'));
     await tester.pumpAndSettle();
     expect((s.quick.phrases.first as StripCmd).id, 'new');
-    expect((s.quick.phrases[2] as StripCmd).id, 'resume');
-    expect(s.quick.phrases.whereType<StripCmd>(), hasLength(4)); // five without 搜历史 (quick-row), one deleted
+    expect((s.quick.phrases[3] as StripCmd).id, 'resume');
+    expect(s.quick.phrases.whereType<StripCmd>(), hasLength(5)); // six without 搜历史 (quick-row), one deleted
     expect(s.quick.stars, isEmpty);
   });
 
@@ -195,7 +196,7 @@ void main() {
     app.setProfile(const ResolvedProfile(phrases: true));
     await tester.pumpWidget(strip(app));
     expect(find.text('新对话'), findsNothing);
-    expect(find.descendant(of: ph('phrase-5'), matching: find.text('继续')), findsOneWidget); // 搜历史 is a 按键动作 now
+    expect(find.descendant(of: ph('phrase-6'), matching: find.text('继续')), findsOneWidget); // 搜历史 is a 按键动作 now
   });
 
   testWidgets('linux desktop KeyBar sends tool commands, and Ctrl-R from the 搜历史 key action, while preserving TextField caret',
@@ -246,7 +247,7 @@ void main() {
       s.setStripItems(List.of(s.quick.phrases));
       await tester.pump();
       expect(ph('keyact-search'), findsNothing);
-      expect(ph('keyact-mode'), findsOneWidget);
+      expect(ph('keyact-expand'), findsOneWidget);
       expect(focus.hasFocus, isTrue);
 
       fg('bash', shell: true);
@@ -255,7 +256,7 @@ void main() {
       expect(find.text('新对话'), findsNothing);
       // No tool in front: the plain ⌃R is back, and first, since it was used once (the list changed, so it was re-counted).
       await tester.scrollUntilVisible(ph('keyact-search'), -200, scrollable: list);
-      expect(tester.getTopLeft(ph('keyact-search')).dx, lessThan(tester.getTopLeft(ph('phrase-5')).dx));
+      expect(tester.getTopLeft(ph('keyact-search')).dx, lessThan(tester.getTopLeft(ph('phrase-6')).dx));
       expect(focus.hasFocus, isTrue);
       expect(ctl.selection, const TextSelection(baseOffset: 1, extentOffset: 3));
     } finally {
