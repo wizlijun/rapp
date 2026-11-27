@@ -28,7 +28,7 @@ class GlobalSections extends StatelessWidget {
 
   final ServiceMonitor monitor;
 
-  /// Null (tests): no 状态服务 block.
+  /// Null (tests): no 中心服务 block.
   final StateSync? stateSync;
 
   /// The current data root; the caller rebuilds when it changes.

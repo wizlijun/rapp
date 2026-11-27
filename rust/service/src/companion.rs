@@ -1,5 +1,5 @@
 //! Companion services: programs `rapp-service` runs next to itself when `services.json` turns
-//! them on. For now there is one, the state service (`rapp-state`).
+//! them on. For now there is one, the center service (`rapp-center`).
 //!
 //! On: the program is started (`kill_on_drop`), asked `GET /v1/health` every 200 ms for at most
 //! 5 s, then its port is shared (kind `"state"`) and it becomes this device's own sink. A start
@@ -7,7 +7,7 @@
 //! While it is tried again it stays this device's sink, so the outboxes wait and resend.
 //! Off: the program is stopped, it is no sink any more, and its share is taken back: removed when
 //! the companion made it, only unmarked when the user had shared the port (`take_back`).
-//! `rapp-service` never links `rapp-state`: it only starts the program.
+//! `rapp-service` never links `rapp-center`: it only starts the program.
 
 use crate::forward::{admit, Caller};
 use crate::outbox::send;
@@ -20,7 +20,7 @@ use rapp_net::msg::Op;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
@@ -30,8 +30,12 @@ use tokio::task::JoinHandle;
 
 /// A program rApp can run beside itself.
 pub struct Companion {
-    /// Its key in `services.json` and the IPC `name`.
+    /// The IPC `name` and the `name` in its log events.
     pub name: &'static str,
+    /// Its key in `services.json`.
+    pub key: &'static str,
+    /// The key an older version wrote: read when `key` is not there, removed on the next write.
+    pub old_key: Option<&'static str>,
     pub program: &'static str,
     /// The port it listens on unless `services.json` says another.
     pub port: u16,
@@ -39,9 +43,17 @@ pub struct Companion {
     pub kind: &'static str,
     /// The note of its share, unless the port was shared already.
     pub note: &'static str,
+    /// The note an older version gave its share: such a share is still the companion's own.
+    pub old_note: Option<&'static str>,
 }
 
-pub const TABLE: &[Companion] = &[Companion { name: "state", program: "rapp-state", port: 8102, kind: "state", note: "状态服务" }];
+pub const TABLE: &[Companion] = &[Companion {
+    name: "state",
+    key: "center",
+    old_key: Some("state"),
+    program: "rapp-center", port: 8102, kind: "state", note: "中心服务",
+    old_note: Some("状态服务"),
+}];
 
 /// In the device's `local/` (its home).
 const FILE: &str = "services.json";
@@ -72,16 +84,29 @@ pub struct ServiceCfg {
     pub keep_events: Option<usize>,
 }
 
-/// The command line of `rapp-state` for `c`: the data under `<home>/state` unless the store is
-/// `"memory"`.
-pub fn args(c: &ServiceCfg, home: &Path) -> Vec<String> {
+/// The command line of `rapp-center` for `c`: the data in `data` unless the store is `"memory"`.
+pub fn args(c: &ServiceCfg, data: &Path) -> Vec<String> {
     let mut a = vec!["--port".to_string(), c.port.unwrap_or(TABLE[0].port).to_string()];
     if c.store.as_deref() != Some("memory") {
-        a.extend(["--data".to_string(), home.join("state").to_string_lossy().into_owned()]);
+        a.extend(["--data".to_string(), data.to_string_lossy().into_owned()]);
     }
     a.extend(["--keep-days".to_string(), c.keep_days.unwrap_or(7).to_string()]);
     a.extend(["--keep-events".to_string(), c.keep_events.unwrap_or(1000).to_string()]);
     a
+}
+
+/// Where `rapp-center` keeps its data: `<home>/center`. An older version's `<home>/state` is moved
+/// there when `center` is not there yet; when both are, `state` is left alone. Err (`<home>/state`,
+/// why) when the move fails: the data stays where it is and is used from there.
+pub fn data_dir(home: &Path) -> Result<PathBuf, (PathBuf, String)> {
+    let (old, new) = (home.join("state"), home.join("center"));
+    if new.exists() || !old.exists() {
+        return Ok(new);
+    }
+    match std::fs::rename(&old, &new) {
+        Ok(()) => Ok(new),
+        Err(e) => Err((old, e.kind().to_string())),
+    }
 }
 
 /// What a companion is doing.
@@ -182,18 +207,20 @@ fn read_file(home: &Path) -> Result<Map<String, Value>, Value> {
         Err(e) => return Err(json!({"why": "json", "line": e.line(), "column": e.column()})),
     };
     for c in TABLE {
-        if let Some(v) = map.get(c.name) {
-            if let Err(e) = serde_json::from_value::<ServiceCfg>(v.clone()) {
-                return Err(json!({"why": "entry", "name": c.name, "error": e.to_string()}));
+        for key in std::iter::once(c.key).chain(c.old_key) {
+            if let Some(v) = map.get(key) {
+                if let Err(e) = serde_json::from_value::<ServiceCfg>(v.clone()) {
+                    return Err(json!({"why": "entry", "name": key, "error": e.to_string()}));
+                }
             }
         }
     }
     Ok(map)
 }
 
-/// The entry of `c` in a valid map: off when there is none.
+/// The entry of `c` in a valid map (its `key`, else its `old_key`): off when there is none.
 fn cfg_in(map: &Map<String, Value>, c: &Companion) -> ServiceCfg {
-    map.get(c.name).and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default()
+    map.get(c.key).or_else(|| c.old_key.and_then(|k| map.get(k))).and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default()
 }
 
 /// `read_file`, a broken file logged and taken as everything off.
@@ -207,15 +234,22 @@ fn load(state: &State) -> Option<Map<String, Value>> {
     }
 }
 
-/// `map` with `name` turned `on`, every other field and entry kept; a new entry when there is none
-/// (or it is not an object).
-fn turned(mut map: Map<String, Value>, name: &str, on: bool) -> Map<String, Value> {
-    match map.get_mut(name) {
+/// `map` with `c` turned `on` under `c.key`, every other field and entry kept; a new entry when
+/// there is none (or it is not an object). An entry under `c.old_key` gives its fields to `c.key`
+/// when that has none, and is removed.
+fn turned(mut map: Map<String, Value>, c: &Companion, on: bool) -> Map<String, Value> {
+    let old = c.old_key.and_then(|k| map.remove(k));
+    if !map.contains_key(c.key) {
+        if let Some(old) = old {
+            map.insert(c.key.into(), old);
+        }
+    }
+    match map.get_mut(c.key) {
         Some(Value::Object(e)) => {
             e.insert("on".into(), json!(on));
         }
         _ => {
-            map.insert(name.into(), json!({"on": on}));
+            map.insert(c.key.into(), json!({"on": on}));
         }
     }
     map
@@ -328,7 +362,15 @@ async fn run_once(state: &Arc<State>, c: &'static Companion, cfg: &ServiceCfg, c
     let not_found = || Outcome::Failed("not found", format!("找不到 {}", c.program));
     let Some(bin) = rapp_net::bins::find(c.program, state.bin_dir.as_deref()) else { return not_found() };
     let mut cmd = rapp_net::proc::tokio_command(bin);
-    cmd.args(args(cfg, &state.home))
+    let data = if cfg.store.as_deref() == Some("memory") {
+        state.home.join("center")
+    } else {
+        data_dir(&state.home).unwrap_or_else(|(dir, kind)| {
+            state.log.event(Lvl::Warn, "center_dir_move_failed", json!({"error": kind}));
+            dir
+        })
+    };
+    cmd.args(args(cfg, &data))
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
@@ -345,7 +387,7 @@ async fn run_once(state: &Arc<State>, c: &'static Companion, cfg: &ServiceCfg, c
     let reader = ch.stderr.take().map(|err| tokio::spawn(keep_stderr(state.log_dir.join(format!("{}.log", c.program)), err, last.clone())));
 
     // Ready: the health check answers AND this program still runs `QUICK_EXIT` after its start.
-    // Another `rapp-state` already on the port (a foreign one, or an orphan of an earlier run)
+    // Another `rapp-center` (or an old `rapp-state`) already on the port (a foreign one, or an orphan of an earlier run)
     // answers too, while this one ends at once with "address in use": that is not ours.
     let started = tokio::time::Instant::now();
     let (grace, deadline) = (started + QUICK_EXIT, started + READY_WAIT);
@@ -418,11 +460,11 @@ fn ready(state: &Arc<State>, c: &'static Companion, port: u16) {
 }
 
 /// Takes back what `ready` did to the share of `port` (one of kind `c.kind`): the share is removed
-/// when the companion made it (its note is `c.note`); a share the user made of that port stays,
+/// when the companion made it (its note is `c.note`, or `c.old_note` from an older version); a share the user made of that port stays,
 /// an ordinary one again. Any other share is not touched.
 fn take_back(state: &State, c: &'static Companion, port: u16) {
     let Some(share) = state.shares.get(port).filter(|s| s.kind.as_deref() == Some(c.kind)) else { return };
-    if share.note == c.note {
+    if share.note == c.note || Some(share.note.as_str()) == c.old_note {
         if let Err(e) = sharing::unshare(state, &json!(port), &By::Local) {
             state.log.event(Lvl::Warn, "companion_unshare_failed", json!({"name": c.name, "port": port, "error": e}));
         }
@@ -502,7 +544,7 @@ fn counts(v: &Value) -> Value {
 pub async fn set(state: &Arc<State>, name: &str, on: bool) -> Value {
     let Some(c) = find(name) else { return err("unknown service") };
     let _one = state.companions.setting.lock().await;
-    let map = turned(load(state).unwrap_or_default(), c.name, on);
+    let map = turned(load(state).unwrap_or_default(), c, on);
     if let Err(e) = rapp_net::config::write_json(&state.home.join(FILE), &Value::Object(map.clone())) {
         return err(&format!("{e:#}"));
     }
@@ -694,13 +736,14 @@ mod tests {
     #[test]
     fn args_follow_the_file() {
         let home = Path::new("/h");
-        let data = home.join("state").to_string_lossy().into_owned();
+        let dir = home.join("center");
+        let data = dir.to_string_lossy().into_owned();
         let on: ServiceCfg = serde_json::from_value(json!({"on": true})).unwrap();
-        assert_eq!(args(&on, home), ["--port", "8102", "--data", data.as_str(), "--keep-days", "7", "--keep-events", "1000"]);
+        assert_eq!(args(&on, &dir), ["--port", "8102", "--data", data.as_str(), "--keep-days", "7", "--keep-events", "1000"]);
         let mem: ServiceCfg = serde_json::from_value(json!({"on": true, "port": 9000, "store": "memory", "keep_days": 2, "keep_events": 5})).unwrap();
-        assert_eq!(args(&mem, home), ["--port", "9000", "--keep-days", "2", "--keep-events", "5"]);
+        assert_eq!(args(&mem, &dir), ["--port", "9000", "--keep-days", "2", "--keep-events", "5"]);
         let disk: ServiceCfg = serde_json::from_value(json!({"on": false, "store": "disk"})).unwrap();
-        assert!(args(&disk, home).contains(&"--data".to_string()));
+        assert!(args(&disk, &dir).contains(&"--data".to_string()));
     }
 
     #[test]
@@ -708,14 +751,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = json!({"state": {"on": false, "x": 1}, "llm": {"on": true, "model": "m"}});
         std::fs::write(dir.path().join(FILE), file.to_string()).unwrap();
-        let map = turned(read_file(dir.path()).unwrap(), "state", true);
-        assert_eq!(Value::Object(map.clone()), json!({"state": {"on": true, "x": 1}, "llm": {"on": true, "model": "m"}}));
+        let map = turned(read_file(dir.path()).unwrap(), &TABLE[0], true);
+        assert_eq!(Value::Object(map.clone()), json!({"center": {"on": true, "x": 1}, "llm": {"on": true, "model": "m"}}));
         assert!(cfg_in(&map, &TABLE[0]).on);
         // No file: everything off; turning on writes a fresh entry.
         let none = tempfile::tempdir().unwrap();
         let map = read_file(none.path()).unwrap();
         assert_eq!(cfg_in(&map, &TABLE[0]), ServiceCfg::default());
-        assert_eq!(Value::Object(turned(map, "state", true)), json!({"state": {"on": true}}));
+        assert_eq!(Value::Object(turned(map, &TABLE[0], true)), json!({"center": {"on": true}}));
         // Broken: not JSON, not an object, or the entry is not a `ServiceCfg` (`on` missing, a bad port).
         for bad in ["{ nope", "[1]", r#"{"state":{"port":1}}"#, r#"{"state":{"on":true,"port":"x"}}"#] {
             std::fs::write(dir.path().join(FILE), bad).unwrap();
@@ -724,6 +767,63 @@ mod tests {
         // An entry of a service rApp does not know is not looked at.
         std::fs::write(dir.path().join(FILE), r#"{"llm":"anything"}"#).unwrap();
         assert!(read_file(dir.path()).is_ok());
+    }
+
+    #[test]
+    fn the_old_key_reads_as_center() {
+        let map = json!({"state": {"on": true, "port": 9000}}).as_object().unwrap().clone();
+        assert_eq!(cfg_in(&map, &TABLE[0]), ServiceCfg { on: true, port: Some(9000), ..Default::default() });
+    }
+
+    #[test]
+    fn center_key_wins_and_old_key_goes_on_write() {
+        let map = json!({"state": {"on": false}, "center": {"on": false, "port": 9001, "x": 1}, "llm": {"on": true}});
+        let map = map.as_object().unwrap().clone();
+        assert_eq!(cfg_in(&map, &TABLE[0]).port, Some(9001));
+        assert_eq!(Value::Object(turned(map, &TABLE[0], true)), json!({"center": {"on": true, "port": 9001, "x": 1}, "llm": {"on": true}}));
+    }
+
+    #[test]
+    fn turning_an_old_file_moves_its_fields_to_center() {
+        let map = json!({"state": {"on": false, "port": 9002}}).as_object().unwrap().clone();
+        assert_eq!(Value::Object(turned(map, &TABLE[0], true)), json!({"center": {"on": true, "port": 9002}}));
+    }
+
+    #[test]
+    fn a_bad_old_key_is_still_invalid() {
+        let dir = tempfile::tempdir().unwrap();
+        for bad in [r#"{"state":{"on":"x"}}"#, r#"{"center":{"on":true,"port":"x"}}"#] {
+            std::fs::write(dir.path().join(FILE), bad).unwrap();
+            assert!(read_file(dir.path()).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_state_dir_moves_to_center() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir(home.path().join("state")).unwrap();
+        std::fs::write(home.path().join("state/state.json"), b"{}").unwrap();
+        assert_eq!(data_dir(home.path()), Ok(home.path().join("center")));
+        assert!(home.path().join("center/state.json").exists());
+        assert!(!home.path().join("state").exists());
+    }
+
+    #[test]
+    fn both_dirs_keep_center() {
+        let home = tempfile::tempdir().unwrap();
+        for d in ["state", "center"] {
+            std::fs::create_dir(home.path().join(d)).unwrap();
+            std::fs::write(home.path().join(d).join("state.json"), d).unwrap();
+        }
+        assert_eq!(data_dir(home.path()), Ok(home.path().join("center")));
+        assert_eq!(std::fs::read(home.path().join("state/state.json")).unwrap(), b"state");
+        assert_eq!(std::fs::read(home.path().join("center/state.json")).unwrap(), b"center");
+    }
+
+    #[test]
+    fn neither_dir_is_center() {
+        let home = tempfile::tempdir().unwrap();
+        assert_eq!(data_dir(home.path()), Ok(home.path().join("center")));
     }
 
     #[test]

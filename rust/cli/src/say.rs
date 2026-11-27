@@ -275,12 +275,12 @@ fn state_at(r: &Value, now: u64) -> String {
     // A missing number is said in words, never as `null`.
     let port = r["port"].as_u64().map_or("端口不明".to_string(), |p| format!("端口 {p}"));
     if r["on"] != true {
-        out.push_str("状态服务：没开\n");
+        out.push_str("中心服务：没开\n");
     } else if r["running"] == true {
         let share = r["share"].as_u64().map_or("没有分享".to_string(), |n| format!("分享号 {n}"));
-        out.push_str(&format!("状态服务：开着，{port}，{share}\n"));
+        out.push_str(&format!("中心服务：开着，{port}，{share}\n"));
     } else {
-        out.push_str(&format!("状态服务：开着，{port}，没有起来：{}\n", plain(r["error"].as_str().unwrap_or("原因不明"))));
+        out.push_str(&format!("中心服务：开着，{port}，没有起来：{}\n", plain(r["error"].as_str().unwrap_or("原因不明"))));
     }
     let st = &r["stored"];
     if st.is_object() {
@@ -305,12 +305,12 @@ fn state_at(r: &Value, now: u64) -> String {
         })
         .unwrap_or_default();
     if !sinks.is_empty() {
-        out.push_str(&format!("网里的状态服务：{}\n", sinks.join("，")));
+        out.push_str(&format!("网里的中心服务：{}\n", sinks.join("，")));
     }
     let o = &r["outbox"];
     let cached = &o["cached"];
     if o["dest"].is_null() {
-        out.push_str("发件箱：没在发（网里没有状态服务）\n");
+        out.push_str("发件箱：没在发（网里没有中心服务）\n");
     } else if o["active"] == true && o["up"] == true {
         out.push_str(&format!("发件箱：在发，缓存 {cached} 条，已发 {} 条\n", o["sent"]));
     } else if o["active"] == true {
@@ -547,20 +547,20 @@ mod tests {
             "outbox": {"active": true, "cached": 0, "sent": 42, "dropped": 0, "refused": 0, "last_ok": 1, "up": true, "dest": {"id": "123456789", "port": 8102}}});
         assert_eq!(
             state_at(&base, now),
-            "状态服务：开着，端口 8102，分享号 28003\n  存着 3 台设备、5 个会话、120 条队列；最近一次收到 mac 的，2 分钟前\n网里的状态服务：123456789 的 8102（在用），本机的 8102\n发件箱：在发，缓存 0 条，已发 42 条\n"
+            "中心服务：开着，端口 8102，分享号 28003\n  存着 3 台设备、5 个会话、120 条队列；最近一次收到 mac 的，2 分钟前\n网里的中心服务：123456789 的 8102（在用），本机的 8102\n发件箱：在发，缓存 0 条，已发 42 条\n"
         );
         let down = json!({"on": true, "port": 8102, "share": null, "running": false, "error": "端口 8102 被占用", "stored": null, "sinks": [],
             "outbox": {"active": true, "cached": 17, "sent": 0, "up": false, "dest": {"local": 8102}}});
-        assert_eq!(state_at(&down, now), "状态服务：开着，端口 8102，没有起来：端口 8102 被占用\n发件箱：连不上，缓存 17 条\n");
+        assert_eq!(state_at(&down, now), "中心服务：开着，端口 8102，没有起来：端口 8102 被占用\n发件箱：连不上，缓存 17 条\n");
         let off = json!({"on": false, "port": 8102, "share": null, "running": false, "error": null, "stored": null, "sinks": [],
             "outbox": {"active": false, "cached": 0, "sent": 0, "up": false, "dest": null}});
-        assert_eq!(state_at(&off, now), "状态服务：没开\n发件箱：没在发（网里没有状态服务）\n");
+        assert_eq!(state_at(&off, now), "中心服务：没开\n发件箱：没在发（网里没有中心服务）\n");
         let unshared = json!({"on": true, "port": 8102, "share": null, "running": true, "error": null, "stored": null, "sinks": [],
             "outbox": {"active": false, "cached": 0, "sent": 0, "up": false, "dest": null}});
-        assert_eq!(state_at(&unshared, now), "状态服务：开着，端口 8102，没有分享\n发件箱：没在发（网里没有状态服务）\n");
+        assert_eq!(state_at(&unshared, now), "中心服务：开着，端口 8102，没有分享\n发件箱：没在发（网里没有中心服务）\n");
         let no_port = json!({"on": true, "port": null, "share": null, "running": false, "error": null, "stored": null, "sinks": [],
             "outbox": {"dest": null}});
-        assert_eq!(state_at(&no_port, now), "状态服务：开着，端口不明，没有起来：原因不明\n发件箱：没在发（网里没有状态服务）\n");
+        assert_eq!(state_at(&no_port, now), "中心服务：开着，端口不明，没有起来：原因不明\n发件箱：没在发（网里没有中心服务）\n");
         assert_eq!([ago(10), ago(7200), ago(172800)], ["刚才", "2 小时前", "2 天前"]);
     }
 }

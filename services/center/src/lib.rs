@@ -1,9 +1,9 @@
-//! rapp-state: a headless state-queue service. Listens on 127.0.0.1 only.
+//! rapp-center (中心服务): one port for every builtin service; today the state queue. Listens on 127.0.0.1 only.
 
+mod builtin;
 pub mod disk;
-mod http;
-pub mod event;
-pub mod store;
+mod entry;
+pub mod state;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -12,7 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
 
-pub use http::{serve, serve_with_log};
+pub use entry::{serve, serve_with_log};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -121,7 +121,7 @@ pub async fn cli(args: Vec<String>) -> i32 {
     match run(cfg).await {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("rapp-state 起不来：{e}");
+            eprintln!("rapp-center 起不来：{e}");
             1
         }
     }

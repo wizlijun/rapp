@@ -1,16 +1,16 @@
 [package]
-name = "rapp-state"
+name = "rapp-center"
 workspace = "../../rust"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
 [lib]
-name = "rapp_state"
+name = "rapp_center"
 path = "src/lib.rs"
 
 [[bin]]
-name = "rapp-state"
+name = "rapp-center"
 path = "src/main.rs"
 
 [dependencies]

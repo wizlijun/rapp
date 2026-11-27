@@ -24,8 +24,8 @@ name = "fake-rapp-term"
 path = "src/bin/fake-rapp-term.rs"
 
 [[bin]]
-name = "test-rapp-state"
-path = "src/bin/test-rapp-state.rs"
+name = "test-rapp-center"
+path = "src/bin/test-rapp-center.rs"
 
 [[bin]]
 name = "measure-forward"
@@ -47,8 +47,8 @@ tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rapp-net.workspace = true
-# Only for the `test-rapp-state` binary; rApp itself never depends on it.
-rapp-state = { path = "../../services/state" }
+# Only for the `test-rapp-center` binary; rApp itself never depends on it.
+rapp-center = { path = "../../services/center" }
 # The host-core fake platform, the in-process worker harness and its plain-TCP client.
 rapp-host-core.workspace = true
 rapp-client-core = { path = "../client-core" }

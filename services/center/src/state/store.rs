@@ -6,9 +6,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::event::{Event, Kind};
+use crate::state::event::{Event, Kind};
 
-pub use crate::event::TEXT_CHARS;
+pub use crate::state::event::TEXT_CHARS;
 pub const DEVICE_DAYS: u64 = 30;
 pub const PAGE_MAX: usize = 200;
 const PAGE_DEFAULT: usize = 50;
@@ -542,10 +542,10 @@ fn put_report(dev: &mut Device, session: &str, data: Map<String, Value>, sender:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::parse_line;
+    use crate::state::event::parse_line;
 
-    const TERM: &str = include_str!("../api/samples/term-events.ndjson");
-    const MIXED: &str = include_str!("../api/samples/mixed.ndjson");
+    const TERM: &str = include_str!("../../api/samples/term-events.ndjson");
+    const MIXED: &str = include_str!("../../api/samples/mixed.ndjson");
     const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     fn feed(s: &mut Store, text: &str, take: usize) -> Vec<bool> {

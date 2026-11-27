@@ -1,4 +1,4 @@
-// Finds, connects to and follows the rapp-state service (`services/state/api/http.md`).
+// Finds, connects to and follows the center service (rapp-center) (`services/center/api/http.md`).
 // Only status changes are logged; event text (msg, title, name) never is.
 import 'dart:async';
 

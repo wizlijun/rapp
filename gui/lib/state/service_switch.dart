@@ -1,4 +1,4 @@
-// Turning the rapp-state service on or off, here or on another device, and finding which device hosts it.
+// Turning the center service (rapp-center) on or off, here or on another device, and finding which device hosts it.
 
 abstract interface class ServiceSwitchApi {
   /// Asks the state service on device [to] (this device when null) to turn [on] or off; without [on], for its status.
