@@ -24,6 +24,10 @@ New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 [System.IO.File]::WriteAllText($log, '', (New-Object System.Text.UTF8Encoding $false))
 
 $flutter = if ($env:FLUTTER) { $env:FLUTTER } else { 'flutter' }
+# Dart's HttpClient routes 127.0.0.1 through HTTP_PROXY unless NO_PROXY excludes loopback.
+$loopback = '127.0.0.1,localhost,::1'
+$env:NO_PROXY = if ($env:NO_PROXY) { "$($env:NO_PROXY),$loopback" } else { $loopback }
+$env:no_proxy = $env:NO_PROXY
 # rapp-relay: its admin socket is a Unix socket. The other three are Linux- or iOS-only.
 $excludes = @('--exclude', 'rapp-relay', '--exclude', 'rapp-host-linux', '--exclude', 'rapp-client-gtk', '--exclude', 'rapp-hub-ffi')
 
