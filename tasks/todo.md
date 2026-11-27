@@ -1719,9 +1719,20 @@ P0 探查已完成（2026-11-27），结论见 `docs/superpowers/specs/2026-11-2
 - [ ] 探查 4-3：留 `typed` 保护
 - [ ] 探查 4-4：会话状态里加能力位，老 holder 开的会话事先不显示按钮
 - [ ] 探查 1：600 不改；`FormSwitch` 加"不在 `resumed` 时不切形态，回前台再判"（V1b 计划 Task 4 执行时补），防抖先 250 ms
+- [ ] 探查 2-1：Codex 不猜屏幕（守 §19 第 2 条），等它自己上报；在那之前 Codex 只出"做完"卡片，评审 C18–C20 对它不做
+- [ ] 探查 2-2：Codex 的放行只给"进去看"（没有 `msg`，认不出"撤不回"，`git push` 不能点一下就推）
+- [ ] 探查 2-3：C19 ② 的"前三条"第一版不加"读计划文件"的协议请求；拿不到全文时卡片只放 `msg` 那一行和"进去看"
+- [ ] 探查 2-4：`RAPP_TERM` 环境变量和 `rapp emit` 放到评审卡片那一期之前单独做，不在 V1b
+- [ ] 探查 2-5：Claude Code 的 hook 由用户自己装（样例在 `probe/phone-v1a-2` 的 `probes/phone-v1a-2/hooks/`），rapp 不改用户的设置
+- [ ] 探查 2-6：agy 的评审第一版只给"进去看"
+- [ ] 探查 2-7：两家的信任目录那一问只给"进去看"（Claude Code 光标停在 "No, exit"，`Enter` 会退出）
+- [ ] 探查 3-1：第一版接受"Claude Code 和 Codex 的阅读视图只看当前一屏"，rapp 起它们时不加 `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` / `--no-alt-screen`（会改电脑上的样子）
+- [ ] 探查 3-2：宽表格（115–118 格）在手机上按原样横滑
+- [ ] 探查 3-3：规格 S8 只改理由（实测分得清我和它），第一版仍不分左右、不加底色
 
 要真机的（用户动手）：
 
 - [ ] 探查 1：Duo 开合十次、生命周期、hub，操作单在 `docs/superpowers/measurements/2026-11-27-rapp-phone-v1a-1-duo.md` 末尾；探查包已编好在 `.worktrees/phone-v1a-1/gui/build/ios/ipa/`，会盖掉 Duo 上的正式版，测完下次发版装回
 - [ ] 探查 4-5：验收第 3 条，A 上真 Claude Code 弹权限提示，手机点「允许」，A 的窗口大小和 B 的画面不变
-- 探查分支 `probe/phone-v1a-1` 和 worktree `.worktrees/phone-v1a-1` 留到真机数字填完
+- [ ] 探查 3：看 `docs/superpowers/measurements/2026-11-27-rapp-phone-v1a-3-reading.md` 开头六组对照，说一句读不读得下去
+- 探查分支 `probe/phone-v1a-1` 和 worktree `.worktrees/phone-v1a-1` 留到真机数字填完；`probe/phone-v1a-2`、`-3`、`-4` 留给实现时取用
