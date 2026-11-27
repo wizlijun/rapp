@@ -83,6 +83,7 @@ class TermStage extends StatefulWidget {
     required this.port,
     this.frozen = false,
     this.keyboard = 0,
+    this.fit,
   });
 
   final MainState state;
@@ -95,6 +96,9 @@ class TermStage extends StatefulWidget {
   /// How far the soft keyboard reaches up over the stage's bottom: a zoomed grid can go up over it, and a drag
   /// past its top edge scrolls.
   final double keyboard;
+
+  /// Overrides `prefs.termFit` for what this view asks of the window (null: follow the pref). The phone passes false.
+  final bool? fit;
 
   @override
   State<TermStage> createState() => _TermStageState();
@@ -456,7 +460,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   /// MainState asked for the keys to come here (`focusPicture`, a terminal opened or switched to).
   void _onState() {
     _syncHotkey();
-    if (widget.state.prefs.termFit != (_sent?.fit ?? widget.state.prefs.termFit)) setState(() {});
+    if (_wantFit != (_sent?.fit ?? _wantFit)) setState(() {});
     final tick = widget.state.termFocusTick;
     if (tick == _focusSeen) return;
     _focusSeen = tick;
@@ -481,12 +485,14 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     SchedulerBinding.instance.addPostFrameCallback((_) => _flushView());
   }
 
+  bool get _wantFit => widget.fit ?? widget.state.prefs.termFit;
+
   void _flushView() {
     _viewQueued = false;
     if (!mounted) return;
     final win = widget.session.currentWindow;
     if (win == null || _model == null) return;
-    final v = (window: win, cols: _cols, rows: _rows, fit: widget.state.prefs.termFit);
+    final v = (window: win, cols: _cols, rows: _rows, fit: _wantFit);
     final sent = _sent;
     if (v == sent) {
       _viewTimer?.cancel();
