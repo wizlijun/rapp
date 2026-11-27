@@ -322,10 +322,11 @@ type Sink = extern "C" fn(id: u64, kind: u8, ptr: *mut u8, len: usize);
 `PlatformCaps.forOs` 加：
 
 ```dart
-'android' => const PlatformCaps(hubInProcess: true, systemOpen: true, onlineUpdate: true),
+// systemOpen 等安卓的打开文件、分享通道接上再开
+'android' => const PlatformCaps(hubInProcess: true, onlineUpdate: true),
 ```
 
-`systemOpen` 现在的四处用法（`main_window.dart:43`、`term_stage.dart:50`、`local_section.dart:43`、`data_section.dart:54`）都走 `iosChannel`。要先给安卓接一个通道（打开文件、分享），再开这一位；没接之前安卓上留 false。（P0 结果 §3）
+`systemOpen` 现在的四处用法（`main_window.dart:43`、`term_stage.dart:50`、`local_section.dart:43`、`data_section.dart:54`）都走 `iosChannel`。要先给安卓接一个通道（打开文件、分享），再开这一位；没接之前安卓上留 false（上面的代码就是这样）。（P0 结果 §3）
 
 `onlineUpdate` 在安卓上的数据来源和界面位置都不同，见 §13.2。现在这个能力位的两处用法（`main_window.dart:411` 的红点、`pages/global_sections.dart:64` 的「版本与升级」行）读的都是 `ServiceMonitor` 的状态，安卓没有 service，`GlobalSections` 也不会出现（`main_window.dart:391`）。
 
@@ -593,7 +594,7 @@ build-android.sh [debug|release] [--install <序列号>]
 3. 接入引导和精简的「本机」页（共用 iPad 的）。
 4. 桌面会话、单应用会话、文本终端；触摸、外接键盘、鼠标；文字剪贴板；前后台；返回键；常亮；全屏和折叠。
 
-验收（模拟器）：装上 → 输入 relay 和密钥 → 在设备页按 ID 添加主机（和 iPad 一样，主机不会自己出现）→ 全景看到设备 → 进桌面会话点和打字 → 开终端 → 切到后台 2 秒后 `adb shell` 看没有连接 → 切回来自动恢复 → 旋转、分屏不重建不崩。Mac 门禁全过；Linux 实机回归过了。
+验收（模拟器）：装上 → 输入 relay 和密钥 → 在设备页按 ID 添加主机（和 iPad 一样，主机不会自己出现；P0 结果 §3）→ 全景看到设备 → 进桌面会话点和打字 → 开终端 → 切到后台 2 秒后 `adb shell` 看没有连接 → 切回来自动恢复 → 旋转、分屏不重建不崩。Mac 门禁全过；Linux 实机回归过了。
 
 ### 14.3 和 Windows 的 C 段怎么对
 
@@ -625,11 +626,11 @@ Windows 的 C 段也要「会话端口的小接口」，在 Windows 机器上做
 4. 外接键盘上系统拿走的键，和 P0 的表对一遍。
 5. 语音按钮在这台设备上出不出现、识别准不准。
 6. 厂商系统的省电策略会不会在前台就限制它。
-7. 更新一遍（细节见第 10 条）。
+7. 更新一遍（细节见第 10 条）。（P0 结果 §7）
 8. 双栈的真 IPv6：有全局 IPv6 的网络、只有 IPv6 的网络（NAT64）下各连一次 relay（模拟器上没有全局 IPv6，P0 测不了）。（P0 结果 §3）
 9. 触控板双指滚动、捏合：Flutter 收到的是 `PointerPanZoom*` 还是 `PointerScrollEvent`（模拟器上用 `uinput` 虚拟触控板测不出；平板上没有触控板）。**一分钟检查（在 P1 第一个包上做，探查包已卸掉）：**平板上 Ctrl+C、Ctrl+V 的 `isControlPressed`（P0 里平板只做过 `input keycombination`，它发的字母 `metaState` 为 0，`uinput` 平板上被拒，所以注入显示不了修饰键状态；34、36 上 `uinput` 已过）。做法：把配对的蓝牙键盘接上，在 P1 第一个包里（会话里或一个看得到按键的地方）按 Ctrl+C、Ctrl+V，看 App 收到的是不是带 Ctrl 的组合。（P0 结果 §5）
 10. 自己装自己走完一遍：平板上点「更新」→ 荣耀的安全检测 → 勾「已了解…」→「继续安装」→ 输锁屏密码，看版本变新、App 是被杀还是自己起来；没有锁屏密码的机器是什么样也看一下。P0 里平板只走到输密码那一步（密码不能替用户输），「安装外部来源应用」的授权随探查包卸掉没了，要重新打开。（P0 结果 §7）
-11. 打字不少字：用真键盘和软键盘各打一段，到 Mac 上核对。P0 里模拟器 36 上重复 7 次、少字 3 次（少的字在写作条里就没有了），34 和平板上到齐；是注入、写作条收字还是模拟器输入法丢的，没查清。（P0 结果 §4）
+11. 打字不少字：用真键盘和软键盘各打一段，到 Mac 上核对。P0 里模拟器 36 上重复 7 次、少字 3 次（有截图的两次，少的字在写作条里就没有了）；34 上到齐；平板上第一次也少了一个字，重打后到齐；是注入、写作条收字还是模拟器输入法丢的，没查清。（P0 结果 §4）
 12. 强制走 relay 时的帧率（P0 没量；局域网下平板 30 s 平均 26.1 帧）。（P0 结果 §8）
 13. 语音：真人对着平板按住说话，看有没有任何回调、按钮该不该出现。P0 里平板六次按住说话都没有回调，哪里都没拿到中文字。（P0 结果 §6）
 14. 真键盘在文本框里：Ctrl+空格（P0 里只到了 Ctrl，空格被输入法拿走）、单按字母（36 上没有按键事件、也看不到字）、Ctrl+C/V。这几处 P0 没查明原因。（P0 结果 §5）

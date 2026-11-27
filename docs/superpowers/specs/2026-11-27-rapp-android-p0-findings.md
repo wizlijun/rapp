@@ -44,11 +44,11 @@
 | 1 | 工具和空壳 | **过**。两个模拟器都能装、能启动，截图里是 `rApp P0 shell`。36 上第一次截图撞上「System UI isn't responding」弹框，等一会儿再试正常 | — | §4.5 已改成装完的样子 |
 | 2 | `.so` | **过**。九个名字都导出；四个 `LOAD` 段都是 `0x4000`；11.3 MB，strip 后 7.5 MB；依赖全部直接编过 | — | §6.2 已改：不用 `#[used] static`；闸的顺序和忘了 ack 的后果；hub-ffi 自己包 `catch_unwind` |
 | 3 | 进程内 hub 和网络 | **过**。两个模拟器都起得来 hub、出接入引导；放进 relay 和 key、在设备页按 ID 加上这台 Mac 后在线；「默认」和「只有 IPv4」两种状态下 relay 都解析成 `::ffff:` 映射地址并连上 | relay 存的是 IPv4 字面地址，**域名解析没有拿到**；模拟器上没有全局 IPv6。两样都留给实机，在 P1 第一个包上做（§14.6 第 8、15 条） | §6.1 已改（库按名字传；`AI_V4MAPPED` 的问题不用回答）；§6.5 `systemOpen` 要安卓通道；§14.2 验收加「按 ID 添加」 |
-| 4 | 进程内会话、节流 | **过，模拟器 36 的打字没过**。门禁两轮（对照、慢速 200 ms）在模拟器 34、模拟器 36、平板上都过：慢速时 `p0 fps` 平均 4.4–4.7，traffic `frames` 平均 28.9–29.6；后 6 次减前 6 次的 PSS 是 −10.6 / −5.9 / −7.9 MB，都在 40 MB 以内。P0Moving 的动画面、颜色三台都对。TextEdit 打 `p0probe`：34、平板上到齐；**36 上重复 7 次，到齐 4 次、少字 3 次**（第 4 节「模拟器 36 打字重复测量」），有截图的 2 次在 rApp 的写作条里就已经少了。打字经写作条发出，这一点只凭截图。**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（桌面会话）；其余都是单应用会话，因为桌面会话会把用户自己的会话顶掉。hub 读到超过 64 KiB 的回复行（`watch_load` 首行，Mac 服务起来约 52 分钟以后，量到的区间 51.5–55 分钟）就丢整条连接，会话跟着断；探查里绕过后会话撑过 250 s | 36 的少字：用真键盘和软键盘各打一段，留给实机（§14.6 第 11 条）。64 KiB 行上限：共用代码，main 上没修，记进 `tasks/todo.md`「安卓平板」，P1 接会话前修 | §6.2 规矩 1 已补 |
+| 4 | 进程内会话、节流 | **过，模拟器 36 的打字没过**。门禁两轮（对照、慢速 200 ms）在模拟器 34、模拟器 36、平板上都过：慢速时 `p0 fps` 平均 4.4–4.7，traffic `frames` 平均 28.9–29.6；后 6 次减前 6 次的 PSS 是 −10.6 / −5.9 / −7.9 MB，都在 40 MB 以内。P0Moving 的动画面、颜色三台都对。TextEdit 打 `p0probe`：34 上到齐；平板上第一次在发送前也少了第二个 p，重打 `probe` 后到齐；**36 上重复 7 次，到齐 4 次、少字 3 次**（第 4 节「模拟器 36 打字重复测量」），有截图的 2 次在 rApp 的写作条里就已经少了。打字经写作条发出，这一点只凭截图。**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（桌面会话）；其余都是单应用会话，因为桌面会话会把用户自己的会话顶掉。hub 读到超过 64 KiB 的回复行（`watch_load` 首行，Mac 服务起来约 52 分钟以后，量到的区间 51.5–55 分钟）就丢整条连接，会话跟着断；探查里绕过后会话撑过 250 s | 36 的少字：用真键盘和软键盘各打一段，留给实机（§14.6 第 11 条）。64 KiB 行上限：共用代码，main 上没修，记进 `tasks/todo.md`「安卓平板」，P1 接会话前修 | §6.2 规矩 1 已补 |
 | 5 | 键盘和触控板 | **部分过**。过关条件（Ctrl+C/V 在空白区到得了 App，`isControlPressed` 为真）在 34、36 上**过**（`uinput`，内核级，`ctrl=1`）。**平板上没确认，等用户用真键盘按**：键到得了，但 `input keycombination` 发的字母 `metaState` 为 0，平板上 `uinput` 被拒，注入显示不了修饰键状态。36 上文本框有焦点、软键盘打开时 Ctrl+C/V/A/Z/X 都到、`ctrl=1`；36 上原先「到不了」是点在了文本框外，34 和平板的文本框没有重测。Meta 组合都被系统拿走。滚轮是 `PointerScrollEvent kind=mouse`，三台都有 | 平板的 Ctrl+C/V：蓝牙键盘的一分钟检查，在 P1 第一个包上做（§14.6 第 9 条）。触控板双指和捏合：模拟器上测不出，平板没有触控板（§14.6 第 9 条）。Ctrl+SPACE、文本框里单按字母：原因没查明（§14.6 第 14 条） | §14.6 第 9 条已改 |
 | 6 | 语音 | **部分过**。三个目标按 §11 的规则手算都是「不能用」：34 没有识别器（规则 3，正是 34 的过关条件）；36 和平板的 `checkRecognitionSupport` 报 14（规则 4）。**哪里都没有拿到中文字**：36 在线识别收到 `ready`、`begin`、`error 7`（没检测到语音），设备上下载 `cmn-Hans-CN` 后报 `error 13`；分段的静音时长给 `Long` 时 36 的识别器拒绝，给 `int` 不再拒绝，但只来过一个空的 `segment`；平板六次按住说话（普通 ×3、分段 ×2、热词）都没有任何回调。分段结果、热词效果都没有拿到 | 按 U6 的退路：判成不能用，按钮不出现（§11 规则 3、4）。平板上真人对着平板说话：留给实机（§14.6 第 5、13 条） | §11 已改（语言标签、超时、异常、`int`、规则 4、找识别器）；「按下去没回调」的处理是建议 2 |
 | 7 | 自己装自己 | **部分过**。两个模拟器过：`versionCode` 9001 → 9002；`canInstall` 起点是否，开开关后是；装完 App 被杀、没有自己重启；数据文件和开关都还在。`success` 回调没观察到（进程死了）。哈希不对的四个条件在 34 和平板上都过。**平板上没装完，等用户**：荣耀多出安全检测、「已了解…」勾选、锁屏密码三层，密码不能替用户输 | 平板上走完一遍、输锁屏密码：留给实机，在 P1 第一个包上做（§14.6 第 7、10 条） | §13.2 第 4 步已改（装完不重启）；荣耀三层是建议 1，「装完回到桌面」的提示是建议 3 |
-| 8 | 数字 | **部分过**。release APK 29.5 MB（29,522,135 字节），三个 `.so` 8.26 / 11.58 / 7.53 MB（MB = 10⁶ 字节）；三台装的是同一个构建。PSS（MB = 1000 dumpsys KB）：模拟器 34 没会话 88.8、开着静态 2560×1600 桌面会话 220.4；模拟器 36 没会话 89.1、静态单应用会话 158.6；平板没会话 209.0、静态单应用会话 445.7。release 动画面 30 s 平均 `p0 fps`：平板 26.1（屏幕 60 Hz），模拟器 34 26.0、模拟器 36 25.1（只作参考）。「静态」会话每秒仍到 3–7 帧，PSS 摆动大，平均数只作大概 | 强制走 relay 的帧率没量：留给实机（§14.6 第 12 条） | 不用改 |
+| 8 | 数字 | **部分过**。三台装的 release 包 29.5 MB（29,544,999 字节），三个 `.so` 8.26 / 11.58 / 7.55 MB（MB = 10⁶ 字节）。PSS（MB = 1000 dumpsys KB）：模拟器 34 没会话 88.8、开着静态 2560×1600 桌面会话 220.4（这两项是在早一版的包上量的）；模拟器 36 没会话 89.1、静态单应用会话 158.6；平板没会话 209.0、静态单应用会话 445.7。release 动画面 30 s 平均 `p0 fps`：平板 26.1（屏幕 60 Hz），模拟器 34 26.0、模拟器 36 25.1（只作参考）。「静态」会话每秒仍到 3–7 帧，PSS 摆动大，平均数只作大概 | 强制走 relay 的帧率没量：留给实机（§14.6 第 12 条） | 不用改 |
 
 ## 1 工具和空壳
 
@@ -58,16 +58,15 @@
 
 **空壳。** `gui/lib/main_p0_shell.dart` 只显示 `rApp P0 shell` 和 `Platform.operatingSystemVersion`。`flutter build apk --debug -t lib/main_p0_shell.dart --target-platform android-arm64` 出 81 MB 的调试 APK。两个模拟器各装一次、用 `am start -n com.rapphub.rapp/.MainActivity` 启动、`screencap` 截图（图在 scratchpad，不进仓库）：
 - API 34：白底，中间大字 `rApp P0 shell`，下面一行小字 `sdk_phone64_arm64-userdebug 14 UE1A.230829.036.A1 11228894 test-keys`；底部是平板的任务栏。`logcat -d -s flutter AndroidRuntime` 里只有两行 flutter 的 Impeller（OpenGLES）和 Dart VM service 信息，没有 FATAL。
-- API 36：同样的页面，小字 `sdk_gphone64_arm64-userdebug 16 BE2A.250530.026.F3 13894323 dev-keys`；底部是手势条。`logcat` 没有 FATAL。**第一次截图（冷启动后立刻装、启动）截到的是系统弹的「System UI isn't responding」对话框**，不是我们的应用；点 Wait、等 20 秒后再启动（应用已在前台），第二张截图才是上面这个正常页面。弹框是模拟器刚起来时 System UI 太忙，不是应用崩溃（`AndroidRuntime` 里没有 FATAL），但以后在 36 上装包前最好多等一会儿。
+- API 36：同样的页面，小字 `sdk_gphone64_arm64-userdebug 16 BE2A.250530.026.F3 13894323 dev-keys`；底部是手势条。`logcat` 没有 FATAL。**第一次截图（冷启动后立刻装、启动）截到的是系统弹的「System UI isn't responding」对话框**，不是本应用；点 Wait、等 20 秒后再启动（应用已在前台），第二张截图才是上面这个正常页面。弹框是模拟器刚起来时 System UI 太忙，不是应用崩溃（`AndroidRuntime` 里没有 FATAL），但以后在 36 上装包前最好多等一会儿。
 - 两台模拟器没有同时开，一台关掉（`adb emu kill`）再开另一台。
 
 **这一步碰到的坑（P1 的人会再碰到）：**
-1. **`flutter create` 会改写 `gui/.metadata`**：它把原来的 linux/macos/windows 三条迁移记录丢了，只留 android。我把原文件还原后手工加了一条 android 记录。它还会生成 `gui/test/widget_test.dart`（引用不存在的 `MyApp`），已删除。它也会改 `gui/pubspec.lock`，已还原。
+1. **`flutter create` 会改写 `gui/.metadata`**：它把原来的 linux/macos/windows 三条迁移记录丢了，只留 android。处理：原文件还原，再手工加一条 android 记录。它还会生成 `gui/test/widget_test.dart`（引用不存在的 `MyApp`），已删除。它也会改 `gui/pubspec.lock`，已还原。
 2. **JDK。** `sdkmanager`/`avdmanager` 在 JDK 27 上正常。Gradle 9.1.0 不认 JDK 27（`flutter create` 末尾的提示就是这个），所以装了 `brew install openjdk@21`，之后所有 `flutter build` 都在命令前设 `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home`。没有动 Flutter 全局配置。`brew install openjdk@21` 顺带升级了 8 个依赖库（brotli、fontconfig、glib、harfbuzz、jpeg-turbo、lz4、zstd、little-cms2）。
 3. **下载非常慢，要绕代理（只在这台 Mac 上需要：它开着 TUN + fake-ip 代理；没有这种代理的机器直接下就行）。** 这台 Mac 的代理让 Google 的下载服务器只有约 1–160 KB/s，Gradle 的 100+ MB 下载一直超时；直连物理网卡（DoH 解析 + 绑定 en0）能到 10–17 MB/s。做法：在 scratchpad 里起一个只监听 127.0.0.1 的小 CONNECT 代理（Python，DoH 解析真实 IP，socket 绑 en0），然后 `sdkmanager --proxy=http --proxy_host=127.0.0.1 --proxy_port=18123`，Gradle 用 `JAVA_TOOL_OPTIONS="-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=18123 -Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=18123 -Dhttp.nonProxyHosts=localhost|127.0.0.1"`。Maven Central（Cloudflare）走这条路也只有约 150 KB/s，首次 `flutter build apk` 总共用了约 40 分钟（含一次因代理空闲超时设置过短而断流重来）。依赖缓存好之后再编会快很多。
 4. **Flutter 生成的 `.gitignore` 忽略了 `gradlew`、`gradlew.bat`、`gradle-wrapper.jar`**；它们每次 `flutter build` 会重新生成，不进仓库。
 5. AGP 在第一次构建时自己装了 build-tools 36.0.0 和 CMake 3.22.1，不用手动装。
-
 6. **Gradle 设置。** Flutter 模板在 `gui/android/gradle.properties` 里加了 `android.newDsl=false`、`android.builtInKotlin=false`。P1 建工程时照留；以后升 AGP 时再看能不能去掉。
 
 **用到的命令**（和计划第 1 项的命令一致；P1 照着来，`JAVA_HOME` 指 openjdk@21；这台 Mac 上 `sdkmanager` 另加上面第 3 条的 `--proxy` 参数）：
@@ -208,7 +207,7 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 **第 4 步：放进 relay 和 key。**
 - 这台 Mac 的数据根是 `~/rapp`（没有 `RAPP_HOME`，没有指针文件）。`jq '{relay, key}' ~/rapp/local/service.json > <scratchpad>/p0-service.json`，`chmod 600`。
 - **和计划不同：合并，不覆盖。** 模拟器上的 `service.json` 已经有 `ensureDeviceId` 写的 `id`，整个覆盖会丢掉它。做法：`run-as … cat` 拉下来，`jq -s '.[0] * .[1]'` 合上 relay 和 key，再 `run-as com.rapphub.rapp sh -c 'cat > /data/user/0/com.rapphub.rapp/files/rapp/local/service.json'` 写回（**要写绝对路径**，`sh -c` 里的相对路径不是应用目录，报 `No such file or directory`）。之后字段是 `id,key,relay`，0600。hub 认这个文件，没再改。
-- **和计划不同：这台 Mac 不会自己出现。** 有了 relay 和 key 之后全景里只有「本机」、设备在线 1/1，`hub.log` 没有任何 relay 的行。hub 只探 `hosts.json` 里存过的主机；正常用法是在设备页「添加设备」填对方的 ID（`add_host` → `add_by_id`）。为了不让 ID 出现在界面和输入记录里，我没走界面，而是用 `jq '[{id: .id, name: "这台 Mac", password: ""}]' ~/rapp/local/service.json` 生成 `hosts.json` 写进 `files/rapp/local/`（0600），再冷启动。
+- **和计划不同：这台 Mac 不会自己出现。** 有了 relay 和 key 之后全景里只有「本机」、设备在线 1/1，`hub.log` 没有任何 relay 的行。hub 只探 `hosts.json` 里存过的主机；正常用法是在设备页「添加设备」填对方的 ID（`add_host` → `add_by_id`）。为了不让 ID 出现在界面和输入记录里，探查没走界面，而是用 `jq '[{id: .id, name: "这台 Mac", password: ""}]' ~/rapp/local/service.json` 生成 `hosts.json` 写进 `files/rapp/local/`（0600），再冷启动。
 - 结果（两台一样）：全景里「这台 Mac」在线（苹果标记、0.15.52、正在跑的会话、「打开应用」），设备在线 2/2；`hub.log` 有 `route … path:"lan" result:"ok"` 和 `presence … online:true`，`ports` 映射了这台 Mac 的两个共享端口（28000、28001）。模拟器经 `10.0.2.2` 的 NAT 能直接连到 Mac 的局域网地址，所以「自动」走的是 lan，没走 relay。
 - 为了看 relay 那条路，把 `hosts.json` 里这台的 `route` 改成 `"relay"`（等于 hub 的 `set_route` 设成 relay）再冷启动：`route … path:"relay" result:"ok"`，`presence online:true`，界面同样在线。之后的网络测试都在强制 relay 下做。两台模拟器的 `hosts.json` 现在都留着 `route: relay`。
 - 存下来的 `hub.log`（见第 5 步末尾）都没有 `warn`、`error` 行。lan 那次和强制 relay 第一次的日志当时没单独存，只在屏幕上看过。
@@ -251,10 +250,11 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 - `rust/net/src/quic.rs:271` 的注释写「Only the iOS hub uses them」，现在安卓也用，要改。
 - `gui/lib/p0/p0_pages.dart:61` 的 `relayHost` 遇到没加方括号的 IPv6 字面地址，会在最后一个冒号处截断。只在探查页里用，P1 不带过去。
 - `rust/android-ffi/src/lib.rs:371` 的 `anyhow_text` 只是包了一层 `to_string`，可以直接用 `to_string`。只在探查函数 `rapp_p0_resolve` 里用。
+- 能力表里安卓的 `systemOpen` 先留 false：它的四处用法（`main_window.dart:43`、`term_stage.dart:50`、`local_section.dart:43`、`data_section.dart:54`）都走 `iosChannel`，安卓上没有这个通道。探查的 `main_android.dart` 也是这样设的（见「探查里打的补丁」）。
 
 ## 4 进程内会话
 
-**状态：过，模拟器 36 的打字没过。** 门禁两轮（对照、慢速 200 ms）在模拟器 34、模拟器 36、平板上都过，见本节「第四次测量」。36 上 TextEdit 打 `p0probe` 不稳：先后 7 次（`input text` 4 次、逐键 3 次）里 4 次少一个字符（`p0robe`、`pprobe`），逐键输入也少，不只是 `adb shell input text`；有截图的几次，少的字在写作条里就没有了；34、平板上打字过。**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（第二次测量的 `p0/t4e-desktop-static-34.png`，桌面会话）；36 和平板只看了 P0Moving 的画面在动、颜色对，没有和 Mac 屏幕逐处对照。到 Mac 的会话从第三次测量起都是单应用会话：桌面会话一次只能一个人开，开了会把用户自己正在用的桌面会话顶掉。强制 relay 的 fps 四次测量都没量。
+**状态：过，模拟器 36 的打字没过。** 门禁两轮（对照、慢速 200 ms）在模拟器 34、模拟器 36、平板上都过，见本节「第四次测量」。36 上 TextEdit 打 `p0probe` 不稳：先后 7 次（`input text` 4 次，其中 1 次打的是 `a1abba`；逐键 3 次）里 3 次少一个字符（`p0robe`、`pprobe`），逐键输入也少，不只是 `adb shell input text`；有截图的几次，少的字在写作条里就没有了；34 上到齐；平板上第一次 `input text 'p0probe'` 在发送前也少了第二个 p，退格后重打 `probe` 才到齐。**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（第二次测量的 `p0/t4e-desktop-static-34.png`，桌面会话）；36 和平板只看了 P0Moving 的画面在动、颜色对，没有和 Mac 屏幕逐处对照。到 Mac 的会话从第三次测量起都是单应用会话：桌面会话一次只能一个人开，开了会把用户自己正在用的桌面会话顶掉。强制 relay 的 fps 四次测量都没量。
 
 本节有四次测量：第一次（模拟器 34，桌面会话和单应用会话）、第二次（模拟器 34，查会话为什么断、加绕过）、第三次（模拟器 34，画面源换成 P0Moving）、第四次（模拟器 34、模拟器 36、平板，门禁和打字），外加模拟器 36 的打字重复测量。
 
@@ -287,7 +287,7 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 |---|---|---|
 | 桌面会话有画面、和 Mac 屏幕一致、红蓝没反 | 有。debug 包 `p0 fps` 14–29；release 包 `p0 fps` 10–15，traffic `frames` 13–51 | `p0/t4-desktop-34.png`（debug）、`p0/t4-desktop-release-34.png`（release，截到时已断开，画面停在最后一帧） |
 | 单应用会话打字 | 过，但不是直接打进文稿：`adb shell input tap 1200 700` 后 `adb shell input text 'p0probe'` 进的是 rApp 自己的写作条。按回车（`adb shell input keyevent 66`）后发到 Mac，TextEdit 文稿里出现 `p0probe`，标题变成 Edited。之后没存盘就关掉了 | `p0/t4-type-34.png`（字在写作条）、`p0/t4-type2-34.png`、`p0/t4-p0probe-34.png`（字在文稿里） |
-| 会话稳定性 | **release 包里会话自己断**：三次里两次在 18 s、10 s 后断，安卓侧报 `host disconnected: failed to fill whole buffer`（`client-core/src/protocol.rs:352` 的 `read_exact` 读到 EOF），Mac 侧记 `session_end reason "connection lost"`。断之前那一秒 `p0 fps` 还有 14–15，不是闸卡住。点「重连」能连回来。第三次开了 91 s，是我 `am force-stop` 结束的。debug 包两次各开了 115 s、79 s，Mac 侧结束原因也记的是 `connection lost`，当时是不是我结束的没有记下来 | `p0/t4-textedit-disconnect-34.png` |
+| 会话稳定性 | **release 包里会话自己断**：三次里两次在 18 s、10 s 后断，安卓侧报 `host disconnected: failed to fill whole buffer`（`client-core/src/protocol.rs:352` 的 `read_exact` 读到 EOF），Mac 侧记 `session_end reason "connection lost"`。断之前那一秒 `p0 fps` 还有 14–15，不是闸卡住。点「重连」能连回来。第三次开了 91 s，由探查方 `am force-stop` 结束。debug 包两次各开了 115 s、79 s，Mac 侧结束原因也记的是 `connection lost`，当时是不是探查方结束的没有记下来 | `p0/t4-textedit-disconnect-34.png` |
 
 **第一次测量停在这里的原因：** 每次会话结束（自己断开也算），Mac 上的 rApp 都会在 10 s 后自动锁屏（`service.log` 里 `auto_lock`）。锁上以后要用户输入密码。另外，打开桌面会话会把另一台设备正开着的桌面会话顶掉（`session_end reason "taken over"`）。
 
@@ -300,7 +300,7 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 - 连接丢了、会话跟着断，只在这个探查的进程内会话里见过。
 - 桌面版的会话在自己的进程里、有自己的连接，那边什么都没测。
 
-探查里的绕过（补丁表 `link.rs` 那行）：连接还开着、错误是 `line longer than` 时，只把错误交回去、记一行 `p0_keep_link`，不丢连接。绕过后 hub.log 里只有大约每分钟一行 `p0_keep_link`，没有反复重连。两次会话都撑过 250 s：桌面会话 256 s（被另一台设备顶掉才结束），单应用会话 251 s（我 `am force-stop` 结束）。**真修法应在 main 的共用代码里**：要么 `watch_load` 的首行别带那么多历史、或拆行，要么读行上限对这个回复放宽；不管哪种，「回复太长」都不该丢整条连接。
+探查里的绕过（补丁表 `link.rs` 那行）：连接还开着、错误是 `line longer than` 时，只把错误交回去、记一行 `p0_keep_link`，不丢连接。绕过后 hub.log 里只有大约每分钟一行 `p0_keep_link`，没有反复重连。两次会话都撑过 250 s：桌面会话 256 s（被另一台设备顶掉才结束），单应用会话 251 s（由探查方 `am force-stop` 结束）。**真修法应在 main 的共用代码里**：要么 `watch_load` 的首行别带那么多历史、或拆行，要么读行上限对这个回复放宽；不管哪种，「回复太长」都不该丢整条连接。
 
 **绕过留下没修的：** 它只保住了连接；首行超上限时 `watch_load` 照样失败，大约每分钟重试一次。余力（负载）数据要等真修法。
 
@@ -320,7 +320,7 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 
 **界面上看到的问题（P1 留意）：** 会话断开后，画面中间的「重连 / 结束会话」框里，「结束会话」点了没反应，只能点左上角总览按钮离开。重现：模拟器 34、release 包，开一个单应用会话，让它断开（第二次测量里是会话自己断），在断开框里点「结束会话」（`adb -s <目标> shell input tap` 点了几次），画面不变。同一个框里的「重连」是好的（第三次测量里 Mac 上的 app 退出后点「重连」，会话重新开了起来）。第四次测量里 36 上也一样（见下「Mac 自动升级」）。Mac 锁着时，会话里显示「远程电脑已锁屏：输入系统密码」；探查里没用过这个输入。
 
-**第二次测量的锁屏和顶掉次数：** 自动锁屏 1 次（06:27:40Z，绕过之前那次会话断开后）；我顶掉别人的桌面会话 2 次（06:27:16Z、06:43:28Z）；我的会话被别人顶掉 1 次（06:47:44Z）。
+**第二次测量的锁屏和顶掉次数：** 自动锁屏 1 次（06:27:40Z，绕过之前那次会话断开后）；探查会话顶掉别人的桌面会话 2 次（06:27:16Z、06:43:28Z）；探查会话被别人顶掉 1 次（06:47:44Z）。
 
 ### 第三次测量（2026-11-27 16:15 起，模拟器 34；画面源换成单应用会话）
 
@@ -341,13 +341,13 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 
 **开会话会抢焦点。** rapp-host 开单应用会话时调 `app.activate()`（`Sources/rapp-host/WindowCapture.swift:60`），会把被抓的 app 带到前台。P0Moving 收到激活后把焦点还给之前在前台的 app，并把窗口放到最后。抓图不受影响，因为过滤器只含这个 app 的窗口。开会话时还了 1 次焦点。
 
-**对照那一轮被打扰，作废。** 第 13、14 个采样之间（07:25:44–07:25:52Z），P0Moving 被激活了 5 次，大约每 2 s 一次，之前在前台的是 Finder。每次焦点都被我还给了 Finder。之后窗口离开了右下角，帧头从 `2560x1664` 变成 `2576x1680`。当时用户自己的桌面会话还开着，看样子是用户在点或拖这个窗口，我的「还焦点」和用户抢了 5 次。按规矩这一轮整轮作废（`p0/t4f-ctl-34.txt`，不引用里面的 PSS）。
+**对照那一轮被打扰，作废。** 第 13、14 个采样之间（07:25:44–07:25:52Z），P0Moving 被激活了 5 次，大约每 2 s 一次，之前在前台的是 Finder。每次焦点都被探查脚本还给了 Finder。之后窗口离开了右下角，帧头从 `2560x1664` 变成 `2576x1680`。当时用户自己的桌面会话还开着，看样子是用户在点或拖这个窗口，探查脚本的「还焦点」和用户抢了 5 次。按规矩这一轮整轮作废（`p0/t4f-ctl-34.txt`，不引用里面的 PSS）。
 
 随后改了 P0Moving：
 - 激活前 1.5 s 内有点击或按键，或者鼠标还按着，就不还焦点；
 - 重开时窗口放在用户拖到的位置。
 
-**我造成了一次锁屏。** 重开 P0Moving 要先退出它，我的会话也随之结束（07:29:21Z `session_end reason "closed"`）。用户自己的两个会话已在 07:26:20Z 结束，Mac 上没有别的会话了，于是 10 s 后自动锁屏（07:29:32Z `auto_lock`）。之后在 34 上点「重连」，会话开了，但 Mac 侧记 `A is locked at start; waiting for unlock`，没有画面。
+**探查造成了一次锁屏。** 重开 P0Moving 要先退出它，探查会话也随之结束（07:29:21Z `session_end reason "closed"`）。用户自己的两个会话已在 07:26:20Z 结束，Mac 上没有别的会话了，于是 10 s 后自动锁屏（07:29:32Z `auto_lock`）。之后在 34 上点「重连」，会话开了，但 Mac 侧记 `A is locked at start; waiting for unlock`，没有画面。
 
 教训：只要 Mac 上没有别的会话，探查结束自己的会话就会锁屏。所以要重开画面源，得先开一个新会话再关旧的。
 
@@ -370,13 +370,13 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 - 回复有多大：在 Mac 上只读地连本机 IPC，发 `{"cmd":"load","history":true}`，首行回复 75,125 字节，里面 720 个历史点（每个约 100 字节；各次量的在 99–103 字节之间），而上限 `MAX_LINE` 是 65,536（`p0/t4f-load-size.txt`）。
 - 别的请求都没撞上。
 
-**第三次测量的锁屏和顶掉次数：** 自动锁屏 1 次（07:29:32Z，我造成的，见上）；顶掉别人 0 次；被顶掉 0 次；和用户抢焦点 5 次（07:25:44–07:25:52Z，见上）。
+**第三次测量的锁屏和顶掉次数：** 自动锁屏 1 次（07:29:32Z，探查造成的，见上）；顶掉别人 0 次；被顶掉 0 次；和用户抢焦点 5 次（07:25:44–07:25:52Z，见上）。
 
 ### 第四次测量（2026-11-27，模拟器 34、模拟器 36、平板；时间见各表，UTC）
 
 **怎么做的。**
 - 包：probe `d2706c7e` 不带 `P0_PAGE` 的 release 包（`p0/t4g-release.apk`），三台都装的这一个。
-- 平板：荣耀 ROD2-W09，Android 16，USB 连 Mac，没改任何设置。模拟器无窗口跑（`-no-window -no-audio`）。
+- 平板：荣耀 ROD2-W09，Android 16，USB 连 Mac。只临时改过「充电时保持唤醒」，探查结束时改回原值；别的设置没改。模拟器无窗口跑（`-no-window -no-audio`）。
 - 画面源只用单应用会话，没开桌面会话：动画面是第三次测量的 P0Moving（`com.rapp.p0moving`），打字用 TextEdit 的一个空白文档。
 - Mac 上的 rApp 先是 0.15.64，09:47:11Z 自己升到了 0.15.66（见下面「Mac 自动升级」）。门禁、30 s fps、平板的画面和打字、平板的两个 PSS 都是 0.15.64 时量的；模拟器 36 的打字和静态 PSS 是 0.15.66 时量的。
 
@@ -443,7 +443,7 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 - `p0/t4g-ctl-tab.txt` 第 3–5 次采样（第 22–45 行，08:54:17–08:54:40Z）的 9 秒里 `p0 fps` 是 5、3、2、4、5、9、8、8、12，同一时间 traffic `frames` 也只有 4、3、2、6、3、8、7、9、9：是 Mac 那边来的帧少了，不是平板画不过来。
 - 前两次采样是 24–29，第 6–18 次是 22–30。去掉第 3–5 次，其余 45 秒平均 26.9。
 - 平板单独量的 30 s fps 是 26.1（第 8 节），和模拟器差不多。
-- 那 9 秒为什么来的帧少没查。同一时间 08:54:10Z 我在 Mac 上跑了一次量 `watch_load` 首行的脚本，这只是时间上碰巧挨着，没证实有关系。
+- 那 9 秒为什么来的帧少没查。同一时间 08:54:10Z 在 Mac 上跑过一次量 `watch_load` 首行的脚本，这只是时间上碰巧挨着，没证实有关系。
 
 慢速轮三台表现一样。
 
@@ -452,16 +452,16 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 **其他看到的。**
 - 「rApp P0 探查」：设备名在探查包里写死，所以 34、36、平板在 relay 上是三台同名设备；Mac 的 `service.log` 里今天有 3 个不同的指纹都叫这个名字。
 - Mac 很忙：跑的时候平板顶栏显示「这台 Mac CPU 持续 90% 以上」（92–93%）。
-- 模拟器 36 上之前留下的路由是「中继（强制）」。在强制 relay 上看过一次画面后，我在 ⋯ 菜单里点「恢复自动选路」改回了自动；门禁和 30 s fps 都是自动（局域网）下量的。
-- 会话结束后顶栏显示「P0 Moving 意外结束：closed」，其实是我从 ⋯ →「结束会话」→「再点一次确认」正常结束的。确认要在一两秒内点，晚了就失效。
+- 模拟器 36 上之前留下的路由是「中继（强制）」。在强制 relay 上看过一次画面后，在 ⋯ 菜单里点「恢复自动选路」改回了自动；门禁和 30 s fps 都是自动（局域网）下量的。
+- 会话结束后顶栏显示「P0 Moving 意外结束：closed」，其实是从 ⋯ →「结束会话」→「再点一次确认」正常结束的。确认要在一两秒内点，晚了就失效。
 - P0Moving 的日志在 09:01–09:02Z（门禁轮之后）有两次把焦点还给 `com.apple.loginwindow`，窗口位置没变。
 
-**Mac 自动升级。** 09:47:09Z Mac 上的 rApp 下载了 0.15.66，09:47:11Z 服务停下，09:47:12Z 新版本起来（`update_applied` 0.15.64 → 0.15.66）。所有会话都以 `service stopped` 结束，包括我的 P0Moving 和 TextEdit，也包括几个不是我开的终端会话和一个桌面会话。所以 09:47:11Z–09:48:54Z 之间 Mac 上一个会话都没有，这不是我关的；Mac 没锁。36 上显示 `host disconnected: failed to fill whole buffer`。断开的卡片上点「结束会话」和「再点一次确认」都没用（和上面「界面上看到的问题」一样）；点「重连」，再从 ⋯ 结束就可以了。第一次在 36 上打字正赶上这次重启，丢了；重连后又打了一次（TextEdit 会话 09:48:54Z 开），这次到了 Mac，但收到的是 `p0robe`（见上面「模拟器 36 打字的经过」）。
+**Mac 自动升级。** 09:47:09Z Mac 上的 rApp 下载了 0.15.66，09:47:11Z 服务停下，09:47:12Z 新版本起来（`update_applied` 0.15.64 → 0.15.66）。所有会话都以 `service stopped` 结束，包括探查的 P0Moving 和 TextEdit，也包括几个不是探查开的终端会话和一个桌面会话。所以 09:47:11Z–09:48:54Z 之间 Mac 上一个会话都没有，这不是探查关的；Mac 没锁。36 上显示 `host disconnected: failed to fill whole buffer`。断开的卡片上点「结束会话」和「再点一次确认」都没用（和上面「界面上看到的问题」一样）；点「重连」，再从 ⋯ 结束就可以了。第一次在 36 上打字正赶上这次重启，丢了；重连后又打了一次（TextEdit 会话 09:48:54Z 开），这次到了 Mac，但收到的是 `p0robe`（见上面「模拟器 36 打字的经过」）。
 
 **第四次测量的锁屏和顶掉次数。**
-- 自动锁屏 1 次，是最后一次关会话：09:55:14Z 关掉模拟器 36，09:55:44Z 它的 TextEdit 会话 `connection lost`，09:55:54Z `auto_lock`。这一次按安排接受。
+- 自动锁屏 1 次，是最后一次关会话：09:55:14Z 关掉模拟器 36，09:55:44Z 它的 TextEdit 会话 `connection lost`，09:55:54Z `auto_lock`。这是测量收尾时关会话引起的，测量已做完。
 - 中间没锁过。
-- 顶掉别人 0 次；我自己两台之间互相顶掉 1 次（见上）；和用户抢焦点 0 次。
+- 顶掉别人 0 次；探查的两台之间互相顶掉 1 次（见上）；和用户抢焦点 0 次。
 
 **P1 接手时要改的（读代码看到的，探查里没改）：**
 - `watch_load` 首行超过 64 KiB：探查的绕过 `keeps_link`（`rust/hub/src/link.rs:983`）是按错误文字 `line longer than` 判断的，不能带进 main。真修法在共用代码里：这条回复放宽或去掉读行上限，或者首行分块发；不管哪种，回复太长都不该丢整条连接。已记进 `tasks/todo.md`「安卓平板」。
@@ -510,7 +510,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 | Meta + C | 36 | 没到 | 日历打开 |
 | Meta + C | 平板（实机） | 没到 | 联系人打开（荣耀系统快捷键） |
 | Meta + TAB、Meta + ENTER | 34、36、平板（实机） | 没到 | 回到桌面（启动器在前台）；34 上 Meta + TAB 复测也是启动器在前台 |
-| Meta 单按 | 34、36、平板（实机） | 没到（App 里没有 `Meta` 的行） | 34：回桌面；36：启动器搜索框弹出并拿走窗口焦点；平板：回桌面（我随后重新拉起 App） |
+| Meta 单按 | 34、36、平板（实机） | 没到（App 里没有 `Meta` 的行） | 34：回桌面；36：启动器搜索框弹出并拿走窗口焦点；平板：回桌面（随后重新拉起 App） |
 
 **文本框有焦点时（只在 36 上测）：**
 
@@ -561,7 +561,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 | 触控板捏合 | 34、36 | 同上，没有任何事件 | 注入。**模拟器上测不了，留给实机** |
 | 触控板双指滚动、捏合 | 平板（实机） | 没做，等用户：平板上不能用 `uinput`；这台机器上也没有触控板（`dumpsys input` 里只有蓝牙鼠标、键盘和触摸屏） | 没做 |
 
-触控板这一项，`translucent` 之后 36 和 34 各试了一次（两指同向滚动和两指张开），还是没有事件。不排除是我的事件序列不对；结论只是「这种方式没测出来」。§14.6 第 9 条已加，要在有触控板的实机上看 Flutter 收到 `PointerPanZoom*` 还是 `PointerScrollEvent`。
+触控板这一项，`translucent` 之后 36 和 34 各试了一次（两指同向滚动和两指张开），还是没有事件。不排除是注入的事件序列不对；结论只是「这种方式没测出来」。§14.6 第 9 条已加，要在有触控板的实机上看 Flutter 收到 `PointerPanZoom*` 还是 `PointerScrollEvent`。
 
 ## 6 语音
 
@@ -596,7 +596,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 
 热词用 `EXTRA_BIASING_STRINGS`（字符串列表）。
 
-**模拟器 36**（第一次测量，Mac 未锁屏，每次说话前我自己用 `tools/locked` 查过，这一条没有保存的文件；`RECORD_AUDIO` 用 `pm grant` 授予）：
+**模拟器 36**（第一次测量，Mac 未锁屏，每次说话前用 `tools/locked` 查过，这一条没有保存的文件；`RECORD_AUDIO` 用 `pm grant` 授予）：
 
 | 次 | 设置 | 事件顺序 | 文字 |
 |---|---|---|---|
@@ -605,7 +605,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 | 热词 | `EXTRA_BIASING_STRINGS=[rApp]` | `ready`、`begin`、`error 7`、`end`；`rms` 只有 1 次、最大 -2.0，声音没确认进入，热词效果**没测** | 没有 |
 | 设备上、`cmn-Hans-CN` | 先点 `download` 触发语言包下载，再勾「设备上」「cmn-Hans-CN」按住 | `start` 后 0.04 s 就 `error 13`（日志 `agsa_transcription_LANGUAGE_PACK_ERROR`），`end`；之后又来一个 `ready`，松手时 `error 5`，日志有 `#stopListening called with no preceding #startListening - ignoring`（`p0/t6f-e36-ondevice-cmn-log.txt`） | 没有 |
 
-下载这一步：当时在屏幕上看到「Download 普通话 (中国大陆) update」对话框、52.97 MB，我点了 Download；日志里看到过 `onEndTriggerModelDownload(): success`；这两处没有留文字证据（屏幕只有截图 `p0/t6f-e36-download.png`，日志没存）。下载之后再查 `support`（`p0/t6f-e36-support-after-download.txt`）：`installed` 仍是 `[en-US]`，`pending: [cmn-Hans-CN]`。语言包为什么没就绪，没查明。
+下载这一步：当时在屏幕上看到「Download 普通话 (中国大陆) update」对话框、52.97 MB，点了 Download；日志里看到过 `onEndTriggerModelDownload(): success`；这两处没有留文字证据（屏幕只有截图 `p0/t6f-e36-download.png`，日志没存）。下载之后再查 `support`（`p0/t6f-e36-support-after-download.txt`）：`installed` 仍是 `[en-US]`，`pending: [cmn-Hans-CN]`。语言包为什么没就绪，没查明。
 
 第二次测量（36，20:18:29–20:20:12；Mac 未锁屏：Mac 的服务日志 `t6-mac-lock-times.txt` 里 20:16:14 解锁、20:22:40 才自动锁上（文件里是 UTC，加 9 小时），每次也用 `tools/locked` 查过）。两次在线运行（分段 `int`、普通一段）的 `rms` 都只有 1 次、停在 -2.0，包括和第一次测量普通一段设置相同的那次（那次是 5 次、最大 10.0）：Mac 没锁，这两次声音却没进识别器，原因不明，没有查出来。设备上那次不一样：`start` 后约 0.12 s 就 `error 13`，没有 `ready`，`rms` 0，没开始收音。请求是否被接受只看日志，不依赖声音：
 - 分段 `int`：见上，请求被接受，`rms` 1 次 -2.0，没有声音进入的证据。
@@ -665,7 +665,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 | 模拟器 36（Android 16，google_apis） | 9001 → **9002** | **过** |
 | 平板（实机，HONOR ROD2-W09，Android 16，MagicOS 10） | 停在 9001 | **没装完**：装的最后一步要输入锁屏密码，不能替用户输；留给实机，在 P1 第一个包上做（规格 §14.6 第 10 条） |
 
-### 7.1 干净安装、开开关、装（Step 2）
+### 7.1 干净安装、开开关、装
 
 | 目标 | 动作 | 系统显示（原话） | 测到的值 | 过没过 |
 |---|---|---|---|---|
@@ -698,7 +698,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 
 `install` 事件：`success` **没有观察到，而且从页面上观察不了**：点 `UPDATE` 后 2 秒内进程就没了，页面的日志只在内存里，随进程一起丢；重开后日志是空的，这说明不了回调到没到过。所以「装成」不能靠这个回调判断，要靠重开后读到的新 `versionCode`（回调到不到都一样）。看到过的只有 `pending`（要用户确认）和用户取消时的 `cancelled`（code 3）。
 
-### 7.3 哈希不对的那一遍（Step 3）
+### 7.3 哈希不对的那一遍
 
 `app.sha256` 改成 64 个 `0`，在 9001 的包里点「下载并安装」。四个条件：
 
@@ -706,7 +706,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 |---|---|---|---|---|
 | 模拟器 34 | 是：`p0 install error 校验失败：期望 0000…（64 个 0），实际 46c800c1…` | 是（前台还是本 App） | 是（`ls` 目录为空，`total 0`） | 是 |
 | 平板（实机） | 是，同样一行 | 是 | 是（`total 0`） | 是 |
-| 模拟器 36 | 按任务只做了 Step 2，没做 | — | — | — |
+| 模拟器 36 | 没测（36 上只测了正常安装） | — | — | — |
 
 文件是下载完、算完哈希、不对就立刻删，不留给安装器。
 
@@ -718,13 +718,13 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 
 ### 7.5 P1 要做的（从这些现象来）
 
-1. **装完不会自己回来，成功回调也靠不住（没观察到，页面观察不了）。** 用户点系统的确认后，App 立刻被杀。「更新」按钮旁要提前说一句「装完会回到桌面，请再打开 rApp」。更新器不能指望装完在原进程里做事。
+1. **装完不会自己回来，成功回调也靠不住（没观察到，页面观察不了）。** 用户点系统的确认后，App 立刻被杀。「更新」按钮旁要不要提前说一句、怎么说，见建议 3。更新器不能指望装完在原进程里做事。
 2. **判断是否装成功：下次启动读自己的 `versionCode`**，和启动前存下的「正在升到 y」比。比对上就清状态、删缓存的包。`installApk` 的 `pending`、`cancelled` 事件可以用来把「正在安装」状态退回「有新版本」。
 3. **装完缓存里的包还在**（91 MB）：下一次启动要删 `cacheDir/update/`；校验失败这一支已经删了。
 4. **进程被杀时一份状态要先落盘**（正在装、目标版本），因为进程回不来做收尾。
 5. 数据在：标记文件在 `files/` 里，升级后还在，开关也还在，无需迁移。
 6. **`canInstall` 要在回前台时重读**：用户开了开关回来，页面用 `AppLifecycleState.resumed` 刷新就够，不需要轮询。
-7. **平板上还会有荣耀的三层界面**（见 7.4）：「更新」前要提示用户「会让你勾一个已了解、再输锁屏密码」；没有锁屏密码的机器是什么样没测。
+7. **平板上还会有荣耀的三层界面**（见 7.4）：「更新」前要不要提示、怎么提示，见建议 1；没有锁屏密码的机器是什么样没测。
 8. 清单要有 `REQUEST_INSTALL_PACKAGES` 和网络安全配置（探查里已写好）。这两样在正式包里也生效，不只是调试包。网络安全配置只对 `localhost`、`127.0.0.1` 放行明文：探查里给的是本机文件服务，P1 里给的是本机的 AI 整理（规格 §6.4）；P1 里真正的下载走 https，不要把明文放开到别的地址。
 9. 探查代码里的缺口（读代码看到的，P1 不要照抄）：
    - 接安装结果的广播接收器在 `configureFlutterEngine` 里注册、`onDestroy` 里注销，只跟着 Activity 活。P1 放进清单里的接收器或一个服务。
@@ -741,25 +741,25 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 
 ## 8 数字
 
-**状态：部分过。** 大小、PSS、release 30 s fps 都量了；没量的只有强制走 relay 的 fps，留给实机（规格 §14.6 第 12 条）。大小只量了模拟器 34 上的 release 包；PSS 和 fps 三台都量了。
+**状态：部分过。** 大小、PSS、release 30 s fps 都量了；没量的只有强制走 relay 的 fps，留给实机（规格 §14.6 第 12 条）。
 
 **本节的 MB：** 文件大小 MB = 10⁶ 字节；PSS 的 MB = 1000 个 `dumpsys meminfo` 的 KB（dumpsys 的 KB 是 1,024 字节）。
 
-### 大小（模拟器 34 上的 release 包）
+### 大小
 
-- release APK：`flutter build apk --release --target-platform android-arm64`，29,522,135 字节（29.5 MB）。这是带 hub 64 KiB 绕过（第 4 节）的包，比不带绕过的包大 1,072 字节，多出来的都在 `librapp_android.so` 里。
-- `unzip -lv` 看三个 `.so`（都是 Stored，不压缩）：
+三台最后装的是同一个 release 包 `p0/t4g-release.apk`，29,544,999 字节（29.5 MB）。它和 `p0/t4f-release.apk` 一样大，`.so` 的大小取自 `p0/t4f-sizes.txt`（`unzip -lv`，都是 Stored，不压缩）：
 
-  | `.so` | 字节 | MB |
-  |---|---:|---:|
-  | `libapp.so` | 8,258,448 | 8.26 |
-  | `libflutter.so` | 11,579,920 | 11.58 |
-  | `librapp_android.so` | 7,530,064 | 7.53 |
+| `.so` | 字节 | MB |
+|---|---:|---:|
+| `libapp.so` | 8,258,448 | 8.26 |
+| `libflutter.so` | 11,579,920 | 11.58 |
+| `librapp_android.so` | 7,552,928 | 7.55 |
 
-- 后来给 fps 行加上帧大小、给超长行日志加上请求名的包：APK 29,544,999 字节（29.5 MB）；`libapp.so`、`libflutter.so` 不变，`librapp_android.so` 7,552,928 字节（7.55 MB）。证据 `p0/t4f-sizes.txt`。
-- 大小证据 `p0/t4e-sizes.txt`。
+构建命令：`flutter build apk --release --target-platform android-arm64`。这个包带 hub 64 KiB 的绕过（第 4 节），fps 行带帧大小，超长行日志带请求名。
 
-### 模拟器 34 上的 PSS
+早一版的包（`p0/t4e-release.apk`，下面模拟器 34 的 PSS 是在它上面量的）：29,522,135 字节，`librapp_android.so` 7,530,064 字节，另两个 `.so` 一样（`p0/t4e-sizes.txt`）。
+
+### 模拟器 34 上的 PSS（早一版的包）
 
 - 命令：`adb -s <目标> shell dumpsys meminfo com.rapphub.rapp | grep 'TOTAL PSS'`，每 10 s 一次共 6 次（`scratchpad/tools/sample.sh <out> 6 10`）。
 - 没开会话、停在总览页（`am force-stop` 后重新启动、等 40 s）：89633、89512、88344、87640、87684、89900 KB，平均 88786 KB（88.8 MB）。不带绕过的包同样量法：平均 90862 KB（90.9 MB）。证据 `p0/t4e-nosession-34.txt`（文件里的 `p0 fps` 行是 force-stop 之前那个进程留在 logcat 里的，不算）、`p0/t4-pss-nosession-34.txt`。
@@ -767,7 +767,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 
 ### 三台的 fps 和 PSS
 
-三台装的都是同一个 release 包 `p0/t4g-release.apk`，大小没有再量。
+三台装的都是上面那个 release 包 `p0/t4g-release.apk`。
 
 **release 动画面 30 s 平均 `p0 fps`。**
 - 条件：`debug.rapp.p0_slow_ms=0`，P0Moving，帧 `2576x1680`，路由自动（局域网）。
