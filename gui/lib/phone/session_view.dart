@@ -10,7 +10,7 @@ import '../term/term_stage.dart';
 import '../ui/disconnected_stage.dart';
 import '../ui/lifecycle.dart';
 import '../ui/main_state.dart';
-import '../ui/stage.dart' show keyboardLift, offlineBarFor;
+import '../ui/stage.dart' show PixelSnap, keyboardLift, offlineBarFor;
 import '../ui/tokens.dart';
 import 'phone_nav.dart';
 import 'widgets.dart';
@@ -34,6 +34,15 @@ class PhoneSessionView extends StatelessWidget {
   }
 
   Widget _body(BuildContext context, RappTokens t) {
+    final problem = state.hubProblem;
+    if (problem != null) return Center(child: Text(problem, textAlign: TextAlign.center, style: TextStyle(color: t.text)));
+    if (state.current == null) {
+      // The session ended (结束) or is gone: back to the home page.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (nav.now == PhoneView.session) nav.home();
+      });
+      return const SizedBox.shrink();
+    }
     final rec = state.currentRecord;
     final rs = state.currentRemote;
     final keyboard = keyboardLift(MediaQuery.of(context), fullscreen: false);
@@ -55,13 +64,15 @@ class PhoneSessionView extends StatelessWidget {
             (rec?.frozen == true && !rs.detached && rs.windows.isNotEmpty))) {
       return Stack(children: [
         Positioned.fill(
-          child: TermStage(
-            state: state,
-            session: rs,
-            port: state.termPort!,
-            frozen: rec?.frozen == true,
-            keyboard: keyboard,
-            fit: false,
+          child: PixelSnap(
+            child: TermStage(
+              state: state,
+              session: rs,
+              port: state.termPort!,
+              frozen: rec?.frozen == true,
+              keyboard: keyboard,
+              fit: false,
+            ),
           ),
         ),
         if (rec != null && rec.frozen) Positioned(top: 0, left: 0, right: 0, child: offlineBarFor(state, rec)),

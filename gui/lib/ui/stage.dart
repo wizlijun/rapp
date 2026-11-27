@@ -97,7 +97,7 @@ class Stage extends StatelessWidget {
           // A terminal (live, or frozen by a network drop): its box lines need whole device pixels.
           full = true;
           term = true;
-          body = _PixelSnap(child: TermStage(
+          body = PixelSnap(child: TermStage(
               state: state,
               session: rs,
               port: state.termPort!,
@@ -305,19 +305,19 @@ class _HostNoticeBar extends StatelessWidget {
 
 /// Paints [child] moved by under a device pixel, so its top-left lands on one: whatever it snaps in
 /// its own coordinates is then snapped on the screen too, wherever the layout put it.
-class _PixelSnap extends SingleChildRenderObjectWidget {
-  const _PixelSnap({required super.child});
+class PixelSnap extends SingleChildRenderObjectWidget {
+  const PixelSnap({super.key, required super.child});
 
   @override
   RenderObject createRenderObject(BuildContext context) =>
-      _RenderPixelSnap(MediaQuery.devicePixelRatioOf(context));
+      RenderPixelSnap(MediaQuery.devicePixelRatioOf(context));
 
   @override
-  void updateRenderObject(BuildContext context, _RenderPixelSnap r) => r.dpr = MediaQuery.devicePixelRatioOf(context);
+  void updateRenderObject(BuildContext context, RenderPixelSnap renderObject) => renderObject.dpr = MediaQuery.devicePixelRatioOf(context);
 }
 
-class _RenderPixelSnap extends RenderProxyBox {
-  _RenderPixelSnap(this._dpr);
+class RenderPixelSnap extends RenderProxyBox {
+  RenderPixelSnap(this._dpr);
 
   double _dpr;
   set dpr(double v) {

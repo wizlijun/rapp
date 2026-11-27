@@ -127,6 +127,57 @@ void main() {
       expect(field(tester).controller!.selection, const TextSelection.collapsed(offset: 2));
     });
 
+    Future<void> swapOut(WidgetTester tester, {String text = 'hello', int at = 3}) async {
+      big(tester);
+      await tester.pumpWidget(layer());
+      await tester.pump();
+      field(tester).controller!.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: at));
+      await tester.pump();
+      await tester.pumpWidget(wrap(const SizedBox.shrink()));
+      await tester.pump();
+    }
+
+    Future<void> swapIn(WidgetTester tester) async {
+      await tester.pumpWidget(layer());
+      await tester.pump();
+      await tester.pump();
+    }
+
+    testWidgets('stale caret is dropped when the draft changed', (tester) async {
+      await swapOut(tester);
+      rs.composer.draft = 'hello world';
+      await swapIn(tester);
+      expect(text(tester), 'hello world');
+      expect(field(tester).controller!.selection, const TextSelection.collapsed(offset: 11));
+    });
+
+    testWidgets('caret after send is not reused', (tester) async {
+      await swapOut(tester);
+      rs.composer.draft = ''; // what a send leaves
+      await swapIn(tester);
+      await tester.pump();
+      expect(text(tester), '');
+      expect(rs.composer.caret, isNull); // spent: taken or dropped, never kept for a later mount
+    });
+
+    // The panel stays mounted through a collapse (no dispose), so the Pad's own behaviour is the editor's, untouched.
+    testWidgets('pad collapse and reopen leaves the caret as the editor had it', (tester) async {
+      big(tester);
+      await tester.pumpWidget(layer());
+      await tester.pump();
+      field(tester).controller!.value = const TextEditingValue(text: 'hello', selection: TextSelection.collapsed(offset: 2));
+      await tester.pump();
+      rs.composer.collapse();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      rs.composer.open = true;
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(text(tester), 'hello');
+      expect(rs.composer.caret, isNull);
+      expect(field(tester).controller!.selection, const TextSelection.collapsed(offset: 2));
+    });
+
     testWidgets('⌘= / ⌘- / ⌘0 zoom the whole panel in four steps; the default is the smallest', (tester) async {
       big(tester);
       await tester.pumpWidget(layer());

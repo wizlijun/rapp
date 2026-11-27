@@ -108,6 +108,7 @@ abstract class ComposerEditor {
 
 /// Editors whose caret or selection can be read and put back (a panel remount keeps it, spec F9).
 abstract class SelectionEditor {
+  String get text;
   TextSelection get selection;
   set selection(TextSelection value);
 }

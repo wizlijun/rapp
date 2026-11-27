@@ -110,9 +110,11 @@ void main() {
     await boot(tester, app: 'term:pty:w', phone: true);
     expect(views(), isNotEmpty);
     expect(views().every((v) => v['fit'] == false), isTrue);
+    final before = views().length;
     tester.view.physicalSize = const Size(844, 390);
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
+    expect(views().length, greaterThan(before));
     expect(views().every((v) => v['fit'] == false), isTrue);
   });
 
@@ -122,7 +124,7 @@ void main() {
     expect(views().last['fit'], true);
   });
 
-  testWidgets('phone picture does not call stageSize', (tester) async {
+  testWidgets('phone picture sends no resize', (tester) async {
     await boot(tester, app: 'Safari', phone: true);
     await tester.pump(const Duration(seconds: 1));
     expect(port.calls.where((c) => c.$1 == 'resize'), isEmpty);
@@ -136,6 +138,30 @@ void main() {
     await tester.pump();
     expect(nav.now, PhoneView.home);
     expect(s.phoneInSession, isFalse);
+  });
+
+  testWidgets('the session ending sends the phone home', (tester) async {
+    await boot(tester, app: 'term:pty:w', phone: true);
+    s.endCurrent();
+    term.play(const ClosedEvent(1, ''));
+    await tester.runAsync(flush);
+    await tester.pump();
+    await tester.pump();
+    expect(s.current, isNull);
+    expect(nav.now, PhoneView.home);
+    expect(s.phoneInSession, isFalse);
+  });
+
+  testWidgets('a hub problem shows its words', (tester) async {
+    await boot(tester, app: 'term:pty:w', phone: true);
+    await tester.runAsync(() async {
+      await t.die();
+      await flush();
+    });
+    await tester.pump();
+    expect(s.hubProblem, isNotNull);
+    expect(find.text(s.hubProblem!), findsOneWidget);
+    await tester.pump(const Duration(seconds: 1));
   });
 
   // The phone session view hosts no composer in V1b (it mounts TermStage / Picture / DisconnectedStage only,

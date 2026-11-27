@@ -413,6 +413,9 @@ class FlutterEditor implements ComposerEditor, HandoffEditor, SelectionEditor {
   }
 
   @override
+  String get text => _controller.text;
+
+  @override
   TextSelection get selection => _controller.selection;
 
   @override
