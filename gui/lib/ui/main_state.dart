@@ -4470,6 +4470,14 @@ class MainState extends ChangeNotifier {
     if (r.key == currentKey) _unlockAsks.add(r.id);
   }
 
+  /// A password dialog for [device] was closed under the user (the phone form switch closes the old form's
+  /// dialogs): ask again while its session is still locked and no password is in flight.
+  void askUnlockAgain(String device) {
+    if (_disposed || _unlockBusy.containsKey(device)) return;
+    final r = _unlockTarget(device);
+    if (r != null && remote[r.sid]?.screenLocked == true) _unlockAsks.add(device);
+  }
+
   /// The session to type the password through: the current one when it is this device's, else any locked one.
   SessionRecord? _unlockTarget(String device) {
     bool usable(SessionRecord x) =>

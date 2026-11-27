@@ -254,6 +254,42 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  // M1: fold and unfold close the old form's menus and dialogs, but a pending system-password ask is not dropped:
+  // the dialog is there again in the new form.
+  testWidgets('an open password dialog survives fold and unfold', (tester) async {
+    await boot(tester, rows: [term('y', 'working')]);
+    await tester.runAsync(() async {
+      s.openOrSwitch('m1', 'app', 'App');
+      for (var i = 0; i < 4; i++) {
+        await flush();
+      }
+    });
+    port.emit(ReadyEvent(sid, 'App'));
+    port.emit(ScreenLockedEvent(sid, true));
+    await tester.runAsync(flush);
+    await tester.pump();
+    port.emit(ScreenLockedEvent(sid, false));
+    port.emit(ScreenLockedEvent(sid, true));
+    await tester.runAsync(flush);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(UnlockDialog), findsOneWidget);
+    await resize(tester, phoneSize);
+    await tester.runAsync(flush);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(PhoneSessionView), findsOneWidget);
+    expect(find.byType(UnlockDialog), findsOneWidget);
+    await resize(tester, padSize);
+    await tester.runAsync(flush);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(MainWindow), findsOneWidget);
+    expect(find.byType(UnlockDialog), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(UnlockDialog), findsNothing);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpWidget(const SizedBox());
+  });
+
   group('iOS without a key', () {
     late PlatformCaps was;
     setUp(() {

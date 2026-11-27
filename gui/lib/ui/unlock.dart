@@ -91,8 +91,13 @@ Future<UnlockRequest?> showUnlockDialog(
   required String device,
 }) => showDialog<UnlockRequest>(
   context: context,
+  // Named, with its device: the phone form switch closes the old form's dialogs and asks this one again.
+  routeSettings: RouteSettings(name: unlockDialogRoute, arguments: device),
   builder: (_) => UnlockDialog(store: store, device: device),
 );
+
+/// The route name of [showUnlockDialog]; its arguments are the device id.
+const unlockDialogRoute = 'unlock';
 
 class UnlockDialog extends StatefulWidget {
   const UnlockDialog({super.key, required this.store, required this.device});

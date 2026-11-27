@@ -7,6 +7,7 @@ import 'package:flutter/widgets.dart';
 
 import '../ui/fullscreen.dart' show foldedShortSide;
 import '../ui/main_state.dart';
+import '../ui/unlock.dart' show unlockDialogRoute;
 import 'landing.dart';
 
 enum UiForm { pad, phone }
@@ -129,6 +130,26 @@ class _FormSwitchState extends State<FormSwitch> with WidgetsBindingObserver {
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _between) setState(() => _between = false);
+      // M1: a password dialog closed with the old form is asked again once the new form listens.
+      final device = _unlockClosed;
+      _unlockClosed = null;
+      if (device != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) widget.state.askUnlockAgain(device);
+        });
+      }
+    });
+  }
+
+  /// The device of a password dialog the last swap closed.
+  String? _unlockClosed;
+
+  /// Closes every route above the first (the old form's menus, sheets and dialogs), noting a password dialog.
+  void _closeRoutes() {
+    Navigator.maybeOf(context, rootNavigator: true)?.popUntil((r) {
+      final a = r.settings.arguments;
+      if (!r.isFirst && r.settings.name == unlockDialogRoute && a is String) _unlockClosed = a;
+      return r.isFirst;
     });
   }
 
@@ -140,7 +161,7 @@ class _FormSwitchState extends State<FormSwitch> with WidgetsBindingObserver {
     final inSession = !s.overview && s.currentKey != null;
     _spot = PadSpot(overview: s.overview, key: s.currentKey);
     // Menus and dialogs of the Pad form do not come back (F13).
-    if (closeMenus) Navigator.maybeOf(context, rootNavigator: true)?.popUntil((r) => r.isFirst);
+    if (closeMenus) _closeRoutes();
     final key = _spot.key;
     final landing = foldLanding(
       spot: _spot,
@@ -156,7 +177,7 @@ class _FormSwitchState extends State<FormSwitch> with WidgetsBindingObserver {
     final s = widget.state;
     final spot = unfoldLanding(spot: _spot, phoneEntered: widget.entered?.call());
     // Sheets and dialogs of the phone form do not stay above the Pad (R21).
-    Navigator.maybeOf(context, rootNavigator: true)?.popUntil((r) => r.isFirst);
+    _closeRoutes();
     // The Pad's stage size goes through the policy after the old one was judged once, so at most one resize goes out.
     s.setPhone(form: false);
     final key = spot.key;
