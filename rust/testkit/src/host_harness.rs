@@ -266,6 +266,8 @@ pub struct Controller {
     pub frames: usize,
     /// The flags and size of the last frame taken.
     pub last_frame: Option<(u8, usize, usize)>,
+    /// The mode of the last frame taken.
+    pub last_mode: Option<u8>,
 }
 
 impl Controller {
@@ -299,6 +301,7 @@ impl Controller {
             auto_ack: true,
             frames: 0,
             last_frame: None,
+            last_mode: None,
         }
     }
 
@@ -356,6 +359,7 @@ impl Controller {
             }
             self.frames += 1;
             self.last_frame = Some((*flags, *width, *height));
+            self.last_mode = Some(*mode);
             if self.auto_ack {
                 let ack = rapp_client_core::protocol::frame_ack(0);
                 self.send(&ack);

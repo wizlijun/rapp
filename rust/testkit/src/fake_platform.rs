@@ -79,6 +79,8 @@ struct State {
 
     clip: Option<ClipRead>,
     change: i64,
+    /// `ClipboardOps::change_count` calls so far: the host's clipboard watcher polling.
+    clip_polls: usize,
     written: Option<ReceivedItem>,
     pastes: Vec<Option<ReceivedItem>>,
 
@@ -234,6 +236,7 @@ impl FakePlatform {
             locked_windows: None,
             clip: None,
             change: 0,
+            clip_polls: 0,
             written: None,
             pastes: Vec::new(),
             cover: None,
@@ -273,8 +276,10 @@ impl FakePlatform {
     }
 
     /// Deterministic BGRA (opaque, `width * 4` bytes per row): a ground of 32 px blocks in light
-    /// colours, with text-like rows every 16 px (dark marks in the middle 8 rows of each band).
-    /// `scroll` moves the content up by that many pixels.
+    /// colours, with text-like rows every 16 px (dark marks in the middle 8 rows of each band),
+    /// and one dark dot per row in each 64 px strip, so no row repeats more than the scroll
+    /// detector allows (`ScrollDetector.maxRepeats`: rows seen more often do not vote) and a
+    /// scroll is found. `scroll` moves the content up by that many pixels.
     pub fn pattern(width: usize, height: usize, scroll: i64) -> Vec<u8> {
         let mut out = vec![0u8; width * height * 4];
         for y in 0..height {
@@ -290,7 +295,8 @@ impl FakePlatform {
                     180 + ((block >> 16) & 0x3f) as u8,
                 ];
                 let glyph = mix((x / 6) as u64 ^ (band << 24) ^ 0x9e37_79b9);
-                let ink = (4..12).contains(&line) && x % 6 < 4 && glyph & 3 != 0;
+                let dot = (x % 64) as u64 == mix(row as u64 ^ (((x / 64) as u64) << 40)) % 64;
+                let ink = dot || (4..12).contains(&line) && x % 6 < 4 && glyph & 3 != 0;
                 let [b, g, r] = if ink { [30, 30, 40] } else { ground };
                 let o = (y * width + x) * 4;
                 out[o..o + 4].copy_from_slice(&[b, g, r, 255]);
@@ -331,7 +337,8 @@ impl FakePlatform {
         self.st().scroll
     }
 
-    /// Makes the next capture send a frame even though nothing moved.
+    /// Makes the next capture deliver a picture even though nothing moved. The picture is the
+    /// same, so the encoder finds no tile to send and B gets no frame from it.
     pub fn touch(&self) {
         FakePlatform::changed(&mut self.st());
     }
@@ -385,6 +392,11 @@ impl FakePlatform {
 
     pub fn change_count(&self) -> i64 {
         self.st().change
+    }
+
+    /// How many times the host asked for the clipboard's change count.
+    pub fn clip_polls(&self) -> usize {
+        self.st().clip_polls
     }
 
     /// What the clipboard holds now (after the host's writes and restores).
@@ -815,7 +827,9 @@ struct FakeClipboard(Arc<Mutex<State>>);
 
 impl ClipboardOps for FakeClipboard {
     fn change_count(&mut self) -> i64 {
-        lock_state(&self.0).change
+        let mut s = lock_state(&self.0);
+        s.clip_polls += 1;
+        s.change
     }
     fn read(&mut self) -> Option<ClipRead> {
         lock_state(&self.0).clip.clone()

@@ -58,6 +58,25 @@ fn wait_canvas(c: &mut Controller, want: &[u8]) -> bool {
     }
 }
 
+/// Like `wait_canvas`, for whichever mode the host streams now: the saving ladder may have
+/// switched it (`Saving`).
+fn wait_canvas_in_current_mode(c: &mut Controller, scroll: i64) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let (w, h, canvas) = c.canvas();
+        if let Some(mode) = c.last_mode {
+            if canvas == expected_canvas(w, h, scroll, MODES[mode as usize]).as_slice() {
+                return true;
+            }
+        }
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() || c.is_closed() {
+            return false;
+        }
+        let _ = c.next_within(left.min(Duration::from_millis(100)));
+    }
+}
+
 #[test]
 fn listening_then_ready() {
     let (_platform, host) = serve();
@@ -206,7 +225,9 @@ fn yield_blocks_input_for_1s() {
     let (_platform, host) = serve();
     let mut c = ready(&host, 0);
     host.command(r#"{"cmd":"yield","by":"Mac"}"#);
-    std::thread::sleep(Duration::from_millis(50));
+    // Time for the command to reach the session; 50 ms of real time would be the whole 1 s
+    // window at 20x.
+    std::thread::sleep(host_time(0.2));
     c.send(&client::key(36, 0, true));
     match c.wait_for(|m| matches!(m, Incoming::InputBlocked(_))) {
         Incoming::InputBlocked(by) => assert_eq!(by, "Mac"),
@@ -214,9 +235,11 @@ fn yield_blocks_input_for_1s() {
     }
     let blocked = host.wait_event("input_blocked");
     assert_eq!(blocked["by"], "Mac");
-    // After 1 s of host time the same input goes through and is reported.
+    // After 1 s of host time: the release of the dropped press is dropped too
+    // (InputYield.swift:58), and the next press goes through and is reported.
     std::thread::sleep(host_time(1.5));
     c.send(&client::key(36, 0, false));
+    c.send(&client::key(36, 0, true));
     host.wait_event("input");
 }
 
@@ -466,11 +489,16 @@ fn pause_and_resume() {
     let changed = got.iter().filter(|m| matches!(m, Incoming::Changed)).count();
     // About once a second (the capture runs at 1 fps while paused).
     assert!((1..=4).contains(&changed), "{changed} changed messages: {:?}", c.seen);
-    assert!(
-        got.iter().any(|m| matches!(m, Incoming::Windows(l) if l.first().is_some_and(|w| w.title.contains("Renamed")))),
-        "windows not delivered while paused: {:?}",
-        c.seen
-    );
+    // While paused the table goes out at most every 5 s (PauseOutbox.windowsEvery), counted
+    // from the last one sent at the start, so it may still be held after these 2 s.
+    let renamed = |m: &Incoming| matches!(m, Incoming::Windows(l) if l.first().is_some_and(|w| w.title.contains("Renamed")));
+    if !got.iter().any(renamed) {
+        let frames = c.frames;
+        let start = Instant::now();
+        c.wait_for(renamed);
+        assert!(start.elapsed() < host_time(5.5), "windows not delivered while paused: {:?}", c.seen);
+        assert_eq!(c.frames, frames, "frames while paused: {:?}", c.seen);
+    }
     c.send(&client::stream(0, 15, 1.0, false, false));
     let first = c.wait_for(is_frame);
     // A diff against the last frame sent before the pause (Server.swift:1203), not a full frame.
@@ -512,10 +540,11 @@ fn unacknowledged_controller_gets_bounded_frames() {
     assert!(stats.len() >= 3, "{stats:?}");
     assert!(stats.iter().all(|s| s["fps"].as_i64().is_some_and(|f| f <= 1)), "{stats:?}");
     // The paced sender holds one offer at most: acking now lets the newest picture through.
+    // Five seconds without an ack can move the saving ladder to two-tone (`Saving`), so the
+    // picture is checked in whichever mode arrives.
     c.auto_ack = true;
     c.send(&client::frame_ack(0));
-    let (w, h, _) = c.canvas();
-    assert!(wait_canvas(&mut c, &expected_canvas(w, h, platform.scroll(), Mode::Gray4)), "{:?}", c.seen);
+    assert!(wait_canvas_in_current_mode(&mut c, platform.scroll()), "{:?}", c.seen);
 }
 
 #[test]
@@ -653,14 +682,16 @@ fn all_windows_closed_keeps_the_session() {
     let (platform, host) = serve();
     let (mut c, _, _) = showing(&host, 0);
     let one = platform.windows();
+    // A picture that did not change sends nothing (the encoder has no tile to send), so each
+    // frame here comes from a scroll.
     let before = frame_region(&{
-        platform.touch();
+        platform.scroll_by(16);
         c.wait_for(is_frame)
     });
     platform.set_windows(vec![]);
     c.wait_for(|m| matches!(m, Incoming::Windows(l) if l.is_empty()));
     // An empty table keeps the region (Server.swift:939-963).
-    platform.touch();
+    platform.scroll_by(16);
     let after = frame_region(&c.wait_for(is_frame));
     assert_eq!((before.x, before.y, before.w, before.h), (after.x, after.y, after.w, after.h));
     platform.set_windows(one);
@@ -677,6 +708,8 @@ fn empty_region_sends_no_frame() {
     assert!(quiet.is_ok(), "{quiet:?}");
     assert!(!c.is_closed());
     platform.set_frame_size(None);
+    // The same picture as before the empty ones sends nothing; a changed one is sent.
+    platform.scroll_by(16);
     c.wait_for(is_frame);
 }
 
@@ -822,7 +855,9 @@ fn yield_blocks_then_releases() {
     let (mut c, id) = with_window(&host);
     platform.clear_log();
     host.command(r#"{"cmd":"yield","by":"Mac"}"#);
-    std::thread::sleep(Duration::from_millis(50));
+    // Time for the command to reach the session; 50 ms of real time would be the whole 1 s
+    // window at 20x.
+    std::thread::sleep(host_time(0.2));
     click(&mut c, id, 100.0, 100.0);
     c.wait_for(|m| matches!(m, Incoming::InputBlocked(by) if by == "Mac"));
     assert_eq!(host.wait_event("input_blocked")["by"], "Mac");
@@ -1090,6 +1125,14 @@ fn is_clip(m: &Incoming) -> bool {
 fn clip_ready(host: &Host) -> Controller {
     let mut c = ready(host, 0);
     c.wait_for(|m| matches!(m, Incoming::ScreenLocked(false)));
+    // The watcher counts a copy only when the app was in front at its previous tick too
+    // (`ClipStore.changed`), so a copy made before its first tick is never announced, on the
+    // Mac as here. Wait for that tick: one poll to start the store, one tick after it.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while host.platform().clip_polls() < 2 {
+        assert!(Instant::now() < deadline, "the clipboard watcher never polled");
+        std::thread::sleep(Duration::from_millis(2));
+    }
     c
 }
 
@@ -1289,9 +1332,11 @@ fn paste_text_inline() {
     let e = host.wait_event_where(|e| is_transfer(e, "b_to_a", "text"));
     assert_eq!(e["bytes"], 6);
 
-    // About 2 s later the old clipboard is back.
+    // 2.05 s after the answer went out (Paster.finish) the old clipboard is back. Timed from
+    // `sent`, which is before the answer left A: `answered` is when this side read it, which
+    // can be later on a loaded machine. Sent + 0.15 s paste wait + 2.05 s.
     wait_log(&platform, |l| l.iter().any(|x| x == "clipboard restore"));
-    assert!(answered.elapsed() >= host_time(2.0), "restored after {:?}", answered.elapsed());
+    assert!(sent.elapsed() >= host_time(2.2), "restored after {:?}", sent.elapsed());
     assert_eq!(current_text(&platform).as_deref(), Some("old clipboard"));
 }
 
@@ -1594,14 +1639,16 @@ fn unlock_with_a_wrong_password() {
     send_unlock(&mut c, "fixture-wrong");
     wait_text(&host, "unlock dropped: already typing", 1);
     // Every unlock is dropped until the 8 s settle wait is over; the first after it is typed.
+    // The wait is 80 sleeps of 0.1 s (`waitUntilUnlocked`), 5 ms each at 20x, and every real
+    // sleep overshoots a little, so the upper bounds leave room for that.
     while count_text(&host, "typing the unlock password") < 2 {
-        assert!(typed.elapsed() < host_time(12.0), "the settle wait never ended:\n{}", worker_text(&host));
+        assert!(typed.elapsed() < host_time(20.0), "the settle wait never ended:\n{}", worker_text(&host));
         send_unlock(&mut c, "fixture-wrong");
         std::thread::sleep(host_time(0.25));
     }
     let waited = typed.elapsed();
     assert!(waited >= host_time(8.0), "typing again after {waited:?}");
-    assert!(waited < host_time(10.0), "typing again after {waited:?}");
+    assert!(waited < host_time(16.0), "typing again after {waited:?}");
     assert!(platform.locked());
     // A stayed locked and B already knows: Swift sends `screenLocked` only on a change.
     assert!(c.quiet_for(host_time(0.5), |m| !matches!(m, Incoming::ScreenLocked(false))).is_ok());
