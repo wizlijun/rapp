@@ -176,6 +176,22 @@ void main() {
     expect(s.quick.keys.map((k) => k.id).toList().indexOf('search'), 0);
   });
 
+  iosTest('a refused tap in 常用语▾ is told in the sheet only, not on the strip behind it', (tester) async {
+    fg('codex');
+    s.setStripItems([const StripCmd('new', per: {'codex': null}), ...defaultStripItems.skip(1)]);
+    await tester.pumpWidget(strip(tsess));
+    await tester.tap(ph('quick-menu-phrases'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.ancestor(of: find.text('新对话'), matching: find.byType(ListTile)));
+    await tester.pump();
+    expect(tester.widget<Text>(ph('menu-hint')).data, 'Codex 没有这个命令');
+    expect(ph('phrase-hint'), findsNothing, reason: 'the sheet says it; the strip under it stays quiet');
+    Navigator.of(tester.element(ph('menu-hint'))).pop();
+    await tester.pumpAndSettle();
+    expect(ph('phrase-hint'), findsNothing, reason: 'no stale hint once the sheet is gone');
+    await tester.pump(const Duration(seconds: 5));
+  });
+
   iosTest('常用语▾: lists commands when a tool is recognised, grey under zsh (spec §5.4)', (tester) async {
     await tester.pumpWidget(strip(tsess));
     await tester.tap(ph('quick-menu-phrases'));

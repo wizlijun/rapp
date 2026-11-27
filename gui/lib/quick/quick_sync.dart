@@ -185,6 +185,16 @@ class QuickSync extends ChangeNotifier {
     _setStatus(reachable ? QuickSyncStatus.local : QuickSyncStatus.waiting);
   }
 
+  /// The link went away for now (a pause, or a reconnect under way): it is dropped and every timer stops, but the
+  /// status stays as it was. A local edit stays pending (at > synced) and goes with the next [attach]; a failed
+  /// reconnect is told with [detach].
+  void suspend() {
+    _gen++;
+    _stopTimers();
+    _link = null;
+    _attaching = false;
+  }
+
   /// A watch event (`prefs.<name>` or `prefs.usage`); others are ignored, and so is anything while not attached.
   void onPush(Map<String, Object?> e) {
     if (_link == null && !_attaching) return;
