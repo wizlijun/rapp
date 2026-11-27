@@ -9,6 +9,7 @@ import 'package:rapp/quick/key_actions.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/side_panel.dart';
+import 'package:rapp/ui/star_button.dart';
 
 import '../fakes.dart';
 import '../ui/helpers.dart';
@@ -61,6 +62,18 @@ void main() {
     expect(a.chord, const Chord('x', ctrl: true, alt: true));
     expect(s.quick.keys, hasLength(builtinKeyActions.length + 1));
     expect(k('keys-row-${a.id}'), findsOneWidget);
+  });
+
+  testWidgets('the star is the shared StarButton: 打星 / 取消星标', (tester) async {
+    await open(tester);
+    expect(tester.widget(k('keys-star-search')), isA<StarButton>());
+    expect(find.descendant(of: k('keys-star-search'), matching: find.byTooltip('打星')), findsOneWidget);
+    await tapK(tester, 'keys-star-search');
+    expect(s.quick.stars, ['k:search']);
+    expect(tester.widget<StarButton>(k('keys-star-search')).starred, isTrue);
+    expect(find.descendant(of: k('keys-star-search'), matching: find.byTooltip('取消星标')), findsOneWidget);
+    await tapK(tester, 'keys-star-search');
+    expect(s.quick.stars, isEmpty);
   });
 
   testWidgets('save is off without a name or a key', (tester) async {

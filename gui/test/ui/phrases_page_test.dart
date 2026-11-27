@@ -12,6 +12,7 @@ import 'package:rapp/quick/quick_prefs.dart';
 import 'package:rapp/ui/controls.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
+import 'package:rapp/ui/star_button.dart';
 
 import '../fakes.dart';
 import 'helpers.dart';
@@ -58,7 +59,7 @@ void main() {
     await tester.tap(find.byKey(const Key('phrases-star-0')));
     await tester.pumpAndSettle();
     expect(s.quick.stars, [r0]);
-    expect(find.byTooltip('取消打星'), findsOneWidget);
+    expect(find.byTooltip('取消星标'), findsOneWidget);
     await tester.tap(find.byKey(const Key('phrases-star-2')));
     await tester.pumpAndSettle();
     expect(s.quick.stars, [r0, r2]);
@@ -69,8 +70,13 @@ void main() {
     s.setStripItems([s.quick.phrases[1], ...s.quick.phrases.sublist(2), s.quick.phrases[0]]);
     await tester.pumpAndSettle();
     expect(s.quick.stars, [r2]);
-    expect(find.byTooltip('取消打星'), findsOneWidget);
-    expect(tester.widget<IconButton>(find.byKey(const Key('phrases-star-1'))).tooltip, '取消打星');
+    expect(find.byTooltip('取消星标'), findsOneWidget);
+    expect(tester.widget<StarButton>(find.byKey(const Key('phrases-star-1'))).starred, isTrue);
+    expect(find.descendant(of: find.byKey(const Key('phrases-star-1')), matching: find.byTooltip('取消星标')), findsOneWidget);
+    // The one star of 快捷区, as on the keys page and in the menus.
+    for (var i = 0; i < s.quick.phrases.length; i++) {
+      expect(tester.widget(find.byKey(Key('phrases-star-$i'))), isA<StarButton>());
+    }
   });
 
   testWidgets('the switch turns the strip off; the list is the defaults', (tester) async {

@@ -12,6 +12,7 @@ import '../quick/key_layout.dart';
 import 'quick_sync_line.dart';
 import '../ui/controls.dart';
 import '../ui/main_state.dart';
+import '../ui/star_button.dart';
 import '../ui/tokens.dart';
 
 Future<void> openKeysPage(BuildContext context, MainState state) => Navigator.of(context)
@@ -199,11 +200,9 @@ class KeysPage extends StatelessWidget {
                     : Text(_perSubtitle(a), style: TextStyle(color: t.muted), maxLines: 2, overflow: TextOverflow.ellipsis),
                 onTap: () => _edit(context, i),
                 trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                  IconButton(
+                  StarButton(
                     key: Key('keys-star-${a.id}'),
-                    tooltip: stars.contains(a.ref) ? '取消打星' : '打星',
-                    icon: Icon(stars.contains(a.ref) ? Icons.star : Icons.star_border,
-                        color: stars.contains(a.ref) ? t.text : t.muted),
+                    starred: stars.contains(a.ref),
                     onPressed: () => state.toggleStar(a.ref),
                   ),
                   ReorderableDragStartListener(index: i, child: Icon(Icons.drag_handle, color: t.muted)),

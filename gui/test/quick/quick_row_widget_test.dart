@@ -23,6 +23,7 @@ import 'package:rapp/quick/quick_usage.dart';
 import 'package:rapp/term/term_session_port.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
+import 'package:rapp/ui/star_button.dart';
 
 import '../fakes.dart';
 import '../ui/helpers.dart';
@@ -171,6 +172,9 @@ void main() {
     await tester.tap(ph('quick-menu-phrases'));
     await tester.pumpAndSettle();
     expect(find.descendant(of: ph('menu-star-p-$i'), matching: find.byIcon(Icons.star_border)), findsOneWidget);
+    // The one star of 快捷区, the same as on the settings pages.
+    expect(tester.widget(ph('menu-star-p-$i')), isA<StarButton>());
+    expect(find.descendant(of: ph('menu-star-p-$i'), matching: find.byTooltip('打星')), findsOneWidget);
     await tester.tap(ph('menu-star-p-$i'));
     await tester.pumpAndSettle();
     expect(ph('menu-settings'), findsOneWidget, reason: 'the sheet stays');
@@ -184,6 +188,7 @@ void main() {
     await tester.tap(ph('quick-menu-keys'));
     await tester.pumpAndSettle();
     expect(find.descendant(of: ph('menu-k-search'), matching: find.text('⌃R')), findsOneWidget);
+    expect(tester.widget(ph('menu-star-k-search')), isA<StarButton>());
     await tester.tap(ph('menu-star-k-search'));
     await tester.pumpAndSettle();
     Navigator.of(tester.element(ph('menu-settings'))).pop();

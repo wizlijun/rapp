@@ -16,6 +16,7 @@ import '../quick/quick_usage.dart';
 import '../term/term_session_port.dart';
 import '../ui/controls.dart';
 import '../ui/main_state.dart';
+import '../ui/star_button.dart';
 import '../ui/tokens.dart';
 import 'composer_plus.dart';
 import 'phrase_send.dart';
@@ -269,11 +270,7 @@ class _PhraseStripState extends State<PhraseStrip> {
                 trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                   if (put) Icon(Icons.keyboard_return, color: t.muted, size: 18),
                   if (chord != null) Text(chord, style: TextStyle(color: t.muted, fontSize: 13)),
-                  IconButton(
-                    key: starKey,
-                    icon: Icon(starred ? Icons.star : Icons.star_border, color: starred ? t.accent : t.muted),
-                    onPressed: () => widget.state.toggleStar(ref),
-                  ),
+                  StarButton(key: starKey, starred: starred, onPressed: () => widget.state.toggleStar(ref)),
                 ]),
                 onTap: onTap,
               );

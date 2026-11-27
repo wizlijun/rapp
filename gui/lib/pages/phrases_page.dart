@@ -10,6 +10,7 @@ import '../quick/quick_prefs.dart';
 import 'quick_sync_line.dart';
 import '../ui/controls.dart';
 import '../ui/main_state.dart';
+import '../ui/star_button.dart';
 import '../ui/tokens.dart';
 
 Future<void> openPhrasesPage(BuildContext context, MainState state) => Navigator.of(context)
@@ -251,25 +252,6 @@ String _cmdSubtitle(StripCmd c) => [
           '${t.name} ${a is CmdText ? a.text : barKeys[(a as CmdKey).key]?.label ?? a.key}',
     ].join(' · ');
 
-/// The row's star, the same look as the key actions page's.
-class _StarButton extends StatelessWidget {
-  const _StarButton({required this.index, required this.starred, required this.onPressed});
-  final int index;
-  final bool starred;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RappTokens.of(context);
-    return IconButton(
-      key: Key('phrases-star-$index'),
-      tooltip: starred ? '取消打星' : '打星',
-      icon: Icon(starred ? Icons.star : Icons.star_border, color: starred ? t.text : t.muted),
-      onPressed: onPressed,
-    );
-  }
-}
-
 class PhrasesPage extends StatelessWidget {
   const PhrasesPage({super.key, required this.state});
   final MainState state;
@@ -358,8 +340,8 @@ class PhrasesPage extends StatelessWidget {
                               : null,
                       onTap: () => _edit(context, i),
                       trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                        _StarButton(
-                          index: i,
+                        StarButton(
+                          key: Key('phrases-star-$i'),
                           starred: stars.contains(refOf(p)),
                           onPressed: () => state.toggleStar(refOf(p)),
                         ),
