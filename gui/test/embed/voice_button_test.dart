@@ -333,7 +333,7 @@ void main() {
     expect(v.bottom, lessThan(panelTop));
   });
 
-  iosTest('no voice, landscape: 收起 alone stands 8 above the panel top', (tester) async {
+  iosTest('no voice, landscape: 收起 stands 8 above the panel top, the 快捷区 toggle above it', (tester) async {
     es.dispose();
     // Built off iOS, where MainState makes no voice input of its own.
     debugDefaultTargetPlatformOverride = TargetPlatform.windows;

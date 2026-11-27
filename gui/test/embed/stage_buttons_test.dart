@@ -166,13 +166,18 @@ void main() {
     expect(rs.composer.open, isFalse);
   });
 
-  test('stackButtonCount counts the toggle: 语音, 输入, 快捷区, and 还原 while zoomed', () {
+  test('stackButtonCount counts the toggle open or closed: 语音, 输入, 快捷区, and 还原 while zoomed and closed', () {
     expect(stackButtonCount(rs, voice: true), 3);
     expect(stackButtonCount(rs, voice: false), 2);
+    rs.composer.open = true;
+    expect(stackButtonCount(rs, voice: true), 3);
+    rs.composer.open = false;
     final z = zoomable();
     addTearDown(z.dispose);
     z.zoomOf(7).zoomTo(2, const Offset(500, 350), fitRect(const Size(100, 100), stage), stage);
     expect(stackButtonCount(z, voice: true), 4);
+    z.composer.open = true;
+    expect(stackButtonCount(z, voice: true), 3, reason: '还原 waits while the text area is open');
     rs.setProfile(const ResolvedProfile(name: 'X', composer: false));
     expect(stackButtonCount(rs, voice: true), 0);
   });

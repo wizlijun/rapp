@@ -228,7 +228,7 @@ class _KeyBarState extends State<KeyBar> {
   void initState() {
     super.initState();
     _bind();
-    // A key typed into the picture folds the 快捷区 (打字后自动收起); the toggle in the box, or beside 输入, shows it again.
+    // A key typed into the picture folds the 快捷区 (打字后自动收起); the toggle beside 输入 (收起) shows it again.
     HardwareKeyboard.instance.addHandler(_onKey);
   }
 
