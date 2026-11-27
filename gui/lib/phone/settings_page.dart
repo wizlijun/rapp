@@ -30,20 +30,23 @@ class SettingsPage extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             children: [
               for (final th in themeOrder)
-                InkWell(
-                  onTap: () => state.setTheme(th),
-                  child: Container(
-                    constraints: const BoxConstraints(minHeight: phoneTap),
-                    alignment: Alignment.centerLeft,
-                    child: Row(children: [
-                      Expanded(
-                        child: Text(themeLabel(th),
-                            style: style?.copyWith(
-                                color: th == state.prefs.theme ? t.text : t.muted,
-                                fontWeight: th == state.prefs.theme ? FontWeight.w600 : null)),
-                      ),
-                      if (th == state.prefs.theme) Icon(Icons.check, size: 18, color: t.text),
-                    ]),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12), // Q2
+                  child: InkWell(
+                    onTap: () => state.setTheme(th),
+                    child: Container(
+                      constraints: const BoxConstraints(minHeight: phoneTap),
+                      alignment: Alignment.centerLeft,
+                      child: Row(children: [
+                        Expanded(
+                          child: Text(themeLabel(th),
+                              style: style?.copyWith(
+                                  color: th == state.prefs.theme ? t.text : t.muted,
+                                  fontWeight: th == state.prefs.theme ? FontWeight.w600 : null)),
+                        ),
+                        if (th == state.prefs.theme) Icon(Icons.check, size: 18, color: t.text),
+                      ]),
+                    ),
                   ),
                 ),
               const SizedBox(height: 12),

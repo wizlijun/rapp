@@ -37,7 +37,7 @@ Future<void> showPhoneSheet(BuildContext context, PhoneNav nav) {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [row('设备', PhoneView.devices), row('设置', PhoneView.settings)],
+                children: [row('设备', PhoneView.devices), const SizedBox(height: 12), row('设置', PhoneView.settings)], // Q2
               ),
             ),
           ),

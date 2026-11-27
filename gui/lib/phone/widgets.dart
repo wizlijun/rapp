@@ -65,6 +65,8 @@ class PhonePage extends StatelessWidget {
                       ],
                     ),
                   ),
+                // Q2: the back button and what is under it are 12 apart.
+                if (onBack != null || title != null) const SizedBox(height: 12),
                 Expanded(child: child),
               ],
             ),
@@ -135,32 +137,36 @@ class PhoneRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     final style = Theme.of(context).textTheme.bodyMedium;
-    return Semantics(
-      button: true,
-      excludeSemantics: true,
-      label: '${item.what}，${item.program} 在 ${item.device}，${item.line}',
-      onTap: onTap,
-      child: InkWell(
+    // Q2: two rows to tap are 12 apart.
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Semantics(
+        button: true,
+        excludeSemantics: true,
+        label: '${item.what}，${item.program} 在 ${item.device}，${item.line}',
         onTap: onTap,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: phoneTap),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: t.line.withValues(alpha: 0.5)))),
-          child: Row(
-            children: [
-              StatusLamp(item.lamp),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(_source(item), style: style?.copyWith(color: t.text)),
-                    if (item.line.isNotEmpty) Text(item.line, style: style?.copyWith(color: t.muted)),
-                  ],
+        child: InkWell(
+          onTap: onTap,
+          child: Container(
+            constraints: const BoxConstraints(minHeight: phoneTap),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(border: Border(bottom: BorderSide(color: t.line.withValues(alpha: 0.5)))),
+            child: Row(
+              children: [
+                StatusLamp(item.lamp),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(_source(item), style: style?.copyWith(color: t.text)),
+                      if (item.line.isNotEmpty) Text(item.line, style: style?.copyWith(color: t.muted)),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
