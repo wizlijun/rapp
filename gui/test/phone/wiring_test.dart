@@ -9,6 +9,7 @@ import 'package:rapp/paths.dart';
 import 'package:rapp/phone/form.dart';
 import 'package:rapp/phone/phone_nav.dart';
 import 'package:rapp/phone/phone_shell.dart';
+import 'package:rapp/phone/session_view.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/main_window.dart';
 import 'package:rapp/ui/prefs.dart';
@@ -104,13 +105,19 @@ void main() {
     tester.widget<TextField>(field).controller!.value = const TextEditingValue(text: 'hello', selection: TextSelection.collapsed(offset: 2));
     await tester.pump();
     await resize(tester, const Size(390, 844));
-    expect(find.byType(ComposerPanel), findsNothing);
+    // R34: the phone mounts the same composer layer; its panel takes the text and the caret too.
+    expect(find.byType(PhoneSessionView), findsOneWidget);
+    expect(find.byType(ComposerPanel), findsOneWidget);
+    final p = tester.widget<TextField>(field).controller!;
+    expect(p.text, 'hello');
+    expect(p.selection, const TextSelection.collapsed(offset: 2));
     await resize(tester, const Size(1194, 834));
     await tester.pump();
     expect(rs.composer.open, isTrue);
     final c = tester.widget<TextField>(field).controller!;
     expect(c.text, 'hello');
     expect(c.selection, const TextSelection.collapsed(offset: 2));
+    await tester.pump(const Duration(seconds: 1));
   });
 }
 

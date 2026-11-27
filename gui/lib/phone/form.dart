@@ -121,8 +121,19 @@ class _FormSwitchState extends State<FormSwitch> with WidgetsBindingObserver {
     } else {
       _unfold();
     }
-    setState(() => _form = target);
+    // F9: the old shell goes first, one frame with neither, then the new one. Mounted in the same frame, the new
+    // shell's writing panel would attach before the old one let go of the session's draft and caret.
+    setState(() {
+      _form = target;
+      _between = true;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _between) setState(() => _between = false);
+    });
   }
+
+  /// The one frame between two shells (see [_settled]).
+  bool _between = false;
 
   void _fold({bool closeMenus = false}) {
     final s = widget.state;
@@ -157,5 +168,9 @@ class _FormSwitchState extends State<FormSwitch> with WidgetsBindingObserver {
   }
 
   @override
-  Widget build(BuildContext context) => _form == UiForm.phone ? widget.phone(context) : widget.pad(context);
+  Widget build(BuildContext context) => _between
+      ? const SizedBox.expand()
+      : _form == UiForm.phone
+          ? widget.phone(context)
+          : widget.pad(context);
 }

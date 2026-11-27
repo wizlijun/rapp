@@ -1,5 +1,6 @@
 /// The phone's in-session view (V1b Task 8): the existing stage widgets, never the Pad's `Stage`.
-/// A text terminal asks with `fit: false`, so A's rows and columns stay as they are (S4, F11).
+/// A text terminal asks with `fit: false`, so A's rows and columns stay as they are (S4, F11). Over it, the Pad's
+/// composer layer, lock banner and host notice (R34, one implementation).
 library;
 
 import 'package:flutter/material.dart';
@@ -10,7 +11,7 @@ import '../term/term_stage.dart';
 import '../ui/disconnected_stage.dart';
 import '../ui/lifecycle.dart';
 import '../ui/main_state.dart';
-import '../ui/stage.dart' show PixelSnap, keyboardLift, offlineBarFor;
+import '../ui/stage.dart' show PixelSnap, keyboardLift, stageOverlays;
 import '../ui/tokens.dart';
 import 'phone_nav.dart';
 import 'widgets.dart';
@@ -28,7 +29,7 @@ class PhoneSessionView extends StatelessWidget {
       backgroundColor: t.bg,
       body: ListenableBuilder(
         listenable: state,
-        builder: (context, _) => PhonePage(onBack: nav.home, child: _body(context, t)),
+        builder: (context, _) => PhonePage(onBack: nav.home, keepHomeBar: true, child: _body(context, t)),
       ),
     );
   }
@@ -53,33 +54,29 @@ class PhoneSessionView extends StatelessWidget {
       }
     }
     final isTerm = rs != null && state.termPort?.owns(rs.sid) == true;
+    Widget body;
+    var picture = false, full = false, term = false;
     if (rec != null && rec.frozen && rs != null && !rs.detached && win != null && !isTerm) {
-      return Stack(children: [
-        Positioned.fill(child: Picture(state: state, session: rs, window: win, frozen: true, keyboard: keyboard)),
-        Positioned(top: 0, left: 0, right: 0, child: offlineBarFor(state, rec)),
-      ]);
-    }
-    if (isTerm &&
+      picture = true;
+      body = Picture(state: state, session: rs, window: win, frozen: true, keyboard: keyboard);
+    } else if (isTerm &&
         ((rec?.phase == Phase.live && rec?.lastSid == null) ||
             (rec?.frozen == true && !rs.detached && rs.windows.isNotEmpty))) {
-      return Stack(children: [
-        Positioned.fill(
-          child: PixelSnap(
-            child: TermStage(
-              state: state,
-              session: rs,
-              port: state.termPort!,
-              frozen: rec?.frozen == true,
-              keyboard: keyboard,
-              fit: false,
-            ),
-          ),
+      full = true;
+      term = true;
+      body = PixelSnap(
+        child: TermStage(
+          state: state,
+          session: rs,
+          port: state.termPort!,
+          frozen: rec?.frozen == true,
+          keyboard: keyboard,
+          fit: false,
         ),
-        if (rec != null && rec.frozen) Positioned(top: 0, left: 0, right: 0, child: offlineBarFor(state, rec)),
-      ]);
-    }
-    if (rec != null && (rec.phase == Phase.disconnected || rec.lastSid != null)) {
-      return DisconnectedStage(
+      );
+    } else if (rec != null && (rec.phase == Phase.disconnected || rec.lastSid != null)) {
+      full = true;
+      body = DisconnectedStage(
         session: rs,
         reason: disconnectWord(rec.reason),
         reconnectWord: reconnectLabel(rec.reason),
@@ -91,10 +88,18 @@ class PhoneSessionView extends StatelessWidget {
         onEnd: state.endCurrent,
         sessionKey: rec.key,
       );
+    } else if (rs != null && !rs.detached && win != null) {
+      picture = true;
+      body = Picture(state: state, session: rs, window: win, keyboard: keyboard);
+    } else {
+      body = Center(child: Text('正在连接', style: TextStyle(color: t.muted)));
     }
-    if (rs != null && !rs.detached && win != null) {
-      return Picture(state: state, session: rs, window: win, keyboard: keyboard);
-    }
-    return Center(child: Text('正在连接', style: TextStyle(color: t.muted)));
+    // The Pad's own composer layer, offline bar, lock banner and host notice over the body (R34). They float over
+    // it and never resize anything: only the Pad's Stage calls stageSize (S4, F11).
+    return Stack(children: [
+      Positioned.fill(child: body),
+      ...stageOverlays(context,
+          state: state, rec: rec, rs: rs, term: term, picture: picture, full: full, keyboard: keyboard),
+    ]);
   }
 }

@@ -8,6 +8,7 @@ import 'package:flutter/rendering.dart';
 import '../embed/composer_editor.dart';
 import '../embed/composer_panel.dart';
 import '../embed/picture.dart';
+import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../term/end_term_dialog.dart';
 import '../term/term_id.dart';
@@ -233,62 +234,78 @@ class Stage extends StatelessWidget {
               child: body,
             ),
           );
+          final overlays = stageOverlays(context,
+              state: state, rec: rec, rs: rs, term: term, picture: picture, full: full, keyboard: keyboard,
+              editor: composerEditor);
           if (term && rs != null) {
             // The same tree whether the panel is open or not: the terminal stage is never remounted (its focus
             // would fight the panel's caret), and never moves (input-dock spec): the input dock floats over it.
-            final bar = rec != null && rec.frozen ? offlineBarFor(state, rec) : null;
-            return Stack(
-              children: [
-                Positioned.fill(child: stage),
-                if (bar != null) Positioned(top: 0, left: 0, right: 0, child: bar),
-                ...composerLayer(state: state, session: rs, port: state.portOf(rs.sid)!,
-                    keyboard: keyboard, editor: composerEditor),
-              ],
-            );
+            return Stack(children: [Positioned.fill(child: stage), ...overlays]);
           }
-          final port = state.port;
-          final banner = state.lockBanner;
-          final notice = state.hostNotice;
-          final offline = rec != null && rec.frozen && picture ? offlineBarFor(state, rec) : null;
-          final layer = !full && (picture || (rs != null && rs.detached)) && rs != null && port != null;
-          return Stack(
-            children: [
-              stage,
-              if (layer)
-                ...composerLayer(state: state, session: rs, port: port, keyboard: keyboard, editor: composerEditor),
-              if (offline != null || banner != null || notice != null)
-                Positioned(
-                  top: 0, left: 0, right: 0,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      ?offline,
-                      if (banner != null)
-                        Material(
-                          color: const Color(0xffffe7a3),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                            child: Row(children: [
-                              Expanded(child: Text(banner.text, style: const TextStyle(color: Colors.black87))),
-                              // Raw TextButton on purpose: it sits on the yellow banner, so its ink is fixed black.
-                              TextButton(
-                                style: TextButton.styleFrom(foregroundColor: Colors.black87),
-                                onPressed: () => requestUnlock(context, state, rec!.id),
-                                child: Text(banner.action),
-                              ),
-                            ]),
-                          ),
-                        ),
-                      if (notice != null) _HostNoticeBar(state: state, notice: notice),
-                    ],
-                  ),
-                ),
-            ],
-          );
+          return Stack(children: [stage, ...overlays]);
         });
       },
     );
   }
+}
+
+/// What stands over the stage's body, after it in a [Stack]: the composer layer, the offline bar, the lock banner
+/// and the host notice. The Pad's [Stage] and the phone's session view both lay these (one implementation).
+/// [term] is a live or frozen terminal on show; [picture] a picture (live or frozen); [full] a body that fills the
+/// stage (a terminal, the disconnected stage).
+List<Widget> stageOverlays(
+  BuildContext context, {
+  required MainState state,
+  required SessionRecord? rec,
+  required RemoteSession? rs,
+  required bool term,
+  required bool picture,
+  required bool full,
+  required double keyboard,
+  ComposerEditor Function()? editor,
+}) {
+  if (term && rs != null) {
+    final bar = rec != null && rec.frozen ? offlineBarFor(state, rec) : null;
+    return [
+      if (bar != null) Positioned(top: 0, left: 0, right: 0, child: bar),
+      ...composerLayer(state: state, session: rs, port: state.portOf(rs.sid)!, keyboard: keyboard, editor: editor),
+    ];
+  }
+  final port = state.port;
+  final banner = state.lockBanner;
+  final notice = state.hostNotice;
+  final offline = rec != null && rec.frozen && picture ? offlineBarFor(state, rec) : null;
+  final layer = !full && (picture || (rs != null && rs.detached)) && rs != null && port != null;
+  return [
+    if (layer) ...composerLayer(state: state, session: rs, port: port, keyboard: keyboard, editor: editor),
+    if (offline != null || banner != null || notice != null)
+      Positioned(
+        top: 0, left: 0, right: 0,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ?offline,
+            if (banner != null)
+              Material(
+                color: const Color(0xffffe7a3),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  child: Row(children: [
+                    Expanded(child: Text(banner.text, style: const TextStyle(color: Colors.black87))),
+                    // Raw TextButton on purpose: it sits on the yellow banner, so its ink is fixed black.
+                    TextButton(
+                      style: TextButton.styleFrom(foregroundColor: Colors.black87),
+                      onPressed: () => requestUnlock(context, state, rec!.id),
+                      child: Text(banner.action),
+                    ),
+                  ]),
+                ),
+              ),
+            if (notice != null) _HostNoticeBar(state: state, notice: notice),
+          ],
+        ),
+      ),
+  ];
 }
 
 /// A v13 host notice over the picture, in the lock banner's colours: what A did, and what to do about it.

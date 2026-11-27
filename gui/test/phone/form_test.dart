@@ -125,6 +125,7 @@ void main() {
     await tester.pump(settle - const Duration(milliseconds: 50));
     expect(find.byKey(padKey), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 60));
+    await tester.pump(); // the frame between the two shells (F9)
     expect(find.byKey(phoneKey), findsOneWidget);
     expect(s.phoneCalls.where((c) => c.form).length, 1);
   });
@@ -153,11 +154,13 @@ void main() {
     expect(s.phoneCalls, isEmpty);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pump(settle + const Duration(milliseconds: 10));
+    await tester.pump(); // the frame between the two shells (F9)
     expect(find.byKey(phoneKey), findsOneWidget);
     // A transitional size seen only while paused and gone by the time the app is back does nothing.
     tester.view.physicalSize = const Size(1194, 834);
     await tester.pump();
     await tester.pump(settle * 2);
+    await tester.pump(); // the frame between the two shells (F9)
     expect(find.byKey(padKey), findsOneWidget);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     tester.view.physicalSize = const Size(500, 834);
@@ -177,6 +180,7 @@ void main() {
     tester.view.physicalSize = const Size(390, 844);
     await tester.pump();
     await tester.pump(settle + const Duration(milliseconds: 10));
+    await tester.pump(); // the frame between the two shells (F9)
     expect(got, [(screen: PhoneScreen.home, cameFrom: 'k1')]);
   });
 
@@ -188,6 +192,7 @@ void main() {
     tester.view.physicalSize = const Size(390, 844);
     await tester.pump();
     await tester.pump(settle + const Duration(milliseconds: 10));
+    await tester.pump(); // the frame between the two shells (F9)
     expect(got, [(screen: PhoneScreen.session, cameFrom: null)]);
     expect(s.phoneInSession, isTrue);
   });
@@ -200,11 +205,13 @@ void main() {
     tester.view.physicalSize = const Size(390, 844);
     await tester.pump();
     await tester.pump(settle + const Duration(milliseconds: 10));
+    await tester.pump(); // the frame between the two shells (F9)
     expect(s.overview, isFalse);
     // Back with nothing entered: the wall comes back (F8).
     tester.view.physicalSize = const Size(1194, 834);
     await tester.pump();
     await tester.pump(settle + const Duration(milliseconds: 10));
+    await tester.pump(); // the frame between the two shells (F9)
     expect(find.byKey(padKey), findsOneWidget);
     expect(s.phoneForm, isFalse);
     expect(s.overview, isTrue);
@@ -224,6 +231,7 @@ void main() {
     tester.view.physicalSize = const Size(390, 844);
     await tester.pump();
     await tester.pump(settle + const Duration(milliseconds: 10));
+    await tester.pump(); // the frame between the two shells (F9)
     await tester.pumpAndSettle();
     expect(find.byKey(phoneKey), findsOneWidget);
     expect(find.text('menu-item'), findsNothing);
@@ -271,11 +279,13 @@ void main() {
     tester.view.physicalSize = const Size(390, 844);
     await tester.pump();
     await tester.pump(settle + const Duration(milliseconds: 10));
+    await tester.pump(); // the frame between the two shells (F9)
     expect(find.byKey(phoneKey), findsOneWidget);
     expect(find.byType(MainWindow), findsNothing);
     tester.view.physicalSize = const Size(1194, 834);
     await tester.pump();
     await tester.pump(settle + const Duration(milliseconds: 10));
+    await tester.pump(); // the frame between the two shells (F9)
     await tester.pump(const Duration(seconds: 1));
     expect(find.byType(MainWindow), findsOneWidget);
     expect(st.currentKey, key);
@@ -358,12 +368,14 @@ void main() {
     tester.view.physicalSize = const Size(390, 844);
     await tester.pump();
     await tester.pump(settle + const Duration(milliseconds: 10));
+    await tester.pump(); // the frame between the two shells (F9)
     expect(find.byKey(phoneKey), findsOneWidget);
     await tester.pump(const Duration(seconds: 1));
     expect(resizes(e.port).length, before);
     tester.view.physicalSize = const Size(1194, 834);
     await tester.pump();
     await tester.pump(settle + const Duration(milliseconds: 10));
+    await tester.pump(); // the frame between the two shells (F9)
     await tester.pump(const Duration(seconds: 2));
     expect(find.byType(MainWindow), findsOneWidget);
     expect(resizes(e.port).length, before);
@@ -375,12 +387,14 @@ void main() {
     tester.view.physicalSize = const Size(390, 844);
     await tester.pump();
     await tester.pump(settle + const Duration(milliseconds: 10));
+    await tester.pump(); // the frame between the two shells (F9)
     await tester.pump(const Duration(seconds: 1));
     expect(resizes(e.port).length, before);
     tester.view.physicalSize = const Size(1000, 700);
     await tester.pump();
     // 390 ms in, the stage has not been still for 400 ms yet.
     await tester.pump(const Duration(milliseconds: 390));
+    await tester.pump(); // the frame between the two shells (F9)
     expect(find.byType(MainWindow), findsOneWidget);
     expect(resizes(e.port).length, before);
     await tester.pump(const Duration(milliseconds: 400));
@@ -408,9 +422,11 @@ void main() {
     tester.view.physicalSize = const Size(390, 844);
     await tester.pump();
     await tester.pump(settle + const Duration(milliseconds: 10));
+    await tester.pump(); // the frame between the two shells (F9)
     tester.view.physicalSize = const Size(1194, 834);
     await tester.pump();
     await tester.pump(settle + const Duration(milliseconds: 10));
+    await tester.pump(); // the frame between the two shells (F9)
     expect(find.byKey(padKey), findsOneWidget);
     expect(e.st.overview, isFalse);
     expect(e.st.currentKey, other);

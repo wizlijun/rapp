@@ -15,11 +15,15 @@ const offlineLine = '连不上，通了自动恢复';
 
 /// The page frame: background, safe area, content centred at most [phoneMaxWidth] wide (F4).
 class PhonePage extends StatelessWidget {
-  const PhonePage({super.key, required this.child, this.title, this.onBack, this.offline = false});
+  const PhonePage({super.key, required this.child, this.title, this.onBack, this.offline = false, this.keepHomeBar = false});
   final Widget child;
   final String? title;
   final VoidCallback? onBack;
   final bool offline;
+
+  /// The bottom stays above the home bar with the soft keyboard up too (the session view: its overlays stand on
+  /// `keyboardLift`, which takes the home bar off, as the Pad's stage does).
+  final bool keepHomeBar;
 
   @override
   Widget build(BuildContext context) {
@@ -28,6 +32,7 @@ class PhonePage extends StatelessWidget {
     return ColoredBox(
       color: t.bg,
       child: SafeArea(
+        maintainBottomViewPadding: keepHomeBar,
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: phoneMaxWidth),

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
@@ -164,8 +165,94 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
   });
 
-  // The phone session view hosts no composer in V1b (it mounts TermStage / Picture / DisconnectedStage only,
-  // not composerLayer), so there is no editor caret to keep; the draft lives in RemoteSession.composer.
+  // R34: the phone mounts the Pad's own composer layer, lock banner and host notice (one implementation).
+  for (final ios in [false, true]) {
+    testWidgets('phone terminal: the composer opens and sends${ios ? ' (iOS)' : ''}', (tester) async {
+      if (ios) debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        await boot(tester, app: 'term:pty:w', phone: true);
+        expect(find.byKey(const Key('composer-open')), findsOneWidget);
+        await tester.tap(find.byKey(const Key('composer-open')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(s.currentRemote!.composer.open, isTrue);
+        await tester.enterText(find.byKey(const Key('composer-field')), 'ls');
+        await tester.tap(find.byKey(const Key('composer-send')));
+        await tester.pump();
+        await tester.runAsync(flush);
+        final pastes = [for (final c in term.calls) if (c.$1 == 'paste') c.$2];
+        expect(pastes.single['data'], 'ls');
+        expect(views().every((v) => v['fit'] == false), isTrue);
+        await tester.runAsync(flush);
+        await tester.pump(const Duration(seconds: 5)); // the history note's 4 s
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+  }
+
+  // keyboardLift(fullscreen: false) takes the home bar off, so the page must keep standing above the home bar
+  // while the keyboard is up (as the Pad's stage does): the 输入 button then sits over the keyboard, not under it.
+  testWidgets('phone: the composer stands over the soft keyboard', (tester) async {
+    await boot(tester, app: 'term:pty:w', phone: true);
+    tester.view.viewPadding = const FakeViewPadding(bottom: 34);
+    tester.view.padding = FakeViewPadding.zero; // what iOS reports with the keyboard up
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(tester.getRect(find.byKey(const Key('composer-open'))).bottom, lessThanOrEqualTo(844 - 300));
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  // F9: text typed in the phone's composer (the Pad's own panel, keyed by session) is there on the Pad after a swap.
+  testWidgets('text typed on the phone is in the Pad composer after a swap', (tester) async {
+    await boot(tester, app: 'term:pty:w', phone: true);
+    await tester.tap(find.byKey(const Key('composer-open')));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('composer-field')), 'half a line');
+    await tester.pump();
+    // FormSwitch puts one empty frame between the two shells, so the phone's panel lets go before the Pad's takes over.
+    await tester.pumpWidget(MaterialApp(theme: themeDataFor(RappTheme.matrix), home: const SizedBox.expand()));
+    await tester.pumpWidget(MaterialApp(theme: themeDataFor(RappTheme.matrix), home: Scaffold(body: Stage(state: s))));
+    await tester.pump();
+    final field = find.descendant(of: find.byKey(const Key('composer-field')), matching: find.byType(EditableText));
+    expect(tester.widget<EditableText>(field).controller.text, 'half a line');
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('phone picture shows the lock banner', (tester) async {
+    await boot(tester, app: 'Safari', phone: true);
+    expect(find.text('输入系统密码'), findsNothing);
+    port.emit(const ScreenLockedEvent(1, true));
+    await tester.runAsync(flush);
+    await tester.pump();
+    expect(find.text(s.lockBanner!.text), findsOneWidget);
+    expect(find.text('输入系统密码'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('phone picture shows the host notice', (tester) async {
+    await boot(tester, app: 'Safari', phone: true);
+    expect(find.byKey(const Key('host-notice')), findsNothing);
+    port.emit(const CoveredEvent(1, 3, '通知中心', 'com.apple.notificationcenterui', true));
+    await tester.runAsync(flush);
+    await tester.pump();
+    expect(find.byKey(const Key('host-notice')), findsOneWidget);
+    expect(find.text('关掉它'), findsOneWidget);
+    await tester.pump(hostNoticeFor);
+  });
+
+  testWidgets('phone picture: the composer opens over it, no resize', (tester) async {
+    await boot(tester, app: 'Safari', phone: true);
+    expect(find.byKey(const Key('composer-open')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('composer-open')));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.byKey(const Key('composer-field')), findsOneWidget);
+    expect(port.calls.where((c) => c.$1 == 'resize'), isEmpty);
+  });
+
+  // The draft lives in RemoteSession.composer, not in either shell's widgets (F9).
   testWidgets('draft survives a shell switch', (tester) async {
     await boot(tester, app: 'term:pty:w', phone: true);
     final rs = s.currentRemote!;
