@@ -164,7 +164,8 @@ Future<void> main(List<String> args) async {
   hub?.addListener(reportWindows);
   reportWindows();
 
-  MainWindow mainWindow() => MainWindow(
+  // Built once: a MainWindow per build would make a WindowManagerFullscreen (a windowManager listener) per unfold.
+  final mainWindow = MainWindow(
     state: state,
     monitor: monitor,
     control: control,
@@ -187,9 +188,9 @@ Future<void> main(List<String> args) async {
     navigatorKey: shell.navigatorKey,
     state: state,
     // Off by default; RAPP_PHONE_FORM=1 puts the form switch in MaterialApp.home (R25), under the root Navigator.
-    home: phoneFormWanted(Platform.environment)
-        ? phoneFormSwitch(state: state, nav: PhoneNav(state), data: data, pad: (_) => mainWindow())
-        : mainWindow(),
+    home: phoneFormWanted(env)
+        ? phoneFormSwitch(state: state, nav: PhoneNav(state), data: state.data, pad: (_) => mainWindow)
+        : mainWindow,
   ));
 }
 
