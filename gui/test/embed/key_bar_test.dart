@@ -109,7 +109,7 @@ void main() {
   }
 
   group('terminal', () {
-    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌥ ⌘, ← →, the ⌃ keys and copy / paste
+    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌘C ⌘V ⌘T ⌘ ⌃ ← →
     iosTest('tap Esc twice sends [Esc] twice', (tester) async {
       await tester.pumpWidget(bar(tsess));
       await tap(tester, 'esc');
@@ -154,31 +154,48 @@ void main() {
       ]);
     });
 
-    iosTest('⌥ then Enter sends Alt-Enter', (tester) async {
+    iosTest('⌘T runs the stage\'s ⌘T (termCommand t) and types nothing', (tester) async {
+      final got = <String>[];
+      tsess.termCommand = got.add;
       await tester.pumpWidget(bar(tsess, width: 900));
-      await tap(tester, 'opt');
-      await tap(tester, 'enter');
-      expect(termKeys(), [
-        ['Alt-Enter'],
-      ]);
+      await tap(tester, 'cmdt');
+      expect(got, ['t']);
+      expect(term.calls.where((c) => c.$1 == 'keys' || c.$1 == 'type'), isEmpty);
     });
 
-    iosTest('⌃ and ⌥ on a key that already has Ctrl: Ctrl-Alt-C, Ctrl not doubled', (tester) async {
+    iosTest('⌘ then a letter on the bar\'s session runs the rApp shortcut, not a key; ⌘ goes off', (tester) async {
+      final got = <String>[];
+      tsess.termCommand = got.add;
+      await tester.pumpWidget(bar(tsess, width: 900));
+      await tap(tester, 'cmd');
+      expect(tsess.keyLatch.of(latchCmd), LatchState.once);
+      expect(sendLatchedLetter(s, tsess, term, 'W'), isTrue);
+      expect(got, ['w']);
+      expect(term.calls.where((c) => c.$1 == 'keys' || c.$1 == 'type'), isEmpty);
+      expect(tsess.keyLatch.flags, 0);
+    });
+
+    iosTest('⌘ with ⌃ also lit: ⌘ wins, nothing sent; a letter rApp has no shortcut for sends nothing too', (tester) async {
+      final got = <String>[];
+      tsess.termCommand = got.add;
       await tester.pumpWidget(bar(tsess, width: 900));
       await tap(tester, 'ctrl');
-      await tap(tester, 'opt');
-      await tap(tester, 'cc');
-      expect(termKeys(), [
-        ['Ctrl-Alt-C'],
-      ]);
+      await tap(tester, 'cmd');
+      expect(sendLatchedLetter(s, tsess, term, 'x'), isTrue);
+      expect(got, ['x'], reason: 'the stage decides x is nothing');
+      expect(term.calls.where((c) => c.$1 == 'keys' || c.$1 == 'type'), isEmpty);
+      expect(tsess.keyLatch.flags, 0);
     });
 
-    iosTest('⌃L sends Ctrl-L', (tester) async {
+    iosTest('⌘ lit, then ← on the bar: plain Left and ⌘ goes off', (tester) async {
       await tester.pumpWidget(bar(tsess, width: 900));
-      await tap(tester, 'cl');
+      await tap(tester, 'cmd');
+      await tap(tester, 'left');
+      await tester.pump(const Duration(milliseconds: 20));
       expect(termKeys(), [
-        ['Ctrl-L'],
+        ['Left'],
       ]);
+      expect(tsess.keyLatch.flags, 0);
     });
 
     iosTest('⌘C calls onCopy', (tester) async {
@@ -190,7 +207,7 @@ void main() {
   });
 
   group('app', () {
-    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌥ ⌘, ← →, the ⌃ keys and copy / paste
+    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌘C ⌘V ⌘T ⌘ ⌃ ← →
     iosTest('⇧Tab sends key(48, latchShift); ⌃ then ↑ sends key(126, latchCtrl) after keyEvent(59, down)', (tester) async {
       await tester.pumpWidget(bar(app, width: 900));
       await tap(tester, 'stab');
@@ -206,10 +223,10 @@ void main() {
       ]);
     });
 
-    iosTest('⌃L sends key(37, latchCtrl)', (tester) async {
+    iosTest('⌘T sends key(17, latchCmd) to the app', (tester) async {
       await tester.pumpWidget(bar(app, width: 900));
-      await tap(tester, 'cl');
-      expect(appKeys(), [('key', 1, 37, latchCtrl)]);
+      await tap(tester, 'cmdt');
+      expect(appKeys(), [('key', 1, 17, latchCmd)]);
     });
 
     iosTest('⌘C sends key(8, latchCmd)', (tester) async {
@@ -243,10 +260,10 @@ void main() {
 
     iosTest('going away releases the modifiers', (tester) async {
       await tester.pumpWidget(bar(app, width: 900));
-      await tap(tester, 'opt');
+      await tap(tester, 'ctrl');
       port.calls.clear();
       await tester.pumpWidget(wrap(const SizedBox()));
-      expect(appKeys(), [('up', 1, 58, 0)]);
+      expect(appKeys(), [('up', 1, 59, 0)]);
     });
 
     iosTest('a hardware key took the once ⌘ (latch_used): it goes up, locked stays', (tester) async {
@@ -259,21 +276,18 @@ void main() {
       expect(s.appLatch.flags, 0);
     });
 
-    iosTest('modifier codes: ⌥ 58, ⌃ 59, ⌘ 55; each down carries every flag on, the up what stays', (tester) async {
+    iosTest('modifier codes: ⌃ 59, ⌘ 55; each down carries every flag on, the up what stays', (tester) async {
       await tester.pumpWidget(bar(app, width: 900));
-      await tap(tester, 'opt');
       await tap(tester, 'ctrl');
       await tap(tester, 'cmd');
       await tap(tester, 'enter');
       await tester.pump(const Duration(milliseconds: 20));
-      const all = latchOpt | latchCtrl | latchCmd;
+      const all = latchCtrl | latchCmd;
       expect(appKeys(), [
-        ('down', 1, 58, latchOpt),
-        ('down', 1, 59, latchOpt | latchCtrl),
+        ('down', 1, 59, latchCtrl),
         ('down', 1, 55, all),
         ('key', 1, 36, all),
-        ('up', 1, 55, latchOpt | latchCtrl),
-        ('up', 1, 58, latchCtrl),
+        ('up', 1, 55, latchCtrl),
         ('up', 1, 59, 0),
       ]);
     });
@@ -287,18 +301,18 @@ void main() {
       expect(appKeys(), [('up', 1, 59, 0)]);
     });
 
-    iosTest('a hardware key took the once ⌘ with ⌥ locked: ⌘ goes up, ⌥ stays and native is told', (tester) async {
+    iosTest('a hardware key took the once ⌘ with ⌃ locked: ⌘ goes up, ⌃ stays and native is told', (tester) async {
       await tester.pumpWidget(bar(app, width: 900));
       await tap(tester, 'cmd');
-      await tap(tester, 'opt');
+      await tap(tester, 'ctrl');
       await tester.pump(const Duration(milliseconds: 50));
-      await tap(tester, 'opt');
+      await tap(tester, 'ctrl');
       port.calls.clear();
       port.emit(const LatchUsedEvent(1));
       await tester.pump();
-      expect(appKeys(), [('up', 1, 55, latchOpt)]);
-      expect([for (final c in port.calls) if (c.$1 == 'latch') c.$2['modifiers']], [latchOpt]);
-      expect(s.appLatch.of(latchOpt), LatchState.locked);
+      expect(appKeys(), [('up', 1, 55, latchCtrl)]);
+      expect([for (final c in port.calls) if (c.$1 == 'latch') c.$2['modifiers']], [latchCtrl]);
+      expect(s.appLatch.of(latchCtrl), LatchState.locked);
     });
 
     iosTest('⌘ locked, then a hardware key (latch_used): native gets ⌘ again for the next one', (tester) async {
@@ -333,7 +347,7 @@ void main() {
   });
 
   group('repeat and swipe', () {
-    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌥ ⌘, ← →, the ⌃ keys and copy / paste
+    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌘C ⌘V ⌘T ⌘ ⌃ ← →
     iosTest('hold ← 400 ms then 160 ms: three Left', (tester) async {
       await tester.pumpWidget(bar(tsess));
       final g = await tester.startGesture(tester.getCenter(k('left')));
@@ -440,7 +454,7 @@ void main() {
   });
 
   group('paste', () {
-    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌥ ⌘, ← →, the ⌃ keys and copy / paste
+    setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌘C ⌘V ⌘T ⌘ ⌃ ← →
     iosTest('⌘V sends the clipboard and leaves composer draft unchanged', (tester) async {
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (c) async {
         if (c.method == 'Clipboard.getData') return {'text': 'hello'};
@@ -478,10 +492,13 @@ void main() {
   });
 
   group('first row', () {
-    iosTest('⌫ and ⌃ are there without ⋯: ⌫ sends Backspace, ⌃ then ⌫ sends Ctrl-Backspace', (tester) async {
+    iosTest('⌫ is there without ⋯ and ⌃ is not: ⌃ (second row) then ⌫ sends Ctrl-Backspace', (tester) async {
       await tester.pumpWidget(bar(tsess));
       expect(s.prefs.keyBarMore, isFalse);
+      expect(k('ctrl'), findsNothing);
+      expect(k('cmd'), findsNothing);
       await tap(tester, 'bksp');
+      await tap(tester, 'more');
       await tap(tester, 'ctrl');
       await tap(tester, 'bksp');
       expect(termKeys(), [
@@ -490,9 +507,9 @@ void main() {
       ]);
     });
 
-    iosTest('left to right: Tab ⇧Tab Esc ⌃C ⌃ ↑ ↓ ⌫ ⏎ ⋯ ⌄', (tester) async {
+    iosTest('left to right: Tab ⇧Tab Esc ⌃C ↑ ↓ ⌫ ⏎ ⋯ ⌄', (tester) async {
       await tester.pumpWidget(bar(tsess));
-      const order = ['tab', 'stab', 'esc', 'cc', 'ctrl', 'up', 'down', 'bksp', 'enter', 'more', 'hide'];
+      const order = ['tab', 'stab', 'esc', 'cc', 'up', 'down', 'bksp', 'enter', 'more', 'hide'];
       final xs = [for (final id in order) tester.getCenter(k(id)).dx];
       for (var i = 1; i < xs.length; i++) {
         expect(xs[i], greaterThan(xs[i - 1]), reason: '${order[i]} is right of ${order[i - 1]}');
@@ -512,6 +529,20 @@ void main() {
       expect(termKeys(), [
         ['Left'],
       ]);
+    });
+
+    iosTest('second row left to right: ⌘C ⌘V ⌘T ⌘ ⌃ ← →, on a terminal and on an app', (tester) async {
+      s.prefs.keyBarMore = true;
+      const order = ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'left', 'right'];
+      for (final rs in [tsess, app]) {
+        await tester.pumpWidget(bar(rs, width: 900));
+        final xs = [for (final id in order) tester.getCenter(k(id)).dx];
+        for (var i = 1; i < xs.length; i++) {
+          expect(xs[i], greaterThan(xs[i - 1]), reason: '${order[i]} is right of ${order[i - 1]} (${rs.appName})');
+        }
+        expect(find.descendant(of: k('cmdt'), matching: find.text('⌘T')), findsOneWidget);
+        expect(k('opt'), findsNothing);
+      }
     });
 
     iosTest('the copy and paste keys read ⌘C and ⌘V', (tester) async {
@@ -576,6 +607,45 @@ void main() {
       expect(File('${tmp.path}/devices/123456789/gui.json').readAsStringSync(), contains('"key_bar_more":false'));
     });
 
+    iosTest('⋯ folding the second row lets go of a lit ⌃ and ⌘ (terminal); on an app their ups go to A', (tester) async {
+      s.prefs.keyBarMore = true;
+      await tester.pumpWidget(bar(tsess, width: 900));
+      await tap(tester, 'ctrl');
+      await tap(tester, 'cmd');
+      expect(tsess.keyLatch.flags, latchCtrl | latchCmd);
+      await tap(tester, 'more');
+      expect(s.prefs.keyBarMore, isFalse);
+      expect(tsess.keyLatch.flags, 0);
+      await tap(tester, 'more');
+      await tester.pumpWidget(bar(app, width: 900));
+      await tap(tester, 'ctrl');
+      port.calls.clear();
+      await tap(tester, 'more');
+      expect(s.appLatch.flags, 0);
+      expect(appKeys(), [('up', 1, 59, 0)]);
+      await tap(tester, 'more');
+      expect(s.prefs.keyBarMore, isTrue);
+      expect(s.appLatch.flags, 0, reason: 'opening the row lights nothing');
+    });
+
+    iosTest('the 更多按键 switch turning the second row off lets go too: every terminal, and the app\'s ups go to A', (tester) async {
+      s.remote[tsess.sid] = tsess;
+      try {
+        s.prefs.keyBarMore = true;
+        await tester.pumpWidget(bar(app, width: 900));
+        await tap(tester, 'cmd');
+        tsess.keyLatch.tap(latchCtrl);
+        port.calls.clear();
+        s.setKeyBarMore(false);
+        await tester.pump();
+        expect(s.appLatch.flags, 0);
+        expect(appKeys(), [('up', 1, 55, 0)]);
+        expect(tsess.keyLatch.flags, 0);
+      } finally {
+        s.remote.remove(tsess.sid);
+      }
+    });
+
     iosTest('⌄ is the last key of the first row, ⋯ just before it', (tester) async {
       await tester.pumpWidget(bar(tsess));
       expect(k('hide'), findsOneWidget);
@@ -599,6 +669,7 @@ void main() {
     });
 
     iosTest('⌄ folds even with ⌃ lit and 打字后自动收起 off', (tester) async {
+      s.prefs.keyBarMore = true;
       await tester.pumpWidget(bar(tsess));
       s.setQuickAutoHide(false);
       await tap(tester, 'ctrl');
@@ -840,37 +911,34 @@ void main() {
       }
     });
 
-    testWidgets('Linux: first row has 11 keys ending in ⋯ ⌄; second row has ⌘C ⌘V and ⌃L; ⌄ folds per kind', (tester) async {
+    testWidgets('Linux: first row has 10 keys ending in ⋯ ⌄; second row has ⌘C ⌘V ⌘T ⌘ ⌃; ⌄ folds per kind', (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.linux;
       try {
         tester.view.physicalSize = const Size(1000, 900);
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.reset);
         await tester.pumpWidget(bar(tsess, width: 720));
-        const first = ['tab', 'stab', 'esc', 'cc', 'ctrl', 'up', 'down', 'bksp', 'enter', 'more', 'hide'];
+        const first = ['tab', 'stab', 'esc', 'cc', 'up', 'down', 'bksp', 'enter', 'more', 'hide'];
         final xs = [for (final id in first) tester.getCenter(k(id)).dx];
         for (var i = 1; i < xs.length; i++) {
           expect(xs[i], greaterThan(xs[i - 1]), reason: '${first[i]} right of ${first[i - 1]}');
         }
         await tap(tester, 'bksp');
+        await tap(tester, 'more');
+        await tester.pump();
         await tap(tester, 'ctrl');
         await tap(tester, 'bksp');
         expect(termKeys(), [
           ['Backspace'],
           ['Ctrl-Backspace'],
         ]);
-        await tap(tester, 'more');
-        await tester.pump();
         expect(find.descendant(of: k('copy'), matching: find.text('⌘C')), findsOneWidget);
         expect(find.descendant(of: k('paste'), matching: find.text('⌘V')), findsOneWidget);
         expect(find.descendant(of: k('copy'), matching: find.bySemanticsLabel('复制')), findsOneWidget);
         expect(find.descendant(of: k('paste'), matching: find.bySemanticsLabel('粘贴')), findsOneWidget);
         expect(k('cd'), findsNothing);
-        term.calls.clear();
-        await tap(tester, 'cl');
-        expect(termKeys(), [
-          ['Ctrl-L'],
-        ]);
+        expect(k('cmdt'), findsOneWidget);
+        expect(k('cmd'), findsOneWidget);
         s.setQuickHidden(term: false, hidden: false);
         s.setQuickAutoHide(false);
         await tap(tester, 'ctrl');
@@ -879,8 +947,8 @@ void main() {
         expect(s.prefs.quickHiddenApp, isFalse);
         await tester.pumpWidget(bar(app, width: 720));
         port.calls.clear();
-        await tap(tester, 'cl');
-        expect(appKeys(), [('key', 1, 37, latchCtrl)]);
+        await tap(tester, 'cmdt');
+        expect(appKeys(), [('key', 1, 17, latchCmd)]);
         await tap(tester, 'hide');
         expect(s.prefs.quickHiddenApp, isTrue);
       } finally {

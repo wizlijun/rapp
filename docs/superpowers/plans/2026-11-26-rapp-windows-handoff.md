@@ -88,7 +88,7 @@ B 段分三批写，前两批在两个分支上并行，互相没看过对方的
   3. 超过 512 字节的帧只记长度和 FNV 校验，不记十六进制。对不上时看不到是哪个字节不同，要查就临时把上限调大。
 - **计划里错的，已经改回计划 B**（提交 `0c29a2ce`、`48b5c6eb`）：恢复暂停后发的是差量，不是整帧（只有暂停期间换了模式才是整帧；计划的审查重点 5 和任务 14 的测试原来也写错了，已改）；区域大小变化不强制整帧，只有密度变 1% 以上才是；输出缓冲是固定 64 KiB 循环取，不是越长越大；分块样本要带每次调用的输入，不然 Rust 没法重放；`lib.rs` 的模块要按任务逐个声明。
 - **最先会撞上的**：
-  1. **zlib 输出是不是逐字节相同**。Windows 上 `libz-sys` 用它自己编的 zlib（草稿说是 1.3.x，没核对），Swift 用的是苹果系统的 zlib，两边的输出没比过。探针 C1 本来该先回答这个问题，草稿是在 C1 之前写的。不相同就走计划 B 任务 3 写好的退路（比解压后的字节），任务 5 的切片边界跟着变。
+  1. **zlib 输出是不是逐字节相同**。探针 C1 已在 Mac 上做完（2026-11-27，结果页 C1 一节）：`libz-sys` 1.1.33 静态编的原版 zlib（features `static` 加 `stock-zlib`，default-features 关）和 Swift 逐字节相同，612 项全同，走 `flate2` 和直接调 C 接口（含 `deflateCopy`）都一样；`miniz_oxide`、zlib-ng、zlib-rs 都不相同。所以计划 B 任务 3 走原方案，不走退路。两件事留给 Windows 那边：这个结论只在 Mac arm64 上量过，Windows x64 上以 `deflate.bin` 样本测试过了为准；草稿的 `rust/host-core/Cargo.toml` 只写了 `features = ["static"]`，要加上 `"stock-zlib"`，否则 workspace 里将来有谁打开 `libz-sys/zlib-ng`，这里会悄悄换成 zlib-ng，输出就不一样了。
   2. `deflate.rs` 是这个 crate 里唯一有 `unsafe` 的文件：`zalloc`/`zfree` 的指针类型、`deflateCopy`、`Box` 的处理都是凭记忆写的。
   3. Swift 生成器可能过不了类型检查（很长的元组数组字面量、`SenderTrace.init` 里的 `[unowned self]` 闭包）。
   4. 时间和 RTT 是 `f64`，经过 JSON 来回一趟要一位不差。
@@ -192,7 +192,7 @@ B 段分三批写，前两批在两个分支上并行，互相没看过对方的
    5. 两个门禁在同一个提交上都绿了，在 Mac 上把接线合进 `main`（`merge: …（feat/windows-foundation）`，文字见计划 A）。这次合并改的是共用代码，算 macOS 的改动。
 
 **4. B 段草稿**，同样以 Windows 为主，在分支 `feat/windows-host-core` 上做（它是 `main` 加 B 段的接线，见 2.1）：
-   1. Mac：`git merge main`；做探针 C1，任务 3（压缩）要它的结论；生成样本：`RAPP_WRITE_FIXTURES=1 swift test --filter 'Fixtures/'`，然后不带那个变量再跑一遍（比对方式）；提交；推分支。生成器只调用 `Sources/RappCore/` 的代码；Swift 符号在测试里看不到时，照计划 B 任务 2 的办法绕，**不改 Swift 的访问级别**。这一步只修生成器，不修 Rust。
+   1. Mac（**已做**，2026-11-27：样本 47 个文件在 `30cdd17a`，探针 C1 过了，见 3.2）：`git merge main`；做探针 C1，任务 3（压缩）要它的结论；生成样本：`RAPP_WRITE_FIXTURES=1 swift test --filter 'Fixtures/'`，然后不带那个变量再跑一遍（比对方式）；提交；推分支。生成器只调用 `Sources/RappCore/` 的代码；Swift 符号在测试里看不到时，照计划 B 任务 2 的办法绕，**不改 Swift 的访问级别**。这一步只修生成器，不修 Rust。
    2. Windows（A 段在 Windows 上绿了以后）：`git merge main`，再把 `feat/windows-foundation` 合进这个分支，testkit 依赖的 crate 要有 A 段的接线才能在 Windows 上编。读 3.2 节和三个说明文件（`…windows-b1/b2/b3-draft-notes.md`）。
    3. Windows：`cargo test -p rapp-host-core`。红的地方：以 Swift 为准改 Rust，不改样本。做不到一个字节不差的，按计划 B“Fixture rules”最后一条处理并写进 `PORTING.md`。样本本身错了就回 Mac 重新生成。
    4. Windows：任务 13–19 的草稿写完了：`cargo test -p rapp-testkit --test host_session`，再 `--test host_service`。然后补或者认下 3.2 节“草稿和 Swift 不一样”剩下的四条。`scripts\check-windows.ps1` 全绿后推分支。

@@ -62,7 +62,12 @@ class RemoteSession extends ChangeNotifier {
   /// is mounted. The key bar's 打字后自动收起 asks it before the stage sees the key.
   bool Function(KeyEvent e)? termTakesKey;
 
-  /// A terminal's key bar modifiers (⌃ ⌥, sticky); the app's live in [MainState.appLatch].
+  /// A terminal stage's ⌘ + [letter] (lowercase), as a hardware ⌘ on the stage: c copy, v paste, t a new terminal
+  /// beside, w end this one; any other letter nothing. The key bar's ⌘T and its sticky ⌘ run it; null while no stage
+  /// is mounted.
+  void Function(String letter)? termCommand;
+
+  /// A terminal's key bar modifiers (⌃ ⌘, sticky); the app's live in [MainState.appLatch].
   final keyLatch = ModifierLatch();
 
   /// Whether a typed letter opens the writing panel. A panel opened by a letter and closed unused means the

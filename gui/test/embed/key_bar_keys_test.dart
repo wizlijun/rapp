@@ -4,17 +4,31 @@ import 'package:rapp/embed/key_bar_keys.dart';
 import 'package:rapp/embed/modifier_latch.dart';
 
 void main() {
-  test('one row of eleven by intent: Tab ⇧Tab, Esc ⌃C, ⌃, ↑ ↓, ⌫ ⏎, then ⋯ and ⌄ at the end; more adds the second row', () {
-    expect(keyBarRows(app: false, more: false), [
-      ['tab', 'stab', 'esc', 'cc', 'ctrl', 'up', 'down', 'bksp', 'enter', 'more', 'hide'],
-    ]);
-    expect(keyBarRows(app: false, more: true)[1],
-        ['copy', 'paste', 'opt', 'left', 'right', 'co', 'cr', 'ct', 'cb', 'cl']);
+  test('one row of ten by intent: Tab ⇧Tab, Esc ⌃C, ↑ ↓, ⌫ ⏎, then ⋯ and ⌄ at the end; more adds the second row', () {
+    for (final app in [false, true]) {
+      expect(keyBarRows(app: app, more: false), [
+        ['tab', 'stab', 'esc', 'cc', 'up', 'down', 'bksp', 'enter', 'more', 'hide'],
+      ], reason: 'app: $app');
+      expect(keyBarRows(app: app, more: true)[1], ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'left', 'right'],
+          reason: 'app: $app');
+    }
   });
 
-  test('app: ⌘ after ⌥', () {
-    expect(keyBarRows(app: true, more: true)[1],
-        ['copy', 'paste', 'opt', 'cmd', 'left', 'right', 'co', 'cr', 'ct', 'cb', 'cl']);
+  test('⌘T reads ⌘T, sends nothing by itself (the bar runs it), and is said Command T', () {
+    final k = barKeys['cmdt']!;
+    expect(k.kind, BarKind.cmdT);
+    expect(k.label, '⌘T');
+    expect(k.spoken, 'Command T');
+  });
+
+  test('no ⌥ and no ⌃-letter keys on the bar; the ⌃-letters stay in barKeys for the 常用语条 commands', () {
+    for (final app in [false, true]) {
+      final ids = {for (final row in keyBarRows(app: app, more: true)) ...row};
+      for (final gone in ['opt', 'co', 'cr', 'ct', 'cb', 'cl']) {
+        expect(ids.contains(gone), isFalse, reason: '$gone, app: $app');
+      }
+    }
+    expect(barKeys['cr']!.wire, 'Ctrl-R');
   });
 
   test('no key is on the bar twice', () {
@@ -90,7 +104,7 @@ void main() {
     expect(barKeys['ctrl']!.bit, latchCtrl);
     expect(barKeys['opt']!.bit, latchOpt);
     expect(barKeys['cmd']!.bit, latchCmd);
-    for (final id in ['ctrl', 'opt', 'cmd', 'copy', 'paste', 'more', 'hide']) {
+    for (final id in ['ctrl', 'opt', 'cmd', 'cmdt', 'copy', 'paste', 'more', 'hide']) {
       final k = barKeys[id]!;
       expect(k.wire, isNull, reason: id);
       expect(k.code, isNull, reason: id);
