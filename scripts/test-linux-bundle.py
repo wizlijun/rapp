@@ -269,8 +269,33 @@ with tempfile.TemporaryDirectory(prefix='rapp-bundle-') as td, EchoServer(('127.
                     routes_resp = desk_http.getresponse()
                     routes_json = json.loads(routes_resp.read().decode('utf-8'))
                     assert routes_resp.status == 200 and routes_json == {
-                        'routes': [{'name': 'state', 'kind': 'builtin', 'v': 1}],
+                        'routes': [
+                            {'name': 'state', 'kind': 'builtin', 'v': 1},
+                            {'name': 'prefs', 'kind': 'builtin', 'v': 1},
+                        ],
                     }, (routes_resp.status, routes_json)
+                    desk_http.request('GET', '/prefs/v1/all')
+                    prefs_all_resp = desk_http.getresponse()
+                    prefs_all = json.loads(prefs_all_resp.read().decode('utf-8'))
+                    assert prefs_all_resp.status == 200 and len(prefs_all.get('store', '')) == 16, (prefs_all_resp.status, prefs_all)
+                    stars_put = json.dumps({'at': 1700000000001, 'base': 0, 'data': ['k:search']})
+                    desk_http.request('PUT', '/prefs/v1/stars', body=stars_put, headers={'Content-Type': 'application/json'})
+                    stars_put_resp = desk_http.getresponse()
+                    stars_put_resp.read()
+                    assert stars_put_resp.status == 204, stars_put_resp.status
+                    desk_http.request('GET', '/prefs/v1/stars')
+                    stars_get_resp = desk_http.getresponse()
+                    stars_doc = json.loads(stars_get_resp.read().decode('utf-8'))
+                    assert stars_get_resp.status == 200 and stars_doc == {'at': 1700000000001, 'data': ['k:search']}, stars_doc
+                    desk_http.request('PUT', '/prefs/v1/stars', body=stars_put, headers={'Content-Type': 'application/json'})
+                    stars_conflict_resp = desk_http.getresponse()
+                    stars_conflict_doc = json.loads(stars_conflict_resp.read().decode('utf-8'))
+                    assert stars_conflict_resp.status == 409 and stars_conflict_doc == stars_doc, (stars_conflict_resp.status, stars_conflict_doc)
+                    prefs_file = local / 'center' / 'prefs.json'
+                    prefs_deadline = time.monotonic() + 3
+                    while not prefs_file.is_file() and time.monotonic() < prefs_deadline:
+                        time.sleep(.1)
+                    assert prefs_file.is_file() and (prefs_file.stat().st_mode & 0o777) == 0o600, prefs_file
                     desk_body = json.dumps({
                         'device': 'linux-box',
                         'sessions': [{'id': '123456789', 'app': 'term:pty:t1', 'name': 'claude'}],

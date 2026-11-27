@@ -3,10 +3,13 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/app_profile.dart';
+import 'package:rapp/embed/composer_panel.dart';
+import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/embed/key_bar.dart';
 import 'package:rapp/embed/phrase_strip.dart';
 import 'package:rapp/embed/phrases.dart';
@@ -359,4 +362,44 @@ void main() {
     expect(ph('menu-settings'), findsOneWidget);
     expect(term.calls.where((c) => c.$1 != 'composer'), isEmpty);
   });
+
+  testWidgets('Linux desktop: mouse click on a quick-row key action sends keys while preserving editor focus and IME preedit',
+      (tester) async {
+    tester.view.physicalSize = const Size(1600, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    tsess.composer.open = true;
+    s.toggleStar('k:clear');
+    await tester.pumpWidget(wrap(SizedBox(
+      width: 1200,
+      height: 700,
+      child: Stack(children: composerLayer(state: s, session: tsess, port: term, editor: FlutterEditor.new)),
+    )));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('bar-stab')), findsNothing);
+    expect(ph('quick-menu-keys'), findsOneWidget);
+    expect(ph('quick-menu-phrases'), findsOneWidget);
+
+    final field = find.byKey(const Key('composer-field'));
+    await tester.tap(field, kind: PointerDeviceKind.mouse);
+    await tester.pump();
+    EditableText editor() => tester.widget<EditableText>(find.descendant(of: field, matching: find.byType(EditableText)));
+    const preedit = TextEditingValue(
+      text: 'hello ni',
+      selection: TextSelection.collapsed(offset: 8),
+      composing: TextRange(start: 6, end: 8),
+    );
+    tester.testTextInput.updateEditingValue(preedit);
+    await tester.pump();
+
+    term.calls.clear();
+    await tester.tap(ph('keyact-clear'), kind: PointerDeviceKind.mouse);
+    await tester.pump();
+    expect(term.calls.where((c) => c.$1 == 'keys').single.$2['keys'], ['Ctrl-L']);
+    expect(editor().focusNode.hasFocus, isTrue);
+    expect(editor().controller.value, preedit);
+    await waitRepeat(tester);
+    await tester.pump(const Duration(seconds: 2));
+  }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 }
