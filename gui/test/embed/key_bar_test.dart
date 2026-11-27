@@ -198,6 +198,65 @@ void main() {
       expect(tsess.keyLatch.flags, 0);
     });
 
+    iosTest('PgUp / PgDn page the stage\'s own history (termPage) and send nothing', (tester) async {
+      s.prefs.keyBarMore = true;
+      final got = <bool>[];
+      tsess.termPage = (up) {
+        got.add(up);
+        return true;
+      };
+      await tester.pumpWidget(bar(tsess, width: 900));
+      await tap(tester, 'pgup');
+      await tap(tester, 'pgdn');
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(got, [true, false]);
+      expect(termKeys(), isEmpty);
+    });
+
+    iosTest('a key sent from the bar tells the stage (termSent, back to the latest); a page of history does not',
+        (tester) async {
+      s.prefs.keyBarMore = true;
+      var sent = 0;
+      tsess.termSent = () => sent++;
+      tsess.termPage = (_) => true;
+      await tester.pumpWidget(bar(tsess, width: 900));
+      await tap(tester, 'pgup');
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(sent, 0);
+      await tap(tester, 'enter');
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(sent, 1);
+    });
+
+    iosTest('PgUp in a full-screen program (termPage false) goes to it as PageUp', (tester) async {
+      s.prefs.keyBarMore = true;
+      tsess.termPage = (_) => false;
+      await tester.pumpWidget(bar(tsess, width: 900));
+      await tap(tester, 'pgup');
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(termKeys(), [
+        ['PageUp'],
+      ]);
+    });
+
+    iosTest('PgUp with ⌃ lit is a key for the program, not a page of history; ⌃ goes off', (tester) async {
+      s.prefs.keyBarMore = true;
+      var paged = 0;
+      tsess.termPage = (_) {
+        paged++;
+        return true;
+      };
+      await tester.pumpWidget(bar(tsess, width: 900));
+      await tap(tester, 'ctrl');
+      await tap(tester, 'pgup');
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(paged, 0);
+      expect(termKeys(), [
+        [termWire('PageUp', latchCtrl)],
+      ]);
+      expect(tsess.keyLatch.flags, 0);
+    });
+
     iosTest('⌘C calls onCopy', (tester) async {
       await tester.pumpWidget(bar(tsess, width: 900));
       await tap(tester, 'copy');
@@ -227,6 +286,15 @@ void main() {
       await tester.pumpWidget(bar(app, width: 900));
       await tap(tester, 'cmdt');
       expect(appKeys(), [('key', 1, 17, latchCmd)]);
+    });
+
+    iosTest('PgUp / PgDn go to the app as key 116 / 121', (tester) async {
+      s.prefs.keyBarMore = true;
+      await tester.pumpWidget(bar(app, width: 900));
+      await tap(tester, 'pgup');
+      await tap(tester, 'pgdn');
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(appKeys(), [('key', 1, 116, 0), ('key', 1, 121, 0)]);
     });
 
     iosTest('⌘C sends key(8, latchCmd)', (tester) async {
@@ -531,9 +599,9 @@ void main() {
       ]);
     });
 
-    iosTest('second row left to right: ⌘C ⌘V ⌘T ⌘ ⌃ ← →, on a terminal and on an app', (tester) async {
+    iosTest('second row left to right: ⌘C ⌘V ⌘T ⌘ ⌃ ← → PgUp PgDn, on a terminal and on an app', (tester) async {
       s.prefs.keyBarMore = true;
-      const order = ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'left', 'right'];
+      const order = ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'left', 'right', 'pgup', 'pgdn'];
       for (final rs in [tsess, app]) {
         await tester.pumpWidget(bar(rs, width: 900));
         final xs = [for (final id in order) tester.getCenter(k(id)).dx];

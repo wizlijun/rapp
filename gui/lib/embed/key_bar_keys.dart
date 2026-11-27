@@ -62,13 +62,13 @@ const barKeys = <String, BarKey>{
 /// First row, ten keys: complete and switch mode (Tab ⇧Tab), stop (Esc ⌃C), choose (↑ ↓), ⌫ ⏎, then the bar's own two
 /// at the right end: ⋯ (second row) and ⌄ (fold the 快捷区, as the toggle in the box does; the user asked for it back on
 /// 2026-11-25). [more] adds the second row (bar-cmd, 2026-11-27): copy and paste (shown as ⌘C ⌘V), ⌘T, the sticky ⌘
-/// and ⌃, ← →. Any ⌃ key is the sticky ⌃ and a typed letter; on a terminal the sticky ⌘ and a letter is rApp's own
+/// and ⌃, ← →, PgUp PgDn (on a terminal a page of rApp's own history, in a full-screen program its keys). Any ⌃ key is the sticky ⌃ and a typed letter; on a terminal the sticky ⌘ and a letter is rApp's own
 /// shortcut. The rows are the same for an app and a terminal; [app] is kept for the callers that tell them apart.
 List<List<String>> keyBarRows({required bool app, required bool more}) {
   const first = ['tab', 'stab', 'esc', 'cc', 'up', 'down', 'bksp', 'enter', 'more', 'hide'];
   if (!more) return [first];
   return [
     first,
-    ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'left', 'right'],
+    ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'left', 'right', 'pgup', 'pgdn'],
   ];
 }

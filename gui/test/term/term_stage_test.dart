@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/panel_place.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
@@ -75,11 +76,11 @@ void main() {
     tmp.deleteSync(recursive: true);
   });
 
-  Future<void> show(WidgetTester t, {double w = 800, double h = 480}) async {
+  Future<void> show(WidgetTester t, {double w = 800, double h = 480, double keyboard = 0}) async {
     await t.pumpWidget(wrap(SizedBox(
       width: w,
       height: h,
-      child: TermStage(state: state, session: session, port: port),
+      child: TermStage(state: state, session: session, port: port, keyboard: keyboard),
     )));
   }
 
@@ -429,6 +430,67 @@ void main() {
     await t.pump();
     final sel = painter(t).selection!;
     expect(selectionText(sel, model.lineAt, model.wrappedAt), 'bcd');
+  });
+
+  testWidgets('termPage: a page of history at a time (screen rows less one), down back to the latest', (t) async {
+    model.apply(scr([for (var i = 0; i < 10; i++) 'row $i'], hist: 50, limit: 2000));
+    await show(t);
+    final page = session.termPage!;
+    expect(page(true), isTrue);
+    expect(model.offset, 9);
+    expect(page(true), isTrue);
+    expect(model.offset, 18);
+    expect(page(false), isTrue);
+    expect(page(false), isTrue);
+    expect(model.offset, 0);
+    expect(port.calls.where((c) => c.$1 == 'keys'), isEmpty);
+  });
+
+  // Where [rows] rows of the grid end, in the stage's own coordinates.
+  double rowsEnd(WidgetTester t, int rows) =>
+      t.getTopLeft(find.byKey(const Key('term-grid'))).dy -
+      t.getTopLeft(find.byType(TermStage)).dy +
+      rows * painter(t).metrics.cellH;
+
+  testWidgets('termPage pages only the rows seen above the soft keyboard', (t) async {
+    model.apply(scr([for (var i = 0; i < 10; i++) 'row $i'], hist: 50, limit: 2000));
+    await show(t);
+    final end = rowsEnd(t, 6);
+    await show(t, keyboard: 480 - end);
+    expect(session.termPage!(true), isTrue);
+    expect(model.offset, 5, reason: '6 rows seen, less one');
+  });
+
+  testWidgets('termPage pages only the rows seen above the floating input block', (t) async {
+    model.apply(scr([for (var i = 0; i < 10; i++) 'row $i'], hist: 50, limit: 2000));
+    await show(t);
+    panelPlaceOf(session).value = Rect.fromLTWH(20, rowsEnd(t, 7), 600, 120);
+    expect(session.termPage!(true), isTrue);
+    expect(model.offset, 6, reason: '7 rows seen, less one');
+  });
+
+  testWidgets('a block high on the stage does not shrink the page', (t) async {
+    model.apply(scr([for (var i = 0; i < 10; i++) 'row $i'], hist: 50, limit: 2000));
+    await show(t);
+    panelPlaceOf(session).value = Rect.fromLTWH(20, rowsEnd(t, 1), 600, 60);
+    expect(session.termPage!(true), isTrue);
+    expect(model.offset, 9);
+  });
+
+  testWidgets('termSent (a key from the key bar) brings a page of history back to the latest', (t) async {
+    model.apply(scr([for (var i = 0; i < 10; i++) 'row $i'], hist: 50, limit: 2000));
+    await show(t);
+    session.termPage!(true);
+    expect(model.offset, 9);
+    session.termSent!();
+    expect(model.offset, 0);
+  });
+
+  testWidgets('termPage in the alternate screen: false (the program has the key), nothing scrolls', (t) async {
+    model.apply(scr([for (var i = 0; i < 10; i++) 'row $i'], hist: 50, limit: 2000, alt: true));
+    await show(t);
+    expect(session.termPage!(true), isFalse);
+    expect(model.offset, 0);
   });
 
   testWidgets('a scroll in the alternate screen does nothing', (t) async {
