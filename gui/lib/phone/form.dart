@@ -11,6 +11,9 @@ import 'landing.dart';
 
 enum UiForm { pad, phone }
 
+/// Whether the desktop entry wraps the main window in the form switch (a dev flag; iOS always does).
+bool phoneFormWanted(Map<String, String> env) => env['RAPP_PHONE_FORM'] == '1';
+
 UiForm formOf(Size s) => s.shortestSide < foldedShortSide ? UiForm.phone : UiForm.pad;
 
 /// Tentative 250 ms; not under 100 ms (back on the Pad it adds the ResizePolicy's 300 ms, F11 wants 400).

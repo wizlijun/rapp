@@ -33,6 +33,9 @@ import 'quick/quick_sync.dart';
 import 'ui/prefs.dart';
 import 'ui/system_font.dart';
 import 'main_ios.dart';
+import 'phone/form.dart' show phoneFormWanted;
+import 'phone/phone_nav.dart';
+import 'phone/phone_shell.dart' show phoneFormSwitch;
 import 'ui/tokens.dart';
 import 'ui/controls.dart';
 
@@ -161,28 +164,32 @@ Future<void> main(List<String> args) async {
   hub?.addListener(reportWindows);
   reportWindows();
 
+  MainWindow mainWindow() => MainWindow(
+    state: state,
+    monitor: monitor,
+    control: control,
+    relocator: DataRelocator(
+      env: env,
+      os: os,
+      restartService: () async =>
+          control == null ? '找不到 rapp-service' : await control.run(ServiceAction.restart),
+      setHubHome: (d) async => await hub?.setHome(d),
+      state: state,
+    ),
+    fullscreen: WindowManagerFullscreen(),
+    hooks: UpdateHooks(
+      confirmQuit: shell._askUpgrade,
+      quitNow: shell._quitNow,
+    ),
+  );
   runApp(_App(
     textSize: textSize,
     navigatorKey: shell.navigatorKey,
     state: state,
-    home: MainWindow(
-      state: state,
-      monitor: monitor,
-      control: control,
-      relocator: DataRelocator(
-        env: env,
-        os: os,
-        restartService: () async =>
-            control == null ? '找不到 rapp-service' : await control.run(ServiceAction.restart),
-        setHubHome: (d) async => await hub?.setHome(d),
-        state: state,
-      ),
-      fullscreen: WindowManagerFullscreen(),
-      hooks: UpdateHooks(
-        confirmQuit: shell._askUpgrade,
-        quitNow: shell._quitNow,
-      ),
-    ),
+    // Off by default; RAPP_PHONE_FORM=1 puts the form switch in MaterialApp.home (R25), under the root Navigator.
+    home: phoneFormWanted(Platform.environment)
+        ? phoneFormSwitch(state: state, nav: PhoneNav(state), data: data, pad: (_) => mainWindow())
+        : mainWindow(),
   ));
 }
 

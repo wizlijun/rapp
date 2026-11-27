@@ -29,6 +29,8 @@ import 'ui/main_state.dart';
 import 'ui/main_window.dart';
 import 'quick/quick_prefs.dart';
 import 'quick/quick_sync.dart';
+import 'phone/phone_shell.dart' show phoneFormSwitch;
+import 'phone/phone_nav.dart';
 import 'ui/prefs.dart';
 import 'ui/system_font.dart' show fallbackTextSize;
 import 'ui/tokens.dart';
@@ -142,7 +144,13 @@ Future<void> mainIos() async {
   WidgetsBinding.instance.addObserver(_WindowSize(() => unawaited(fullscreen.windowSize(_windowSize()))));
   runApp(_IosApp(
     state: state,
-    home: MainWindow(state: state, monitor: null, control: null, fullscreen: fullscreen, rime: rime),
+    // Built once; lives as long as the app. The switch is MaterialApp.home, under the root Navigator (R25).
+    home: phoneFormSwitch(
+      state: state,
+      nav: PhoneNav(state),
+      data: data,
+      pad: (_) => MainWindow(state: state, monitor: null, control: null, fullscreen: fullscreen, rime: rime),
+    ),
   ));
 }
 
