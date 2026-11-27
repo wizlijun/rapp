@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -21,6 +22,11 @@ class FakeLink extends StateLink {
   final usage = <String, QuickDoc>{};
   final puts = <({String name, int at, int base, Object? data})>[];
   final usagePuts = <({String device, int at, Object? data})>[];
+  /// A PUT of this doc is decided at once but answered only when the completer completes.
+  final hold = <String, Completer<void>>{};
+
+  /// `prefsAll` answers (with what was there when it was called) only when this completes.
+  Completer<void>? holdAll;
   bool failAll = false;
   bool failPuts = false;
 
@@ -33,12 +39,14 @@ class FakeLink extends StateLink {
   @override
   Future<Map<String, Object?>> prefsAll() async {
     if (failAll) throw const StateLinkError(0);
-    return {
+    final snap = {
       'store': store,
       for (final e in docs.entries) e.key: {'at': e.value.at, 'data': e.value.data},
       if (usage.isNotEmpty)
         'usage': {for (final e in usage.entries) e.key: {'at': e.value.at, 'data': e.value.data}},
     };
+    if (holdAll != null) await holdAll!.future;
+    return snap;
   }
 
   @override
@@ -50,9 +58,15 @@ class FakeLink extends StateLink {
       docs[name] = QuickDoc((cur?.at ?? 0) + 1, cur?.data ?? const <Object?>[]);
     }
     final cur = docs[name];
-    if ((cur?.at ?? 0) != base) return cur ?? const QuickDoc(0, null);
-    docs[name] = QuickDoc(at, jsonDecode(jsonEncode(data)));
-    return null;
+    final QuickDoc? answer;
+    if ((cur?.at ?? 0) != base) {
+      answer = cur ?? const QuickDoc(0, null);
+    } else {
+      docs[name] = QuickDoc(at, jsonDecode(jsonEncode(data)));
+      answer = null;
+    }
+    if (hold[name] case final c?) await c.future;
+    return answer;
   }
 
   @override
@@ -409,6 +423,102 @@ void main() {
       w.attach(link);
       expect(w.sync.status, QuickSyncStatus.synced);
       expect(link.docs['stars']!.data, ['k:search']);
+    });
+  });
+  test('an edit to another doc during a PUT is not overwritten by the stale step', () {
+    fakeAsync((a) {
+      final w = World(a);
+      final link = FakeLink(); // empty service: every doc is pushed in one round
+      final gate = link.hold['layout'] = Completer<void>();
+      w.sync.attach(link);
+      a.flushMicrotasks();
+      expect(link.puts.map((p) => p.name), ['phrases', 'keys', 'layout']);
+      w.prefs.toggleStar('k:esc');
+      gate.complete();
+      a.flushMicrotasks();
+      expect(w.prefs.stars, ['k:esc']);
+      a.elapse(const Duration(seconds: 2));
+      expect(w.prefs.stars, ['k:esc']);
+      expect(link.docs['stars']!.data, ['k:esc']);
+    });
+  });
+
+  test('an edit during our own PUT is still pushed when the service clock is ahead', () {
+    fakeAsync((a) {
+      final w = World(a);
+      final link = FakeLink();
+      w.inStep(link);
+      w.attach(link);
+      final ahead = t0 + 10000000;
+      link.docs['stars'] = QuickDoc(ahead, w.prefs.docOf('stars').data);
+      w.sync.onPush({
+        'what': 'prefs.stars',
+        'doc': {'at': ahead, 'data': w.prefs.docOf('stars').data},
+      });
+      a.flushMicrotasks();
+      expect(w.prefs.atOf('stars'), ahead);
+      final gate = link.hold['stars'] = Completer<void>();
+      w.prefs.toggleStar('k:search');
+      a.elapse(const Duration(milliseconds: 1001));
+      expect(link.puts.single.at, ahead + 1);
+      w.prefs.toggleStar('k:bg'); // the clock is still behind the service
+      link.hold.remove('stars');
+      gate.complete();
+      a.elapse(const Duration(seconds: 2));
+      expect(w.prefs.stars, ['k:search', 'k:bg']);
+      expect(link.docs['stars']!.data, ['k:search', 'k:bg']);
+    });
+  });
+
+  test('a newer watch push during our PUT is not rolled back by its 204', () {
+    fakeAsync((a) {
+      final w = World(a);
+      final link = FakeLink();
+      w.inStep(link);
+      w.attach(link);
+      final gate = link.hold['stars'] = Completer<void>();
+      w.prefs.toggleStar('k:search');
+      a.elapse(const Duration(milliseconds: 1001));
+      expect(link.puts, hasLength(1));
+      final later = link.puts.single.at + 5000;
+      link.docs['stars'] = QuickDoc(later, const ['k:mode']);
+      w.sync.onPush({
+        'what': 'prefs.stars',
+        'doc': {'at': later, 'data': ['k:mode']},
+      });
+      gate.complete();
+      a.elapse(const Duration(seconds: 2));
+      expect(w.prefs.stars, ['k:mode']);
+      expect(w.prefs.atOf('stars'), later);
+    });
+  });
+
+  test('a usage push heard while fetching beats the older fetched cell', () {
+    fakeAsync((a) {
+      final w = World(a);
+      final link = FakeLink();
+      w.inStep(link);
+      final today = usageDay(w.clock());
+      link.usage['dev-b'] = QuickDoc(5, {
+        'k:search': {today: 3},
+      });
+      final gate = link.holdAll = Completer<void>();
+      w.sync.attach(link);
+      a.flushMicrotasks();
+      w.sync.onPush({
+        'what': 'prefs.usage',
+        'device': 'dev-b',
+        'doc': {
+          'at': 9,
+          'data': {
+            'k:search': {today: 7},
+          },
+        },
+      });
+      gate.complete();
+      a.flushMicrotasks();
+      expect(w.sync.status, QuickSyncStatus.synced);
+      expect(w.prefs.others['dev-b']!['k:search']![today], 7);
     });
   });
 }

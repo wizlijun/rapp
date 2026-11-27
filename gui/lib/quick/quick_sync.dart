@@ -82,6 +82,9 @@ class QuickSync extends ChangeNotifier {
 
   /// The service's copy of each doc as last heard (fetched, pushed by watch, returned by a 409, or what we put).
   final Map<String, QuickDoc?> _server = {};
+
+  /// Other devices' usage pushed while [attach] is fetching.
+  final Map<String, QuickDoc> _heardUsage = {};
   Future<void> _chain = Future.value();
   Timer? _debounce;
   Timer? _usageTimer;
@@ -99,6 +102,7 @@ class QuickSync extends ChangeNotifier {
     _stopTimers();
     _link = null;
     _server.clear();
+    _heardUsage.clear();
     if (!link.prefs) {
       _attaching = false;
       _setStatus(QuickSyncStatus.local);
@@ -112,7 +116,7 @@ class QuickSync extends ChangeNotifier {
     if (gen != _gen) return;
     if (id != hostId) {
       hostId = id;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
     Map<String, Object?> all;
     try {
@@ -151,6 +155,12 @@ class QuickSync extends ChangeNotifier {
           for (final e in usage.entries)
             if (e.key is String && e.key != device) e.key as String: ?_docFrom(e.value),
       });
+    // A cell pushed while fetching is kept when it is newer than the fetched one.
+    for (final e in _heardUsage.entries) {
+      final fetched = _others[e.key];
+      if (fetched == null || e.value.at > fetched.at) _others[e.key] = e.value;
+    }
+    _heardUsage.clear();
     prefs.setOthers(_otherUsage());
     _link = link;
     _save();
@@ -186,6 +196,11 @@ class QuickSync extends ChangeNotifier {
     if (name == 'usage') {
       final dev = e['device'];
       if (dev is! String || dev.isEmpty || dev == device) return;
+      if (_link == null) {
+        final had = _heardUsage[dev];
+        if (had == null || doc.at > had.at) _heardUsage[dev] = doc; // attach merges it in
+        return;
+      }
       _others[dev] = doc;
       prefs.setOthers(_otherUsage());
       _save();
@@ -221,17 +236,25 @@ class QuickSync extends ChangeNotifier {
 
   /// §10.3 over the four docs: a first join (all of them together, they depend on each other) for the docs that need
   /// one, the table for the rest. A doc whose PUT got a 409 goes round again with the returned copy, [_retries] times.
+  /// The steps are worked out from the local docs as they were before the round's first PUT; when one of them has
+  /// changed since (the user edited it while a PUT was out), the rest of the round is dropped and worked out again.
   Future<void> _pass(int gen) async {
     final rounds = <String, int>{};
     var todo = quickDocNames.toSet();
     while (todo.isNotEmpty) {
       if (gen != _gen || _link == null) return;
+      final basis = {for (final n in quickDocNames) n: _print(prefs.docOf(n))};
       final steps = _steps(todo);
       final again = <String>{};
+      var stale = false;
       for (final n in quickDocNames) {
         final step = steps[n];
         if (step == null) continue;
         if (gen != _gen) return;
+        if (step is! Keep && _print(prefs.docOf(n)) != basis[n]) {
+          stale = true;
+          break;
+        }
         switch (step) {
           case Keep():
             break;
@@ -244,9 +267,11 @@ class QuickSync extends ChangeNotifier {
             if (await _push(n, step, gen) && (rounds[n] = (rounds[n] ?? 0) + 1) <= _retries) again.add(n);
         }
       }
-      todo = again;
+      todo = stale ? quickDocNames.toSet() : again;
     }
   }
+
+  static String _print(QuickDoc d) => '${d.at}\u0000${jsonEncode(d.data)}';
 
   Map<String, MergeStep> _steps(Set<String> names) {
     final now = _now();
@@ -288,6 +313,9 @@ class QuickSync extends ChangeNotifier {
     final cur = prefs.docOf(name);
     if (cur.at != doc.at || jsonEncode(cur.data) != jsonEncode(doc.data)) prefs.adopt(name, doc);
     final sent = prefs.docOf(name);
+    // An edit made while this PUT is out must land above it even when the service's clock is ahead of ours, or the
+    // 204 below would mark it synced unsent.
+    prefs.floor[name] = max(prefs.floor[name] ?? 0, sent.at + 1);
     final QuickDoc? conflict;
     try {
       conflict = await _link!.putPref(name, at: sent.at, base: step.base, data: sent.data);
@@ -297,9 +325,12 @@ class QuickSync extends ChangeNotifier {
     }
     if (gen != _gen) return false;
     if (conflict == null) {
+      // The service holds [sent] now. An edit made meanwhile has a later `at` (the floor above) and stays pending.
       _synced[name] = sent.at;
-      _learn(name, sent);
+      final known = _server[name];
+      if (known == null || known.at < sent.at) _learn(name, sent); // a newer watch push is not rolled back
       _save();
+      if (prefs.atOf(name) != sent.at) _queuePass();
       return false;
     }
     _learn(name, conflict.at == 0 && conflict.data == null ? null : conflict);
