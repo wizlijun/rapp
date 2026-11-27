@@ -2,6 +2,30 @@
   {
     "assets": [
       {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.63/latest.json",
+        "name": "latest.json",
+        "size": 884
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.63/rapp-0.15.63-macos-arm64.zip",
+        "name": "rapp-0.15.63-macos-arm64.zip",
+        "size": 26313920
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.63/rapp-0.15.63.pkg",
+        "name": "rapp-0.15.63.pkg",
+        "size": 26296372
+      }
+    ],
+    "draft": false,
+    "html_url": "https://github.com/wizlijun/rapp/releases/tag/v0.15.63",
+    "prerelease": false,
+    "published_at": "2026-11-27T07:17:31Z",
+    "tag_name": "v0.15.63"
+  },
+  {
+    "assets": [
+      {
         "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.62/latest.json",
         "name": "latest.json",
         "size": 555
@@ -12,9 +36,24 @@
         "size": 26187623
       },
       {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.62/rapp-0.15.62-omarchy-x86_64-SHA256SUMS",
+        "name": "rapp-0.15.62-omarchy-x86_64-SHA256SUMS",
+        "size": 209
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.62/rapp-0.15.62-omarchy-x86_64.tar.gz",
+        "name": "rapp-0.15.62-omarchy-x86_64.tar.gz",
+        "size": 27875953
+      },
+      {
         "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.62/rapp-0.15.62.pkg",
         "name": "rapp-0.15.62.pkg",
         "size": 26168544
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.62/rapp-omarchy-0.15.62-1-x86_64.pkg.tar.zst",
+        "name": "rapp-omarchy-0.15.62-1-x86_64.pkg.tar.zst",
+        "size": 26466600
       }
     ],
     "draft": false,
@@ -36,9 +75,24 @@
         "size": 26182610
       },
       {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.61/rapp-0.15.61-omarchy-x86_64-SHA256SUMS",
+        "name": "rapp-0.15.61-omarchy-x86_64-SHA256SUMS",
+        "size": 209
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.61/rapp-0.15.61-omarchy-x86_64.tar.gz",
+        "name": "rapp-0.15.61-omarchy-x86_64.tar.gz",
+        "size": 27868772
+      },
+      {
         "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.61/rapp-0.15.61.pkg",
         "name": "rapp-0.15.61.pkg",
         "size": 26164882
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.15.61/rapp-omarchy-0.15.61-1-x86_64.pkg.tar.zst",
+        "name": "rapp-omarchy-0.15.61-1-x86_64.pkg.tar.zst",
+        "size": 26456422
       }
     ],
     "draft": false,

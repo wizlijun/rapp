@@ -1621,3 +1621,9 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 10. （P2）没有中心服务：设置页显示「只存在本机」，其余一切照常。
 - [ ] 11. （P2）两台都各自改过常用语再第一次接上同一个服务：两边的常用语都在，谁也没丢。
 - [ ] 12. 输入块的抓手是整条顶边：在顶边最左、最右按住都能拖，双击回到底部居中；横线比原来长（块宽的三分之一，48–160）。
+
+## Linux 0.15.61 与 0.15.62 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），依次构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 挂载至已发布的 [v0.15.61](https://github.com/wizlijun/rapp/releases/tag/v0.15.61) 与 [v0.15.62](https://github.com/wizlijun/rapp/releases/tag/v0.15.62) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.61`–`0.15.62`（`fix/ios-center-section`、`feat/overview-local-services`）：在 `gui/test/ui/main_window_test.dart` 补充 Linux 桌面端「设备 → 本机」同时展示 `StateServiceRow` 与 `StateSection`（「中心服务」）连接状态测试，在 `gui/test/ui/overview_test.dart` 补充 Linux 桌面端总览本机列无人接入折为 56px 竖条、远端接入自动展开并展示「连上的服务」（`本机 · :8102` 中心服务与 LLM 网关状态）及断开折回测试；全工作区 20 个 crate 与 3,668 项 Flutter 测试全部通过。
+- [x] `v0.15.62`（源码 `d9020e5d`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json` 含 `v0.15.61` 与 `v0.15.62` 全部 6 项资产、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01561-parity.md` 与 `docs/superpowers/plans/2026-11-27-linux-01562-parity.md`。

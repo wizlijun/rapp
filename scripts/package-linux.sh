@@ -110,21 +110,22 @@ warnings, companion center service (`rapp-center`, migrating `local/state/` to
 `local/center/` and `services.json` `state` to `center`), event outbox and cross-device
 StateSync / StateOut status queue, Needs You `推断` inferred waits, `别处开着`
 open-elsewhere session cards (`/v1/watch`, `/v1/seen`, `/v1/desk/<fp>`, `/v1/routes`,
-`/state/v1/…`, 中心服务 settings, and per-device `SetService` switches), intent-following
+`/state/v1/…`, 中心服务 settings, per-device `SetService` switches, and overview
+本机 `连上的服务` status rows for 中心服务 and LLM 网关), intent-following
 IME switching (local `fcitx5-remote` / `ibus` Chinese in the writing panel and
 English on the stage, remote auto-English before stage keys, streamed terminal
-`typeToCompose: false` default, and folded 本机 column when no local service is
-present), remote macOS Terminal consent prompts with screen preservation,
+`typeToCompose: false` default, and overview 本机 column auto-folding to a 56 px
+strip while nobody is connected in), remote macOS Terminal consent prompts with screen preservation,
 `Ctrl+Shift+V` Linux terminal paste with Wayland selection roundtrip, and the
 enlarged 3-line non-blocking `WaitCard` stage overlay (for slow `Ctrl+Shift+T`,
 新建, 恢复, standby 启动 and device-tab shell opens, with queued counts and
-automatic switch to a remote Mac's desktop on consent) share the macOS 0.15.60
+automatic switch to a remote Mac's desktop on consent) share the macOS 0.15.62
 layout and rules.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and
 reattach without reconnecting. This release uses protocol v16 (compatible with
-macOS 0.15.35–0.15.60); update both peers when coming from protocol v15. Incoming GUI
+macOS 0.15.35–0.15.62); update both peers when coming from protocol v15. Incoming GUI
 state rules are forwarded by the Linux client to compatible hosts (such as
 macOS 0.15.35+) and safely ignored by the Linux desktop/app host. Off-stage and
 hidden/minimized embedded or detached sessions pause pictures but keep activity

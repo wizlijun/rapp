@@ -11,6 +11,7 @@ import 'package:rapp_rime/rapp_rime.dart';
 import 'package:rapp/pages/local_section.dart';
 import 'package:rapp/platform_caps.dart';
 import 'package:rapp/ui/access_setup.dart';
+import 'package:rapp/ui/devices_tab.dart';
 import 'package:rapp/ui/shares_section.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -443,6 +444,28 @@ void main() {
     await settle(tester);
     expect(find.byKey(const ValueKey('shares-111')), findsOneWidget);
   });
+
+  testWidgets('Linux desktop: 本机 shows LocalSection, StateServiceRow and StateSection (中心服务)', (tester) async {
+    final was = caps;
+    caps = PlatformCaps.forOs('linux');
+    addTearDown(() => caps = was);
+    s.dispose();
+    final sync = FakeStateSync(tmp.path)
+      ..status = StateStatus.connected
+      ..url = Uri.parse('http://localhost:28003');
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), stateSync: sync);
+    await pump(tester);
+    s.togglePanel(PanelTab.devices);
+    await settle(tester);
+    expect(find.byType(LocalSection), findsOneWidget);
+    expect(find.byKey(const ValueKey('state-service-local')), findsOneWidget);
+    final devTab = find.byType(DevicesTab);
+    expect(find.descendant(of: devTab, matching: find.byType(StateSection)), findsOneWidget);
+    expect(find.descendant(of: devTab, matching: find.text('中心服务')), findsWidgets);
+    expect(find.descendant(of: devTab, matching: find.textContaining('http://localhost:28003')), findsOneWidget);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpWidget(const SizedBox());
+  }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 
   Future<void> pumpInsets(WidgetTester tester, MediaQueryData Function(MediaQueryData) edit) async {
     tester.view.physicalSize = const Size(1194, 834);
