@@ -274,7 +274,7 @@ class InputDockState extends State<InputDock> with TickerProviderStateMixin {
                         if (quickMounted)
                           MetaData(
                             key: const Key('dock-quick'),
-                            // A drag on a key is the key's (a swipe up for its other key), never a move.
+                            // A drag on a key is the key's, never a move of the block.
                             metaData: composerNoDrag,
                             behavior: HitTestBehavior.translucent,
                             child: IgnorePointer(

@@ -1471,12 +1471,20 @@ macOS、Linux、Duo、iPad 各一遍。
 用户：「快捷键盘 more 栏里去掉一个不常用的，增加一个 cmd+T 放在第三个，再插入一个单独的 cmd、单独的 Ctl 键，按下后是按下状态，等用户输入其他字符做组合输入。后面那些 ctrl 的组合键可以都去掉了。」用户定的：去掉 ⌥；第一行的 ⌃ 挪到第二行；终端里 ⌘ + 字母当 rApp 快捷键。设计 `docs/superpowers/specs/2026-11-27-rapp-bar-cmd-design.md`。
 
 - [x] 第一行 `Tab ⇧Tab Esc ⌃C ↑ ↓ ⌫ ⏎ ⋯ ⌄`，第二行 `⌘C ⌘V ⌘T ⌘ ⌃ ← →`（终端、应用一样）；⌘T 键在终端里走舞台的 ⌘T（等候卡片），在应用里发 ⌘T；终端里亮着的 ⌘ + 字母走舞台的 `termCommand`（C 复制、V 粘贴、T 新建、W 结束，其它不发）；收起第二行松开亮着的 ⌃ ⌘。⌃R 等留在常用语条命令里。收起松开、舞台 ⌘ 路径、⌘ 字母三处做过"去掉就失败"；flutter analyze 通过；全量只剩 `linux_detach_test` 2 条（main 上同样失败）
-- [ ] 1 iPad / 手机文本终端，点 ⋯：第二行从左到右是 ⌘C ⌘V ⌘T ⌘ ⌃ ← →，没有 ⌥ 和 ⌃O ⌃R ⌃T ⌃B ⌃L；第一行没有 ⌃
+- [ ] 1 iPad / 手机文本终端，点 ⋯：第二行从左到右是 ⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →，没有 ⌥ 和 ⌃O ⌃R ⌃T ⌃B ⌃L；第一行没有 ⌃
 - [ ] 2 终端里点 ⌘T：旁边开出新终端，等候卡片照常出现
 - [ ] 3 终端里点 ⌘（亮），再在写作版或实体键盘打 t：开新终端，⌘ 熄灭，终端里没有打进 t；打 w：问是否结束（能结束的设备上）；打 x：什么也没发生，⌘ 熄灭
 - [ ] 4 终端里点 ⌃（亮），打 r：发出 Ctrl-R（claude 里翻历史），⌃ 熄灭；双击 ⌃ 锁住，连打两个字母都是 Ctrl
 - [ ] 5 应用会话（如 Safari）里点 ⌘T：被控 Mac 上开新标签页；点 ⌘ 再打 l：地址栏选中
 - [ ] 6 ⌃ 或 ⌘ 亮着时再点 ⋯ 收起第二行：键熄灭，下一个字母照常打字（应用里被控 Mac 不再按着 ⌃/⌘）
+- [x] 追加（`feat/bar-pgup`）：第二行末尾 PgUp PgDn；终端普通屏幕翻 rApp 历史（一屏少一行），全屏程序里发给程序，⌃/⌘ 亮着照常发键，应用里发 116/121。快捷区和终端画面两处做过"去掉就失败"；全量只剩 `linux_detach_test` 2 条
+- [ ] 7 iPhone Duo / iPad 文本终端（shell 或 claude）里输出很多行后点 PgUp：往上翻一屏，能看到更早的输出，连点继续往上；点 PgDn 翻回去，到底回到最新
+- [ ] 8 终端里开 `less` 或 vim：PgUp/PgDn 由程序自己翻页
+- [ ] 9 应用会话（如 Safari）里点 PgUp/PgDn：网页上下翻一屏
+- [x] 追加（`feat/quick-one`）：去掉快捷区上的 ⌄（只从开关收起）；第一行 `Tab ⇧Tab Esc ⌃C ⌫ ⏎ ↑ ⋯`，第二行 `⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →`，↓ 对齐在 ↑ 下、→ 在 ⋯ 下；去掉方向键上滑和 Home/End。flutter analyze 通过；全量只剩 `linux_detach_test`（新 worktree 没有 `rapp-session`，main 上同样失败）
+- [ ] 10 iPhone Duo / iPad 上打开快捷区：快捷区上没有 ⌄；收起只能点输入块里的开关，收起后语音、输入旁边的开关还在，点它再打开
+- [ ] 11 点 ⋯：↓ 正好在 ↑ 下面，→ 在 ⋯ 下面，← 在 ↓ 左边；竖屏、横屏、iPad 都对齐
+- [ ] 12 方向键上没有角标；往上滑 ↑ 只发 ↑；按住 ← 连发
 
 ## Linux 0.15.55 版本跟随对齐与发布（2026-11-27）
 
@@ -1501,11 +1509,11 @@ macOS、Linux、Duo、iPad 各一遍。
 
 ## Windows 版 A 段（地基）（计划 `docs/superpowers/plans/2026-11-26-rapp-windows-a-foundation.md`，分支 `feat/windows-foundation`）
 
-现状（2026-11-27）：代码是草稿，**还没在任何机器上编译、没跑过测试**。草稿笔记在 `docs/superpowers/plans/notes/2026-11-26-windows-a-draft-notes.md`，验证的人先看它的第 6、7 节。
+现状（2026-11-27）：**在 Mac 上过了门禁**，测的是分支 `feat/windows-foundation` 的提交 `0b5bd91f`（合并 `main` 4b8c337d 之后）。草稿代码不用改就编过了：`cargo test --workspace --no-fail-fast` 1716 个过；`rapp-ports` 有一个用固定端口的测试 `every_map_stays_when_the_device_list_cannot_be_read` 在负载下挂了一次，单独重跑 5 次都过，这个 crate 分支没改。clippy `-D warnings` 干净；`swift test` 563 个过、0 个失败；`flutter analyze` 没问题；`flutter test` 3623 个过，`linux_detach_test.dart` 的 2 个失败是因为新 worktree 里没有 `rust/target/release/rapp-session`，补上这个文件后重跑也过了，跟分支无关。iOS：`rapp-hub-ffi` 对 `aarch64-apple-ios`（release）和 `aarch64-apple-ios-sim` 的 `cargo check` 都过。**Windows 门禁还没跑**，Linux 也没编：Mac 上交叉编译缺 C 头文件，`ring` 编不过。草稿笔记在 `docs/superpowers/plans/notes/2026-11-26-windows-a-draft-notes.md`，验证的人先看它的第 6、7 节。
 
-- **已合进本机 `main`，这次合并不发版。** `main` 的文件里只有 Mac 不编译的部分：`rust/host-windows/`、`rust/svc-windows/`（都不在 `rust/Cargo.toml` 的成员表里）、`scripts/check-windows.ps1`、`scripts/stage-windows.ps1`、`.gitattributes` 和文档。Mac 编译的文件和合并前一个字节都不差，所以不影响 macOS 和 iOS 发版。
-- **接线不在 `main` 的文件里。** 对已有 crate 的改动（约 55 个文件）在提交 `118b1f72` 里撤下了，它们在 `main` 的历史里。分支 `feat/windows-foundation` 上已经把这个提交还原好，验证的人直接在分支上编译、修。
-- **接线进 `main` 的条件**：Mac 门禁全绿，Windows 门禁（`scripts\check-windows.ps1`）全绿，再照常合并。那一次合并改的是共用代码，算 macOS 的改动。
+- **接线已合进本机 `main`（2026-11-27）。** 用户定的：Mac 门禁绿了就合，不等 Windows 门禁。对已有 crate 的改动（约 55 个文件）、`rust/host-windows/` 和 `rust/svc-windows/` 进成员表，都在 `main` 里了。这次合并改的是共用代码，算 macOS 的改动。
+- **Windows 那一支没验过。** `cfg(windows)` 里的代码在 Mac 上编不到，`scripts\check-windows.ps1` 一次都没跑过；`CLAUDE.md` 说这类代码要先过 Windows 门禁再合并，这一次是用户知情后放行的例外。Windows 机器装好后的第一件事就是在 `main` 上跑它，红了在 Windows 上修，按 `CLAUDE.md` 的 Windows 集成 session 推回来。
+- **Linux 那一支也没编过。** 动到 Linux 专有代码的只有 `rust/service/src/instance.rs`（加了几处 `#[cfg(target_os = "linux")]`，在 Linux 上不改变编进去的东西）和 testkit `service.rs` 里两处条件（Linux 上值不变）。Linux 的 session 下次合并 `origin/main` 时编一遍。
 
 - A 段做完后，一台 Windows 机器能：编出全部 Rust crate（`rapp-relay`、`rapp-host-linux`、`rapp-client-gtk`、`rapp-hub-ffi` 除外）、跑过测试和 clippy（`scripts\check-windows.ps1`）、编出 Flutter 界面、用 `scripts\stage-windows.ps1` 摆出开发用的版本目录、从 `bin\rapp.exe` 启动界面、当控制端连别的设备。
 - 还不能：当被控端（没有 `rapp-host`，D 段）、开文本终端（E 段）、自己升级（G 段）、有监督程序和系统服务（`rapp-svc`，C 段）、语音（H 段）、安装包（G 段）。

@@ -151,7 +151,7 @@ void main() {
       expect(port.calls.where((c) => c.$1 == 'composer_send'), isEmpty);
     }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 
-    testWidgets('Linux: clicking ⌄ or ⋯ on the key bar preserves focus, selection and IME ($composing)', (tester) async {
+    testWidgets('Linux: clicking ⋯ on the key bar, then the toggle, preserves focus, selection and IME ($composing)', (tester) async {
       big(tester);
       await tester.pumpWidget(layer(tapp));
       await tester.pumpAndSettle();
@@ -166,13 +166,13 @@ void main() {
       );
       tester.testTextInput.updateEditingValue(before);
       await tester.pump();
-      // Clicking ⋯ (second row) and ⌄ (fold) with a mouse keeps the editor focused and untouched.
+      // Clicking ⋯ (second row) and the toggle (fold) with a mouse keeps the editor focused and untouched.
       await tester.tap(find.byKey(const Key('bar-more')), kind: PointerDeviceKind.mouse);
       await tester.pumpAndSettle();
       expect(es.prefs.keyBarMore, isTrue);
       expect(editor().focusNode.hasFocus, isTrue);
       expect(editor().controller.value, before);
-      await tester.tap(find.byKey(const Key('bar-hide')), kind: PointerDeviceKind.mouse);
+      await tester.tap(toggle, kind: PointerDeviceKind.mouse);
       await tester.pumpAndSettle();
       expect(es.prefs.quickHiddenTerm, isTrue);
       expect(lit(tester), isFalse);
@@ -188,7 +188,7 @@ void main() {
     }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
   }
 
-  testWidgets('Linux: folding an app key bar via ⌄ releases a lit sticky ⌃', (tester) async {
+  testWidgets('Linux: folding an app key bar via the toggle releases a lit sticky ⌃', (tester) async {
     big(tester);
     es.setQuickHidden(term: false, hidden: false);
     es.prefs.keyBarMore = true; // ⌃ is on the second row
@@ -198,7 +198,7 @@ void main() {
     await tester.pump();
     expect(es.appLatch.flags, isNonZero);
     port.calls.clear();
-    await tester.tap(find.byKey(const Key('bar-hide')), kind: PointerDeviceKind.mouse);
+    await tester.tap(toggle, kind: PointerDeviceKind.mouse);
     await tester.pumpAndSettle();
     expect(es.prefs.quickHiddenApp, isTrue);
     expect(es.appLatch.flags, 0);

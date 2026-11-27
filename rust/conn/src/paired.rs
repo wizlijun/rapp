@@ -137,6 +137,15 @@ mod tests {
         assert_eq!(mode & 0o777, 0o600);
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn file_is_private_on_windows() {
+        let dir = tempfile::tempdir().unwrap();
+        Paired::load(dir.path()).unwrap().add(&Fp([1; 32]), "x").unwrap();
+        let file = dir.path().join("paired.json");
+        assert_eq!(rapp_net::private::acl(&file).unwrap(), rapp_net::private::private_acl().unwrap());
+    }
+
     #[test]
     fn add_twice_keeps_one_entry() {
         let dir = tempfile::tempdir().unwrap();
