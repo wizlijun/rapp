@@ -1021,16 +1021,16 @@ impl Message {
                 if bytes.len() > STATE_RULES_LIMIT {
                     return err("rules too large");
                 }
-                let Ok(s) = std::str::from_utf8(bytes) else { return err("rules not UTF-8") };
-                Message::StateRules(s.to_string())
+                let Some(s) = foundation_utf8(bytes) else { return err("rules not UTF-8") };
+                Message::StateRules(s)
             }
             44 => {
                 let bytes = r.rest();
                 if bytes.len() > APP_STATE_LIMIT {
                     return err("state too large");
                 }
-                let Ok(s) = std::str::from_utf8(bytes) else { return err("state not UTF-8") };
-                Message::AppState(s.to_string())
+                let Some(s) = foundation_utf8(bytes) else { return err("state not UTF-8") };
+                Message::AppState(s)
             }
             t => return err(format!("unknown message type {t}")),
         };
@@ -1177,10 +1177,17 @@ impl Writer {
 }
 
 fn utf8(bytes: &[u8]) -> Result<String, CodecError> {
-    match std::str::from_utf8(bytes) {
-        Ok(s) => Ok(s.to_string()),
-        Err(_) => err("text is not valid UTF-8"),
+    match foundation_utf8(bytes) {
+        Some(s) => Ok(s),
+        None => err("text is not valid UTF-8"),
     }
+}
+
+/// Swift's `String(bytes:encoding: .utf8)`: valid UTF-8 or nothing, and one leading byte
+/// order mark dropped (a second one stays). The `protocol-rejects.json` BOM cases.
+fn foundation_utf8(bytes: &[u8]) -> Option<String> {
+    let s = std::str::from_utf8(bytes).ok()?;
+    Some(s.strip_prefix('\u{FEFF}').unwrap_or(s).to_string())
 }
 
 struct Reader<'a> {
