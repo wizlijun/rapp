@@ -28,8 +28,8 @@ const _phones = <Size>[
   Size(375, 667),
   Size(430, 932),
   Size(599, 800),
-  // Measured in the simulator (V1a probe), not invented. Task 12 adds the real-device fold sequence and the settle check.
-  // Duo 外屏、内屏：Task 12 补
+  // The Duo and iPad sizes below were measured in the simulator (V1a probe), not invented.
+  // Task 12 adds the real-device fold sequence and the settle check.
   Size(466, 678), // Duo outer
   Size(678, 466),
   Size(375, 1183), // iPad split windows
@@ -50,6 +50,9 @@ double _contrast(Color a, Color b) {
 }
 
 Color _over(Color top, Color under) => Color.alphaBlend(top, under);
+
+/// Buttons held to 64 (card buttons and primary ones) over the whole run, so that check cannot pass on nothing.
+var cardButtons = 0;
 
 class _Tap {
   _Tap(this.element, this.rect, this.primary);
@@ -75,6 +78,8 @@ void main() {
   var sid = 0;
 
   Future<void> flush() => Future<void>.delayed(Duration.zero);
+
+  tearDownAll(() => expect(cardButtons, greaterThan(0), reason: 'no card button was measured at 64'));
 
   setUp(() {
     sid = 0;
@@ -123,6 +128,7 @@ void main() {
     nav = PhoneNav(s);
     booted = true;
     t.emit({'event': 'presence', 'id': 'm2', 'online': true});
+    t.emit({'event': 'terms', 'id': 'm2', 'path': 'lan', 'terms': [term('o', 'working')], 'hosts': []});
     t.emit({
       'event': 'terms',
       'id': 'm1',
@@ -138,6 +144,10 @@ void main() {
       'hosts': [],
     });
     await tester.runAsync(() async {
+      s.openOrSwitch('m2', 'term:pty:o', 'o');
+      for (var i = 0; i < 6; i++) {
+        await flush();
+      }
       s.openOrSwitch('m1', 'term:pty:a', 'a');
       for (var i = 0; i < 6; i++) {
         await flush();
@@ -182,15 +192,16 @@ void main() {
     }
     final out = <_Tap>[];
     for (final e in found) {
-      var nested = false;
+      var nested = false, inCard = false;
       e.visitAncestorElements((a) {
         if (identical(a, root.evaluate().first)) return false;
+        if (a.widget is PhoneCard) inCard = true;
         if (isTap(a.widget)) nested = true;
         return !nested;
       });
       if (nested) continue;
       final box = e.renderObject! as RenderBox;
-      out.add(_Tap(e, box.localToGlobal(Offset.zero) & box.size, e.widget is PhoneButton && (e.widget as PhoneButton).primary));
+      out.add(_Tap(e, box.localToGlobal(Offset.zero) & box.size, e.widget is PhoneButton && ((e.widget as PhoneButton).primary || inCard)));
     }
     return out;
   }
@@ -199,6 +210,7 @@ void main() {
     final taps = tappables(tester, root);
     expect(taps, isNotEmpty, reason: '$where: nothing to tap found');
     for (final a in taps) {
+      if (a.primary) cardButtons++;
       expect(a.rect.height, greaterThanOrEqualTo(a.primary ? phonePrimaryTap : phoneTap), reason: '$where: tap height ${a.element.widget.runtimeType} at ${a.rect} ${_chain(a.element)}');
     }
     // Two tappables that overlap horizontally and sit one above the other need 12 between them.
@@ -213,13 +225,15 @@ void main() {
   }
 
   void checkContrast(RappTokens k, String where) {
-    final bgs = {'bg': k.bg, 'panel': _over(k.panel[0], k.bg), 'tint': _over(k.tint, k.bg)};
+    final bgs = {'bg': k.bg, 'panel': _over(k.panel[0], k.bg), 'tint': _over(k.tint, k.bg), 'button face': _over(k.raise[0], k.bg)};
     for (final e in bgs.entries) {
       for (final f in {'text': k.text, 'muted': k.muted}.entries) {
         expect(_contrast(_over(f.value, e.value), e.value), greaterThanOrEqualTo(4.5), reason: '$where: ${f.key} on ${e.key}');
       }
     }
-    // The primary button: bg ink on a text-coloured fill.
+    // The waiting card's title on its tint.
+    expect(_contrast(k.accent, _over(k.tint, k.bg)), greaterThanOrEqualTo(4.5), reason: '$where: accent on tint');
+    // A primary button: bg ink on a text-coloured fill (PhoneButton primary).
     expect(_contrast(k.bg, k.text), greaterThanOrEqualTo(4.5), reason: '$where: primary button');
   }
 
@@ -245,11 +259,12 @@ void main() {
       nav.open(v);
       await settle(tester);
       expect(tester.takeException(), isNull, reason: '$where ${v.name}');
+      if (v == PhoneView.devices) expect(find.textContaining('codex · o'), findsOneWidget, reason: '$where: the offline device lists its session');
       if (scale == 1) checkTaps(tester, find.byType(PhoneShell), '$where ${v.name}');
     }
 
     // 会话里面
-    nav.enter(s.entries.first.key);
+    nav.enter('m1/term:pty:a');
     await settle(tester);
     expect(tester.takeException(), isNull, reason: '$where session');
     expect(find.byType(PhoneSessionView), findsOneWidget, reason: where);

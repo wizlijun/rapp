@@ -78,10 +78,13 @@ class PhonePage extends StatelessWidget {
 }
 
 class PhoneButton extends StatelessWidget {
-  const PhoneButton({super.key, required this.label, this.onPressed, this.primary = false});
+  const PhoneButton({super.key, required this.label, this.onPressed, this.primary = false, this.tall = false});
   final String label;
   final VoidCallback? onPressed;
   final bool primary;
+
+  /// A button on a card (and a primary one) is [phonePrimaryTap] high, others [phoneTap].
+  final bool tall;
 
   @override
   Widget build(BuildContext context) {
@@ -102,7 +105,7 @@ class PhoneButton extends StatelessWidget {
           behavior: HitTestBehavior.opaque,
           onTap: onPressed,
           child: Container(
-            constraints: BoxConstraints(minHeight: primary ? phonePrimaryTap : phoneTap),
+            constraints: BoxConstraints(minHeight: primary || tall ? phonePrimaryTap : phoneTap),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             alignment: Alignment.center,
             decoration: deco,
@@ -236,7 +239,7 @@ class PhoneCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 12),
-              PhoneButton(label: buttonLabel(item.button), onPressed: onButton),
+              PhoneButton(label: buttonLabel(item.button), onPressed: onButton, tall: true),
             ],
           ),
         ),
