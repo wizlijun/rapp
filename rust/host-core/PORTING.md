@@ -65,7 +65,7 @@ on the real platform) or "not on Windows".
 | `Sources/rapp-host/Paster.swift:110-137` | `noteOwnWrite` and `write`: the item on the clipboard. | `session::clip` paster `note_own_write`, `write` (platform: `ClipboardOps::write`) | `host_session::paste_text_inline` |
 | `Sources/rapp-host/Paster.swift:138-164` | `waitFrontmost` and `sendPaste`: the target in front, then the paste key; locked A fails with the fixed text. | `session::clip` paster `wait_frontmost` (platform: `InputOps::paste_key`) | `host_session::paste_when_locked_fails_with_the_fixed_text`, `host_session::paste_when_the_target_stays_behind_fails_with_the_fixed_text` |
 | `Sources/rapp-host/Paster.swift:165-200` | `takeSnapshot` and `restoreOnMain`: the old clipboard back, unless something newer was copied. | `session::clip` `paste_restore_check`, paster `restore`, `read` (platform: `ClipboardOps::snapshot`, `restore`) | `host_session::paste_does_not_restore_over_a_newer_copy` |
-| `Sources/rapp-host/PowerHold.swift:1-45` | Keeps A awake while a session is open. | `session::session` `stay_awake` (a `lock::StayAwake` on a lock handle of its own; the two log lines); platform: `LockOps::stay_awake` | `rules_lock::lock_rules_match_swift`, `host_session::stay_awake_spans_the_session`, `host_session::a_refused_hello_never_holds_a_awake` |
+| `Sources/rapp-host/PowerHold.swift:1-45` | Keeps A awake while a session is open. | `session::session` `stay_awake` (a `lock::StayAwake` on a lock handle of its own; the three log lines); platform: `LockOps::stay_awake` | `rules_lock::lock_rules_match_swift`, `host_session::stay_awake_spans_the_session`, `host_session::a_refused_hello_never_holds_a_awake`, `host_session::a_refused_stay_awake_is_logged_and_never_released` |
 | `Sources/rapp-host/ScreenLocker.swift:1-22` | Locks the screen for `lock`. | platform: `LockOps::lock`; `lock` `lock_screen` | `host_session::lock_command_reports_ok_already_failed`, `rules_lock::lock_rules_match_swift` |
 | `Sources/rapp-host/SecureFocusWatcher.swift:1-65` | Watches for keyboard focus in a password field; tells B on a change. | `session::hints` `check_secure_focus` | `host_session::secure_focus_follows_the_platform` |
 | `Sources/rapp-host/SecureFocusWatcher.swift:66-110` | `readSecure` and `installObserver`: the focused element's role. | platform: `ControlOps::secure_focus` | phase D |
@@ -79,7 +79,7 @@ on the real platform) or "not on Windows".
 | `Sources/rapp-host/Server.swift:393-411` | `receive`: bad data ends the session, not the worker. | `session::session` `spawn_reader` | `host_session::garbage_ends_the_session_not_the_worker` |
 | `Sources/rapp-host/Server.swift:412-442` | `handle`: the yield gate, then `hello` checks token, app and version. | `session::session` `handle`, `gated`, `hello` | `host_session::version_mismatch_is_rejected`, `host_session::yield_blocks_then_releases` |
 | `Sources/rapp-host/Server.swift:443-469` | Input, `setStream`, `ping`, `resize` dispatch. | `session::session` `handle` | `host_session::set_stream_changes_mode`, `host_session::menu_pick_is_ignored` |
-| `Sources/rapp-host/Server.swift:470-487` | `focus`, `close`, `move`. | `session::input` `focus_window`, `close_window`, `move_window`; `geometry` (platform: `WindowOps::raise`, `close`, `move_to`) | `host_session::window_commands_reach_the_platform`, `host_session::desktop_session_shows_the_main_display` |
+| `Sources/rapp-host/Server.swift:470-487` | `focus`, `close`, `move`. | `session::input` `focus_window`, `close_window`, `move_window`; `geometry` (platform: `WindowOps::raise`, `close`, `move_to`) | `host_session::window_commands_reach_the_platform`, `host_session::a_window_that_will_not_move_is_logged`, `host_session::desktop_session_shows_the_main_display` |
 | `Sources/rapp-host/Server.swift:488-505` | `menuPick`. | `session::session` `handle` (passes the yield gate, `gated`; then always the "no longer has" branch, `:490-494`: no menus on Windows, spec §6.3) | `host_session::menu_pick_is_ignored` |
 | `Sources/rapp-host/Server.swift:506-524` | `paste`, `selectInput`, `frameAck`. | `session::clip` `paste`; `session::input` `select_input`; `session::session` `handle` | `host_session::paste_text_inline`, `host_session::input_source_is_reported_and_selected`, `host_session::unacknowledged_controller_gets_bounded_frames` |
 | `Sources/rapp-host/Server.swift:525-543` | `unlock`, `dismissCover`, `setView`, `stateRules`; the types the host never handles. | `session::session` `handle` | `protocol::not_handled_is_exactly_17_18_28`, `host_session::set_view_narrows_the_picture` |
@@ -262,10 +262,33 @@ Each entry: what differs from Swift, why, and the weaker check that stands in.
 - **Staying awake (`PowerHold.swift`).** Swift's session holds an IOKit assertion through
   `StayAwake`, begun at a valid hello and ended at the end. host-core does the same with
   `lock::StayAwake` around `LockOps::stay_awake(true/false)` on a lock handle the session keeps
-  for this alone, and writes PowerHold's two lines ("keeping A awake while the session is
-  open", "A may idle again"). `stay_awake` returns nothing, so a refusal is not seen and
-  Swift's "could not keep A awake (IOKit …)" line has no counterpart. Check:
-  `host_session::stay_awake_spans_the_session`, `host_session::a_refused_hello_never_holds_a_awake`.
+  for this alone, and writes PowerHold's three lines ("keeping A awake while the session is
+  open", "A may idle again", and on a refusal "could not keep A awake (<reason>)", where Swift
+  writes "IOKit <code>" and the platform writes its own reason). The keep-alive itself, IOKit's
+  assertion and the 30 s user-activity tick, is the platform's. Check:
+  `host_session::stay_awake_spans_the_session`, `host_session::a_refused_hello_never_holds_a_awake`,
+  `host_session::a_refused_stay_awake_is_logged_and_never_released`.
+- **The `[focus]` log line (`FocusSession.swift:122-155`).** Swift writes the accessibility
+  roles of the start control and of the picked layer (`start=AXTextArea picked=AXScrollArea`)
+  and `depth=` the layers the reader walked. `ControlOps::focus_chain` answers rects only, so
+  host-core writes `start=-`, `picked=depth<n>` (the picked layer's index) and `depth=` the
+  chain's length (0 for a miss the reader answered). Only this debug line differs: the panel
+  picked and the `focusRegion` sent are the same. A platform that wants the roles in the line
+  must add them to `focus_chain`'s answer (phase D). Check: `rules_focus::focus_pane_matches_swift`
+  holds the pick to Swift's; the line itself has no check.
+- **The locale the state rules see (`AppStateWatcher.swift:66`).** Swift passes
+  `Locale.preferredLanguages.first ?? "en"`. host-core has no OS call for it, so it reads
+  `RAPP_LOCALE` and falls back to `"en"` (`session::hints::rule_locale`). On a Windows host
+  whose language is not English, a pack that matches on `locale` sees `en` unless the
+  platform's launcher sets `RAPP_LOCALE` (phase D: from `GetUserPreferredUILanguages`, in the
+  BCP 47 form Swift gives, e.g. `zh-Hans-CN`). Check: `state_rules::state_engine` covers
+  matching on a given locale; where it comes from has no check.
+- **The focus region in the session test.** `host_session::focus_region_after_click` checks
+  the `focusRegion` the session sends against the panel the fake's chain draws, within 8
+  points on each edge, not against a value from `focus-pane.json`: the fake's window and chain
+  are not one of the fixture's cases. The pane rules themselves are held to Swift value for
+  value by `rules_focus::focus_pane_matches_swift` and `rules_focus::focus_tracker_matches_swift`;
+  the session test checks the wiring (click, query, rounding into canvas points, send).
 - **Typing after the session ended.** Swift's typing loop asks only the screen's lock state;
   host-core's also stops once the session is gone (plan B Review Focus 2). Check:
   `host_session::disconnect_while_typing_frees_the_lock`.
@@ -274,8 +297,9 @@ Each entry: what differs from Swift, why, and the weaker check that stands in.
 
 Plan B Task 20 step 5 puts this on the probe-results page, which does not exist yet
 (`docs/superpowers/specs/2026-11-26-rapp-windows-probe-results.md`); it lives here until
-then. The draft is uncompiled and untested; see
-`docs/superpowers/plans/notes/2026-11-26-windows-b3-draft-notes.md`.
+then. On the Mac (2026-11-27) host-core and testkit compile, every fixture test passes, the
+session and service tests pass, and clippy `-D warnings` is clean; nothing has run on Windows
+yet. The draft's history is in `docs/superpowers/plans/notes/2026-11-26-windows-b3-draft-notes.md`.
 
 **The interface.** [`src/platform.rs`](src/platform.rs) is the final one. Read it there; it
 is not copied here.
@@ -319,14 +343,26 @@ the session tests depend on each):
   listed while A is locked.
 - Nothing logs typed text, passwords or clipboard contents, only their length.
 
-**The deflate backend.** `libz-sys` 1.x with `default-features = false, features = ["static"]`
-(`Cargo.toml`): stock zlib built from its bundled C sources. On Windows that needs a C
-compiler, the MSVC build tools' `cl.exe` (the "Desktop development with C++" workload). If
-probe C1 picks zlib-rs instead, `libz-rs-sys` needs no C compiler. Only `src/deflate.rs`
-names the crate. Probe C1 has not run, so whether the output is byte-identical to the Swift
-host's (Apple's system zlib) is not proven; plan B Task 3 has the fallback if it is not.
+**The deflate backend.** `libz-sys` 1.x with `default-features = false, features = ["static",
+"stock-zlib"]` (`Cargo.toml`): stock zlib built from its bundled C sources. `stock-zlib` keeps
+it stock even if another crate in the workspace turns on `libz-sys/zlib-ng`, whose output
+differs. Probe C1 (Mac arm64, 2026-11-27) found it byte-identical to the Swift host's Apple
+zlib, and `deflate::script_matches_swift` holds it to `deflate.bin`; on Windows x64 that
+test is the proof. Building it on Windows needs a C compiler, the MSVC build tools' `cl.exe`
+(the "Desktop development with C++" workload). Only `src/deflate.rs` names the crate.
+
+**Swift's string and number details, as host-core matches them.** A platform that hands
+host-core text or numbers gets the same answers as the Swift host only through these; do not
+replace them with the obvious Rust call:
+
+- strings compare by canonical equivalence (NFC through `icu_normalizer`) and split into
+  grapheme clusters (`unicode-segmentation`), as Swift's `String` does;
+- decoded UTF-8 drops one leading BOM, as `String(decoding:as:)` through Foundation does;
+- names sort as `localizedStandardCompare` does, case-only ties included;
+- JSON doubles parse exactly (`serde_json` `float_roundtrip`), as `JSONSerialization` does.
 
 **Not byte-exact.** Every entry of part 4: text recognition (`VisionText.swift`), the display
 an app on a locked A is shown on (`WindowCapture.swift:273-287`), staying awake
-(`PowerHold.swift`, no "could not keep A awake" line), and typing that also stops when the
-session ends.
+(`PowerHold.swift`, the refusal reason is the platform's), the roles and depth in the
+`[focus]` log line, the locale the state rules see (`RAPP_LOCALE`, else `en`), the session
+test's 8-point check of the focus region, and typing that also stops when the session ends.

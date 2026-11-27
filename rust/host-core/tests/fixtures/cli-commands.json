@@ -1,0 +1,347 @@
+[
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"quit\"}"
+    },
+    "name" : "command 0",
+    "out" : {
+      "cmd" : "quit"
+    }
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "  {\"cmd\":\"kick\",\"extra\":1}  "
+    },
+    "name" : "command 1",
+    "out" : {
+      "cmd" : "kick"
+    }
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"focus\"}"
+    },
+    "name" : "command 2",
+    "out" : {
+      "cmd" : "focus"
+    }
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"peer\",\"port\":50123,\"name\":\"Mac mini\"}"
+    },
+    "name" : "command 3",
+    "out" : {
+      "cmd" : "peer",
+      "name" : "Mac mini",
+      "port" : 50123
+    }
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"peer\",\"port\":70000,\"name\":\"x\"}"
+    },
+    "name" : "command 4",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"yield\",\"by\":\"Mac mini\"}"
+    },
+    "name" : "command 5",
+    "out" : {
+      "by" : "Mac mini",
+      "cmd" : "yield"
+    }
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"yield\"}"
+    },
+    "name" : "command 6",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"dance\"}"
+    },
+    "name" : "command 7",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : ""
+    },
+    "name" : "command 8",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "quit"
+    },
+    "name" : "command 9",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":3}"
+    },
+    "name" : "command 10",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "[\"quit\"]"
+    },
+    "name" : "command 11",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"peer\",\"name\":\"x\"}"
+    },
+    "name" : "command 12",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"peer\",\"port\":1}"
+    },
+    "name" : "command 13",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"peer\",\"port\":-1,\"name\":\"x\"}"
+    },
+    "name" : "command 14",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"peer\",\"port\":0,\"name\":\"\"}"
+    },
+    "name" : "command 15",
+    "out" : {
+      "cmd" : "peer",
+      "name" : "",
+      "port" : 0
+    }
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"peer\",\"port\":65535,\"name\":\"客厅的 \\\"Mac\\\"\"}"
+    },
+    "name" : "command 16",
+    "out" : {
+      "cmd" : "peer",
+      "name" : "客厅的 \"Mac\"",
+      "port" : 65535
+    }
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"peer\",\"port\":50123.0,\"name\":\"x\"}"
+    },
+    "name" : "command 17",
+    "out" : {
+      "cmd" : "peer",
+      "name" : "x",
+      "port" : 50123
+    }
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"peer\",\"port\":50123.5,\"name\":\"x\"}"
+    },
+    "name" : "command 18",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"peer\",\"port\":1e3,\"name\":\"x\"}"
+    },
+    "name" : "command 19",
+    "out" : {
+      "cmd" : "peer",
+      "name" : "x",
+      "port" : 1000
+    }
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"peer\",\"port\":\"50123\",\"name\":\"x\"}"
+    },
+    "name" : "command 20",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"peer\",\"port\":true,\"name\":\"x\"}"
+    },
+    "name" : "command 21",
+    "out" : {
+      "cmd" : "peer",
+      "name" : "x",
+      "port" : 1
+    }
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"peer\",\"port\":null,\"name\":\"x\"}"
+    },
+    "name" : "command 22",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"peer\",\"port\":65535,\"name\":3}"
+    },
+    "name" : "command 23",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"yield\",\"by\":\"\"}"
+    },
+    "name" : "command 24",
+    "out" : {
+      "by" : "",
+      "cmd" : "yield"
+    }
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"yield\",\"by\":null}"
+    },
+    "name" : "command 25",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"quit\""
+    },
+    "name" : "command 26",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "   "
+    },
+    "name" : "command 27",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "\t"
+    },
+    "name" : "command 28",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{}"
+    },
+    "name" : "command 29",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"CMD\":\"quit\"}"
+    },
+    "name" : "command 30",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"Quit\"}"
+    },
+    "name" : "command 31",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"quit\"} x"
+    },
+    "name" : "command 32",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "null"
+    },
+    "name" : "command 33",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "3"
+    },
+    "name" : "command 34",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "\"quit\""
+    },
+    "name" : "command 35",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"kick\"}\n"
+    },
+    "name" : "command 36",
+    "out" : {
+      "cmd" : "kick"
+    }
+  },
+  {
+    "in" : {
+      "fn" : "command",
+      "line" : "{\"cmd\":\"yield\",\"by\":\"aé\\n\"}"
+    },
+    "name" : "command 37",
+    "out" : {
+      "by" : "aé\n",
+      "cmd" : "yield"
+    }
+  }
+]

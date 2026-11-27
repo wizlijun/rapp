@@ -1,0 +1,1287 @@
+[
+  {
+    "in" : {
+      "args" : [
+        "--token",
+        "abc"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 0: [\"--token\", \"abc\"]",
+    "out" : {
+      "ok" : {
+        "app" : null,
+        "bind" : null,
+        "cmd" : "serve",
+        "json" : false,
+        "port" : 47800,
+        "token" : "abc"
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "--port",
+        "5000",
+        "--token",
+        "abc"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 1: [\"--port\", \"5000\", \"--token\", \"abc\"]",
+    "out" : {
+      "ok" : {
+        "app" : null,
+        "bind" : null,
+        "cmd" : "serve",
+        "json" : false,
+        "port" : 5000,
+        "token" : "abc"
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 2: []",
+    "out" : {
+      "error" : "--token is required"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "--token"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 3: [\"--token\"]",
+    "out" : {
+      "error" : "--token needs a value"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "--token",
+        ""
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 4: [\"--token\", \"\"]",
+    "out" : {
+      "error" : "the token is empty"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "--token",
+        "a",
+        "--port",
+        "0"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 5: [\"--token\", \"a\", \"--port\", \"0\"]",
+    "out" : {
+      "error" : "bad port 0"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "--token",
+        "a",
+        "--port",
+        "70000"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 6: [\"--token\", \"a\", \"--port\", \"70000\"]",
+    "out" : {
+      "error" : "bad port 70000"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "--token",
+        "a",
+        "--port"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 7: [\"--token\", \"a\", \"--port\"]",
+    "out" : {
+      "error" : "--port needs a value"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "--token",
+        "a",
+        "--json"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 8: [\"--token\", \"a\", \"--json\"]",
+    "out" : {
+      "error" : "unknown argument --json"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "--token",
+        "a",
+        "extra"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 9: [\"--token\", \"a\", \"extra\"]",
+    "out" : {
+      "error" : "unexpected argument extra"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "com.apple.Safari",
+        "--bind",
+        "127.0.0.1",
+        "--port",
+        "0",
+        "--token-env",
+        "RAPP_TOKEN",
+        "--json"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 10: [\"serve\", \"--app\", \"com.apple.Safari\", \"--bind\", \"127.0.0.1\", \"--port\", \"0\", \"--token-env\", \"RAPP_TOKEN\", \"--json\"]",
+    "out" : {
+      "ok" : {
+        "app" : "com.apple.Safari",
+        "bind" : "127.0.0.1",
+        "cmd" : "serve",
+        "json" : true,
+        "port" : 0,
+        "token" : "s3cret"
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--token",
+        "t",
+        "--app",
+        "a"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 11: [\"serve\", \"--token\", \"t\", \"--app\", \"a\"]",
+    "out" : {
+      "ok" : {
+        "app" : "a",
+        "bind" : null,
+        "cmd" : "serve",
+        "json" : false,
+        "port" : 47800,
+        "token" : "t"
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--token",
+        "t",
+        "--app",
+        "desktop:"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 12: [\"serve\", \"--token\", \"t\", \"--app\", \"desktop:\"]",
+    "out" : {
+      "ok" : {
+        "app" : "desktop:",
+        "bind" : null,
+        "cmd" : "serve",
+        "json" : false,
+        "port" : 47800,
+        "token" : "t"
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--token",
+        "t"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 13: [\"serve\", \"--token\", \"t\"]",
+    "out" : {
+      "error" : "--app is required"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "",
+        "--token",
+        "t"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 14: [\"serve\", \"--app\", \"\", \"--token\", \"t\"]",
+    "out" : {
+      "error" : "--app is required"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "a"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 15: [\"serve\", \"--app\", \"a\"]",
+    "out" : {
+      "error" : "--token or --token-env is required"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "a",
+        "--token-env",
+        "MISSING"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 16: [\"serve\", \"--app\", \"a\", \"--token-env\", \"MISSING\"]",
+    "out" : {
+      "error" : "environment variable MISSING is empty or not set"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "a",
+        "--token-env",
+        "EMPTY"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 17: [\"serve\", \"--app\", \"a\", \"--token-env\", \"EMPTY\"]",
+    "out" : {
+      "error" : "environment variable EMPTY is empty or not set"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "a",
+        "--token",
+        "t",
+        "--port",
+        "65536"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 18: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \"65536\"]",
+    "out" : {
+      "error" : "bad port 65536"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "a",
+        "--token",
+        "t",
+        "--port",
+        "x"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 19: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \"x\"]",
+    "out" : {
+      "error" : "bad port x"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "a",
+        "--token",
+        "t",
+        "--bind"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 20: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--bind\"]",
+    "out" : {
+      "error" : "--bind needs a value"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "a",
+        "--token",
+        "t",
+        "--what"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 21: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--what\"]",
+    "out" : {
+      "error" : "unknown argument --what"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "version"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 22: [\"version\"]",
+    "out" : {
+      "ok" : {
+        "cmd" : "version",
+        "json" : false
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "version",
+        "--json"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 23: [\"version\", \"--json\"]",
+    "out" : {
+      "ok" : {
+        "cmd" : "version",
+        "json" : true
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "check",
+        "--json"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 24: [\"check\", \"--json\"]",
+    "out" : {
+      "ok" : {
+        "cmd" : "check",
+        "json" : true,
+        "prompt" : false
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "check",
+        "--prompt",
+        "--json"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 25: [\"check\", \"--prompt\", \"--json\"]",
+    "out" : {
+      "ok" : {
+        "cmd" : "check",
+        "json" : true,
+        "prompt" : true
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "check",
+        "--prompt"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 26: [\"check\", \"--prompt\"]",
+    "out" : {
+      "ok" : {
+        "cmd" : "check",
+        "json" : false,
+        "prompt" : true
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "version",
+        "--prompt"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 27: [\"version\", \"--prompt\"]",
+    "out" : {
+      "error" : "unknown argument --prompt"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "list-apps"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 28: [\"list-apps\"]",
+    "out" : {
+      "ok" : {
+        "cmd" : "list_apps",
+        "json" : false
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "check",
+        "--token",
+        "x"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 29: [\"check\", \"--token\", \"x\"]",
+    "out" : {
+      "error" : "unknown argument --token"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "list-apps",
+        "extra"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 30: [\"list-apps\", \"extra\"]",
+    "out" : {
+      "error" : "unexpected argument extra"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "lock",
+        "--json"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 31: [\"lock\", \"--json\"]",
+    "out" : {
+      "ok" : {
+        "cmd" : "lock",
+        "json" : true
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "lock"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 32: [\"lock\"]",
+    "out" : {
+      "ok" : {
+        "cmd" : "lock",
+        "json" : false
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "lock",
+        "extra"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 33: [\"lock\", \"extra\"]",
+    "out" : {
+      "error" : "unexpected argument extra"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "a",
+        "--token",
+        "t",
+        "--token-env",
+        "RAPP_TOKEN"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 34: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--token-env\", \"RAPP_TOKEN\"]",
+    "out" : {
+      "ok" : {
+        "app" : "a",
+        "bind" : null,
+        "cmd" : "serve",
+        "json" : false,
+        "port" : 47800,
+        "token" : "t"
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "a",
+        "--token-env",
+        "RAPP_TOKEN",
+        "--token",
+        ""
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 35: [\"serve\", \"--app\", \"a\", \"--token-env\", \"RAPP_TOKEN\", \"--token\", \"\"]",
+    "out" : {
+      "error" : "the token is empty"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "a",
+        "--token",
+        "t",
+        "--port",
+        "65535"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 36: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \"65535\"]",
+    "out" : {
+      "ok" : {
+        "app" : "a",
+        "bind" : null,
+        "cmd" : "serve",
+        "json" : false,
+        "port" : 65535,
+        "token" : "t"
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "a",
+        "--token",
+        "t",
+        "--port",
+        "+80"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 37: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \"+80\"]",
+    "out" : {
+      "ok" : {
+        "app" : "a",
+        "bind" : null,
+        "cmd" : "serve",
+        "json" : false,
+        "port" : 80,
+        "token" : "t"
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "a",
+        "--token",
+        "t",
+        "--port",
+        "-0"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 38: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \"-0\"]",
+    "out" : {
+      "ok" : {
+        "app" : "a",
+        "bind" : null,
+        "cmd" : "serve",
+        "json" : false,
+        "port" : 0,
+        "token" : "t"
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "a",
+        "--token",
+        "t",
+        "--port",
+        "-1"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 39: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \"-1\"]",
+    "out" : {
+      "error" : "bad port -1"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "a",
+        "--token",
+        "t",
+        "--port",
+        "007"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 40: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \"007\"]",
+    "out" : {
+      "ok" : {
+        "app" : "a",
+        "bind" : null,
+        "cmd" : "serve",
+        "json" : false,
+        "port" : 7,
+        "token" : "t"
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "a",
+        "--token",
+        "t",
+        "--port",
+        ""
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 41: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \"\"]",
+    "out" : {
+      "error" : "bad port "
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "a",
+        "--token",
+        "t",
+        "--port",
+        " 80"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 42: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \" 80\"]",
+    "out" : {
+      "error" : "bad port  80"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "a",
+        "--token",
+        "t",
+        "--app",
+        "b"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 43: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--app\", \"b\"]",
+    "out" : {
+      "ok" : {
+        "app" : "b",
+        "bind" : null,
+        "cmd" : "serve",
+        "json" : false,
+        "port" : 47800,
+        "token" : "t"
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--json",
+        "--json",
+        "--app",
+        "a",
+        "--token",
+        "t"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 44: [\"serve\", \"--json\", \"--json\", \"--app\", \"a\", \"--token\", \"t\"]",
+    "out" : {
+      "ok" : {
+        "app" : "a",
+        "bind" : null,
+        "cmd" : "serve",
+        "json" : true,
+        "port" : 47800,
+        "token" : "t"
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "--token",
+        "t"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 45: [\"serve\", \"--app\", \"--token\", \"t\"]",
+    "out" : {
+      "error" : "unexpected argument t"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--what",
+        "--app"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 46: [\"serve\", \"--what\", \"--app\"]",
+    "out" : {
+      "error" : "unknown argument --what"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "desktop:2",
+        "--token",
+        "t",
+        "--bind",
+        "::1"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 47: [\"serve\", \"--app\", \"desktop:2\", \"--token\", \"t\", \"--bind\", \"::1\"]",
+    "out" : {
+      "ok" : {
+        "app" : "desktop:2",
+        "bind" : "::1",
+        "cmd" : "serve",
+        "json" : false,
+        "port" : 47800,
+        "token" : "t"
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "中文应用",
+        "--token",
+        "\"q\\\n"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 48: [\"serve\", \"--app\", \"中文应用\", \"--token\", \"\\\"q\\\\\\n\"]",
+    "out" : {
+      "ok" : {
+        "app" : "中文应用",
+        "bind" : null,
+        "cmd" : "serve",
+        "json" : false,
+        "port" : 47800,
+        "token" : "\"q\\\n"
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "serve",
+        "--app",
+        "a",
+        "--token",
+        "t",
+        "-x"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 49: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"-x\"]",
+    "out" : {
+      "error" : "unexpected argument -x"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "dance"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 50: [\"dance\"]",
+    "out" : {
+      "error" : "unexpected argument dance"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "-"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 51: [\"-\"]",
+    "out" : {
+      "error" : "unexpected argument -"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "--token",
+        "a",
+        "--port",
+        "1"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 52: [\"--token\", \"a\", \"--port\", \"1\"]",
+    "out" : {
+      "ok" : {
+        "app" : null,
+        "bind" : null,
+        "cmd" : "serve",
+        "json" : false,
+        "port" : 1,
+        "token" : "a"
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "--token",
+        "a",
+        "--token-env",
+        "RAPP_TOKEN"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 53: [\"--token\", \"a\", \"--token-env\", \"RAPP_TOKEN\"]",
+    "out" : {
+      "error" : "unknown argument --token-env"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "--token-env",
+        "RAPP_TOKEN"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 54: [\"--token-env\", \"RAPP_TOKEN\"]",
+    "out" : {
+      "error" : "unknown argument --token-env"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "check",
+        "--prompt",
+        "--prompt"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 55: [\"check\", \"--prompt\", \"--prompt\"]",
+    "out" : {
+      "ok" : {
+        "cmd" : "check",
+        "json" : false,
+        "prompt" : true
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "version",
+        "--json",
+        "extra"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 56: [\"version\", \"--json\", \"extra\"]",
+    "out" : {
+      "error" : "unexpected argument extra"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "list-apps",
+        "--json"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 57: [\"list-apps\", \"--json\"]",
+    "out" : {
+      "ok" : {
+        "cmd" : "list_apps",
+        "json" : true
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "lock",
+        "--prompt"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 58: [\"lock\", \"--prompt\"]",
+    "out" : {
+      "error" : "unknown argument --prompt"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "Serve",
+        "--app",
+        "a",
+        "--token",
+        "t"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 59: [\"Serve\", \"--app\", \"a\", \"--token\", \"t\"]",
+    "out" : {
+      "error" : "unknown argument --app"
+    }
+  }
+]

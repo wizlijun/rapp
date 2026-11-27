@@ -1,0 +1,1887 @@
+[
+  {
+    "in" : {
+      "call" : null,
+      "fn" : "lock_screen",
+      "locked" : [
+        true
+      ],
+      "step" : 0.10000000000000001,
+      "timeout" : 2
+    },
+    "name" : "already locked calls nothing",
+    "out" : {
+      "events" : [
+        {
+          "op" : "is_locked",
+          "v" : true
+        }
+      ],
+      "outcome" : {
+        "kind" : "already",
+        "reason" : null
+      }
+    }
+  },
+  {
+    "in" : {
+      "call" : null,
+      "fn" : "lock_screen",
+      "locked" : [
+        false,
+        false,
+        false,
+        true
+      ],
+      "step" : 0.10000000000000001,
+      "timeout" : 2
+    },
+    "name" : "locked once state flips",
+    "out" : {
+      "events" : [
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "call"
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        }
+      ],
+      "outcome" : {
+        "kind" : "locked",
+        "reason" : null
+      }
+    }
+  },
+  {
+    "in" : {
+      "call" : null,
+      "fn" : "lock_screen",
+      "locked" : [
+        false
+      ],
+      "step" : 0.10000000000000001,
+      "timeout" : 2
+    },
+    "name" : "never locked fails after timeout",
+    "out" : {
+      "events" : [
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "call"
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        }
+      ],
+      "outcome" : {
+        "kind" : "failed",
+        "reason" : "调用后 2 秒内没有锁上"
+      }
+    }
+  },
+  {
+    "in" : {
+      "call" : "找不到 SACLockScreenImmediate",
+      "fn" : "lock_screen",
+      "locked" : [
+        false
+      ],
+      "step" : 0.10000000000000001,
+      "timeout" : 2
+    },
+    "name" : "missing symbol fails",
+    "out" : {
+      "events" : [
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "call"
+        }
+      ],
+      "outcome" : {
+        "kind" : "failed",
+        "reason" : "找不到 SACLockScreenImmediate"
+      }
+    }
+  },
+  {
+    "in" : {
+      "call" : null,
+      "fn" : "lock_screen",
+      "locked" : [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        true
+      ],
+      "step" : 0.10000000000000001,
+      "timeout" : 2
+    },
+    "name" : "locks on the last poll",
+    "out" : {
+      "events" : [
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "call"
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        }
+      ],
+      "outcome" : {
+        "kind" : "failed",
+        "reason" : "调用后 2 秒内没有锁上"
+      }
+    }
+  },
+  {
+    "in" : {
+      "call" : null,
+      "fn" : "lock_screen",
+      "locked" : [
+        false
+      ],
+      "step" : 0.10000000000000001,
+      "timeout" : 0.34999999999999998
+    },
+    "name" : "odd timeout truncates in the text",
+    "out" : {
+      "events" : [
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "call"
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        }
+      ],
+      "outcome" : {
+        "kind" : "failed",
+        "reason" : "调用后 0 秒内没有锁上"
+      }
+    }
+  },
+  {
+    "in" : {
+      "call" : null,
+      "fn" : "lock_screen",
+      "locked" : [
+        false
+      ],
+      "step" : 0.10000000000000001,
+      "timeout" : 0
+    },
+    "name" : "zero timeout never sleeps",
+    "out" : {
+      "events" : [
+        {
+          "op" : "is_locked",
+          "v" : false
+        },
+        {
+          "op" : "call"
+        }
+      ],
+      "outcome" : {
+        "kind" : "failed",
+        "reason" : "调用后 0 秒内没有锁上"
+      }
+    }
+  },
+  {
+    "in" : {
+      "fn" : "wait_until_unlocked",
+      "locked" : [
+        false
+      ],
+      "step" : 0.10000000000000001,
+      "timeout" : 8
+    },
+    "name" : "returns at once when not locked",
+    "out" : {
+      "events" : [
+        {
+          "op" : "is_locked",
+          "v" : false
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "wait_until_unlocked",
+      "locked" : [
+        true,
+        true,
+        true,
+        true,
+        true,
+        false
+      ],
+      "step" : 0.10000000000000001,
+      "timeout" : 8
+    },
+    "name" : "polls until state flips",
+    "out" : {
+      "events" : [
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : false
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "wait_until_unlocked",
+      "locked" : [
+        true
+      ],
+      "step" : 0.10000000000000001,
+      "timeout" : 8
+    },
+    "name" : "gives up after timeout",
+    "out" : {
+      "events" : [
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "wait_until_unlocked",
+      "locked" : [
+        true
+      ],
+      "step" : 0.10000000000000001,
+      "timeout" : 0.25
+    },
+    "name" : "short timeout",
+    "out" : {
+      "events" : [
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        },
+        {
+          "op" : "is_locked",
+          "v" : true
+        },
+        {
+          "op" : "sleep",
+          "s" : 0.10000000000000001
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 982,
+          "width" : 1512,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 1440,
+          "width" : 2560,
+          "x" : 1512,
+          "y" : -200
+        }
+      ],
+      "fn" : "locked_start_display",
+      "windows" : [
+        {
+          "height" : 300,
+          "width" : 400,
+          "x" : 100,
+          "y" : 100
+        },
+        {
+          "height" : 900,
+          "width" : 1200,
+          "x" : 1700,
+          "y" : 0
+        }
+      ]
+    },
+    "name" : "follows the largest window",
+    "out" : {
+      "height" : 1440,
+      "width" : 2560,
+      "x" : 1512,
+      "y" : -200
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 982,
+          "width" : 1512,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 1440,
+          "width" : 2560,
+          "x" : 1512,
+          "y" : -200
+        }
+      ],
+      "fn" : "locked_start_display",
+      "windows" : [
+        {
+          "height" : 900,
+          "width" : 1200,
+          "x" : 100,
+          "y" : 0
+        },
+        {
+          "height" : 300,
+          "width" : 400,
+          "x" : 1700,
+          "y" : 100
+        }
+      ]
+    },
+    "name" : "follows the largest window, moved",
+    "out" : {
+      "height" : 982,
+      "width" : 1512,
+      "x" : 0,
+      "y" : 0
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 982,
+          "width" : 1512,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 1440,
+          "width" : 2560,
+          "x" : 1512,
+          "y" : -200
+        }
+      ],
+      "fn" : "locked_start_display",
+      "windows" : [
+        {
+          "height" : 600,
+          "width" : 800,
+          "x" : 1300,
+          "y" : 100
+        }
+      ]
+    },
+    "name" : "uses the window centre",
+    "out" : {
+      "height" : 1440,
+      "width" : 2560,
+      "x" : 1512,
+      "y" : -200
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 982,
+          "width" : 1512,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 1440,
+          "width" : 2560,
+          "x" : 1512,
+          "y" : -200
+        }
+      ],
+      "fn" : "locked_start_display",
+      "windows" : [
+
+      ]
+    },
+    "name" : "no windows",
+    "out" : null
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 982,
+          "width" : 1512,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 1440,
+          "width" : 2560,
+          "x" : 1512,
+          "y" : -200
+        }
+      ],
+      "fn" : "locked_start_display",
+      "windows" : [
+        {
+          "height" : 900,
+          "width" : 40,
+          "x" : 1700,
+          "y" : 0
+        }
+      ]
+    },
+    "name" : "tiny window ignored",
+    "out" : null
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 982,
+          "width" : 1512,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 1440,
+          "width" : 2560,
+          "x" : 1512,
+          "y" : -200
+        }
+      ],
+      "fn" : "locked_start_display",
+      "windows" : [
+        {
+          "height" : 400,
+          "width" : 400,
+          "x" : 9000,
+          "y" : 9000
+        }
+      ]
+    },
+    "name" : "window off every display",
+    "out" : null
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 982,
+          "width" : 1512,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 1440,
+          "width" : 2560,
+          "x" : 1512,
+          "y" : -200
+        }
+      ],
+      "fn" : "locked_start_display",
+      "windows" : [
+        {
+          "height" : 900,
+          "width" : 40,
+          "x" : 1700,
+          "y" : 0
+        },
+        {
+          "height" : 200,
+          "width" : 300,
+          "x" : 1800,
+          "y" : 100
+        }
+      ]
+    },
+    "name" : "tiny ignored, the next qualifies",
+    "out" : {
+      "height" : 1440,
+      "width" : 2560,
+      "x" : 1512,
+      "y" : -200
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 982,
+          "width" : 1512,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 1440,
+          "width" : 2560,
+          "x" : 1512,
+          "y" : -200
+        }
+      ],
+      "fn" : "locked_start_display",
+      "windows" : [
+        {
+          "height" : 200,
+          "width" : 300,
+          "x" : 100,
+          "y" : 100
+        },
+        {
+          "height" : 300,
+          "width" : 200,
+          "x" : 1800,
+          "y" : 100
+        }
+      ]
+    },
+    "name" : "equal areas: the first wins",
+    "out" : {
+      "height" : 982,
+      "width" : 1512,
+      "x" : 0,
+      "y" : 0
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 982,
+          "width" : 1512,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 1440,
+          "width" : 2560,
+          "x" : 1512,
+          "y" : -200
+        }
+      ],
+      "fn" : "locked_start_display",
+      "windows" : [
+        {
+          "height" : 50,
+          "width" : 50,
+          "x" : 1600,
+          "y" : 0
+        }
+      ]
+    },
+    "name" : "exactly 50 x 50 qualifies",
+    "out" : {
+      "height" : 1440,
+      "width" : 2560,
+      "x" : 1512,
+      "y" : -200
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 982,
+          "width" : 1512,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 1440,
+          "width" : 2560,
+          "x" : 1512,
+          "y" : -200
+        }
+      ],
+      "fn" : "locked_start_display",
+      "windows" : [
+        {
+          "height" : 200,
+          "width" : 200,
+          "x" : 1412,
+          "y" : 100
+        }
+      ]
+    },
+    "name" : "centre on the shared edge goes right",
+    "out" : {
+      "height" : 1440,
+      "width" : 2560,
+      "x" : 1512,
+      "y" : -200
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+        {
+          "height" : 982,
+          "width" : 1512,
+          "x" : 0,
+          "y" : 0
+        },
+        {
+          "height" : 1440,
+          "width" : 2560,
+          "x" : 1512,
+          "y" : -200
+        }
+      ],
+      "fn" : "locked_start_display",
+      "windows" : [
+        {
+          "height" : -300,
+          "width" : -400,
+          "x" : 2000,
+          "y" : 600
+        }
+      ]
+    },
+    "name" : "negative size is standardised",
+    "out" : {
+      "height" : 1440,
+      "width" : 2560,
+      "x" : 1512,
+      "y" : -200
+    }
+  },
+  {
+    "in" : {
+      "displays" : [
+
+      ],
+      "fn" : "locked_start_display",
+      "windows" : [
+        {
+          "height" : 900,
+          "width" : 1200,
+          "x" : 1700,
+          "y" : 0
+        }
+      ]
+    },
+    "name" : "no displays",
+    "out" : null
+  },
+  {
+    "in" : {
+      "fn" : "stay_awake",
+      "granted" : true,
+      "steps" : [
+        "begin",
+        "begin",
+        "end",
+        "end"
+      ]
+    },
+    "name" : "begin holds once, end releases that hold",
+    "out" : {
+      "events" : [
+        {
+          "id" : 1,
+          "op" : "hold"
+        },
+        {
+          "id" : 1,
+          "op" : "release"
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "stay_awake",
+      "granted" : true,
+      "steps" : [
+        "end"
+      ]
+    },
+    "name" : "end without begin releases nothing",
+    "out" : {
+      "events" : [
+
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "stay_awake",
+      "granted" : false,
+      "steps" : [
+        "begin",
+        "end"
+      ]
+    },
+    "name" : "refused hold releases nothing",
+    "out" : {
+      "events" : [
+        {
+          "id" : null,
+          "op" : "hold"
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "stay_awake",
+      "granted" : true,
+      "steps" : [
+        "begin",
+        "end",
+        "begin",
+        "end"
+      ]
+    },
+    "name" : "a new session holds again",
+    "out" : {
+      "events" : [
+        {
+          "id" : 1,
+          "op" : "hold"
+        },
+        {
+          "id" : 1,
+          "op" : "release"
+        },
+        {
+          "id" : 2,
+          "op" : "hold"
+        },
+        {
+          "id" : 2,
+          "op" : "release"
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "stay_awake",
+      "granted" : false,
+      "steps" : [
+        "begin",
+        "end",
+        "begin",
+        "begin",
+        "end"
+      ]
+    },
+    "name" : "refused then granted",
+    "out" : {
+      "events" : [
+        {
+          "id" : null,
+          "op" : "hold"
+        },
+        {
+          "id" : null,
+          "op" : "hold"
+        }
+      ]
+    }
+  }
+]

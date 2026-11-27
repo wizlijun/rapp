@@ -1123,6 +1123,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "libz-sys"
+version = "1.1.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fee3f59f4321dab0c78d828942e7aa09d0bd8ad6e78a501977e6bf3d02938045"
+dependencies = [
+ "cc",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1634,6 +1645,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "rapp-host-core"
+version = "0.15.57"
+dependencies = [
+ "anyhow",
+ "icu_normalizer",
+ "libz-sys",
+ "rapp-client-core",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "unicode-segmentation",
+ "zeroize",
+]
+
+[[package]]
 name = "rapp-host-linux"
 version = "0.15.57"
 dependencies = [
@@ -1817,7 +1844,9 @@ dependencies = [
  "anyhow",
  "quinn",
  "rand 0.9.5",
+ "rapp-client-core",
  "rapp-conn",
+ "rapp-host-core",
  "rapp-hub",
  "rapp-net",
  "rapp-relay",
@@ -2482,6 +2511,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 
 [[package]]
+name = "unicode-segmentation"
+version = "1.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
+
+[[package]]
 name = "unicode-width"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2519,6 +2554,12 @@ name = "utf_types"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a3b425286980a367278453f3b6d28cdcb134b574e5a35824a6ff5eebad50bb6"
+
+[[package]]
+name = "vcpkg"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "version-compare"

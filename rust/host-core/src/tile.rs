@@ -21,19 +21,21 @@
 //!
 //! Frame body before compression (little-endian):
 //!
-//!     u16 tileCount
-//!     tileCount times:
-//!       u16 tileIndex   row-major, ceil(width / 64) tiles per row
-//!       u8  kind        0 solid, 1/2/4 palette with that many bits per pixel,
-//!                       3 two-tone sub-blocks, 5 copy, 255 raw
-//!       kind 0:     one sample
-//!       kind 1/2/4: u8 n, n samples (ascending), then index bits row by row,
-//!                   most significant bit first, each row padded to a whole byte
-//!       kind 3:     the tile's 16x16 sub-blocks row by row, each:
-//!                   u8 n (1 or 2), n samples (ascending), and for n = 2 one bit
-//!                   per pixel (0 = the smaller sample) row by row, most
-//!                   significant bit first, each row padded to a whole byte
-//!       kind 255:   every sample of the tile, row by row
+//! ```text
+//! u16 tileCount
+//! tileCount times:
+//!   u16 tileIndex   row-major, ceil(width / 64) tiles per row
+//!   u8  kind        0 solid, 1/2/4 palette with that many bits per pixel,
+//!                   3 two-tone sub-blocks, 5 copy, 255 raw
+//!   kind 0:     one sample
+//!   kind 1/2/4: u8 n, n samples (ascending), then index bits row by row,
+//!               most significant bit first, each row padded to a whole byte
+//!   kind 3:     the tile's 16x16 sub-blocks row by row, each:
+//!               u8 n (1 or 2), n samples (ascending), and for n = 2 one bit
+//!               per pixel (0 = the smaller sample) row by row, most
+//!               significant bit first, each row padded to a whole byte
+//!   kind 255:   every sample of the tile, row by row
+//! ```
 //!
 //! Edge tiles are min(64, width - x0) by min(64, height - y0) pixels, and
 //! edge sub-blocks likewise keep their real size. Kind 3 is chosen whenever a

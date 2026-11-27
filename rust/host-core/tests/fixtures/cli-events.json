@@ -1,0 +1,1232 @@
+[
+  {
+    "in" : {
+      "event" : {
+        "port" : 51234,
+        "type" : "listening"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 0",
+    "out" : "{\"event\":\"listening\",\"port\":51234}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "port" : 0,
+        "type" : "listening"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 1",
+    "out" : "{\"event\":\"listening\",\"port\":0}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "port" : 65535,
+        "type" : "listening"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 2",
+    "out" : "{\"event\":\"listening\",\"port\":65535}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "client" : "127.0.0.1:50000",
+        "fps" : 15,
+        "mode" : "color16",
+        "type" : "session_started"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 3",
+    "out" : "{\"client\":\"127.0.0.1:50000\",\"event\":\"session\",\"fps\":15,\"mode\":\"color16\",\"state\":\"started\"}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "client" : "say \"hi\" \\ back\nslash / 客户端 “你好”\t\u0001",
+        "fps" : 0,
+        "mode" : "gray4",
+        "type" : "session_started"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 4",
+    "out" : "{\"client\":\"say \\\"hi\\\" \\\\ back\\nslash / 客户端 “你好”\\t\\u0001\",\"event\":\"session\",\"fps\":0,\"mode\":\"gray4\",\"state\":\"started\"}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "client" : "",
+        "fps" : 30,
+        "mode" : "duocolor",
+        "type" : "session_started"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 5",
+    "out" : "{\"client\":\"\",\"event\":\"session\",\"fps\":30,\"mode\":\"duocolor\",\"state\":\"started\"}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "reason" : "client disconnected",
+        "type" : "session_ended"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 6",
+    "out" : "{\"event\":\"session\",\"reason\":\"client disconnected\",\"state\":\"ended\"}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "reason" : "say \"hi\" \\ back\nslash / 客户端 “你好”\t\u0001",
+        "type" : "session_ended"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 7",
+    "out" : "{\"event\":\"session\",\"reason\":\"say \\\"hi\\\" \\\\ back\\nslash / 客户端 “你好”\\t\\u0001\",\"state\":\"ended\"}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "reason" : "busy",
+        "type" : "rejected"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 8",
+    "out" : "{\"event\":\"rejected\",\"reason\":\"busy\"}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "base_rtt_ms" : null,
+        "enc_ms" : null,
+        "fps" : 15,
+        "fulls" : 0,
+        "height" : 600,
+        "kbps" : 12.34,
+        "latency_ms" : null,
+        "rtt_ms" : null,
+        "type" : "stats",
+        "weak" : false,
+        "width" : 800
+      },
+      "fn" : "event"
+    },
+    "name" : "event 9",
+    "out" : "{\"event\":\"stats\",\"fps\":15,\"fulls\":0,\"height\":600,\"kbps\":12.3,\"weak\":false,\"width\":800}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "base_rtt_ms" : null,
+        "enc_ms" : null,
+        "fps" : 0,
+        "fulls" : 0,
+        "height" : 0,
+        "kbps" : 0,
+        "latency_ms" : null,
+        "rtt_ms" : null,
+        "type" : "stats",
+        "weak" : false,
+        "width" : 0
+      },
+      "fn" : "event"
+    },
+    "name" : "event 10",
+    "out" : "{\"event\":\"stats\",\"fps\":0,\"fulls\":0,\"height\":0,\"kbps\":0,\"weak\":false,\"width\":0}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "base_rtt_ms" : null,
+        "enc_ms" : null,
+        "fps" : 5,
+        "fulls" : 0,
+        "height" : 2,
+        "kbps" : 1234.567,
+        "latency_ms" : null,
+        "rtt_ms" : null,
+        "type" : "stats",
+        "weak" : false,
+        "width" : 1
+      },
+      "fn" : "event"
+    },
+    "name" : "event 11",
+    "out" : "{\"event\":\"stats\",\"fps\":5,\"fulls\":0,\"height\":2,\"kbps\":1234.6,\"weak\":false,\"width\":1}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "base_rtt_ms" : 80,
+        "enc_ms" : null,
+        "fps" : 2,
+        "fulls" : 0,
+        "height" : 4,
+        "kbps" : 1,
+        "latency_ms" : 300,
+        "rtt_ms" : 120,
+        "type" : "stats",
+        "weak" : true,
+        "width" : 3
+      },
+      "fn" : "event"
+    },
+    "name" : "event 12",
+    "out" : "{\"baseRttMs\":80,\"event\":\"stats\",\"fps\":2,\"fulls\":0,\"height\":4,\"kbps\":1,\"latencyMs\":300,\"rttMs\":120,\"weak\":true,\"width\":3}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "base_rtt_ms" : 80,
+        "enc_ms" : null,
+        "fps" : 2,
+        "fulls" : 0,
+        "height" : 4,
+        "kbps" : 1,
+        "latency_ms" : null,
+        "rtt_ms" : null,
+        "type" : "stats",
+        "weak" : false,
+        "width" : 3
+      },
+      "fn" : "event"
+    },
+    "name" : "event 13",
+    "out" : "{\"baseRttMs\":80,\"event\":\"stats\",\"fps\":2,\"fulls\":0,\"height\":4,\"kbps\":1,\"weak\":false,\"width\":3}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "base_rtt_ms" : null,
+        "enc_ms" : 9,
+        "fps" : 2,
+        "fulls" : 2,
+        "height" : 4,
+        "kbps" : 1,
+        "latency_ms" : null,
+        "rtt_ms" : null,
+        "type" : "stats",
+        "weak" : false,
+        "width" : 3
+      },
+      "fn" : "event"
+    },
+    "name" : "event 14",
+    "out" : "{\"encMs\":9,\"event\":\"stats\",\"fps\":2,\"fulls\":2,\"height\":4,\"kbps\":1,\"weak\":false,\"width\":3}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "height" : 600,
+        "title" : "Apple / “你好”",
+        "type" : "ready",
+        "width" : 800
+      },
+      "fn" : "event"
+    },
+    "name" : "event 15",
+    "out" : "{\"event\":\"ready\",\"height\":600,\"title\":\"Apple / “你好”\",\"width\":800}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "height" : 0,
+        "title" : "say \"hi\" \\ back\nslash / 客户端 “你好”\t\u0001",
+        "type" : "ready",
+        "width" : 0
+      },
+      "fn" : "event"
+    },
+    "name" : "event 16",
+    "out" : "{\"event\":\"ready\",\"height\":0,\"title\":\"say \\\"hi\\\" \\\\ back\\nslash / 客户端 “你好”\\t\\u0001\",\"width\":0}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "count" : 3,
+        "type" : "windows"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 17",
+    "out" : "{\"count\":3,\"event\":\"windows\"}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "count" : 0,
+        "type" : "windows"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 18",
+    "out" : "{\"count\":0,\"event\":\"windows\"}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "bytes" : 5,
+        "dir" : "a_to_b",
+        "kind" : "files",
+        "name" : "a.txt",
+        "type" : "transfer"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 19",
+    "out" : "{\"bytes\":5,\"dir\":\"a_to_b\",\"event\":\"transfer\",\"kind\":\"files\",\"name\":\"a.txt\"}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "bytes" : 1000,
+        "dir" : "b_to_a",
+        "kind" : "image",
+        "name" : null,
+        "type" : "transfer"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 20",
+    "out" : "{\"bytes\":1000,\"dir\":\"b_to_a\",\"event\":\"transfer\",\"kind\":\"image\"}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "bytes" : 0,
+        "dir" : "b_to_a",
+        "kind" : "data",
+        "name" : null,
+        "type" : "transfer"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 21",
+    "out" : "{\"bytes\":0,\"dir\":\"b_to_a\",\"event\":\"transfer\",\"kind\":\"data\"}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "bytes" : 7,
+        "dir" : "a_to_b",
+        "kind" : "text",
+        "name" : null,
+        "type" : "transfer"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 22",
+    "out" : "{\"bytes\":7,\"dir\":\"a_to_b\",\"event\":\"transfer\",\"kind\":\"text\"}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "bytes" : 18446744073709551615,
+        "dir" : "b_to_a",
+        "kind" : "files",
+        "name" : "say \"hi\" \\ back\nslash / 客户端 “你好”\t\u0001",
+        "type" : "transfer"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 23",
+    "out" : "{\"bytes\":18446744073709551615,\"dir\":\"b_to_a\",\"event\":\"transfer\",\"kind\":\"files\",\"name\":\"say \\\"hi\\\" \\\\ back\\nslash / 客户端 “你好”\\t\\u0001\"}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "type" : "input"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 24",
+    "out" : "{\"event\":\"input\"}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "by" : "M",
+        "type" : "input_blocked"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 25",
+    "out" : "{\"by\":\"M\",\"event\":\"input_blocked\"}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "by" : "",
+        "type" : "input_blocked"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 26",
+    "out" : "{\"by\":\"\",\"event\":\"input_blocked\"}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "type" : "unlock"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 27",
+    "out" : "{\"event\":\"unlock\"}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "code" : 3,
+        "reason" : "say \"hi\"\n",
+        "type" : "exit"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 28",
+    "out" : "{\"code\":3,\"event\":\"exit\",\"reason\":\"say \\\"hi\\\"\\n\"}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "code" : 0,
+        "reason" : "done",
+        "type" : "exit"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 29",
+    "out" : "{\"code\":0,\"event\":\"exit\",\"reason\":\"done\"}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "code" : -1,
+        "reason" : "say \"hi\" \\ back\nslash / 客户端 “你好”\t\u0001",
+        "type" : "exit"
+      },
+      "fn" : "event"
+    },
+    "name" : "event 30",
+    "out" : "{\"code\":-1,\"event\":\"exit\",\"reason\":\"say \\\"hi\\\" \\\\ back\\nslash / 客户端 “你好”\\t\\u0001\"}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "base_rtt_ms" : null,
+        "enc_ms" : null,
+        "fps" : 15,
+        "fulls" : 0,
+        "height" : 600,
+        "kbps" : 0.050000000000000003,
+        "latency_ms" : null,
+        "rtt_ms" : null,
+        "type" : "stats",
+        "weak" : false,
+        "width" : 800
+      },
+      "fn" : "event"
+    },
+    "name" : "event 31",
+    "out" : "{\"event\":\"stats\",\"fps\":15,\"fulls\":0,\"height\":600,\"kbps\":0.1,\"weak\":false,\"width\":800}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "base_rtt_ms" : null,
+        "enc_ms" : null,
+        "fps" : 15,
+        "fulls" : 0,
+        "height" : 600,
+        "kbps" : 0.14999999999999999,
+        "latency_ms" : null,
+        "rtt_ms" : null,
+        "type" : "stats",
+        "weak" : false,
+        "width" : 800
+      },
+      "fn" : "event"
+    },
+    "name" : "event 32",
+    "out" : "{\"event\":\"stats\",\"fps\":15,\"fulls\":0,\"height\":600,\"kbps\":0.1,\"weak\":false,\"width\":800}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "base_rtt_ms" : null,
+        "enc_ms" : null,
+        "fps" : 15,
+        "fulls" : 0,
+        "height" : 600,
+        "kbps" : 0.25,
+        "latency_ms" : null,
+        "rtt_ms" : null,
+        "type" : "stats",
+        "weak" : false,
+        "width" : 800
+      },
+      "fn" : "event"
+    },
+    "name" : "event 33",
+    "out" : "{\"event\":\"stats\",\"fps\":15,\"fulls\":0,\"height\":600,\"kbps\":0.2,\"weak\":false,\"width\":800}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "base_rtt_ms" : null,
+        "enc_ms" : null,
+        "fps" : 15,
+        "fulls" : 0,
+        "height" : 600,
+        "kbps" : 0.34999999999999998,
+        "latency_ms" : null,
+        "rtt_ms" : null,
+        "type" : "stats",
+        "weak" : false,
+        "width" : 800
+      },
+      "fn" : "event"
+    },
+    "name" : "event 34",
+    "out" : "{\"event\":\"stats\",\"fps\":15,\"fulls\":0,\"height\":600,\"kbps\":0.3,\"weak\":false,\"width\":800}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "base_rtt_ms" : null,
+        "enc_ms" : null,
+        "fps" : 15,
+        "fulls" : 0,
+        "height" : 600,
+        "kbps" : 0.040000000000000001,
+        "latency_ms" : null,
+        "rtt_ms" : null,
+        "type" : "stats",
+        "weak" : false,
+        "width" : 800
+      },
+      "fn" : "event"
+    },
+    "name" : "event 35",
+    "out" : "{\"event\":\"stats\",\"fps\":15,\"fulls\":0,\"height\":600,\"kbps\":0,\"weak\":false,\"width\":800}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "base_rtt_ms" : null,
+        "enc_ms" : null,
+        "fps" : 15,
+        "fulls" : 0,
+        "height" : 600,
+        "kbps" : 0.059999999999999998,
+        "latency_ms" : null,
+        "rtt_ms" : null,
+        "type" : "stats",
+        "weak" : false,
+        "width" : 800
+      },
+      "fn" : "event"
+    },
+    "name" : "event 36",
+    "out" : "{\"event\":\"stats\",\"fps\":15,\"fulls\":0,\"height\":600,\"kbps\":0.1,\"weak\":false,\"width\":800}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "base_rtt_ms" : null,
+        "enc_ms" : null,
+        "fps" : 15,
+        "fulls" : 0,
+        "height" : 600,
+        "kbps" : 99.950000000000003,
+        "latency_ms" : null,
+        "rtt_ms" : null,
+        "type" : "stats",
+        "weak" : false,
+        "width" : 800
+      },
+      "fn" : "event"
+    },
+    "name" : "event 37",
+    "out" : "{\"event\":\"stats\",\"fps\":15,\"fulls\":0,\"height\":600,\"kbps\":100,\"weak\":false,\"width\":800}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "base_rtt_ms" : null,
+        "enc_ms" : null,
+        "fps" : 15,
+        "fulls" : 0,
+        "height" : 600,
+        "kbps" : 99.939999999999998,
+        "latency_ms" : null,
+        "rtt_ms" : null,
+        "type" : "stats",
+        "weak" : false,
+        "width" : 800
+      },
+      "fn" : "event"
+    },
+    "name" : "event 38",
+    "out" : "{\"event\":\"stats\",\"fps\":15,\"fulls\":0,\"height\":600,\"kbps\":99.9,\"weak\":false,\"width\":800}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "base_rtt_ms" : null,
+        "enc_ms" : null,
+        "fps" : 15,
+        "fulls" : 0,
+        "height" : 600,
+        "kbps" : 1000000,
+        "latency_ms" : null,
+        "rtt_ms" : null,
+        "type" : "stats",
+        "weak" : false,
+        "width" : 800
+      },
+      "fn" : "event"
+    },
+    "name" : "event 39",
+    "out" : "{\"event\":\"stats\",\"fps\":15,\"fulls\":0,\"height\":600,\"kbps\":1000000,\"weak\":false,\"width\":800}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "base_rtt_ms" : null,
+        "enc_ms" : null,
+        "fps" : 15,
+        "fulls" : 0,
+        "height" : 600,
+        "kbps" : 123456789.98,
+        "latency_ms" : null,
+        "rtt_ms" : null,
+        "type" : "stats",
+        "weak" : false,
+        "width" : 800
+      },
+      "fn" : "event"
+    },
+    "name" : "event 40",
+    "out" : "{\"event\":\"stats\",\"fps\":15,\"fulls\":0,\"height\":600,\"kbps\":123456790,\"weak\":false,\"width\":800}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "base_rtt_ms" : null,
+        "enc_ms" : null,
+        "fps" : 15,
+        "fulls" : 0,
+        "height" : 600,
+        "kbps" : 0.0001,
+        "latency_ms" : null,
+        "rtt_ms" : null,
+        "type" : "stats",
+        "weak" : false,
+        "width" : 800
+      },
+      "fn" : "event"
+    },
+    "name" : "event 41",
+    "out" : "{\"event\":\"stats\",\"fps\":15,\"fulls\":0,\"height\":600,\"kbps\":0,\"weak\":false,\"width\":800}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "base_rtt_ms" : null,
+        "enc_ms" : null,
+        "fps" : 15,
+        "fulls" : 0,
+        "height" : 600,
+        "kbps" : 2.5,
+        "latency_ms" : null,
+        "rtt_ms" : null,
+        "type" : "stats",
+        "weak" : false,
+        "width" : 800
+      },
+      "fn" : "event"
+    },
+    "name" : "event 42",
+    "out" : "{\"event\":\"stats\",\"fps\":15,\"fulls\":0,\"height\":600,\"kbps\":2.5,\"weak\":false,\"width\":800}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "base_rtt_ms" : null,
+        "enc_ms" : null,
+        "fps" : 15,
+        "fulls" : 0,
+        "height" : 600,
+        "kbps" : 7.25,
+        "latency_ms" : null,
+        "rtt_ms" : null,
+        "type" : "stats",
+        "weak" : false,
+        "width" : 800
+      },
+      "fn" : "event"
+    },
+    "name" : "event 43",
+    "out" : "{\"event\":\"stats\",\"fps\":15,\"fulls\":0,\"height\":600,\"kbps\":7.2,\"weak\":false,\"width\":800}"
+  },
+  {
+    "in" : {
+      "event" : {
+        "base_rtt_ms" : 0,
+        "enc_ms" : 0,
+        "fps" : 15,
+        "fulls" : 1,
+        "height" : 600,
+        "kbps" : 3.2999999999999998,
+        "latency_ms" : 0,
+        "rtt_ms" : 0,
+        "type" : "stats",
+        "weak" : true,
+        "width" : 800
+      },
+      "fn" : "event"
+    },
+    "name" : "event 44",
+    "out" : "{\"baseRttMs\":0,\"encMs\":0,\"event\":\"stats\",\"fps\":15,\"fulls\":1,\"height\":600,\"kbps\":3.3,\"latencyMs\":0,\"rttMs\":0,\"weak\":true,\"width\":800}"
+  },
+  {
+    "in" : {
+      "accessibility" : null,
+      "apps" : [
+        {
+          "app" : "com.apple.Safari",
+          "name" : "Safari"
+        }
+      ],
+      "displays" : [
+
+      ],
+      "fn" : "apps",
+      "screen_recording" : null
+    },
+    "name" : "apps 0",
+    "out" : "{\"apps\":[{\"app\":\"com.apple.Safari\",\"name\":\"Safari\"}]}"
+  },
+  {
+    "in" : {
+      "accessibility" : null,
+      "apps" : [
+
+      ],
+      "displays" : [
+
+      ],
+      "fn" : "apps",
+      "screen_recording" : null
+    },
+    "name" : "apps 1",
+    "out" : "{\"apps\":[]}"
+  },
+  {
+    "in" : {
+      "accessibility" : null,
+      "apps" : [
+        {
+          "app" : "com.apple.Safari",
+          "name" : "Safari"
+        }
+      ],
+      "displays" : [
+        {
+          "frame" : {
+            "height" : 1440,
+            "width" : 2560,
+            "x" : 1512,
+            "y" : 0
+          },
+          "id" : 7,
+          "main" : false,
+          "name" : "DELL"
+        },
+        {
+          "frame" : {
+            "height" : 982,
+            "width" : 1512,
+            "x" : 0,
+            "y" : 0
+          },
+          "id" : 1,
+          "main" : true,
+          "name" : "内建显示器"
+        }
+      ],
+      "fn" : "apps",
+      "screen_recording" : null
+    },
+    "name" : "apps 2",
+    "out" : "{\"apps\":[{\"app\":\"desktop:\",\"displays\":[{\"height\":982,\"id\":\"1\",\"main\":true,\"name\":\"内建显示器\",\"width\":1512},{\"height\":1440,\"id\":\"7\",\"main\":false,\"name\":\"DELL\",\"width\":2560}],\"name\":\"桌面\"},{\"app\":\"com.apple.Safari\",\"name\":\"Safari\"}]}"
+  },
+  {
+    "in" : {
+      "accessibility" : true,
+      "apps" : [
+
+      ],
+      "displays" : [
+
+      ],
+      "fn" : "apps",
+      "screen_recording" : false
+    },
+    "name" : "apps 3",
+    "out" : "{\"apps\":[],\"permissions\":{\"accessibility\":true,\"screen_recording\":false}}"
+  },
+  {
+    "in" : {
+      "accessibility" : true,
+      "apps" : [
+        {
+          "app" : "com.apple.Safari",
+          "name" : "Safari"
+        }
+      ],
+      "displays" : [
+        {
+          "frame" : {
+            "height" : 1440,
+            "width" : 2560,
+            "x" : 1512,
+            "y" : 0
+          },
+          "id" : 7,
+          "main" : false,
+          "name" : "DELL"
+        },
+        {
+          "frame" : {
+            "height" : 982,
+            "width" : 1512,
+            "x" : 0,
+            "y" : 0
+          },
+          "id" : 1,
+          "main" : true,
+          "name" : "内建显示器"
+        }
+      ],
+      "fn" : "apps",
+      "screen_recording" : true
+    },
+    "name" : "apps 4",
+    "out" : "{\"apps\":[{\"app\":\"desktop:\",\"displays\":[{\"height\":982,\"id\":\"1\",\"main\":true,\"name\":\"内建显示器\",\"width\":1512},{\"height\":1440,\"id\":\"7\",\"main\":false,\"name\":\"DELL\",\"width\":2560}],\"name\":\"桌面\"},{\"app\":\"com.apple.Safari\",\"name\":\"Safari\"}],\"permissions\":{\"accessibility\":true,\"screen_recording\":true}}"
+  },
+  {
+    "in" : {
+      "accessibility" : false,
+      "apps" : [
+        {
+          "app" : "notepad.exe",
+          "name" : "记事本 \"x\""
+        },
+        {
+          "app" : "a/b",
+          "name" : ""
+        }
+      ],
+      "displays" : [
+
+      ],
+      "fn" : "apps",
+      "screen_recording" : false
+    },
+    "name" : "apps 5",
+    "out" : "{\"apps\":[{\"app\":\"notepad.exe\",\"name\":\"记事本 \\\"x\\\"\"},{\"app\":\"a/b\",\"name\":\"\"}],\"permissions\":{\"accessibility\":false,\"screen_recording\":false}}"
+  },
+  {
+    "in" : {
+      "fn" : "shareable",
+      "regular" : [
+        {
+          "app" : "com.apple.Safari",
+          "name" : "Safari",
+          "pid" : 1
+        },
+        {
+          "app" : "com.apple.TextEdit",
+          "name" : "TextEdit",
+          "pid" : 2
+        },
+        {
+          "app" : "com.apple.Calculator",
+          "name" : "Calculator",
+          "pid" : 3
+        },
+        {
+          "app" : "com.tiny",
+          "name" : "Tiny",
+          "pid" : 4
+        },
+        {
+          "app" : "app10",
+          "name" : "App 10",
+          "pid" : 5
+        },
+        {
+          "app" : "app9",
+          "name" : "App 9",
+          "pid" : 6
+        },
+        {
+          "app" : "z.lower",
+          "name" : "safari",
+          "pid" : 7
+        },
+        {
+          "app" : "b.alpha",
+          "name" : "alpha",
+          "pid" : 8
+        },
+        {
+          "app" : "a.alpha",
+          "name" : "Alpha",
+          "pid" : 9
+        }
+      ],
+      "windows" : [
+        {
+          "height" : 400,
+          "layer" : 0,
+          "pid" : 2,
+          "width" : 600
+        },
+        {
+          "height" : 600,
+          "layer" : 0,
+          "pid" : 1,
+          "width" : 800
+        },
+        {
+          "height" : 300,
+          "layer" : 0,
+          "pid" : 1,
+          "width" : 300
+        },
+        {
+          "height" : 300,
+          "layer" : 25,
+          "pid" : 3,
+          "width" : 300
+        },
+        {
+          "height" : 300,
+          "layer" : 0,
+          "pid" : 4,
+          "width" : 49
+        },
+        {
+          "height" : 49,
+          "layer" : 0,
+          "pid" : 4,
+          "width" : 300
+        },
+        {
+          "height" : 50,
+          "layer" : 0,
+          "pid" : 3,
+          "width" : 50
+        },
+        {
+          "height" : 300,
+          "layer" : 0,
+          "pid" : 99,
+          "width" : 300
+        }
+      ]
+    },
+    "name" : "shareable 0",
+    "out" : {
+      "apps" : [
+        {
+          "app" : "com.apple.Calculator",
+          "name" : "Calculator"
+        },
+        {
+          "app" : "com.apple.Safari",
+          "name" : "Safari"
+        },
+        {
+          "app" : "com.apple.TextEdit",
+          "name" : "TextEdit"
+        }
+      ],
+      "text" : "com.apple.Calculator\tCalculator\ncom.apple.Safari\tSafari\ncom.apple.TextEdit\tTextEdit\n"
+    }
+  },
+  {
+    "in" : {
+      "fn" : "shareable",
+      "regular" : [
+        {
+          "app" : "com.apple.Safari",
+          "name" : "Safari",
+          "pid" : 1
+        },
+        {
+          "app" : "com.apple.TextEdit",
+          "name" : "TextEdit",
+          "pid" : 2
+        },
+        {
+          "app" : "com.apple.Calculator",
+          "name" : "Calculator",
+          "pid" : 3
+        },
+        {
+          "app" : "com.tiny",
+          "name" : "Tiny",
+          "pid" : 4
+        },
+        {
+          "app" : "app10",
+          "name" : "App 10",
+          "pid" : 5
+        },
+        {
+          "app" : "app9",
+          "name" : "App 9",
+          "pid" : 6
+        },
+        {
+          "app" : "z.lower",
+          "name" : "safari",
+          "pid" : 7
+        },
+        {
+          "app" : "b.alpha",
+          "name" : "alpha",
+          "pid" : 8
+        },
+        {
+          "app" : "a.alpha",
+          "name" : "Alpha",
+          "pid" : 9
+        }
+      ],
+      "windows" : [
+        {
+          "height" : 100,
+          "layer" : 0,
+          "pid" : 5,
+          "width" : 100
+        },
+        {
+          "height" : 100,
+          "layer" : 0,
+          "pid" : 6,
+          "width" : 100
+        },
+        {
+          "height" : 100,
+          "layer" : 0,
+          "pid" : 7,
+          "width" : 100
+        },
+        {
+          "height" : 100,
+          "layer" : 0,
+          "pid" : 1,
+          "width" : 100
+        },
+        {
+          "height" : 100,
+          "layer" : 0,
+          "pid" : 8,
+          "width" : 100
+        },
+        {
+          "height" : 100,
+          "layer" : 0,
+          "pid" : 9,
+          "width" : 100
+        }
+      ]
+    },
+    "name" : "shareable 1",
+    "out" : {
+      "apps" : [
+        {
+          "app" : "b.alpha",
+          "name" : "alpha"
+        },
+        {
+          "app" : "a.alpha",
+          "name" : "Alpha"
+        },
+        {
+          "app" : "app9",
+          "name" : "App 9"
+        },
+        {
+          "app" : "app10",
+          "name" : "App 10"
+        },
+        {
+          "app" : "z.lower",
+          "name" : "safari"
+        },
+        {
+          "app" : "com.apple.Safari",
+          "name" : "Safari"
+        }
+      ],
+      "text" : "b.alpha\talpha\na.alpha\tAlpha\napp9\tApp 9\napp10\tApp 10\nz.lower\tsafari\ncom.apple.Safari\tSafari\n"
+    }
+  },
+  {
+    "in" : {
+      "fn" : "shareable",
+      "regular" : [
+        {
+          "app" : "com.apple.Safari",
+          "name" : "Safari",
+          "pid" : 1
+        },
+        {
+          "app" : "com.apple.TextEdit",
+          "name" : "TextEdit",
+          "pid" : 2
+        },
+        {
+          "app" : "com.apple.Calculator",
+          "name" : "Calculator",
+          "pid" : 3
+        },
+        {
+          "app" : "com.tiny",
+          "name" : "Tiny",
+          "pid" : 4
+        },
+        {
+          "app" : "app10",
+          "name" : "App 10",
+          "pid" : 5
+        },
+        {
+          "app" : "app9",
+          "name" : "App 9",
+          "pid" : 6
+        },
+        {
+          "app" : "z.lower",
+          "name" : "safari",
+          "pid" : 7
+        },
+        {
+          "app" : "b.alpha",
+          "name" : "alpha",
+          "pid" : 8
+        },
+        {
+          "app" : "a.alpha",
+          "name" : "Alpha",
+          "pid" : 9
+        }
+      ],
+      "windows" : [
+        {
+          "height" : 500,
+          "layer" : -1,
+          "pid" : 1,
+          "width" : 500
+        },
+        {
+          "height" : 500,
+          "layer" : 0,
+          "pid" : 2,
+          "width" : 49.899999999999999
+        },
+        {
+          "height" : 49.990000000000002,
+          "layer" : 0,
+          "pid" : 3,
+          "width" : 50
+        }
+      ]
+    },
+    "name" : "shareable 2",
+    "out" : {
+      "apps" : [
+
+      ],
+      "text" : ""
+    }
+  },
+  {
+    "in" : {
+      "fn" : "shareable",
+      "regular" : [
+        {
+          "app" : "com.apple.Safari",
+          "name" : "Safari",
+          "pid" : 1
+        },
+        {
+          "app" : "com.apple.TextEdit",
+          "name" : "TextEdit",
+          "pid" : 2
+        },
+        {
+          "app" : "com.apple.Calculator",
+          "name" : "Calculator",
+          "pid" : 3
+        },
+        {
+          "app" : "com.tiny",
+          "name" : "Tiny",
+          "pid" : 4
+        },
+        {
+          "app" : "app10",
+          "name" : "App 10",
+          "pid" : 5
+        },
+        {
+          "app" : "app9",
+          "name" : "App 9",
+          "pid" : 6
+        },
+        {
+          "app" : "z.lower",
+          "name" : "safari",
+          "pid" : 7
+        },
+        {
+          "app" : "b.alpha",
+          "name" : "alpha",
+          "pid" : 8
+        },
+        {
+          "app" : "a.alpha",
+          "name" : "Alpha",
+          "pid" : 9
+        }
+      ],
+      "windows" : [
+
+      ]
+    },
+    "name" : "shareable 3",
+    "out" : {
+      "apps" : [
+
+      ],
+      "text" : ""
+    }
+  }
+]

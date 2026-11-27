@@ -1,0 +1,1671 @@
+[
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 0,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"generic-chat\",\"ids\":[],\"name\":\"聊天类通用\",\"regions\":{\"bottom\":{\"box\":{\"bottom\":0,\"height\":160,\"in\":\"main\"}},\"button\":{\"blob\":{\"in\":\"bottom\",\"pick\":\"rightmost\",\"round\":true,\"size\":[24,48]}},\"main\":{\"box\":{\"bottom\":0,\"right\":0,\"rightOf\":\"sidebar\",\"top\":0}},\"markers\":{\"blob\":{\"in\":{\"strip\":{\"of\":\"sidebar\",\"side\":\"right\",\"width\":40}},\"pick\":\"all\",\"size\":[6,20]}},\"sidebar\":{\"edge\":{\"from\":\"left\",\"max\":420,\"min\":160}},\"tail\":{\"box\":{\"above\":\"bottom\",\"height\":240,\"in\":\"main\"}}},\"require\":[\"bottom\"],\"rev\":1,\"signals\":{\"rowBusy\":{\"count\":true,\"detect\":{\"motion\":{\"window\":0.40000000000000002}},\"in\":\"markers\",\"status\":\"untested\"},\"stop\":{\"detect\":{\"shape\":\"square\"},\"in\":\"button\",\"status\":\"untested\"}},\"states\":[{\"hold\":0.59999999999999998,\"release\":2,\"state\":\"working\",\"when\":{\"any\":[\"stop\",\"rowBusy\"]}},{\"state\":\"idle\"}],\"updated\":\"2026-11-25\"}"
+    },
+    "name" : "resolve generic chat window",
+    "out" : {
+      "bottom" : [
+        {
+          "h" : 160,
+          "w" : 560,
+          "x" : 240,
+          "y" : 440
+        }
+      ],
+      "button" : [
+        {
+          "h" : 32,
+          "w" : 32,
+          "x" : 740,
+          "y" : 520
+        }
+      ],
+      "main" : [
+        {
+          "h" : 600,
+          "w" : 560,
+          "x" : 240,
+          "y" : 0
+        }
+      ],
+      "markers" : [
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 100
+        },
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 140
+        },
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 180
+        }
+      ],
+      "sidebar" : [
+        {
+          "h" : 600,
+          "w" : 240,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "tail" : [
+        {
+          "h" : 240,
+          "w" : 560,
+          "x" : 240,
+          "y" : 200
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 1,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"generic-chat\",\"ids\":[],\"name\":\"聊天类通用\",\"regions\":{\"bottom\":{\"box\":{\"bottom\":0,\"height\":160,\"in\":\"main\"}},\"button\":{\"blob\":{\"in\":\"bottom\",\"pick\":\"rightmost\",\"round\":true,\"size\":[24,48]}},\"main\":{\"box\":{\"bottom\":0,\"right\":0,\"rightOf\":\"sidebar\",\"top\":0}},\"markers\":{\"blob\":{\"in\":{\"strip\":{\"of\":\"sidebar\",\"side\":\"right\",\"width\":40}},\"pick\":\"all\",\"size\":[6,20]}},\"sidebar\":{\"edge\":{\"from\":\"left\",\"max\":420,\"min\":160}},\"tail\":{\"box\":{\"above\":\"bottom\",\"height\":240,\"in\":\"main\"}}},\"require\":[\"bottom\"],\"rev\":1,\"signals\":{\"rowBusy\":{\"count\":true,\"detect\":{\"motion\":{\"window\":0.40000000000000002}},\"in\":\"markers\",\"status\":\"untested\"},\"stop\":{\"detect\":{\"shape\":\"square\"},\"in\":\"button\",\"status\":\"untested\"}},\"states\":[{\"hold\":0.59999999999999998,\"release\":2,\"state\":\"working\",\"when\":{\"any\":[\"stop\",\"rowBusy\"]}},{\"state\":\"idle\"}],\"updated\":\"2026-11-25\"}"
+    },
+    "name" : "resolve generic no sidebar",
+    "out" : {
+      "bottom" : [
+        {
+          "h" : 160,
+          "w" : 800,
+          "x" : 0,
+          "y" : 440
+        }
+      ],
+      "button" : [
+        {
+          "h" : 32,
+          "w" : 32,
+          "x" : 740,
+          "y" : 520
+        }
+      ],
+      "main" : [
+        {
+          "h" : 600,
+          "w" : 800,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "tail" : [
+        {
+          "h" : 240,
+          "w" : 800,
+          "x" : 0,
+          "y" : 200
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 2,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"generic-chat\",\"ids\":[],\"name\":\"聊天类通用\",\"regions\":{\"bottom\":{\"box\":{\"bottom\":0,\"height\":160,\"in\":\"main\"}},\"button\":{\"blob\":{\"in\":\"bottom\",\"pick\":\"rightmost\",\"round\":true,\"size\":[24,48]}},\"main\":{\"box\":{\"bottom\":0,\"right\":0,\"rightOf\":\"sidebar\",\"top\":0}},\"markers\":{\"blob\":{\"in\":{\"strip\":{\"of\":\"sidebar\",\"side\":\"right\",\"width\":40}},\"pick\":\"all\",\"size\":[6,20]}},\"sidebar\":{\"edge\":{\"from\":\"left\",\"max\":420,\"min\":160}},\"tail\":{\"box\":{\"above\":\"bottom\",\"height\":240,\"in\":\"main\"}}},\"require\":[\"bottom\"],\"rev\":1,\"signals\":{\"rowBusy\":{\"count\":true,\"detect\":{\"motion\":{\"window\":0.40000000000000002}},\"in\":\"markers\",\"status\":\"untested\"},\"stop\":{\"detect\":{\"shape\":\"square\"},\"in\":\"button\",\"status\":\"untested\"}},\"states\":[{\"hold\":0.59999999999999998,\"release\":2,\"state\":\"working\",\"when\":{\"any\":[\"stop\",\"rowBusy\"]}},{\"state\":\"idle\"}],\"updated\":\"2026-11-25\"}"
+    },
+    "name" : "resolve generic dark narrow",
+    "out" : {
+      "bottom" : [
+        {
+          "h" : 160,
+          "w" : 160,
+          "x" : 240,
+          "y" : 440
+        }
+      ],
+      "button" : [
+        {
+          "h" : 32,
+          "w" : 32,
+          "x" : 340,
+          "y" : 520
+        }
+      ],
+      "main" : [
+        {
+          "h" : 600,
+          "w" : 160,
+          "x" : 240,
+          "y" : 0
+        }
+      ],
+      "markers" : [
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 100
+        },
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 140
+        },
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 180
+        }
+      ],
+      "sidebar" : [
+        {
+          "h" : 600,
+          "w" : 240,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "tail" : [
+        {
+          "h" : 240,
+          "w" : 160,
+          "x" : 240,
+          "y" : 200
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 3,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"generic-chat\",\"ids\":[],\"name\":\"聊天类通用\",\"regions\":{\"bottom\":{\"box\":{\"bottom\":0,\"height\":160,\"in\":\"main\"}},\"button\":{\"blob\":{\"in\":\"bottom\",\"pick\":\"rightmost\",\"round\":true,\"size\":[24,48]}},\"main\":{\"box\":{\"bottom\":0,\"right\":0,\"rightOf\":\"sidebar\",\"top\":0}},\"markers\":{\"blob\":{\"in\":{\"strip\":{\"of\":\"sidebar\",\"side\":\"right\",\"width\":40}},\"pick\":\"all\",\"size\":[6,20]}},\"sidebar\":{\"edge\":{\"from\":\"left\",\"max\":420,\"min\":160}},\"tail\":{\"box\":{\"above\":\"bottom\",\"height\":240,\"in\":\"main\"}}},\"require\":[\"bottom\"],\"rev\":1,\"signals\":{\"rowBusy\":{\"count\":true,\"detect\":{\"motion\":{\"window\":0.40000000000000002}},\"in\":\"markers\",\"status\":\"untested\"},\"stop\":{\"detect\":{\"shape\":\"square\"},\"in\":\"button\",\"status\":\"untested\"}},\"states\":[{\"hold\":0.59999999999999998,\"release\":2,\"state\":\"working\",\"when\":{\"any\":[\"stop\",\"rowBusy\"]}},{\"state\":\"idle\"}],\"updated\":\"2026-11-25\"}"
+    },
+    "name" : "resolve generic 1600x1000",
+    "out" : {
+      "bottom" : [
+        {
+          "h" : 160,
+          "w" : 1360,
+          "x" : 240,
+          "y" : 840
+        }
+      ],
+      "main" : [
+        {
+          "h" : 1000,
+          "w" : 1360,
+          "x" : 240,
+          "y" : 0
+        }
+      ],
+      "markers" : [
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 100
+        },
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 140
+        },
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 180
+        }
+      ],
+      "sidebar" : [
+        {
+          "h" : 1000,
+          "w" : 240,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "tail" : [
+        {
+          "h" : 240,
+          "w" : 1360,
+          "x" : 240,
+          "y" : 600
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 4,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"generic-chat\",\"ids\":[],\"name\":\"聊天类通用\",\"regions\":{\"bottom\":{\"box\":{\"bottom\":0,\"height\":160,\"in\":\"main\"}},\"button\":{\"blob\":{\"in\":\"bottom\",\"pick\":\"rightmost\",\"round\":true,\"size\":[24,48]}},\"main\":{\"box\":{\"bottom\":0,\"right\":0,\"rightOf\":\"sidebar\",\"top\":0}},\"markers\":{\"blob\":{\"in\":{\"strip\":{\"of\":\"sidebar\",\"side\":\"right\",\"width\":40}},\"pick\":\"all\",\"size\":[6,20]}},\"sidebar\":{\"edge\":{\"from\":\"left\",\"max\":420,\"min\":160}},\"tail\":{\"box\":{\"above\":\"bottom\",\"height\":240,\"in\":\"main\"}}},\"require\":[\"bottom\"],\"rev\":1,\"signals\":{\"rowBusy\":{\"count\":true,\"detect\":{\"motion\":{\"window\":0.40000000000000002}},\"in\":\"markers\",\"status\":\"untested\"},\"stop\":{\"detect\":{\"shape\":\"square\"},\"in\":\"button\",\"status\":\"untested\"}},\"states\":[{\"hold\":0.59999999999999998,\"release\":2,\"state\":\"working\",\"when\":{\"any\":[\"stop\",\"rowBusy\"]}},{\"state\":\"idle\"}],\"updated\":\"2026-11-25\"}"
+    },
+    "name" : "resolve generic dots",
+    "out" : {
+      "bottom" : [
+        {
+          "h" : 160,
+          "w" : 560,
+          "x" : 240,
+          "y" : 440
+        }
+      ],
+      "button" : [
+        {
+          "h" : 32,
+          "w" : 32,
+          "x" : 740,
+          "y" : 520
+        }
+      ],
+      "main" : [
+        {
+          "h" : 600,
+          "w" : 560,
+          "x" : 240,
+          "y" : 0
+        }
+      ],
+      "markers" : [
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 100
+        },
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 140
+        },
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 180
+        }
+      ],
+      "sidebar" : [
+        {
+          "h" : 600,
+          "w" : 240,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "tail" : [
+        {
+          "h" : 240,
+          "w" : 560,
+          "x" : 240,
+          "y" : 200
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 5,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"generic-chat\",\"ids\":[],\"name\":\"聊天类通用\",\"regions\":{\"bottom\":{\"box\":{\"bottom\":0,\"height\":160,\"in\":\"main\"}},\"button\":{\"blob\":{\"in\":\"bottom\",\"pick\":\"rightmost\",\"round\":true,\"size\":[24,48]}},\"main\":{\"box\":{\"bottom\":0,\"right\":0,\"rightOf\":\"sidebar\",\"top\":0}},\"markers\":{\"blob\":{\"in\":{\"strip\":{\"of\":\"sidebar\",\"side\":\"right\",\"width\":40}},\"pick\":\"all\",\"size\":[6,20]}},\"sidebar\":{\"edge\":{\"from\":\"left\",\"max\":420,\"min\":160}},\"tail\":{\"box\":{\"above\":\"bottom\",\"height\":240,\"in\":\"main\"}}},\"require\":[\"bottom\"],\"rev\":1,\"signals\":{\"rowBusy\":{\"count\":true,\"detect\":{\"motion\":{\"window\":0.40000000000000002}},\"in\":\"markers\",\"status\":\"untested\"},\"stop\":{\"detect\":{\"shape\":\"square\"},\"in\":\"button\",\"status\":\"untested\"}},\"states\":[{\"hold\":0.59999999999999998,\"release\":2,\"state\":\"working\",\"when\":{\"any\":[\"stop\",\"rowBusy\"]}},{\"state\":\"idle\"}],\"updated\":\"2026-11-25\"}"
+    },
+    "name" : "resolve generic no dots",
+    "out" : {
+      "bottom" : [
+        {
+          "h" : 160,
+          "w" : 560,
+          "x" : 240,
+          "y" : 440
+        }
+      ],
+      "button" : [
+        {
+          "h" : 32,
+          "w" : 32,
+          "x" : 740,
+          "y" : 520
+        }
+      ],
+      "main" : [
+        {
+          "h" : 600,
+          "w" : 560,
+          "x" : 240,
+          "y" : 0
+        }
+      ],
+      "sidebar" : [
+        {
+          "h" : 600,
+          "w" : 240,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "tail" : [
+        {
+          "h" : 240,
+          "w" : 560,
+          "x" : 240,
+          "y" : 200
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 6,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"generic-chat\",\"ids\":[],\"name\":\"聊天类通用\",\"regions\":{\"bottom\":{\"box\":{\"bottom\":0,\"height\":160,\"in\":\"main\"}},\"button\":{\"blob\":{\"in\":\"bottom\",\"pick\":\"rightmost\",\"round\":true,\"size\":[24,48]}},\"main\":{\"box\":{\"bottom\":0,\"right\":0,\"rightOf\":\"sidebar\",\"top\":0}},\"markers\":{\"blob\":{\"in\":{\"strip\":{\"of\":\"sidebar\",\"side\":\"right\",\"width\":40}},\"pick\":\"all\",\"size\":[6,20]}},\"sidebar\":{\"edge\":{\"from\":\"left\",\"max\":420,\"min\":160}},\"tail\":{\"box\":{\"above\":\"bottom\",\"height\":240,\"in\":\"main\"}}},\"require\":[\"bottom\"],\"rev\":1,\"signals\":{\"rowBusy\":{\"count\":true,\"detect\":{\"motion\":{\"window\":0.40000000000000002}},\"in\":\"markers\",\"status\":\"untested\"},\"stop\":{\"detect\":{\"shape\":\"square\"},\"in\":\"button\",\"status\":\"untested\"}},\"states\":[{\"hold\":0.59999999999999998,\"release\":2,\"state\":\"working\",\"when\":{\"any\":[\"stop\",\"rowBusy\"]}},{\"state\":\"idle\"}],\"updated\":\"2026-11-25\"}"
+    },
+    "name" : "resolve generic tail text",
+    "out" : {
+      "bottom" : [
+        {
+          "h" : 160,
+          "w" : 560,
+          "x" : 240,
+          "y" : 440
+        }
+      ],
+      "button" : [
+        {
+          "h" : 32,
+          "w" : 32,
+          "x" : 740,
+          "y" : 520
+        }
+      ],
+      "main" : [
+        {
+          "h" : 600,
+          "w" : 560,
+          "x" : 240,
+          "y" : 0
+        }
+      ],
+      "sidebar" : [
+        {
+          "h" : 600,
+          "w" : 240,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "tail" : [
+        {
+          "h" : 240,
+          "w" : 560,
+          "x" : 240,
+          "y" : 200
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 7,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"generic-chat\",\"ids\":[],\"name\":\"聊天类通用\",\"regions\":{\"bottom\":{\"box\":{\"bottom\":0,\"height\":160,\"in\":\"main\"}},\"button\":{\"blob\":{\"in\":\"bottom\",\"pick\":\"rightmost\",\"round\":true,\"size\":[24,48]}},\"main\":{\"box\":{\"bottom\":0,\"right\":0,\"rightOf\":\"sidebar\",\"top\":0}},\"markers\":{\"blob\":{\"in\":{\"strip\":{\"of\":\"sidebar\",\"side\":\"right\",\"width\":40}},\"pick\":\"all\",\"size\":[6,20]}},\"sidebar\":{\"edge\":{\"from\":\"left\",\"max\":420,\"min\":160}},\"tail\":{\"box\":{\"above\":\"bottom\",\"height\":240,\"in\":\"main\"}}},\"require\":[\"bottom\"],\"rev\":1,\"signals\":{\"rowBusy\":{\"count\":true,\"detect\":{\"motion\":{\"window\":0.40000000000000002}},\"in\":\"markers\",\"status\":\"untested\"},\"stop\":{\"detect\":{\"shape\":\"square\"},\"in\":\"button\",\"status\":\"untested\"}},\"states\":[{\"hold\":0.59999999999999998,\"release\":2,\"state\":\"working\",\"when\":{\"any\":[\"stop\",\"rowBusy\"]}},{\"state\":\"idle\"}],\"updated\":\"2026-11-25\"}"
+    },
+    "name" : "resolve generic arrow",
+    "out" : {
+      "bottom" : [
+        {
+          "h" : 160,
+          "w" : 560,
+          "x" : 240,
+          "y" : 440
+        }
+      ],
+      "button" : [
+        {
+          "h" : 32,
+          "w" : 32,
+          "x" : 740,
+          "y" : 520
+        }
+      ],
+      "main" : [
+        {
+          "h" : 600,
+          "w" : 560,
+          "x" : 240,
+          "y" : 0
+        }
+      ],
+      "markers" : [
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 100
+        },
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 140
+        },
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 180
+        }
+      ],
+      "sidebar" : [
+        {
+          "h" : 600,
+          "w" : 240,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "tail" : [
+        {
+          "h" : 240,
+          "w" : 560,
+          "x" : 240,
+          "y" : 200
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 8,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"generic-chat\",\"ids\":[],\"name\":\"聊天类通用\",\"regions\":{\"bottom\":{\"box\":{\"bottom\":0,\"height\":160,\"in\":\"main\"}},\"button\":{\"blob\":{\"in\":\"bottom\",\"pick\":\"rightmost\",\"round\":true,\"size\":[24,48]}},\"main\":{\"box\":{\"bottom\":0,\"right\":0,\"rightOf\":\"sidebar\",\"top\":0}},\"markers\":{\"blob\":{\"in\":{\"strip\":{\"of\":\"sidebar\",\"side\":\"right\",\"width\":40}},\"pick\":\"all\",\"size\":[6,20]}},\"sidebar\":{\"edge\":{\"from\":\"left\",\"max\":420,\"min\":160}},\"tail\":{\"box\":{\"above\":\"bottom\",\"height\":240,\"in\":\"main\"}}},\"require\":[\"bottom\"],\"rev\":1,\"signals\":{\"rowBusy\":{\"count\":true,\"detect\":{\"motion\":{\"window\":0.40000000000000002}},\"in\":\"markers\",\"status\":\"untested\"},\"stop\":{\"detect\":{\"shape\":\"square\"},\"in\":\"button\",\"status\":\"untested\"}},\"states\":[{\"hold\":0.59999999999999998,\"release\":2,\"state\":\"working\",\"when\":{\"any\":[\"stop\",\"rowBusy\"]}},{\"state\":\"idle\"}],\"updated\":\"2026-11-25\"}"
+    },
+    "name" : "resolve generic no button",
+    "out" : {
+      "bottom" : [
+        {
+          "h" : 160,
+          "w" : 560,
+          "x" : 240,
+          "y" : 440
+        }
+      ],
+      "button" : [
+        {
+          "h" : 32,
+          "w" : 32,
+          "x" : 740,
+          "y" : 520
+        }
+      ],
+      "main" : [
+        {
+          "h" : 600,
+          "w" : 560,
+          "x" : 240,
+          "y" : 0
+        }
+      ],
+      "markers" : [
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 100
+        },
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 140
+        },
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 180
+        }
+      ],
+      "sidebar" : [
+        {
+          "h" : 600,
+          "w" : 240,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "tail" : [
+        {
+          "h" : 240,
+          "w" : 560,
+          "x" : 240,
+          "y" : 200
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 9,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"generic-chat\",\"ids\":[],\"name\":\"聊天类通用\",\"regions\":{\"bottom\":{\"box\":{\"bottom\":0,\"height\":160,\"in\":\"main\"}},\"button\":{\"blob\":{\"in\":\"bottom\",\"pick\":\"rightmost\",\"round\":true,\"size\":[24,48]}},\"main\":{\"box\":{\"bottom\":0,\"right\":0,\"rightOf\":\"sidebar\",\"top\":0}},\"markers\":{\"blob\":{\"in\":{\"strip\":{\"of\":\"sidebar\",\"side\":\"right\",\"width\":40}},\"pick\":\"all\",\"size\":[6,20]}},\"sidebar\":{\"edge\":{\"from\":\"left\",\"max\":420,\"min\":160}},\"tail\":{\"box\":{\"above\":\"bottom\",\"height\":240,\"in\":\"main\"}}},\"require\":[\"bottom\"],\"rev\":1,\"signals\":{\"rowBusy\":{\"count\":true,\"detect\":{\"motion\":{\"window\":0.40000000000000002}},\"in\":\"markers\",\"status\":\"untested\"},\"stop\":{\"detect\":{\"shape\":\"square\"},\"in\":\"button\",\"status\":\"untested\"}},\"states\":[{\"hold\":0.59999999999999998,\"release\":2,\"state\":\"working\",\"when\":{\"any\":[\"stop\",\"rowBusy\"]}},{\"state\":\"idle\"}],\"updated\":\"2026-11-25\"}"
+    },
+    "name" : "resolve generic dark spinner",
+    "out" : {
+      "bottom" : [
+        {
+          "h" : 160,
+          "w" : 560,
+          "x" : 240,
+          "y" : 440
+        }
+      ],
+      "button" : [
+        {
+          "h" : 32,
+          "w" : 32,
+          "x" : 740,
+          "y" : 520
+        }
+      ],
+      "main" : [
+        {
+          "h" : 600,
+          "w" : 560,
+          "x" : 240,
+          "y" : 0
+        }
+      ],
+      "markers" : [
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 100
+        },
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 140
+        },
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 180
+        }
+      ],
+      "sidebar" : [
+        {
+          "h" : 600,
+          "w" : 240,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "tail" : [
+        {
+          "h" : 240,
+          "w" : 560,
+          "x" : 240,
+          "y" : 200
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 10,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"generic-chat\",\"ids\":[],\"name\":\"聊天类通用\",\"regions\":{\"bottom\":{\"box\":{\"bottom\":0,\"height\":160,\"in\":\"main\"}},\"button\":{\"blob\":{\"in\":\"bottom\",\"pick\":\"rightmost\",\"round\":true,\"size\":[24,48]}},\"main\":{\"box\":{\"bottom\":0,\"right\":0,\"rightOf\":\"sidebar\",\"top\":0}},\"markers\":{\"blob\":{\"in\":{\"strip\":{\"of\":\"sidebar\",\"side\":\"right\",\"width\":40}},\"pick\":\"all\",\"size\":[6,20]}},\"sidebar\":{\"edge\":{\"from\":\"left\",\"max\":420,\"min\":160}},\"tail\":{\"box\":{\"above\":\"bottom\",\"height\":240,\"in\":\"main\"}}},\"require\":[\"bottom\"],\"rev\":1,\"signals\":{\"rowBusy\":{\"count\":true,\"detect\":{\"motion\":{\"window\":0.40000000000000002}},\"in\":\"markers\",\"status\":\"untested\"},\"stop\":{\"detect\":{\"shape\":\"square\"},\"in\":\"button\",\"status\":\"untested\"}},\"states\":[{\"hold\":0.59999999999999998,\"release\":2,\"state\":\"working\",\"when\":{\"any\":[\"stop\",\"rowBusy\"]}},{\"state\":\"idle\"}],\"updated\":\"2026-11-25\"}"
+    },
+    "name" : "resolve generic small",
+    "out" : {
+      "bottom" : [
+        {
+          "h" : 160,
+          "w" : 120,
+          "x" : 240,
+          "y" : 400
+        }
+      ],
+      "button" : [
+        {
+          "h" : 32,
+          "w" : 32,
+          "x" : 300,
+          "y" : 520
+        }
+      ],
+      "main" : [
+        {
+          "h" : 560,
+          "w" : 120,
+          "x" : 240,
+          "y" : 0
+        }
+      ],
+      "markers" : [
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 100
+        },
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 140
+        },
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 180
+        }
+      ],
+      "sidebar" : [
+        {
+          "h" : 560,
+          "w" : 240,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "tail" : [
+        {
+          "h" : 240,
+          "w" : 120,
+          "x" : 240,
+          "y" : 160
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 4,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"claude-desktop\",\"ids\":[\"com.anthropic.claudefordesktop\"],\"name\":\"Claude\",\"regions\":{\"bottom\":{\"box\":{\"bottom\":0,\"height\":160,\"in\":\"main\"}},\"button\":{\"blob\":{\"in\":\"bottom\",\"pick\":\"rightmost\",\"round\":true,\"size\":[24,48]}},\"main\":{\"box\":{\"bottom\":0,\"right\":0,\"rightOf\":\"sidebar\",\"top\":0}},\"markers\":{\"blob\":{\"in\":{\"strip\":{\"of\":\"sidebar\",\"side\":\"right\",\"width\":40}},\"pick\":\"all\",\"size\":[6,20]}},\"sidebar\":{\"edge\":{\"from\":\"left\",\"max\":420,\"min\":160}},\"tail\":{\"box\":{\"above\":\"bottom\",\"height\":240,\"in\":\"main\"}}},\"require\":[\"bottom\"],\"rev\":1,\"signals\":{\"ask\":{\"detect\":{\"text\":[\"Allow\",\"Deny\",\"允许\",\"拒绝\"]},\"in\":\"tail\",\"needs\":[\"text\"],\"status\":\"untested\"},\"rowBusy\":{\"count\":true,\"detect\":{\"motion\":{\"window\":0.40000000000000002}},\"in\":\"markers\",\"status\":\"untested\"},\"rowDot\":{\"count\":true,\"detect\":{\"color\":\"green\",\"shape\":\"dot\"},\"in\":\"markers\",\"status\":\"reported\"},\"rowGray\":{\"count\":true,\"detect\":{\"color\":\"gray\",\"shape\":\"dot\"},\"in\":\"markers\",\"status\":\"reported\"},\"stop\":{\"detect\":{\"shape\":\"square\"},\"in\":\"button\",\"status\":\"seen\"}},\"states\":[{\"kind\":\"permission\",\"state\":\"blocked\",\"when\":{\"any\":[\"ask\"]}},{\"hold\":0.59999999999999998,\"release\":2,\"state\":\"working\",\"when\":{\"any\":[\"stop\",\"rowBusy\",\"rowGray\"]}},{\"state\":\"done\",\"when\":{\"any\":[\"rowDot\"]}},{\"state\":\"idle\"}],\"updated\":\"2026-11-25\"}"
+    },
+    "name" : "resolve claude dots",
+    "out" : {
+      "bottom" : [
+        {
+          "h" : 160,
+          "w" : 560,
+          "x" : 240,
+          "y" : 440
+        }
+      ],
+      "button" : [
+        {
+          "h" : 32,
+          "w" : 32,
+          "x" : 740,
+          "y" : 520
+        }
+      ],
+      "main" : [
+        {
+          "h" : 600,
+          "w" : 560,
+          "x" : 240,
+          "y" : 0
+        }
+      ],
+      "markers" : [
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 100
+        },
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 140
+        },
+        {
+          "h" : 12,
+          "w" : 12,
+          "x" : 210,
+          "y" : 180
+        }
+      ],
+      "sidebar" : [
+        {
+          "h" : 600,
+          "w" : 240,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "tail" : [
+        {
+          "h" : 240,
+          "w" : 560,
+          "x" : 240,
+          "y" : 200
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 11,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"generic-chat\",\"ids\":[],\"name\":\"聊天类通用\",\"regions\":{\"bottom\":{\"box\":{\"bottom\":0,\"height\":160,\"in\":\"main\"}},\"button\":{\"blob\":{\"in\":\"bottom\",\"pick\":\"rightmost\",\"round\":true,\"size\":[24,48]}},\"main\":{\"box\":{\"bottom\":0,\"right\":0,\"rightOf\":\"sidebar\",\"top\":0}},\"markers\":{\"blob\":{\"in\":{\"strip\":{\"of\":\"sidebar\",\"side\":\"right\",\"width\":40}},\"pick\":\"all\",\"size\":[6,20]}},\"sidebar\":{\"edge\":{\"from\":\"left\",\"max\":420,\"min\":160}},\"tail\":{\"box\":{\"above\":\"bottom\",\"height\":240,\"in\":\"main\"}}},\"require\":[\"bottom\"],\"rev\":1,\"signals\":{\"rowBusy\":{\"count\":true,\"detect\":{\"motion\":{\"window\":0.40000000000000002}},\"in\":\"markers\",\"status\":\"untested\"},\"stop\":{\"detect\":{\"shape\":\"square\"},\"in\":\"button\",\"status\":\"untested\"}},\"states\":[{\"hold\":0.59999999999999998,\"release\":2,\"state\":\"working\",\"when\":{\"any\":[\"stop\",\"rowBusy\"]}},{\"state\":\"idle\"}],\"updated\":\"2026-11-25\"}"
+    },
+    "name" : "resolve generic solid",
+    "out" : {
+      "bottom" : [
+        {
+          "h" : 160,
+          "w" : 400,
+          "x" : 0,
+          "y" : 140
+        }
+      ],
+      "main" : [
+        {
+          "h" : 300,
+          "w" : 400,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "tail" : [
+        {
+          "h" : 140,
+          "w" : 400,
+          "x" : 0,
+          "y" : 0
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 11,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"t\",\"regions\":{\"a\":{\"box\":{\"left\":\"25%\",\"width\":\"50%\"}},\n \"b\":{\"box\":{\"left\":10,\"right\":10,\"top\":10,\"bottom\":10}},\n \"c\":{\"box\":{\"in\":\"b\",\"bottom\":0,\"height\":100}},\n \"d\":{\"box\":{\"in\":\"b\",\"above\":\"c\",\"height\":50}},\n \"e\":{\"box\":{\"in\":\"nowhere\"}},\n \"f\":{\"box\":{\"in\":\"d\"}},\n \"loop1\":{\"box\":{\"in\":\"loop2\"}},\"loop2\":{\"box\":{\"in\":\"loop1\"}}}}"
+    },
+    "name" : "resolve box lengths and anchors",
+    "out" : {
+      "a" : [
+        {
+          "h" : 300,
+          "w" : 200,
+          "x" : 100,
+          "y" : 0
+        }
+      ],
+      "b" : [
+        {
+          "h" : 280,
+          "w" : 380,
+          "x" : 10,
+          "y" : 10
+        }
+      ],
+      "c" : [
+        {
+          "h" : 100,
+          "w" : 380,
+          "x" : 10,
+          "y" : 190
+        }
+      ],
+      "d" : [
+        {
+          "h" : 50,
+          "w" : 380,
+          "x" : 10,
+          "y" : 140
+        }
+      ],
+      "f" : [
+        {
+          "h" : 50,
+          "w" : 380,
+          "x" : 10,
+          "y" : 140
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 12,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"t\",\"regions\":{\"l\":{\"edge\":{\"from\":\"left\",\"min\":10,\"max\":300}},\n \"r\":{\"edge\":{\"from\":\"right\",\"min\":10,\"max\":300}},\n \"b\":{\"edge\":{\"from\":\"bottom\",\"min\":0,\"max\":200}},\n \"t\":{\"edge\":{\"from\":\"top\",\"min\":0,\"max\":200}},\n \"none\":{\"edge\":{\"from\":\"left\",\"min\":150,\"max\":300}},\n \"inverted\":{\"edge\":{\"from\":\"left\",\"min\":300,\"max\":10}}}}"
+    },
+    "name" : "resolve edge from every direction",
+    "out" : {
+      "b" : [
+        {
+          "h" : 50,
+          "w" : 400,
+          "x" : 0,
+          "y" : 250
+        }
+      ],
+      "l" : [
+        {
+          "h" : 300,
+          "w" : 100,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "r" : [
+        {
+          "h" : 300,
+          "w" : 50,
+          "x" : 350,
+          "y" : 0
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 13,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"t\",\"regions\":{\"all\":{\"blob\":{\"in\":{\"box\":{}},\"size\":[5,50],\"pick\":\"all\"}},\n \"right\":{\"blob\":{\"in\":{\"box\":{}},\"size\":[5,50],\"pick\":\"rightmost\"}},\n \"left\":{\"blob\":{\"in\":{\"box\":{}},\"size\":[5,50],\"pick\":\"leftmost\"}},\n \"top\":{\"blob\":{\"in\":{\"box\":{}},\"size\":[5,50],\"pick\":\"topmost\"}},\n \"bottom\":{\"blob\":{\"in\":{\"box\":{}},\"size\":[5,50],\"pick\":\"bottommost\"}},\n \"big\":{\"blob\":{\"in\":{\"box\":{}},\"size\":[5,50],\"pick\":\"largest\"}},\n \"round\":{\"blob\":{\"in\":{\"box\":{}},\"round\":true,\"size\":[5,50],\"pick\":\"all\"}},\n \"huge\":{\"blob\":{\"in\":{\"box\":{}},\"size\":[60,90]}}}}"
+    },
+    "name" : "resolve blob picks",
+    "out" : {
+      "all" : [
+        {
+          "h" : 20,
+          "w" : 20,
+          "x" : 10,
+          "y" : 10
+        },
+        {
+          "h" : 24,
+          "w" : 24,
+          "x" : 60,
+          "y" : 40
+        },
+        {
+          "h" : 10,
+          "w" : 40,
+          "x" : 120,
+          "y" : 60
+        }
+      ],
+      "big" : [
+        {
+          "h" : 24,
+          "w" : 24,
+          "x" : 60,
+          "y" : 40
+        }
+      ],
+      "bottom" : [
+        {
+          "h" : 10,
+          "w" : 40,
+          "x" : 120,
+          "y" : 60
+        }
+      ],
+      "left" : [
+        {
+          "h" : 20,
+          "w" : 20,
+          "x" : 10,
+          "y" : 10
+        }
+      ],
+      "right" : [
+        {
+          "h" : 10,
+          "w" : 40,
+          "x" : 120,
+          "y" : 60
+        }
+      ],
+      "round" : [
+        {
+          "h" : 20,
+          "w" : 20,
+          "x" : 10,
+          "y" : 10
+        },
+        {
+          "h" : 24,
+          "w" : 24,
+          "x" : 60,
+          "y" : 40
+        }
+      ],
+      "top" : [
+        {
+          "h" : 20,
+          "w" : 20,
+          "x" : 10,
+          "y" : 10
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 11,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"t\",\"regions\":{\"a\":{\"box\":{\"left\":100,\"width\":200}},\n \"right\":{\"strip\":{\"of\":\"a\",\"side\":\"right\",\"width\":40}},\n \"left\":{\"strip\":{\"of\":\"a\",\"side\":\"left\",\"width\":40}},\n \"top\":{\"strip\":{\"of\":\"a\",\"side\":\"top\",\"width\":10}},\n \"bottom\":{\"strip\":{\"of\":\"a\",\"side\":\"bottom\",\"width\":10}},\n \"wide\":{\"strip\":{\"of\":\"a\",\"side\":\"left\",\"width\":999}}}}"
+    },
+    "name" : "resolve strip of a region",
+    "out" : {
+      "a" : [
+        {
+          "h" : 300,
+          "w" : 200,
+          "x" : 100,
+          "y" : 0
+        }
+      ],
+      "bottom" : [
+        {
+          "h" : 10,
+          "w" : 200,
+          "x" : 100,
+          "y" : 290
+        }
+      ],
+      "left" : [
+        {
+          "h" : 300,
+          "w" : 40,
+          "x" : 100,
+          "y" : 0
+        }
+      ],
+      "right" : [
+        {
+          "h" : 300,
+          "w" : 40,
+          "x" : 260,
+          "y" : 0
+        }
+      ],
+      "top" : [
+        {
+          "h" : 10,
+          "w" : 200,
+          "x" : 100,
+          "y" : 0
+        }
+      ],
+      "wide" : [
+        {
+          "h" : 300,
+          "w" : 200,
+          "x" : 100,
+          "y" : 0
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 14,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"t\",\"regions\":{\"a\":{\"box\":{\"left\":1e308,\"width\":1e308}},\n \"b\":{\"box\":{\"left\":-1e308,\"right\":-1e308}},\n \"c\":{\"box\":{\"top\":-1e308,\"height\":1e308}},\n \"d\":{\"box\":{\"left\":\"1e308%\",\"width\":\"-1e308%\"}},\n \"e\":{\"box\":{\"left\":50,\"right\":400}},\n \"f\":{\"edge\":{\"from\":\"left\",\"min\":1e308,\"max\":1e308}},\n \"g\":{\"edge\":{\"from\":\"top\",\"min\":-1e308,\"max\":1e308}},\n \"h\":{\"edge\":{\"from\":\"left\",\"min\":50,\"max\":10}},\n \"i\":{\"strip\":{\"of\":{\"box\":{}},\"side\":\"left\",\"width\":1e308}},\n \"j\":{\"strip\":{\"of\":{\"box\":{}},\"side\":\"left\",\"width\":-5}},\n \"k\":{\"blob\":{\"in\":\"a\",\"size\":[-1e308,1e308]}}}}"
+    },
+    "name" : "resolve absurd numbers",
+    "out" : {
+      "b" : [
+        {
+          "h" : 100,
+          "w" : 100,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "i" : [
+        {
+          "h" : 100,
+          "w" : 100,
+          "x" : 0,
+          "y" : 0
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 14,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"t\",\"regions\":{\"a\":{\"box\":{\"rightOf\":\"b\"}},\"b\":{\"box\":{\"rightOf\":\"a\"}},\"ok\":{\"box\":{\"left\":10,\"width\":20}}}}"
+    },
+    "name" : "resolve cycle 0",
+    "out" : {
+      "ok" : [
+        {
+          "h" : 100,
+          "w" : 20,
+          "x" : 10,
+          "y" : 0
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 14,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"t\",\"regions\":{\"b\":{\"box\":{\"rightOf\":\"a\"}},\"a\":{\"box\":{\"rightOf\":\"b\"}},\"0dep\":{\"box\":{\"rightOf\":\"a\"}},\"ok\":{\"box\":{\"left\":10,\"width\":20}}}}"
+    },
+    "name" : "resolve cycle 1",
+    "out" : {
+      "ok" : [
+        {
+          "h" : 100,
+          "w" : 20,
+          "x" : 10,
+          "y" : 0
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 14,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"t\",\"regions\":{\"x\":{\"box\":{\"rightOf\":\"z\"}},\"y\":{\"box\":{\"below\":\"x\"}},\"z\":{\"box\":{\"leftOf\":\"y\"}},\"ok\":{\"box\":{\"left\":10,\"width\":20}}}}"
+    },
+    "name" : "resolve cycle 2",
+    "out" : {
+      "ok" : [
+        {
+          "h" : 100,
+          "w" : 20,
+          "x" : 10,
+          "y" : 0
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 14,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"t\",\"regions\":{\"z\":{\"box\":{\"rightOf\":\"y\"}},\"y\":{\"box\":{\"below\":\"x\"}},\"x\":{\"box\":{\"leftOf\":\"z\"}},\"0in\":{\"box\":{\"in\":\"y\"}},\"ok\":{\"box\":{\"left\":10,\"width\":20}}}}"
+    },
+    "name" : "resolve cycle 3",
+    "out" : {
+      "ok" : [
+        {
+          "h" : 100,
+          "w" : 20,
+          "x" : 10,
+          "y" : 0
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "fn" : "resolve",
+      "image" : 11,
+      "pack" : "{\"format\":\"1.0\",\"id\":\"t\",\"regions\":{\"l\":{\"box\":{\"width\":100}},\"r\":{\"box\":{\"left\":300}},\n \"mid\":{\"box\":{\"rightOf\":\"l\",\"leftOf\":\"r\"}},\"top\":{\"box\":{\"height\":50}},\n \"under\":{\"box\":{\"below\":\"top\",\"above\":\"foot\"}},\"foot\":{\"box\":{\"bottom\":0,\"height\":40}},\n \"inline\":{\"box\":{\"in\":{\"box\":{\"left\":\"10%\",\"right\":\"10%\"}},\"top\":\"50%\"}}}}"
+    },
+    "name" : "resolve relations both sides",
+    "out" : {
+      "foot" : [
+        {
+          "h" : 40,
+          "w" : 400,
+          "x" : 0,
+          "y" : 260
+        }
+      ],
+      "inline" : [
+        {
+          "h" : 150,
+          "w" : 320,
+          "x" : 40,
+          "y" : 150
+        }
+      ],
+      "l" : [
+        {
+          "h" : 300,
+          "w" : 100,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "mid" : [
+        {
+          "h" : 300,
+          "w" : 200,
+          "x" : 100,
+          "y" : 0
+        }
+      ],
+      "r" : [
+        {
+          "h" : 300,
+          "w" : 100,
+          "x" : 300,
+          "y" : 0
+        }
+      ],
+      "top" : [
+        {
+          "h" : 50,
+          "w" : 400,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "under" : [
+        {
+          "h" : 210,
+          "w" : 400,
+          "x" : 0,
+          "y" : 50
+        }
+      ]
+    }
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 16,
+      "crop" : {
+        "h" : 2,
+        "w" : 4,
+        "x" : 0,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 2,
+      "scale" : 2,
+      "src" : 15,
+      "trim" : 0,
+      "width" : 4
+    },
+    "name" : "sample test 2x",
+    "out" : {
+      "height" : 1,
+      "image" : 0,
+      "width" : 2
+    }
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 16,
+      "crop" : {
+        "h" : 2,
+        "w" : 4,
+        "x" : 3,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 2,
+      "scale" : 2,
+      "src" : 15,
+      "trim" : 0,
+      "width" : 4
+    },
+    "name" : "sample test leaves",
+    "out" : null
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 16,
+      "crop" : {
+        "h" : 2,
+        "w" : 4,
+        "x" : 0,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 2,
+      "scale" : 0,
+      "src" : 15,
+      "trim" : 0,
+      "width" : 4
+    },
+    "name" : "sample test scale 0.0",
+    "out" : null
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 16,
+      "crop" : {
+        "h" : 2,
+        "w" : 4,
+        "x" : 0,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 2,
+      "scale" : -1,
+      "src" : 15,
+      "trim" : 0,
+      "width" : 4
+    },
+    "name" : "sample test scale -1.0",
+    "out" : null
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 16,
+      "crop" : {
+        "h" : 2,
+        "w" : 4,
+        "x" : 0,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 2,
+      "scale" : "nan",
+      "src" : 15,
+      "trim" : 0,
+      "width" : 4
+    },
+    "name" : "sample test scale nan",
+    "out" : null
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 16,
+      "crop" : {
+        "h" : 2,
+        "w" : 4,
+        "x" : 0,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 2,
+      "scale" : "inf",
+      "src" : 15,
+      "trim" : 0,
+      "width" : 4
+    },
+    "name" : "sample test scale inf",
+    "out" : null
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 16,
+      "crop" : {
+        "h" : 2,
+        "w" : 4,
+        "x" : 0,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 2,
+      "scale" : 9.9998886718268301e-321,
+      "src" : 15,
+      "trim" : 0,
+      "width" : 4
+    },
+    "name" : "sample test scale 1e-320",
+    "out" : null
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 168,
+      "crop" : {
+        "h" : 30,
+        "w" : 40,
+        "x" : 0,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 30,
+      "scale" : 1,
+      "src" : 16,
+      "trim" : 0,
+      "width" : 40
+    },
+    "name" : "sample padded 1.0",
+    "out" : {
+      "height" : 30,
+      "image" : 1,
+      "width" : 40
+    }
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 168,
+      "crop" : {
+        "h" : 30,
+        "w" : 40,
+        "x" : 0,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 30,
+      "scale" : 1.5,
+      "src" : 16,
+      "trim" : 0,
+      "width" : 40
+    },
+    "name" : "sample padded 1.5",
+    "out" : {
+      "height" : 20,
+      "image" : 2,
+      "width" : 26
+    }
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 168,
+      "crop" : {
+        "h" : 30,
+        "w" : 40,
+        "x" : 0,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 30,
+      "scale" : 2,
+      "src" : 16,
+      "trim" : 0,
+      "width" : 40
+    },
+    "name" : "sample padded 2.0",
+    "out" : {
+      "height" : 15,
+      "image" : 3,
+      "width" : 20
+    }
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 168,
+      "crop" : {
+        "h" : 30,
+        "w" : 40,
+        "x" : 0,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 30,
+      "scale" : 3.7000000000000002,
+      "src" : 16,
+      "trim" : 0,
+      "width" : 40
+    },
+    "name" : "sample padded 3.7",
+    "out" : {
+      "height" : 8,
+      "image" : 4,
+      "width" : 10
+    }
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 168,
+      "crop" : {
+        "h" : 30,
+        "w" : 40,
+        "x" : 0,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 30,
+      "scale" : 0.5,
+      "src" : 16,
+      "trim" : 0,
+      "width" : 40
+    },
+    "name" : "sample padded 0.5",
+    "out" : {
+      "height" : 60,
+      "image" : 5,
+      "width" : 80
+    }
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 168,
+      "crop" : {
+        "h" : 30,
+        "w" : 40,
+        "x" : 0,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 30,
+      "scale" : 100,
+      "src" : 16,
+      "trim" : 0,
+      "width" : 40
+    },
+    "name" : "sample padded 100.0",
+    "out" : {
+      "height" : 1,
+      "image" : 6,
+      "width" : 1
+    }
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 168,
+      "crop" : {
+        "h" : 30,
+        "w" : 40,
+        "x" : 0,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 30,
+      "scale" : 1.0000000000000001e+300,
+      "src" : 16,
+      "trim" : 0,
+      "width" : 40
+    },
+    "name" : "sample padded 1e+300",
+    "out" : {
+      "height" : 1,
+      "image" : 7,
+      "width" : 1
+    }
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 168,
+      "crop" : {
+        "h" : 20,
+        "w" : 30,
+        "x" : 3,
+        "y" : 5
+      },
+      "fn" : "sample",
+      "height" : 30,
+      "scale" : 1.5,
+      "src" : 16,
+      "trim" : 0,
+      "width" : 40
+    },
+    "name" : "sample crop 1.5",
+    "out" : {
+      "height" : 13,
+      "image" : 8,
+      "width" : 20
+    }
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 168,
+      "crop" : {
+        "h" : 1,
+        "w" : 1,
+        "x" : 39,
+        "y" : 29
+      },
+      "fn" : "sample",
+      "height" : 30,
+      "scale" : 1,
+      "src" : 16,
+      "trim" : 0,
+      "width" : 40
+    },
+    "name" : "sample crop edge",
+    "out" : {
+      "height" : 1,
+      "image" : 9,
+      "width" : 1
+    }
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 168,
+      "crop" : {
+        "h" : 10,
+        "w" : 10,
+        "x" : -1,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 30,
+      "scale" : 1,
+      "src" : 16,
+      "trim" : 0,
+      "width" : 40
+    },
+    "name" : "sample crop negative",
+    "out" : null
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 168,
+      "crop" : {
+        "h" : 10,
+        "w" : 0,
+        "x" : 0,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 30,
+      "scale" : 1,
+      "src" : 16,
+      "trim" : 0,
+      "width" : 40
+    },
+    "name" : "sample crop empty",
+    "out" : null
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 168,
+      "crop" : {
+        "h" : 30,
+        "w" : 40,
+        "x" : 1,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 30,
+      "scale" : 1,
+      "src" : 16,
+      "trim" : 0,
+      "width" : 40
+    },
+    "name" : "sample crop too wide",
+    "out" : null
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 159,
+      "crop" : {
+        "h" : 30,
+        "w" : 40,
+        "x" : 0,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 30,
+      "scale" : 1,
+      "src" : 16,
+      "trim" : 0,
+      "width" : 40
+    },
+    "name" : "sample row too short",
+    "out" : null
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 168,
+      "crop" : {
+        "h" : 30,
+        "w" : 40,
+        "x" : 0,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 30,
+      "scale" : 1,
+      "src" : 16,
+      "trim" : 0,
+      "width" : 0
+    },
+    "name" : "sample zero width",
+    "out" : null
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 168,
+      "crop" : {
+        "h" : 30,
+        "w" : 40,
+        "x" : 0,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 30,
+      "scale" : 2,
+      "src" : 16,
+      "trim" : 8,
+      "width" : 40
+    },
+    "name" : "sample trim 8",
+    "out" : {
+      "height" : 15,
+      "image" : 10,
+      "width" : 20
+    }
+  },
+  {
+    "in" : {
+      "bytesPerRow" : 168,
+      "crop" : {
+        "h" : 30,
+        "w" : 40,
+        "x" : 0,
+        "y" : 0
+      },
+      "fn" : "sample",
+      "height" : 30,
+      "scale" : 2,
+      "src" : 16,
+      "trim" : 9,
+      "width" : 40
+    },
+    "name" : "sample trim 9",
+    "out" : null
+  }
+]

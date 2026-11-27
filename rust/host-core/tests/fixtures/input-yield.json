@@ -1,0 +1,1230 @@
+[
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 0,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 0.10000000000000001,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 0.29999999999999999,
+          "op" : "admit"
+        }
+      ]
+    },
+    "name" : "own input passes and reports at most every quarter second",
+    "out" : [
+      {
+        "decision" : "pass",
+        "report" : true
+      },
+      {
+        "decision" : "pass",
+        "report" : false
+      },
+      {
+        "decision" : "pass",
+        "report" : true
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 0,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 0.10000000000000001,
+          "op" : "admit"
+        },
+        {
+          "now" : 0.20000000000000001,
+          "op" : "tick"
+        },
+        {
+          "now" : 0.25,
+          "op" : "tick"
+        },
+        {
+          "now" : 0.5,
+          "op" : "tick"
+        }
+      ]
+    },
+    "name" : "steady input reports every quarter second and the trailing one",
+    "out" : [
+      {
+        "decision" : "pass",
+        "report" : true
+      },
+      {
+        "decision" : "pass",
+        "report" : false
+      },
+      false,
+      true,
+      false
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "by" : "Mac mini",
+          "now" : 10,
+          "op" : "yielded"
+        },
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 10.199999999999999,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 10.4,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 10.800000000000001,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 11,
+          "op" : "admit"
+        }
+      ]
+    },
+    "name" : "input within one second of a yield is dropped then passes",
+    "out" : [
+      null,
+      {
+        "decision" : "drop",
+        "notify" : "Mac mini"
+      },
+      {
+        "decision" : "drop",
+        "notify" : null
+      },
+      {
+        "decision" : "drop",
+        "notify" : "Mac mini"
+      },
+      {
+        "decision" : "pass",
+        "report" : true
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "msg" : {
+            "button" : "left",
+            "kind" : "move",
+            "type" : "mouse"
+          },
+          "now" : 0,
+          "op" : "admit"
+        },
+        {
+          "by" : "x",
+          "now" : 1,
+          "op" : "yielded"
+        },
+        {
+          "msg" : {
+            "button" : "left",
+            "kind" : "move",
+            "type" : "mouse"
+          },
+          "now" : 1.1000000000000001,
+          "op" : "admit"
+        }
+      ]
+    },
+    "name" : "hover is blocked but never reported",
+    "out" : [
+      {
+        "decision" : "pass",
+        "report" : false
+      },
+      null,
+      {
+        "decision" : "drop",
+        "notify" : "x"
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "msg" : {
+            "code" : 56,
+            "down" : true,
+            "modifiers" : 0,
+            "type" : "key"
+          },
+          "now" : 0,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "button" : "left",
+            "kind" : "down",
+            "type" : "mouse"
+          },
+          "now" : 0,
+          "op" : "admit"
+        },
+        {
+          "by" : "x",
+          "now" : 0.5,
+          "op" : "yielded"
+        },
+        {
+          "msg" : {
+            "code" : 56,
+            "down" : false,
+            "modifiers" : 0,
+            "type" : "key"
+          },
+          "now" : 0.59999999999999998,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "button" : "left",
+            "kind" : "up",
+            "type" : "mouse"
+          },
+          "now" : 0.90000000000000002,
+          "op" : "admit"
+        }
+      ]
+    },
+    "name" : "release of an admitted press passes while blocked",
+    "out" : [
+      {
+        "decision" : "pass",
+        "report" : true
+      },
+      {
+        "decision" : "pass",
+        "report" : false
+      },
+      null,
+      {
+        "decision" : "pass",
+        "report" : true
+      },
+      {
+        "decision" : "pass",
+        "report" : true
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "msg" : {
+            "button" : "left",
+            "kind" : "down",
+            "type" : "mouse"
+          },
+          "now" : 0,
+          "op" : "admit"
+        },
+        {
+          "by" : "x",
+          "now" : 0.10000000000000001,
+          "op" : "yielded"
+        },
+        {
+          "msg" : {
+            "button" : "left",
+            "kind" : "drag",
+            "type" : "mouse"
+          },
+          "now" : 0.20000000000000001,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "button" : "left",
+            "kind" : "drag",
+            "type" : "mouse"
+          },
+          "now" : 0.29999999999999999,
+          "op" : "admit"
+        }
+      ]
+    },
+    "name" : "drag of an admitted button is never blocked",
+    "out" : [
+      {
+        "decision" : "pass",
+        "report" : true
+      },
+      null,
+      {
+        "decision" : "pass",
+        "report" : false
+      },
+      {
+        "decision" : "pass",
+        "report" : true
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "by" : "x",
+          "now" : 0,
+          "op" : "yielded"
+        },
+        {
+          "msg" : {
+            "button" : "left",
+            "kind" : "down",
+            "type" : "mouse"
+          },
+          "now" : 0.10000000000000001,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "button" : "left",
+            "kind" : "drag",
+            "type" : "mouse"
+          },
+          "now" : 1.5,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "button" : "left",
+            "kind" : "up",
+            "type" : "mouse"
+          },
+          "now" : 1.6000000000000001,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "button" : "left",
+            "kind" : "down",
+            "type" : "mouse"
+          },
+          "now" : 1.7,
+          "op" : "admit"
+        }
+      ]
+    },
+    "name" : "drag and up of a blocked press are dropped",
+    "out" : [
+      null,
+      {
+        "decision" : "drop",
+        "notify" : "x"
+      },
+      {
+        "decision" : "drop",
+        "notify" : null
+      },
+      {
+        "decision" : "drop",
+        "notify" : null
+      },
+      {
+        "decision" : "pass",
+        "report" : true
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "msg" : {
+            "code" : 0,
+            "down" : false,
+            "modifiers" : 0,
+            "type" : "key"
+          },
+          "now" : 0,
+          "op" : "admit"
+        },
+        {
+          "by" : "x",
+          "now" : 1,
+          "op" : "yielded"
+        },
+        {
+          "msg" : {
+            "code" : 0,
+            "down" : false,
+            "modifiers" : 0,
+            "type" : "key"
+          },
+          "now" : 1.1000000000000001,
+          "op" : "admit"
+        }
+      ]
+    },
+    "name" : "stray release is dropped only while blocked",
+    "out" : [
+      {
+        "decision" : "pass",
+        "report" : false
+      },
+      null,
+      {
+        "decision" : "drop",
+        "notify" : "x"
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "by" : "x",
+          "now" : 0,
+          "op" : "yielded"
+        },
+        {
+          "msg" : {
+            "type" : "resize"
+          },
+          "now" : 0.10000000000000001,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "type" : "move"
+          },
+          "now" : 0.10000000000000001,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "type" : "close"
+          },
+          "now" : 0.10000000000000001,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "type" : "set_stream"
+          },
+          "now" : 0.10000000000000001,
+          "op" : "admit"
+        }
+      ]
+    },
+    "name" : "window commands are never blocked",
+    "out" : [
+      null,
+      {
+        "decision" : "pass",
+        "report" : false
+      },
+      {
+        "decision" : "pass",
+        "report" : false
+      },
+      {
+        "decision" : "pass",
+        "report" : false
+      },
+      {
+        "decision" : "pass",
+        "report" : false
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "by" : "x",
+          "now" : 0,
+          "op" : "yielded"
+        },
+        {
+          "msg" : {
+            "type" : "paste"
+          },
+          "now" : 0.10000000000000001,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "type" : "menu_pick"
+          },
+          "now" : 0.10000000000000001,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "type" : "focus"
+          },
+          "now" : 0.10000000000000001,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "type" : "scroll"
+          },
+          "now" : 0.10000000000000001,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "type" : "select_input"
+          },
+          "now" : 0.10000000000000001,
+          "op" : "admit"
+        }
+      ]
+    },
+    "name" : "paste, menu pick, focus, scroll and select input are input",
+    "out" : [
+      null,
+      {
+        "decision" : "drop",
+        "notify" : "x"
+      },
+      {
+        "decision" : "drop",
+        "notify" : null
+      },
+      {
+        "decision" : "drop",
+        "notify" : null
+      },
+      {
+        "decision" : "drop",
+        "notify" : null
+      },
+      {
+        "decision" : "drop",
+        "notify" : null
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "msg" : {
+            "code" : 5,
+            "down" : true,
+            "modifiers" : 0,
+            "type" : "key"
+          },
+          "now" : 0,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "code" : 5,
+            "down" : false,
+            "modifiers" : 0,
+            "type" : "key"
+          },
+          "now" : 0.10000000000000001,
+          "op" : "admit"
+        },
+        {
+          "by" : "x",
+          "now" : 0.20000000000000001,
+          "op" : "yielded"
+        },
+        {
+          "msg" : {
+            "code" : 5,
+            "down" : true,
+            "modifiers" : 0,
+            "type" : "key"
+          },
+          "now" : 0.29999999999999999,
+          "op" : "admit"
+        }
+      ]
+    },
+    "name" : "released key is forgotten so the next press is judged fresh",
+    "out" : [
+      {
+        "decision" : "pass",
+        "report" : true
+      },
+      {
+        "decision" : "pass",
+        "report" : false
+      },
+      null,
+      {
+        "decision" : "drop",
+        "notify" : "x"
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "by" : "x",
+          "now" : 0,
+          "op" : "yielded"
+        },
+        {
+          "msg" : {
+            "code" : 7,
+            "down" : true,
+            "modifiers" : 0,
+            "type" : "key"
+          },
+          "now" : 0.10000000000000001,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "code" : 7,
+            "down" : false,
+            "modifiers" : 0,
+            "type" : "key"
+          },
+          "now" : 1.5,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "code" : 7,
+            "down" : true,
+            "modifiers" : 0,
+            "type" : "key"
+          },
+          "now" : 1.6000000000000001,
+          "op" : "admit"
+        }
+      ]
+    },
+    "name" : "up of a blocked key press is dropped then a fresh press passes",
+    "out" : [
+      null,
+      {
+        "decision" : "drop",
+        "notify" : "x"
+      },
+      {
+        "decision" : "drop",
+        "notify" : null
+      },
+      {
+        "decision" : "pass",
+        "report" : true
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "msg" : {
+            "code" : 7,
+            "down" : true,
+            "modifiers" : 0,
+            "type" : "key"
+          },
+          "now" : 0,
+          "op" : "admit"
+        },
+        {
+          "by" : "x",
+          "now" : 0.10000000000000001,
+          "op" : "yielded"
+        },
+        {
+          "msg" : {
+            "code" : 7,
+            "down" : true,
+            "modifiers" : 0,
+            "type" : "key"
+          },
+          "now" : 0.5,
+          "op" : "admit"
+        }
+      ]
+    },
+    "name" : "repeat down of a held key passes while blocked",
+    "out" : [
+      {
+        "decision" : "pass",
+        "report" : true
+      },
+      null,
+      {
+        "decision" : "pass",
+        "report" : true
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "msg" : {
+            "button" : "left",
+            "kind" : "drag",
+            "type" : "mouse"
+          },
+          "now" : 0,
+          "op" : "admit"
+        },
+        {
+          "by" : "x",
+          "now" : 1,
+          "op" : "yielded"
+        },
+        {
+          "msg" : {
+            "button" : "left",
+            "kind" : "drag",
+            "type" : "mouse"
+          },
+          "now" : 1.1000000000000001,
+          "op" : "admit"
+        }
+      ]
+    },
+    "name" : "drag with no recorded down follows the block state",
+    "out" : [
+      {
+        "decision" : "pass",
+        "report" : false
+      },
+      null,
+      {
+        "decision" : "drop",
+        "notify" : "x"
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "msg" : {
+            "button" : "left",
+            "kind" : "down",
+            "type" : "mouse"
+          },
+          "now" : 0,
+          "op" : "admit"
+        },
+        {
+          "by" : "x",
+          "now" : 0.10000000000000001,
+          "op" : "yielded"
+        },
+        {
+          "msg" : {
+            "button" : "right",
+            "kind" : "down",
+            "type" : "mouse"
+          },
+          "now" : 0.20000000000000001,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "button" : "left",
+            "kind" : "drag",
+            "type" : "mouse"
+          },
+          "now" : 0.29999999999999999,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "button" : "right",
+            "kind" : "drag",
+            "type" : "mouse"
+          },
+          "now" : 0.40000000000000002,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "button" : "right",
+            "kind" : "up",
+            "type" : "mouse"
+          },
+          "now" : 0.5,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "button" : "left",
+            "kind" : "up",
+            "type" : "mouse"
+          },
+          "now" : 0.59999999999999998,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "button" : "right",
+            "kind" : "down",
+            "type" : "mouse"
+          },
+          "now" : 1.2,
+          "op" : "admit"
+        }
+      ]
+    },
+    "name" : "right button is judged apart from a held left one",
+    "out" : [
+      {
+        "decision" : "pass",
+        "report" : true
+      },
+      null,
+      {
+        "decision" : "drop",
+        "notify" : "x"
+      },
+      {
+        "decision" : "pass",
+        "report" : true
+      },
+      {
+        "decision" : "drop",
+        "notify" : null
+      },
+      {
+        "decision" : "drop",
+        "notify" : null
+      },
+      {
+        "decision" : "pass",
+        "report" : true
+      },
+      {
+        "decision" : "pass",
+        "report" : true
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "by" : "a",
+          "now" : 0,
+          "op" : "yielded"
+        },
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 0.10000000000000001,
+          "op" : "admit"
+        },
+        {
+          "by" : "b",
+          "now" : 0.69999999999999996,
+          "op" : "yielded"
+        },
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 0.80000000000000004,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 1.5,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 1.7,
+          "op" : "admit"
+        }
+      ]
+    },
+    "name" : "a second yield moves the end and the name",
+    "out" : [
+      null,
+      {
+        "decision" : "drop",
+        "notify" : "a"
+      },
+      null,
+      {
+        "decision" : "drop",
+        "notify" : "b"
+      },
+      {
+        "decision" : "drop",
+        "notify" : "b"
+      },
+      {
+        "decision" : "pass",
+        "report" : true
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "by" : "",
+          "now" : 0,
+          "op" : "yielded"
+        },
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 0.10000000000000001,
+          "op" : "admit"
+        }
+      ]
+    },
+    "name" : "an empty device name is told as given",
+    "out" : [
+      null,
+      {
+        "decision" : "drop",
+        "notify" : ""
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "by" : "x",
+          "now" : 0,
+          "op" : "yielded"
+        },
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 0.25,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 0.75,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 0.98999999999999999,
+          "op" : "admit"
+        }
+      ]
+    },
+    "name" : "notice exactly half a second later is told again",
+    "out" : [
+      null,
+      {
+        "decision" : "drop",
+        "notify" : "x"
+      },
+      {
+        "decision" : "drop",
+        "notify" : "x"
+      },
+      {
+        "decision" : "drop",
+        "notify" : null
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 1,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 1.25,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 1.3,
+          "op" : "admit"
+        },
+        {
+          "now" : 1.5,
+          "op" : "tick"
+        },
+        {
+          "now" : 1.5,
+          "op" : "tick"
+        }
+      ]
+    },
+    "name" : "report exactly a quarter second later is due",
+    "out" : [
+      {
+        "decision" : "pass",
+        "report" : true
+      },
+      {
+        "decision" : "pass",
+        "report" : true
+      },
+      {
+        "decision" : "pass",
+        "report" : false
+      },
+      true,
+      false
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "now" : 0,
+          "op" : "tick"
+        },
+        {
+          "now" : 100,
+          "op" : "tick"
+        }
+      ]
+    },
+    "name" : "tick with nothing owed",
+    "out" : [
+      false,
+      false
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "msg" : {
+            "code" : 9,
+            "down" : true,
+            "modifiers" : 1048576,
+            "type" : "key"
+          },
+          "now" : 0,
+          "op" : "admit"
+        },
+        {
+          "by" : "x",
+          "now" : 0.10000000000000001,
+          "op" : "yielded"
+        },
+        {
+          "msg" : {
+            "code" : 9,
+            "down" : true,
+            "modifiers" : 0,
+            "type" : "key"
+          },
+          "now" : 0.20000000000000001,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "code" : 9,
+            "down" : false,
+            "modifiers" : 131072,
+            "type" : "key"
+          },
+          "now" : 0.29999999999999999,
+          "op" : "admit"
+        }
+      ]
+    },
+    "name" : "modifiers do not change a key's judgement",
+    "out" : [
+      {
+        "decision" : "pass",
+        "report" : true
+      },
+      null,
+      {
+        "decision" : "pass",
+        "report" : false
+      },
+      {
+        "decision" : "pass",
+        "report" : true
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "by" : "x",
+          "now" : 0,
+          "op" : "yielded"
+        },
+        {
+          "msg" : {
+            "type" : "ping"
+          },
+          "now" : 0.10000000000000001,
+          "op" : "admit"
+        },
+        {
+          "msg" : {
+            "type" : "frame_ack"
+          },
+          "now" : 0.20000000000000001,
+          "op" : "admit"
+        }
+      ]
+    },
+    "name" : "other messages pass unreported while blocked",
+    "out" : [
+      null,
+      {
+        "decision" : "pass",
+        "report" : false
+      },
+      {
+        "decision" : "pass",
+        "report" : false
+      }
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "by" : "x",
+          "now" : 0,
+          "op" : "yielded"
+        },
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 0.10000000000000001,
+          "op" : "admit"
+        },
+        {
+          "now" : 0.59999999999999998,
+          "op" : "tick"
+        },
+        {
+          "msg" : {
+            "type" : "text"
+          },
+          "now" : 1.1000000000000001,
+          "op" : "admit"
+        },
+        {
+          "now" : 1.2,
+          "op" : "tick"
+        }
+      ]
+    },
+    "name" : "blocked input does not report and leaves no debt",
+    "out" : [
+      null,
+      {
+        "decision" : "drop",
+        "notify" : "x"
+      },
+      false,
+      {
+        "decision" : "pass",
+        "report" : true
+      },
+      false
+    ]
+  }
+]

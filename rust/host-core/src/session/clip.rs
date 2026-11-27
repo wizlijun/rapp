@@ -11,6 +11,7 @@
 //!   restore) is one worker thread (`rapp-host paste`) taking jobs in order, which is what
 //!   Swift's main queue gives; the queue of pastes, `PasteSession` and the replies stay on the
 //!   session thread.
+//!
 //! The store is shared with the side connections (`Arc<Mutex<TransferStore>>`).
 
 use std::collections::{HashMap, VecDeque};

@@ -10,13 +10,19 @@ path = "src/lib.rs"
 [dependencies]
 anyhow.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 rapp-client-core = { path = "../client-core" }
 zeroize = "1"
 unicode-segmentation = "1"
+# Swift compares strings by canonical equivalence ("é" == "e\u{301}"); NFC on both sides
+# gives the same answer. Same version and features url/idna already pull in, so no crate
+# and no feature changes for the rest of the workspace.
+icu_normalizer = { version = "2.4", default-features = false, features = ["compiled_data"] }
+# The fixtures and the rules A sends carry Swift's doubles in 17 digits; serde_json's
+# default parser can land one ulp off on those, Foundation's and the round-trip parser never do.
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 # Stock zlib, linked statically: the deflate stream must be copyable (deflateCopy)
 # and byte-identical to the Swift host's. Only src/deflate.rs touches it.
-libz-sys = { version = "1", default-features = false, features = ["static"] }
+libz-sys = { version = "1", default-features = false, features = ["static", "stock-zlib"] }
 
 [dev-dependencies]
 tempfile.workspace = true

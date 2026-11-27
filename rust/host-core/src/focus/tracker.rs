@@ -402,7 +402,7 @@ impl FocusTracker {
     }
 
     fn in_pointer_panel(&self, p: Point) -> bool {
-        self.pointer_panel.map_or(false, |r| r.contains_point(p))
+        self.pointer_panel.is_some_and(|r| r.contains_point(p))
     }
 
     /// A click or key: recheck the keyboard in 0.2 s, clear the follow panel and watch the next second.

@@ -1,0 +1,215 @@
+[
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "now" : 0,
+          "op" : "started"
+        },
+        {
+          "now" : 0.20000000000000001,
+          "op" : "finished"
+        },
+        {
+          "now" : 1,
+          "op" : "started"
+        },
+        {
+          "now" : 1.2,
+          "op" : "finished"
+        },
+        {
+          "now" : 3.1000000000000001,
+          "op" : "due"
+        },
+        {
+          "now" : 3.25,
+          "op" : "due"
+        },
+        {
+          "op" : "restored"
+        },
+        {
+          "now" : 9,
+          "op" : "due"
+        },
+        {
+          "now" : 10,
+          "op" : "started"
+        }
+      ]
+    },
+    "name" : "saves once, restores 2 s after the last",
+    "out" : [
+      true,
+      null,
+      false,
+      null,
+      false,
+      true,
+      null,
+      false,
+      true
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "now" : 0,
+          "op" : "started"
+        },
+        {
+          "now" : 0.10000000000000001,
+          "op" : "started"
+        },
+        {
+          "now" : 0.20000000000000001,
+          "op" : "finished"
+        },
+        {
+          "now" : 5,
+          "op" : "due"
+        },
+        {
+          "now" : 5.5,
+          "op" : "finished"
+        },
+        {
+          "now" : 7.4000000000000004,
+          "op" : "due"
+        },
+        {
+          "now" : 7.5,
+          "op" : "due"
+        }
+      ]
+    },
+    "name" : "not due while a paste is in flight",
+    "out" : [
+      true,
+      false,
+      null,
+      false,
+      null,
+      false,
+      true
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "now" : 0,
+          "op" : "started"
+        },
+        {
+          "now" : 1,
+          "op" : "finished"
+        },
+        {
+          "now" : 3,
+          "op" : "due"
+        }
+      ]
+    },
+    "name" : "exactly two seconds is due",
+    "out" : [
+      true,
+      null,
+      true
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "now" : 1,
+          "op" : "finished"
+        },
+        {
+          "now" : 9,
+          "op" : "due"
+        },
+        {
+          "now" : 9,
+          "op" : "started"
+        },
+        {
+          "now" : 9,
+          "op" : "finished"
+        },
+        {
+          "now" : 11,
+          "op" : "due"
+        }
+      ]
+    },
+    "name" : "finish without start is floored",
+    "out" : [
+      null,
+      false,
+      true,
+      null,
+      true
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "now" : 0,
+          "op" : "due"
+        },
+        {
+          "now" : 100,
+          "op" : "due"
+        }
+      ]
+    },
+    "name" : "nothing saved is never due",
+    "out" : [
+      false,
+      false
+    ]
+  },
+  {
+    "in" : {
+      "fn" : "trace",
+      "steps" : [
+        {
+          "now" : 0,
+          "op" : "started"
+        },
+        {
+          "op" : "restored"
+        },
+        {
+          "now" : 1,
+          "op" : "started"
+        },
+        {
+          "now" : 1,
+          "op" : "finished"
+        },
+        {
+          "now" : 3,
+          "op" : "due"
+        }
+      ]
+    },
+    "name" : "restored while in flight forgets it",
+    "out" : [
+      true,
+      null,
+      true,
+      null,
+      true
+    ]
+  }
+]

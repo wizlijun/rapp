@@ -1,0 +1,951 @@
+[
+  {
+    "in" : {
+      "every" : 5,
+      "fn" : "cover_notices",
+      "steps" : [
+        {
+          "now" : 100,
+          "op" : "send",
+          "pid" : 7
+        },
+        {
+          "now" : 104.90000000000001,
+          "op" : "send",
+          "pid" : 7
+        },
+        {
+          "now" : 104.90000000000001,
+          "op" : "send",
+          "pid" : 8
+        },
+        {
+          "now" : 105,
+          "op" : "send",
+          "pid" : 7
+        },
+        {
+          "now" : 106,
+          "op" : "send",
+          "pid" : 7
+        }
+      ]
+    },
+    "name" : "cover notices throttle",
+    "out" : [
+      {
+        "op" : "sent",
+        "value" : true
+      },
+      {
+        "op" : "sent",
+        "value" : false
+      },
+      {
+        "op" : "sent",
+        "value" : true
+      },
+      {
+        "op" : "sent",
+        "value" : true
+      },
+      {
+        "op" : "sent",
+        "value" : false
+      }
+    ]
+  },
+  {
+    "in" : {
+      "every" : 5,
+      "fn" : "cover_notices",
+      "steps" : [
+        {
+          "now" : 0,
+          "op" : "send",
+          "pid" : 1
+        },
+        {
+          "now" : 4.9900000000000002,
+          "op" : "send",
+          "pid" : 1
+        },
+        {
+          "now" : 5,
+          "op" : "send",
+          "pid" : 1
+        },
+        {
+          "now" : 9.9900000000000002,
+          "op" : "send",
+          "pid" : 1
+        },
+        {
+          "now" : 10.01,
+          "op" : "send",
+          "pid" : 1
+        }
+      ]
+    },
+    "name" : "cover notices boundary",
+    "out" : [
+      {
+        "op" : "sent",
+        "value" : true
+      },
+      {
+        "op" : "sent",
+        "value" : false
+      },
+      {
+        "op" : "sent",
+        "value" : true
+      },
+      {
+        "op" : "sent",
+        "value" : false
+      },
+      {
+        "op" : "sent",
+        "value" : true
+      }
+    ]
+  },
+  {
+    "in" : {
+      "every" : 5,
+      "fn" : "cover_notices",
+      "steps" : [
+        {
+          "now" : 0,
+          "op" : "send",
+          "pid" : 1
+        },
+        {
+          "now" : 5.0099999999999998,
+          "op" : "send",
+          "pid" : 1
+        }
+      ]
+    },
+    "name" : "cover notices just past",
+    "out" : [
+      {
+        "op" : "sent",
+        "value" : true
+      },
+      {
+        "op" : "sent",
+        "value" : true
+      }
+    ]
+  },
+  {
+    "in" : {
+      "every" : 0,
+      "fn" : "cover_notices",
+      "steps" : [
+        {
+          "now" : 0,
+          "op" : "send",
+          "pid" : 1
+        },
+        {
+          "now" : 0,
+          "op" : "send",
+          "pid" : 1
+        }
+      ]
+    },
+    "name" : "cover notices every 0",
+    "out" : [
+      {
+        "op" : "sent",
+        "value" : true
+      },
+      {
+        "op" : "sent",
+        "value" : true
+      }
+    ]
+  },
+  {
+    "in" : {
+      "every" : 5,
+      "fn" : "cover_notices",
+      "steps" : [
+        {
+          "op" : "point",
+          "pid" : 7
+        },
+        {
+          "dismissable" : true,
+          "op" : "reported",
+          "pid" : 7,
+          "point" : {
+            "x" : 12,
+            "y" : 34
+          }
+        },
+        {
+          "op" : "point",
+          "pid" : 7
+        },
+        {
+          "op" : "point",
+          "pid" : 8
+        },
+        {
+          "dismissable" : false,
+          "op" : "reported",
+          "pid" : 7,
+          "point" : {
+            "x" : 12,
+            "y" : 34
+          }
+        },
+        {
+          "op" : "point",
+          "pid" : 7
+        },
+        {
+          "dismissable" : true,
+          "op" : "reported",
+          "pid" : 7,
+          "point" : {
+            "x" : 12,
+            "y" : 34
+          }
+        },
+        {
+          "op" : "forget",
+          "pid" : 7
+        },
+        {
+          "op" : "point",
+          "pid" : 7
+        }
+      ]
+    },
+    "name" : "cover points",
+    "out" : [
+      {
+        "op" : "point",
+        "value" : null
+      },
+      {
+        "op" : "done"
+      },
+      {
+        "op" : "point",
+        "value" : {
+          "x" : 12,
+          "y" : 34
+        }
+      },
+      {
+        "op" : "point",
+        "value" : null
+      },
+      {
+        "op" : "done"
+      },
+      {
+        "op" : "point",
+        "value" : null
+      },
+      {
+        "op" : "done"
+      },
+      {
+        "op" : "done"
+      },
+      {
+        "op" : "point",
+        "value" : null
+      }
+    ]
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.SecurityAgent",
+      "fn" : "cover_dismissable",
+      "regular" : true
+    },
+    "name" : "dismissable com.apple.SecurityAgent true",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.SecurityAgent",
+      "fn" : "cover_dismissable",
+      "regular" : false
+    },
+    "name" : "dismissable com.apple.SecurityAgent false",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.loginwindow",
+      "fn" : "cover_dismissable",
+      "regular" : true
+    },
+    "name" : "dismissable com.apple.loginwindow true",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.loginwindow",
+      "fn" : "cover_dismissable",
+      "regular" : false
+    },
+    "name" : "dismissable com.apple.loginwindow false",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.coreservices.uiagent",
+      "fn" : "cover_dismissable",
+      "regular" : true
+    },
+    "name" : "dismissable com.apple.coreservices.uiagent true",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.coreservices.uiagent",
+      "fn" : "cover_dismissable",
+      "regular" : false
+    },
+    "name" : "dismissable com.apple.coreservices.uiagent false",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.UserNotificationCenter",
+      "fn" : "cover_dismissable",
+      "regular" : true
+    },
+    "name" : "dismissable com.apple.UserNotificationCenter true",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.UserNotificationCenter",
+      "fn" : "cover_dismissable",
+      "regular" : false
+    },
+    "name" : "dismissable com.apple.UserNotificationCenter false",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.LocalAuthentication.UIAgent",
+      "fn" : "cover_dismissable",
+      "regular" : true
+    },
+    "name" : "dismissable com.apple.LocalAuthentication.UIAgent true",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.LocalAuthentication.UIAgent",
+      "fn" : "cover_dismissable",
+      "regular" : false
+    },
+    "name" : "dismissable com.apple.LocalAuthentication.UIAgent false",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.accessibility.universalAccessAuthWarn",
+      "fn" : "cover_dismissable",
+      "regular" : true
+    },
+    "name" : "dismissable com.apple.accessibility.universalAccessAuthWarn true",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.accessibility.universalAccessAuthWarn",
+      "fn" : "cover_dismissable",
+      "regular" : false
+    },
+    "name" : "dismissable com.apple.accessibility.universalAccessAuthWarn false",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.CoreAuthUI",
+      "fn" : "cover_dismissable",
+      "regular" : true
+    },
+    "name" : "dismissable com.apple.CoreAuthUI true",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.CoreAuthUI",
+      "fn" : "cover_dismissable",
+      "regular" : false
+    },
+    "name" : "dismissable com.apple.CoreAuthUI false",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.ScreenSaver.Engine",
+      "fn" : "cover_dismissable",
+      "regular" : true
+    },
+    "name" : "dismissable com.apple.ScreenSaver.Engine true",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.ScreenSaver.Engine",
+      "fn" : "cover_dismissable",
+      "regular" : false
+    },
+    "name" : "dismissable com.apple.ScreenSaver.Engine false",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.notificationcenterui",
+      "fn" : "cover_dismissable",
+      "regular" : true
+    },
+    "name" : "dismissable com.apple.notificationcenterui true",
+    "out" : true
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.notificationcenterui",
+      "fn" : "cover_dismissable",
+      "regular" : false
+    },
+    "name" : "dismissable com.apple.notificationcenterui false",
+    "out" : true
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.example.PasswordHelper",
+      "fn" : "cover_dismissable",
+      "regular" : true
+    },
+    "name" : "dismissable com.example.PasswordHelper true",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.example.PasswordHelper",
+      "fn" : "cover_dismissable",
+      "regular" : false
+    },
+    "name" : "dismissable com.example.PasswordHelper false",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.example.keychainthing",
+      "fn" : "cover_dismissable",
+      "regular" : true
+    },
+    "name" : "dismissable com.example.keychainthing true",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.example.keychainthing",
+      "fn" : "cover_dismissable",
+      "regular" : false
+    },
+    "name" : "dismissable com.example.keychainthing false",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.example.LoginItem",
+      "fn" : "cover_dismissable",
+      "regular" : true
+    },
+    "name" : "dismissable com.example.LoginItem true",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.example.LoginItem",
+      "fn" : "cover_dismissable",
+      "regular" : false
+    },
+    "name" : "dismissable com.example.LoginItem false",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.example.permissions",
+      "fn" : "cover_dismissable",
+      "regular" : true
+    },
+    "name" : "dismissable com.example.permissions true",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.example.permissions",
+      "fn" : "cover_dismissable",
+      "regular" : false
+    },
+    "name" : "dismissable com.example.permissions false",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.example.Privacy",
+      "fn" : "cover_dismissable",
+      "regular" : true
+    },
+    "name" : "dismissable com.example.Privacy true",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.example.Privacy",
+      "fn" : "cover_dismissable",
+      "regular" : false
+    },
+    "name" : "dismissable com.example.Privacy false",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.example.authority",
+      "fn" : "cover_dismissable",
+      "regular" : true
+    },
+    "name" : "dismissable com.example.authority true",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.example.authority",
+      "fn" : "cover_dismissable",
+      "regular" : false
+    },
+    "name" : "dismissable com.example.authority false",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.Safari",
+      "fn" : "cover_dismissable",
+      "regular" : true
+    },
+    "name" : "dismissable com.apple.Safari true",
+    "out" : true
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.Safari",
+      "fn" : "cover_dismissable",
+      "regular" : false
+    },
+    "name" : "dismissable com.apple.Safari false",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.dock",
+      "fn" : "cover_dismissable",
+      "regular" : true
+    },
+    "name" : "dismissable com.apple.dock true",
+    "out" : true
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.dock",
+      "fn" : "cover_dismissable",
+      "regular" : false
+    },
+    "name" : "dismissable com.apple.dock false",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : null,
+      "fn" : "cover_dismissable",
+      "regular" : true
+    },
+    "name" : "dismissable nil true",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : null,
+      "fn" : "cover_dismissable",
+      "regular" : false
+    },
+    "name" : "dismissable nil false",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "",
+      "fn" : "cover_dismissable",
+      "regular" : true
+    },
+    "name" : "dismissable  true",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "",
+      "fn" : "cover_dismissable",
+      "regular" : false
+    },
+    "name" : "dismissable  false",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.Safari",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 30,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : 0.5
+    },
+    "name" : "opened default",
+    "out" : true
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.Safari",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 30,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : 0
+    },
+    "name" : "opened since 0",
+    "out" : true
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.Safari",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 30,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : 2
+    },
+    "name" : "opened since 2",
+    "out" : true
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.Safari",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 30,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : 2.1000000000000001
+    },
+    "name" : "opened since 2.1",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.Safari",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 30,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : null
+    },
+    "name" : "opened since nil",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.Safari",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 30,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : -1
+    },
+    "name" : "opened since -1",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.Safari",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 10,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : 0.5
+    },
+    "name" : "opened session pid",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.Safari",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 20,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : 0.5
+    },
+    "name" : "opened own pid",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.Safari",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 30,
+      "regular" : false,
+      "session_pid" : 10,
+      "since_input" : 0.5
+    },
+    "name" : "opened not regular",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : null,
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 30,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : 0.5
+    },
+    "name" : "opened nil bundle",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 30,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : 0.5
+    },
+    "name" : "opened empty bundle",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.rapp.rapp",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 30,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : 0.5
+    },
+    "name" : "opened com.rapp.rapp",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.dock",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 30,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : 0.5
+    },
+    "name" : "opened com.apple.dock",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.loginwindow",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 30,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : 0.5
+    },
+    "name" : "opened com.apple.loginwindow",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.systemuiserver",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 30,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : 0.5
+    },
+    "name" : "opened com.apple.systemuiserver",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.SecurityAgent",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 30,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : 0.5
+    },
+    "name" : "opened com.apple.SecurityAgent",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.notificationcenterui",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 30,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : 0.5
+    },
+    "name" : "opened com.apple.notificationcenterui",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.controlcenter",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 30,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : 0.5
+    },
+    "name" : "opened com.apple.controlcenter",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.Spotlight",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 30,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : 0.5
+    },
+    "name" : "opened com.apple.Spotlight",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.coreservices.uiagent",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 30,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : 0.5
+    },
+    "name" : "opened com.apple.coreservices.uiagent",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.WindowManager",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 30,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : 0.5
+    },
+    "name" : "opened com.apple.WindowManager",
+    "out" : false
+  },
+  {
+    "in" : {
+      "bundle_id" : "com.apple.finder",
+      "fn" : "app_opened_worth_telling",
+      "own_pid" : 20,
+      "pid" : 30,
+      "regular" : true,
+      "session_pid" : 10,
+      "since_input" : 0.5
+    },
+    "name" : "opened com.apple.finder",
+    "out" : true
+  },
+  {
+    "in" : {
+      "fn" : "is_secure_field",
+      "role" : "AXTextField",
+      "subrole" : "AXSecureTextField"
+    },
+    "name" : "secure AXTextField AXSecureTextField",
+    "out" : true
+  },
+  {
+    "in" : {
+      "fn" : "is_secure_field",
+      "role" : "AXTextField",
+      "subrole" : null
+    },
+    "name" : "secure AXTextField nil",
+    "out" : false
+  },
+  {
+    "in" : {
+      "fn" : "is_secure_field",
+      "role" : "AXTextArea",
+      "subrole" : "AXSearchField"
+    },
+    "name" : "secure AXTextArea AXSearchField",
+    "out" : false
+  },
+  {
+    "in" : {
+      "fn" : "is_secure_field",
+      "role" : null,
+      "subrole" : "AXSecureTextField"
+    },
+    "name" : "secure nil AXSecureTextField",
+    "out" : true
+  },
+  {
+    "in" : {
+      "fn" : "is_secure_field",
+      "role" : null,
+      "subrole" : null
+    },
+    "name" : "secure nil nil",
+    "out" : false
+  },
+  {
+    "in" : {
+      "fn" : "is_secure_field",
+      "role" : "AXTextField",
+      "subrole" : "axsecuretextfield"
+    },
+    "name" : "secure AXTextField axsecuretextfield",
+    "out" : false
+  }
+]

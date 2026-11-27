@@ -333,7 +333,7 @@ impl<'a> RegionResolver<'a> {
                 }
                 if b.round {
                     let r = w as f64 / h as f64;
-                    if !(r >= 0.75 && r <= 1.33) {
+                    if !(0.75..=1.33).contains(&r) {
                         continue;
                     }
                 }
@@ -346,7 +346,7 @@ impl<'a> RegionResolver<'a> {
         Some(match b.pick {
             Pick::All => {
                 // Stable, as Swift's `sort` is in practice.
-                found.sort_by(|a, b| (a.y, a.x).cmp(&(b.y, b.x)));
+                found.sort_by_key(|a| (a.y, a.x));
                 found
             }
             Pick::Rightmost => vec![first_max_by(&found, |a, b| (a.max_x(), -a.y) < (b.max_x(), -b.y))],
