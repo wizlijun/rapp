@@ -30,8 +30,8 @@
 | 1 | 工具和空壳 | 过（两个模拟器都能装、能启动、截图有 `rApp P0 shell`；36 上第一次截图撞上 System UI 无响应弹框，再试后正常） | 不用 | 2026-11-27 |
 | 2 | `.so` | 过（九个名字都导出、四个 `LOAD` 段都是 `0x4000`、11.3 MB / strip 后 7.5 MB；依赖全部直接编过） | §6.2 小改：hub 的四个函数不用 `#[used] static` 就能导出 | 2026-11-27 |
 | 3 | 进程内 hub 和网络 | 过（两个模拟器都起得来 hub、出接入引导；放进 relay 和 key、加上这台 Mac 后在线；默认和只有 IPv4 两种状态下 relay 都解析成 `::ffff:` 映射并连上。relay 是 IPv4 字面地址，域名解析没测到；真 IPv6 一半模拟器上测不了，留给实机） | §6.1 小改（`AI_V4MAPPED` 那个问题不用回答）；§6.5 的 `systemOpen` 要安卓通道；§14.6 加一条 | 2026-11-27 |
-| 4 | 进程内会话、节流 | 没测完（34 上画面、颜色和打字都过，打字经写作条发出；release 包会话会自己断；门禁那步慢 Dart 量内存没做，因为 Mac 被 rApp 自动锁屏；36 没做） | 待定 | 2026-11-27 |
-| 8 | 数字 | 部分（APK 28.2 MiB；三个 `.so` 分别 8.3 / 11.6 / 7.5 MB；没开会话时 PSS 约 88.7 MiB；带会话的 PSS 和 fps 没量） | 待定 | 2026-11-27 |
+| 4 | 进程内会话、节流 | 没测完（34 上画面、颜色和打字都过，打字经写作条发出；会话自己断的原因查到了，是 hub 的 64 KiB 行上限，探查里绕过后会话撑过 250 s；**门禁（慢 Dart 量内存）没做**：用户正从另一台设备用这台 Mac 的桌面，桌面会话互斥；36 没做） | 待定；hub 的 `watch_load` 超长行是 main 的 bug | 2026-11-27 |
+| 8 | 数字 | 部分（APK 28.2 MiB；三个 `.so` 分别 8.3 / 11.6 / 7.5 MB；没开会话时 PSS 约 87 MiB；开着静态 2560×1600 桌面会话时 PSS 6 次平均约 215 MiB，其中 4 次在 187–189 MiB；release 30 s 平均 fps 没量） | 待定 | 2026-11-27 |
 
 ## 1 工具和空壳
 
@@ -197,14 +197,15 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 **结论：过。** hub 在安卓进程里起得来、读得懂数据根、出接入引导；放进 relay 和 key、加上这台 Mac 后，两台模拟器在「默认」和「只有 IPv4」两种状态下都把 relay 解析成 `::ffff:` 映射地址并经 relay 连上。注意这台 Mac 存的 relay 是 IPv4 字面地址，**relay 的域名解析这次没测到**；真 IPv6 和只有 IPv6 的网络也留给实机。
 ## 4 进程内会话
 
-**状态：没测完，停在第 6 步（慢 Dart 量内存）之前。** 只在模拟器 34 上做了；36 没做。
+**状态：没测完。门禁（第 6 步，慢 Dart 量内存）没做；36 没做。** 只在模拟器 34 上做了。
 
 做法：`gui/lib/embed/session_ffi.dart`（新）接 `rapp-android-ffi` 的 `rapp_session_open/send/ack/close/free`。帧包用 `asTypedList(finalizer: rapp_session_free)` 零拷贝交给 Dart。`ackedPackets` 是 `async*`：交出一个帧包，等 `slow`，再 `ack`。这样消费方暂停时不 ack，Rust 的闸也就不放下一帧。`SessionWorker.ffi` 和 `LinuxSessionPort.ffi` 是这两个共用文件里新加的构造函数，旧路径不动。`main_android.dart` 用 `LinuxSessionPort.ffi('librapp_android.so', downloads: () => '<数据根>/files/transfers', slow: P0_SLOW_MS)`。日志每秒打一行 `p0 fps=N`，traffic 事件打 `p0 traffic frames=N`。
 
-单元测试（`gui/test/session_ffi_test.dart`，3 个）：
+单元测试（`gui/test/session_ffi_test.dart`，4 个）：
 - ack 顺序；
 - 消费方暂停时不 ack；
-- `slow` 生效。
+- `slow` 生效；
+- `slowNow` 每帧重新读（续做时加的，见下）。
 
 先红后绿（`flutter test test/session_ffi_test.dart`）。
 
@@ -221,26 +222,51 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 | 单应用会话打字 | 过，但不是直接打进文稿：`adb shell input tap 1200 700` 后 `adb shell input text 'p0probe'` 进的是 rApp 自己的写作条。按回车（`adb shell input keyevent 66`）后发到 Mac，TextEdit 文稿里出现 `p0probe`，标题变成 Edited。之后没存盘就关掉了 | `p0/t4-type-34.png`（字在写作条）、`p0/t4-type2-34.png`、`p0/t4-p0probe-34.png`（字在文稿里） |
 | 会话稳定性 | **release 包里会话自己断**：三次里两次在 18 s、10 s 后断，安卓侧报 `host disconnected: failed to fill whole buffer`（`client-core/src/protocol.rs:352` 的 `read_exact` 读到 EOF），Mac 侧记 `session_end reason "connection lost"`。断之前那一秒 `p0 fps` 还有 14–15，不是闸卡住。点「重连」能连回来。第三次开了 91 s，是我 `am force-stop` 结束的。debug 包两次各开了 115 s、79 s，Mac 侧结束原因也记的是 `connection lost`，当时是不是我结束的没有记下来 | `p0/t4-textedit-disconnect-34.png` |
 
-**卡住的原因：** 每次会话结束（自己断开也算），Mac 上的 rApp 都会在 10 s 后自动锁屏（`service.log` 里 `auto_lock`，今天共 5 次）。锁上以后要用户输入密码，所以第 6 步需要的「A 上有动的画面」做不了。另外，打开桌面会话会把另一台设备正开着的桌面会话顶掉（`session_end reason "taken over"`）。
+**第一次停下的原因：** 每次会话结束（自己断开也算），Mac 上的 rApp 都会在 10 s 后自动锁屏（`service.log` 里 `auto_lock`）。锁上以后要用户输入密码。另外，打开桌面会话会把另一台设备正开着的桌面会话顶掉（`session_end reason "taken over"`）。
+
+### 续做（2026-11-27 下午，模拟器 34，无窗口模式 `emulator -avd rapp-p0-34 -no-window -no-audio`）
+
+**会话自己断的原因（查清了，是 main 的 bug，不是安卓特有的）。** Mac 回 `watch_load` 的第一行带满 1 小时的历史（720 个点），超过 `rapp_net::line::MAX_LINE`（`rust/net/src/line.rs:11`，64 KiB），读行报 `line longer than 64 KiB`。`rust/hub/src/link.rs` 的 `request()` 把这当成连接坏了：缓存连接那支没有专门处理、落到 `forget`，新连接那支走 `forget_if_dead`。连接一丢，这条连接上的会话全断，安卓侧看到的就是 `failed to fill whole buffer`、Mac 侧是 `connection lost`。查法：debug 包加诊断日志（改动 `p0/t4d-diag.diff`），在 hub.log 里看到这行报错，紧跟着连接被丢、会话结束。
+
+探查里的绕过（补丁表 `link.rs` 那行）：连接还开着、错误是 `line longer than` 时，只把错误交回去、记一行 `p0_keep_link`，不丢连接。绕过后 hub.log 里只有大约每分钟一行 `p0_keep_link`，没有反复重连。两次会话都撑过 250 s：桌面会话 256 s（被另一台设备顶掉才结束），单应用会话 251 s（我 `am force-stop` 结束）。**真修法应在 main**：要么 `watch_load` 的首行别带那么多历史、或拆行，要么读行上限对这个回复放宽；不管哪种，「回复太长」都不该丢整条连接。
+
+**慢速开关改成运行时读。** `ackedPackets` 加了 `slowNow`，每帧重新读；`FfiSession` 每秒用 libc 的 `__system_property_get` 读一次系统属性 `debug.rapp.p0_slow_ms`。这样同一个包、同一个会话里，`adb -s emulator-5554 shell setprop debug.rapp.p0_slow_ms 200` 和 `… 0` 就能在慢速和对照之间切换，不用重装、不用断会话（断会话会触发 Mac 自动锁屏）。日志在切换时打 `p0 slow=Nms`。新测试先红后绿：`p0/t4c-red.txt`、`p0/t4c-green.txt`。
+
+**release 包（带绕过）上量到的：**
+
+| 看什么 | 结果 | 证据（scratchpad，不进仓库） |
+|---|---|---|
+| 桌面会话有画面、和 Mac 一致、红蓝没反 | 有，和 Mac 一致，颜色对 | `p0/t4e-desktop-static-34.png` |
+| 动的画面（Mac 上一个 Terminal 窗口每 30 ms 打一行时间，无声、没下载东西） | 画面跟着动；截图那一秒 `p0 fps=15` | `p0/t4e-moving-34.png` |
+| 静态桌面会话时的 PSS | 见第 8 节 | `p0/t4e-static-34.txt` |
+
+**门禁（第 6 步）：没做，BLOCKED。** 对照那一轮（`debug.rapp.p0_slow_ms=0`）开始后约 4 分钟，用户在另一台设备上把这台 Mac 的桌面会话拿回去了（Mac `service.log` 06:47:44Z `session_end reason "taken over"`），从第 10 个采样起 PSS 掉到约 95 MB。按规矩这一轮整轮作废（`p0/t4e-ctl-34.txt`，不引用里面的数），不拼接。桌面会话一次只能一个人开，用户正在用，再顶回去会打断用户，所以没再开。试过单应用会话（Terminal）代替：它跟着用户在 Mac 上聚焦的那个 Terminal 窗口走，`p0 fps` 只有 0–6，不是能控制的动画面，不能当门禁的画面源（`p0/t4e-term-34.png`、`p0/t4e-term-moving-34.png`）。慢速一轮、release 30 s 平均 fps、强制 relay 的 fps 都**没量**。
+
+**界面上看到的问题：** 会话断开后，画面上的「结束会话」按钮点了没反应（`adb shell input tap` 点了几次），只能点左上角总览按钮离开。
+
+**续做里的锁屏和顶掉次数：** 自动锁屏 1 次（06:27:40Z，绕过之前那次会话断开后）；我顶掉别人的桌面会话 2 次（06:27:16Z、06:43:28Z）；我的会话被别人顶掉 1 次（06:47:44Z）。
 
 ## 5 键盘和触控板
 ## 6 语音
 ## 7 自己装自己
 ## 8 数字
 
-**状态：部分。** 只有模拟器 34 的 release 包；带会话的 PSS 和 release fps 还没量。
+**状态：部分。** 只有模拟器 34 的 release 包（续做时重编的带绕过的包，和上午那个差 1,072 字节，都是 `librapp_android.so` 多出来的）。
 
-- release APK：`flutter build apk --release --target-platform android-arm64`，大小 29,521,063 字节（28.2 MiB）。
+- release APK：`flutter build apk --release --target-platform android-arm64`，大小 29,522,135 字节（28.2 MiB）。
 - `unzip -lv` 看三个 `.so`（都是 Stored，不压缩）：
 
   | `.so` | 字节 |
   |---|---:|
   | `libapp.so` | 8,258,448 |
   | `libflutter.so` | 11,579,920 |
-  | `librapp_android.so` | 7,528,992 |
+  | `librapp_android.so` | 7,530,064 |
 
-- 没开会话时的 TOTAL PSS：停在总览页，`adb shell dumpsys meminfo com.rapphub.rapp | grep -E 'TOTAL( PSS)?:?'`，每 10 s 一次共 6 次，得到 90115、92059、89568、90355、91183、91892 KB，平均 90862 KB（约 88.7 MiB）。证据：`p0/t4-sizes.txt`、`p0/t4-pss-nosession-34.txt`。
-- 开着静态 2560×1600 桌面会话时的 PSS、release `p0 fps`（模拟器，只作参考）：**没量**，原因见第 4 节。
+- 测 PSS 用 `adb -s emulator-5554 shell dumpsys meminfo com.rapphub.rapp | grep 'TOTAL PSS'`，每 10 s 一次共 6 次（`scratchpad/tools/sample.sh <out> 6 10`）。
+- 没开会话、停在总览页（`am force-stop` 后重新启动、等 40 s）：89633、89512、88344、87640、87684、89900 KB，平均 88786 KB（约 86.7 MiB）。上午那个包同样量法：平均 90862 KB。证据 `p0/t4e-nosession-34.txt`（文件里的 `p0 fps` 行是 force-stop 之前那个进程留在 logcat 里的，不算）、`p0/t4-pss-nosession-34.txt`。
+- 开着静态 2560×1600 桌面会话（路由自动，局域网）：191609、323376、193956、192720、226652、193968 KB，平均 220380 KB（约 215.2 MiB）。6 次里有两次尖峰（323376、226652），其余 4 次 191609–193968 KB（约 187–189 MiB）。证据 `p0/t4e-static-34.txt`。
+- release 动画面 30 s 平均 `p0 fps`（模拟器，只作参考）：**没量**，原因见第 4 节续做。强制走 relay 的 fps：**没量**。
+- 大小证据 `p0/t4e-sizes.txt`。
 
 ## 探查里打的补丁（P1 的输入）
 
@@ -258,6 +284,8 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 | `main_android.dart` `_log` 用 `debugPrint` | 不用 `stderr.writeln` | 安卓上 stderr 到不了 logcat | 安卓入口的日志（或写文件） |
 | `gui/android/.../MainActivity.kt` | `rapp/android` 通道：`paths`（`filesDir`、`cacheDir`）、`deviceName`（写死 `rApp P0 探查`） | 数据根和设备名 | 安卓平台通道；`deviceName` P1 取真名（`Settings.Global.DEVICE_NAME` 之类） |
 | `gui/android/app/src/main/AndroidManifest.xml` | `INTERNET`、`ACCESS_NETWORK_STATE`、`allowBackup="false"` | 连网；身份密钥不进备份 | §6.4 Kotlin 壳的清单（还差 `dataExtractionRules`、网络安全配置） |
+| `gui/lib/embed/session_ffi.dart` `ackedPackets(slowNow:)`、`p0SlowFromProperty()`、`FfiSession._readSlow()` | ack 前的等待每帧读 `slowNow()`；每秒从系统属性 `debug.rapp.p0_slow_ms` 读一次（`__system_property_get`）；属性没设或不是数字时用 `main_android.dart` 的 `P0_SLOW_MS` | 同一个会话里切换慢速和对照，不断会话（断了 Mac 会自动锁屏） | 不进 P1（探查用）；ack 本身属于 §6.3 `SessionLink` |
+| `rust/hub/src/link.rs` `request()` 两处 + 新函数 `keeps_link` | 连接还开着、错误是 `line longer than` 时只交回错误、记 `p0_keep_link`，不 `forget` / `forget_if_dead` | `watch_load` 首行超 64 KiB 时整条连接被丢、上面的会话全断（第 4 节续做）。这是所有平台共用的 hub 代码 | 不属于 §6.3 的任何安卓接口，归共用的 hub（`rust/hub`、`rust/net`）；**真修法在 main 上做**，P1 不带这个绕过 |
 | `rust/net/src/quic.rs` `pub use sys::getaddrinfo_v6;` | 公开给探查函数 | `rapp_p0_resolve` 要单独看这一支 | 不进 P1（探查用） |
 | `rust/android-ffi` `rapp_p0_resolve`；`Cargo.toml` 加 `rapp-net`、`tokio` | 返回 `getaddrinfo_v6` 和 `resolve_for(dual)` 两行 | 第 3 项的解析探查 | 不进 P1（探查用） |
 | `gui/lib/p0/p0_pages.dart` | `P0_PAGE=resolve` 页；`keys`、`speech`、`install` 占位 | 探查页 | 不进 P1 |
