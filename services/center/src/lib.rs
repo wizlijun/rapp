@@ -1,4 +1,4 @@
-//! rapp-state: a headless state-queue service. Listens on 127.0.0.1 only.
+//! rapp-center (中心服务): one port for every builtin service; today the state queue. Listens on 127.0.0.1 only.
 
 pub mod disk;
 mod http;
@@ -121,7 +121,7 @@ pub async fn cli(args: Vec<String>) -> i32 {
     match run(cfg).await {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("rapp-state 起不来：{e}");
+            eprintln!("rapp-center 起不来：{e}");
             1
         }
     }

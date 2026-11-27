@@ -118,7 +118,7 @@ async fn terminals_off_starts_no_worker() {
     assert_eq!(r["outbox"], idle_outbox(), "{r}");
 }
 
-// ---- the companion: `rapp-state` started, shared and stopped by `rapp-service` ----
+// ---- the companion: `rapp-center` started, shared and stopped by `rapp-service` ----
 
 /// A port nothing listens on now (never 8102, the real default).
 fn free_port() -> u16 {
@@ -186,7 +186,7 @@ async fn state_on_runs_and_shares_it() {
     assert!(r["share"].as_u64().is_some_and(|n| (29000..29010).contains(&n)), "a share number: {r}");
     assert_eq!(r["stored"], json!({"devices": 0, "sessions": 0, "queued": 0, "last": null}), "{r}");
     let s = share_of(&a, p).await.expect("the state service is shared");
-    assert_eq!((s["kind"].as_str(), s["note"].as_str()), (Some("state"), Some("状态服务")), "{s}");
+    assert_eq!((s["kind"].as_str(), s["note"].as_str()), (Some("state"), Some("中心服务")), "{s}");
     assert_eq!(s["local"], r["share"], "{s}");
     assert_eq!(health(p).await.unwrap()["name"], "rapp-state");
     let r = wait_state(&a, WAIT, |r| r["outbox"]["dest"] == json!({"local": p})).await;
@@ -220,7 +220,7 @@ async fn state_off_stops_and_unshares() {
     assert_eq!((s["kind"].as_str(), s["note"].as_str()), (Some("state"), Some("我的")), "the user's note stays: {s}");
     assert_eq!(s["local"], r["share"], "{s}");
     // Its stderr goes to its own log file.
-    let text = std::fs::read_to_string(a.home.path().join("logs").join("rapp-state.log")).unwrap_or_default();
+    let text = std::fs::read_to_string(a.home.path().join("logs").join("rapp-center.log")).unwrap_or_default();
     assert!(text.contains("\"listening\""), "{text}");
     wait_state(&a, WAIT, |r| r["outbox"]["dest"] == json!({"local": p})).await;
 
@@ -233,7 +233,7 @@ async fn state_off_stops_and_unshares() {
     assert_eq!((s["kind"].clone(), s["note"].as_str()), (Value::Null, Some("我的")), "{s}");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
     while health(p).await.is_some() {
-        assert!(tokio::time::Instant::now() < deadline, "rapp-state still answers");
+        assert!(tokio::time::Instant::now() < deadline, "rapp-center still answers");
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     wait_state(&a, WAIT, |r| r["outbox"]["dest"].is_null()).await;
@@ -399,13 +399,13 @@ async fn two_companions_pick_the_same_one() {
     }
 }
 
-/// A `rapp-state` this service did not start (a foreign one, or an orphan of an earlier run), on
+/// A `rapp-center` this service did not start (a foreign one, or an orphan of an earlier run), on
 /// `port`; ended on drop.
 struct Foreign(std::process::Child);
 
 impl Foreign {
     async fn on(port: u16) -> Foreign {
-        let child = std::process::Command::new(env!("CARGO_BIN_EXE_test-rapp-state"))
+        let child = std::process::Command::new(env!("CARGO_BIN_EXE_test-rapp-center"))
             .args(["--port", &port.to_string()])
             .stderr(std::process::Stdio::null())
             .spawn()
@@ -413,7 +413,7 @@ impl Foreign {
         let f = Foreign(child);
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         while health(port).await.is_none() {
-            assert!(tokio::time::Instant::now() < deadline, "the foreign rapp-state does not answer");
+            assert!(tokio::time::Instant::now() < deadline, "the foreign rapp-center does not answer");
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         f
@@ -452,7 +452,7 @@ async fn a_failed_start_takes_back_its_old_share() {
 }
 
 #[tokio::test]
-async fn a_rapp_state_already_on_the_port_is_not_ours() {
+async fn a_rapp_center_already_on_the_port_is_not_ours() {
     let key = rapp_wire::Key::new_local();
     let p = free_port();
     let foreign = Foreign::on(p).await;
@@ -471,7 +471,7 @@ async fn a_rapp_state_already_on_the_port_is_not_ours() {
     drop(foreign);
 }
 
-// ---- the P1 acceptance (spec §15): B's terminal sessions reach a real `rapp-state` on A ----
+// ---- the P1 acceptance (spec §15): B's terminal sessions reach a real `rapp-center` on A ----
 
 /// The texts that must never reach a log: the question, the session's name, title and id.
 const SECRETS: [&str; 4] = ["SECRET-TEXT", "secret-name", "SECRET-TITLE", "term:pty:"];
@@ -646,7 +646,7 @@ async fn claude_working_blocked_done_reach_the_queue() {
     assert_eq!((q[1]["kind"].as_str(), q[1]["app"].as_str()), (Some("permission"), Some("claude-code")), "{}", q[1]);
 }
 
-/// A `rapp-state` the test runs itself (`rapp_state::serve_with_log`), on a fixed port with its
+/// A `rapp-center` the test runs itself (`rapp_center::serve_with_log`), on a fixed port with its
 /// store in a temp dir: stopped by aborting it, started again on the same port and dir.
 struct Ctl {
     port: u16,
@@ -664,10 +664,10 @@ impl Ctl {
 
     async fn start(&mut self) {
         let l = tokio::net::TcpListener::bind(("127.0.0.1", self.port)).await.unwrap();
-        let cfg = rapp_state::Config { port: self.port, data: Some(self.dir.path().join("data")), ..Default::default() };
+        let cfg = rapp_center::Config { port: self.port, data: Some(self.dir.path().join("data")), ..Default::default() };
         let lines = self.lines.clone();
-        let log = rapp_state::Log::new(move |v| lines.lock().unwrap().push(v.clone()));
-        self.task = Some(tokio::spawn(rapp_state::serve_with_log(cfg, l, log)));
+        let log = rapp_center::Log::new(move |v| lines.lock().unwrap().push(v.clone()));
+        self.task = Some(tokio::spawn(rapp_center::serve_with_log(cfg, l, log)));
         assert_eq!(health(self.port).await.unwrap()["name"], "rapp-state");
     }
 
@@ -816,7 +816,7 @@ async fn no_text_in_any_log() {
     // The texts did travel: they are in A's queue and state.
     assert!(q.iter().all(|r| r["msg"] == "SECRET-TEXT" && r["name"] == "secret-name" && r["title"] == "SECRET-TITLE"), "{q:?}");
     let (al, bl) = (a.home.path().join("logs"), b.home.path().join("logs"));
-    let must = [al.join("service.log"), al.join("rapp-state.log"), bl.join("service.log")];
+    let must = [al.join("service.log"), al.join("rapp-center.log"), bl.join("service.log")];
     // The state service logged the posts it took.
     let text = std::fs::read_to_string(&must[1]).unwrap();
     assert!(text.contains("\"event\":\"events\""), "{text}");

@@ -704,7 +704,7 @@ class MainState extends ChangeNotifier {
 
   static const hintHistoryMax = 50;
 
-  /// The rapp-state service this app follows; null when it is not wired in.
+  /// The center service this app follows; null when it is not wired in.
   final StateSync? stateSync;
 
   /// Whether the queue and the needs follow the service: connected, or reconnecting (a refresh) with the last

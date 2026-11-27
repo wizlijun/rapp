@@ -1,4 +1,4 @@
-// Looks again for the rapp-state service as soon as what finding it depends on changes, instead of at the next 60 s look.
+// Looks again for the center service (rapp-center) as soon as what finding it depends on changes, instead of at the next 60 s look.
 import 'package:flutter/foundation.dart';
 
 import 'state_sync.dart';

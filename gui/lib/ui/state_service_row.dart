@@ -1,4 +1,4 @@
-// The 状态服务 switch on a device page: turns that device's rapp-state service on or off.
+// The 状态服务 switch on a device page: turns that device's center service on or off.
 import 'dart:async';
 
 import 'package:flutter/material.dart';

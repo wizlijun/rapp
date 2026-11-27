@@ -1,4 +1,4 @@
-# rapp-state HTTP API
+# rapp-center HTTP API
 
 JSON over HTTP/1.1 on 127.0.0.1. Errors: `{"error": "..."}`.
 

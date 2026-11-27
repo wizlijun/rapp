@@ -381,7 +381,7 @@ mod tests {
     }
 
     fn sample() -> Vec<(Value, u64)> {
-        include_str!("../../../../services/state/api/samples/term-lists.ndjson")
+        include_str!("../../../../services/center/api/samples/term-lists.ndjson")
             .lines()
             .map(|l| {
                 let v: Value = serde_json::from_str(l).unwrap();

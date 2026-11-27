@@ -293,8 +293,8 @@ mod tests {
 
     #[test]
     fn lists_become_the_sample_events() {
-        let lists = include_str!("../../../../services/state/api/samples/term-lists.ndjson");
-        let want: Vec<Value> = include_str!("../../../../services/state/api/samples/term-events.ndjson")
+        let lists = include_str!("../../../../services/center/api/samples/term-lists.ndjson");
+        let want: Vec<Value> = include_str!("../../../../services/center/api/samples/term-events.ndjson")
             .lines()
             .map(|l| serde_json::from_str(l).unwrap())
             .collect();

@@ -1593,6 +1593,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rapp-center"
+version = "0.15.59"
+dependencies = [
+ "anyhow",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "rapp-cli"
 version = "0.15.59"
 dependencies = [
@@ -1804,20 +1818,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rapp-state"
-version = "0.15.59"
-dependencies = [
- "anyhow",
- "http-body-util",
- "hyper",
- "hyper-util",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
-]
-
-[[package]]
 name = "rapp-svc-windows"
 version = "0.15.59"
 
@@ -1844,6 +1844,7 @@ dependencies = [
  "anyhow",
  "quinn",
  "rand 0.9.5",
+ "rapp-center",
  "rapp-client-core",
  "rapp-conn",
  "rapp-host-core",
@@ -1851,7 +1852,6 @@ dependencies = [
  "rapp-net",
  "rapp-relay",
  "rapp-service",
- "rapp-state",
  "rapp-update",
  "rapp-wire",
  "rcgen",

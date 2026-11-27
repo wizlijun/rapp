@@ -1,4 +1,4 @@
-// 设置里的“状态服务”：这台设备怎么找 rapp-state（自动 / 关 / 手填地址），以及现在连得怎么样。
+// 设置里的“状态服务”：这台设备怎么找中心服务（rapp-center）（自动 / 关 / 手填地址），以及现在连得怎么样。
 import 'package:flutter/material.dart';
 
 import '../state/state_config.dart';

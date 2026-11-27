@@ -1,5 +1,5 @@
 //! Companion services: programs `rapp-service` runs next to itself when `services.json` turns
-//! them on. For now there is one, the state service (`rapp-state`).
+//! them on. For now there is one, the center service (`rapp-center`).
 //!
 //! On: the program is started (`kill_on_drop`), asked `GET /v1/health` every 200 ms for at most
 //! 5 s, then its port is shared (kind `"state"`) and it becomes this device's own sink. A start
@@ -7,7 +7,7 @@
 //! While it is tried again it stays this device's sink, so the outboxes wait and resend.
 //! Off: the program is stopped, it is no sink any more, and its share is taken back: removed when
 //! the companion made it, only unmarked when the user had shared the port (`take_back`).
-//! `rapp-service` never links `rapp-state`: it only starts the program.
+//! `rapp-service` never links `rapp-center`: it only starts the program.
 
 use crate::forward::{admit, Caller};
 use crate::outbox::send;
@@ -39,9 +39,11 @@ pub struct Companion {
     pub kind: &'static str,
     /// The note of its share, unless the port was shared already.
     pub note: &'static str,
+    /// The note an older version gave its share: such a share is still the companion's own.
+    pub old_note: Option<&'static str>,
 }
 
-pub const TABLE: &[Companion] = &[Companion { name: "state", program: "rapp-state", port: 8102, kind: "state", note: "状态服务" }];
+pub const TABLE: &[Companion] = &[Companion { name: "state", program: "rapp-center", port: 8102, kind: "state", note: "中心服务", old_note: Some("状态服务") }];
 
 /// In the device's `local/` (its home).
 const FILE: &str = "services.json";
@@ -72,7 +74,7 @@ pub struct ServiceCfg {
     pub keep_events: Option<usize>,
 }
 
-/// The command line of `rapp-state` for `c`: the data under `<home>/state` unless the store is
+/// The command line of `rapp-center` for `c`: the data under `<home>/state` unless the store is
 /// `"memory"`.
 pub fn args(c: &ServiceCfg, home: &Path) -> Vec<String> {
     let mut a = vec!["--port".to_string(), c.port.unwrap_or(TABLE[0].port).to_string()];
@@ -345,7 +347,7 @@ async fn run_once(state: &Arc<State>, c: &'static Companion, cfg: &ServiceCfg, c
     let reader = ch.stderr.take().map(|err| tokio::spawn(keep_stderr(state.log_dir.join(format!("{}.log", c.program)), err, last.clone())));
 
     // Ready: the health check answers AND this program still runs `QUICK_EXIT` after its start.
-    // Another `rapp-state` already on the port (a foreign one, or an orphan of an earlier run)
+    // Another `rapp-center` (or an old `rapp-state`) already on the port (a foreign one, or an orphan of an earlier run)
     // answers too, while this one ends at once with "address in use": that is not ours.
     let started = tokio::time::Instant::now();
     let (grace, deadline) = (started + QUICK_EXIT, started + READY_WAIT);
@@ -418,11 +420,11 @@ fn ready(state: &Arc<State>, c: &'static Companion, port: u16) {
 }
 
 /// Takes back what `ready` did to the share of `port` (one of kind `c.kind`): the share is removed
-/// when the companion made it (its note is `c.note`); a share the user made of that port stays,
+/// when the companion made it (its note is `c.note`, or `c.old_note` from an older version); a share the user made of that port stays,
 /// an ordinary one again. Any other share is not touched.
 fn take_back(state: &State, c: &'static Companion, port: u16) {
     let Some(share) = state.shares.get(port).filter(|s| s.kind.as_deref() == Some(c.kind)) else { return };
-    if share.note == c.note {
+    if share.note == c.note || Some(share.note.as_str()) == c.old_note {
         if let Err(e) = sharing::unshare(state, &json!(port), &By::Local) {
             state.log.event(Lvl::Warn, "companion_unshare_failed", json!({"name": c.name, "port": port, "error": e}));
         }

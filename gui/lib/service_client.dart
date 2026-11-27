@@ -504,7 +504,7 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi, ServiceSwitchA
 
   Future<List<Map<String, dynamic>>> history({int limit = 50}) => _need().history(limit: limit);
 
-  /// The address of the rapp-state service this machine's service knows of; null when there is none or on any error.
+  /// The address of the center service (rapp-center) this machine's service knows of; null when there is none or on any error.
   Future<String?> stateUrl() async {
     try {
       final r = await _need().request({'cmd': 'state'});

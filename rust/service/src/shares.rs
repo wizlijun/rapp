@@ -106,7 +106,7 @@ pub struct Share {
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub proto_auto: bool,
     /// What kind of service this is, when it is one other devices look for ("state": a
-    /// `rapp-state` service). None for an ordinary share.
+    /// `rapp-center` service). None for an ordinary share.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
 }

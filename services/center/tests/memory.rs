@@ -1,6 +1,6 @@
 //! Its own process: it changes the current directory and HOME, which must not leak into other tests.
 
-use rapp_state::{serve, Config};
+use rapp_center::{serve, Config};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 

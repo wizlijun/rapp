@@ -1,4 +1,4 @@
-// What the app tells the rapp-state service on its own account (spec §8): the states it inferred for
+// What the app tells the center service (rapp-center) on its own account (spec §8): the states it inferred for
 // controlled devices, and its desk (what it has open). Event text (name, msg) is never logged.
 import 'dart:async';
 import 'dart:convert';

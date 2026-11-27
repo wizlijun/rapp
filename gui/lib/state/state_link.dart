@@ -1,4 +1,4 @@
-// HTTP + SSE client for the rapp-state service (`services/state/api/http.md`). Plain dart:io, no dependencies.
+// HTTP + SSE client for the center service (rapp-center) (`services/center/api/http.md`). Plain dart:io, no dependencies.
 // Event text is never logged; it can carry what the user typed.
 import 'dart:async';
 import 'dart:convert';
@@ -49,7 +49,7 @@ class StateLink {
     return base.replace(path: '$prefix$path', queryParameters: query == null || query.isEmpty ? null : query);
   }
 
-  /// True only for a 200 from a rapp-state service. Never throws.
+  /// True only for a 200 from a center service. Never throws.
   Future<bool> health() async {
     try {
       final j = await _getJson(_uri('/v1/health'));
