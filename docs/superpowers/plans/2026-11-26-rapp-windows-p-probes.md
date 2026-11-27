@@ -30,7 +30,7 @@
 
 These are the ways a probe gives a wrong "pass". Each line names the task that guards against it.
 
-1. A probe passes on the developer desktop and nobody runs it on the Server 2022 cloud machine with no GPU → every capture, UI and service probe has the cloud machine as a required row of its matrix (Tasks 3, 4, 5, 7, 8, 10, 11).
+1. A probe passes on the developer desktop and nobody runs the `service`/terminal/upgrade probes on the Server 2022 cloud machine with no GPU → Per U12 (2026-11-27), GPU-less Windows Server 2022 (`S22-C`) only provides `rapp-service` (presence, text terminals, port sharing, `rapp-state`, CLI, `rapp-svc` supervisor/updater) and does **not** provide graphical `rapp-host`. Therefore `S22-C` is required for `S4`, `T1`, `T5` and initial setup UI over RDP (`G1`), and is **not** part of the graphical `host` capture/secure-desktop matrix (`H1`, `H3`, `H5`, `S1`, `S2`, `S3`).
 2. Capture looks right by eye but pixels are off (colour space, premultiplied alpha, one-pixel border) → H1 and H3 compare against a generated test pattern numerically, not by looking (Tasks 4, 5).
 3. Input "works" on Notepad only → H5's matrix is six named apps and the count is exact: 20 runs × 1000 characters, zero lost (Task 6).
 4. A service probe passes while a user is logged in and the screen is on, and the real case (cold boot, nobody at the machine) was never run → S2 is run from a cold boot with no local input, and says so in the result (Task 8).
@@ -145,9 +145,9 @@ Expected: a table of backend × item → identical / differs at offset N.
 
 - [ ] **Step 3: Run without a service** and check, on `W11-D`: the main window appears; text renders (Chinese included); the tray icon shows with an `.ico` and its menu opens and reacts; closing the window hides it to the tray and the tray brings it back; starting a second copy brings the first to the front and exits (try a named mutex in `gui/windows/runner/main.cpp` plus `FindWindow`/`SetForegroundWindow`).
 
-- [ ] **Step 4: Run on `S22-C`** (no GPU; Flutter should fall back to software rendering). Same checks, over the console session, not only over RDP. Note the frame time of scrolling the overview.
+- [ ] **Step 4: Run on `S22-C`** (no GPU; over RDP for initial pairing/settings per U12, since `S22-C` only provides `rapp-service` and not graphical `rapp-host`; Flutter should fall back to software rendering). Check that pairing and settings work.
 
-- [ ] **Step 5: Verdict.** Pass = all of Step 3 on both machines. Plugins without Windows support: decide per plugin “replace” or “do it in the runner”, write it into the results page (this list becomes tasks in plan C). Fails on the cloud machine → tell the user (the fallback narrows the server to host-only use).
+- [ ] **Step 5: Verdict.** Pass = all of Step 3 on Windows 11, and initial pairing/settings UI usable on `S22-C`. Plugins without Windows support: decide per plugin “replace” or “do it in the runner”, write it into the results page (this list becomes tasks in plan C). Fails on the cloud machine → tell the user (the fallback narrows the UI there to `--cm` and settings).
 
 - [ ] **Step 6: Record and commit.**
 
@@ -160,11 +160,11 @@ Expected: a table of backend × item → identical / differs at offset N.
 
 - [ ] **Step 1: Write the probe.** It opens N test windows of its own (each fills its client area with a known pattern: per-window solid colour plus a 1-pixel checker in one corner and a frame counter), then captures every top-level window of a target process with the per-window capture API: `Windows.Graphics.Capture` — `IGraphicsCaptureItemInterop::CreateForWindow`, `Direct3D11CaptureFramePool::CreateFreeThreaded`, `GraphicsCaptureSession` with `IsBorderRequired = false` and `IsCursorCaptureEnabled = false`. It reads frames back to BGRA in memory and reports, per window: frames per second, time from a pattern change to the frame that shows it, and the maximum per-channel difference against the known pattern.
 
-- [ ] **Step 2: Run the matrix.** N = 1, 3, 10 windows; targets: the probe's own pattern windows, Notepad, Chrome (with a menu open), VS Code. Cases: a window fully covered by another app; a window partly off-screen; minimised; moved and resized during capture; on a second screen with different scaling. Machines: `W11-D`, `W11-L`, `S22-C` (no GPU — does a WARP device work?). Measure CPU with 10 windows at 30 fps.
+- [ ] **Step 2: Run the matrix.** N = 1, 3, 10 windows; targets: the probe's own pattern windows, Notepad, Chrome (with a menu open), VS Code. Cases: a window fully covered by another app; a window partly off-screen; minimised; moved and resized during capture; on a second screen with different scaling. Machines: `W11-D`, `W11-L` (`S22-C` has no GPU and does not provide `rapp-host` per U12). Measure CPU with 10 windows at 30 fps.
 
 - [ ] **Step 3: Also record three loose facts** the spec marks 【未验证】 with no probe of their own: (a) for every `HWND` seen, whether the upper 32 bits are zero (spec §6.3 uses the low 32 bits as the window id); (b) whether the yellow border can be turned off on build 20348 and on 22000 (spec §3.1); (c) for two Store apps (Calculator, Settings), whether the real process can be found from the `ApplicationFrameHost.exe` window (child window of class `Windows.UI.Core.CoreWindow`, its process id) (spec §6.4).
 
-- [ ] **Step 4: Verdict.** Pass (spec §16 H1) = no border and no pointer in any frame; a fully covered window's content is exact; 10 windows use no more than half a core; the no-GPU machine produces frames. **Fail → stop and ask the user**: the fallback (crop from the whole screen) is a product regression.
+- [ ] **Step 4: Verdict.** Pass (spec §16 H1) = no border and no pointer in any frame; a fully covered window's content is exact; 10 windows use no more than half a core. **Fail → stop and ask the user**: the fallback (crop from the whole screen) is a product regression.
 
 - [ ] **Step 5: Record and commit.** The recipe section must say how the device was created (hardware or WARP), the pixel format, how frames were read back, and how resize was handled (`Recreate` of the frame pool).
 
@@ -177,7 +177,7 @@ Expected: a table of backend × item → identical / differs at offset N.
 
 - [ ] **Step 1: Write the probe.** One process duplicates one output with DXGI Desktop Duplication (`IDXGIOutput1::DuplicateOutput`, also try `IDXGIOutput5::DuplicateOutput1` with a BGRA format list for HDR screens), acquires frames at 30 fps, scales to a target density (try both: on the GPU, and in memory after readback), reads back BGRA, and reports CPU, GPU, frame times and colour difference against a full-screen test pattern it shows itself. A `--count N` mode starts N such processes in the same login session against the same output.
 
-- [ ] **Step 2: Run the matrix.** 4K at 30 fps on `W11-D`; `W11-L` (integrated plus discrete: which adapter owns the output); an HDR screen if there is one; a portrait-rotated screen; a Hyper-V VM; `S22-C`. `--count 8` on `W11-D` and `S22-C`: does every one of the 8 get frames, at what rate.
+- [ ] **Step 2: Run the matrix.** 4K at 30 fps on `W11-D`; `W11-L` (integrated plus discrete: which adapter owns the output); an HDR screen if there is one; a portrait-rotated screen; a Hyper-V VM (`S22-C` does not provide `rapp-host` per U12). `--count 8` on `W11-D` and `W11-L`: does every one of the 8 get frames, at what rate.
 
 - [ ] **Step 3: Verdict.** Pass = 4K 30 fps capture plus scaling ≤ 40% of one core; every machine produces frames with correct colour; **8 processes all get frames**. If only the 8-process line fails, that is not a failure of the probe: record it and the design switches to one capture process per login session (spec §6.5, already written; no need to ask). If single machines fail, record which fallback worked there (per-screen `Windows.Graphics.Capture` item via `CreateForMonitor`, then GDI `BitBlt` at 15 fps). General failure → back to the design.
 
@@ -213,7 +213,7 @@ Expected: a table of backend × item → identical / differs at offset N.
 
 - [ ] **Step 1: Write the probe.** `service`: a Windows service running as SYSTEM that, on a command from `ctl` over a named pipe, starts `helper` inside the interactive user's session with a SYSTEM token (`WTSGetActiveConsoleSessionId`, duplicate its own token, `SetTokenInformation(TokenSessionId)`, `CreateProcessAsUserW` with `lpDesktop = "winsta0\\default"`). `helper`: a loop that follows the input desktop (`OpenInputDesktop` + `SetThreadDesktop`, re-done whenever capture or input fails with access denied), captures with desktop duplication, sends input with `SendInput`, and streams frames back two ways for timing: over the pipe, and through a shared-memory section with an event.
 
-- [ ] **Step 2: Lock screen.** Lock the machine. From `ctl`: get frames of the lock screen; type the password (read from an environment variable of the `ctl` run; never logged) and Enter. 20 times on Windows 11, 20 times on Server 2022. On Server 2022 the lock screen asks for Ctrl+Alt+Del first: turn on the policy `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\SoftwareSASGeneration` (value 1 = services), call `SendSAS(FALSE)` from the service, wait until the password box is on screen (how to know: record what worked), then type.
+- [ ] **Step 2: Lock screen.** Lock the machine. From `ctl`: get frames of the lock screen; type the password (read from an environment variable of the `ctl` run; never logged) and Enter. 20 times on Windows 11 (and 20 times on a GPU-equipped Server 2022 if available; GPU-less `S22-C` does not provide `rapp-host` per U12). On Server 2022 the lock screen asks for Ctrl+Alt+Del first: turn on the policy `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\SoftwareSASGeneration` (value 1 = services), call `SendSAS(FALSE)` from the service, wait until the password box is on screen (how to know: record what worked), then type.
 
 - [ ] **Step 3: UAC and the Ctrl+Alt+Del screen.** Trigger a UAC prompt; check that the helper's frames show it and that a click on “是” lands. Send the software SAS; check that the security screen appears in the frames and that Esc leaves it.
 
@@ -327,7 +327,7 @@ Run at the start of phase D, on the branches `probe/windows-h2`, `-h4`, `-h6`, `
 
 ### Task 15: Level-2 probe for plan F — S3 (Remote Desktop)
 
-- [ ] With RDP connected: what does the capture show. After RDP disconnects: reattach the session to the console (`tscon <id> /dest:console` from SYSTEM) and lock at once (`LockWorkStation` in that session); then unlock from the probe. On `S22-C` (no physical output): is there a picture after reattaching. With the owner inside an RDP session: where does `SendSAS` land.
+- [ ] With RDP connected: what does the capture show. After RDP disconnects: reattach the session to the console (`tscon <id> /dest:console` from SYSTEM) and lock at once (`LockWorkStation` in that session); then unlock from the probe (`S22-C` with no GPU does not provide `rapp-host` per U12). With the owner inside an RDP session: where does `SendSAS` land.
 - [ ] Pass = the RDP desktop is captured while connected; reattach, lock and unlock work; where the SAS lands is known and written down. Fallbacks as in §16.
 - [ ] Record and commit.
 
