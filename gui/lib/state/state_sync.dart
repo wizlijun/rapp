@@ -289,13 +289,14 @@ class StateSync extends ChangeNotifier {
     // Later failures of this same try (the watch and a fetch both failing) are not new ones.
     _gen++;
     _cancelAll();
-    quick?.detach(reachable: false);
     if (_grace) {
-      // The first failed try after a refresh of a working link: keep showing what it had, try again soon.
+      // The first failed try after a refresh of a working link: keep showing what it had (the 快捷区 line too), try
+      // again soon.
       _grace = false;
       _timer = Timer(Duration(seconds: _backoff.first), _connect);
       return;
     }
+    quick?.detach(reachable: false);
     _set(StateStatus.unreachable);
     final secs = _backoff[_attempt < _backoff.length ? _attempt : _backoff.length - 1];
     _attempt++;

@@ -822,6 +822,32 @@ void main() {
       sync.dispose();
     });
 
+    test('a failed first try after refresh keeps the quick line synced', () {
+      fakeAsync((fa) {
+        configure = (l) => l..hasPrefs = true;
+        makeQ().start();
+        fa.flushMicrotasks();
+        links.single.watchCtl.add({'what': 'hello'});
+        fa.flushMicrotasks();
+        expect(quick.status, QuickSyncStatus.synced);
+        final seen = <QuickSyncStatus>[];
+        quick.addListener(() => seen.add(quick.status));
+        sync.pause();
+        configure = (l) => l
+          ..hasPrefs = true
+          ..healthy = false;
+        sync.refresh();
+        fa.flushMicrotasks();
+        expect(links, hasLength(2));
+        expect(quick.status, QuickSyncStatus.synced, reason: 'one failed try after a refresh is not an outage yet');
+        fa.elapse(const Duration(seconds: 2, milliseconds: 100));
+        expect(links, hasLength(3));
+        expect(quick.status, QuickSyncStatus.waiting, reason: 'the second one is');
+        expect(seen, [QuickSyncStatus.waiting]);
+        sync.dispose();
+      });
+    });
+
     test('off goes back to local', () async {
       const StateConfig(StateMode.off).save(dir.path);
       makeQ().start();
