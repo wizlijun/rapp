@@ -28,12 +28,19 @@ class _FakeLlm extends LlmApi {
 
 class _FakeHost implements ServiceSwitchApi {
   _FakeHost(this.host, {this.fails = false});
-  final String? host;
+  String? host;
   final bool fails;
+  int asked = 0;
+
+  /// When set, the next answer waits for it.
+  Completer<String?>? hold;
 
   @override
   Future<String?> stateHost() async {
+    asked++;
     if (fails) throw Exception('no service');
+    final h = hold;
+    if (h != null) return h.future;
     return host;
   }
 
@@ -125,6 +132,44 @@ void main() {
     expect(textIn('center', '本机 · :28009'), findsOneWidget);
   });
 
+  testWidgets('reconnecting at the same address asks the host again', (tester) async {
+    final host = _FakeHost('111');
+    connect();
+    await tester.pumpWidget(build(host: host));
+    await tester.pump();
+    expect(textIn('center', '本机 · :28003'), findsOneWidget);
+    sync
+      ..status = StateStatus.connecting
+      ..notifyListeners();
+    await tester.pump();
+    // The center moved to another device but kept the same share address.
+    host.host = '222';
+    connect();
+    await tester.pump();
+    await tester.pump();
+    expect(host.asked, 2);
+    expect(textIn('center', 'Mac mini · :28003'), findsOneWidget);
+  });
+
+  testWidgets('a host answer from before the link dropped is not shown', (tester) async {
+    final host = _FakeHost('111')..hold = Completer();
+    final first = host.hold!;
+    connect();
+    await tester.pumpWidget(build(host: host));
+    sync
+      ..status = StateStatus.unreachable
+      ..notifyListeners();
+    await tester.pump();
+    host.hold = null;
+    host.host = '222';
+    connect();
+    await tester.pump();
+    await tester.pump();
+    first.complete('111');
+    await tester.pump();
+    expect(textIn('center', 'Mac mini · :28003'), findsOneWidget);
+  });
+
   testWidgets('center states map to their words', (tester) async {
     await tester.pumpWidget(build());
     for (final (st, word, lamp) in [
@@ -200,13 +245,31 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('long text ellipsizes', (tester) async {
-    connect();
-    await tester.pumpWidget(build(llm: _llm, host: _FakeHost('222'), nameOf: (_) => '名' * 60));
-    api.answers[0].complete(LlmProbeFailed('长' * 120));
+  testWidgets('long text wraps onto more lines and is shown in full', (tester) async {
+    final long = '连不上：${'很长的原因' * 12}';
+    await tester.pumpWidget(build(llm: _llm));
+    await tester.pump();
+    final oneLine = tester.getSize(row('llm')).height;
+    api.answers[0].complete(LlmProbeFailed(long));
     await tester.pump();
     expect(tester.takeException(), isNull);
+    final t = tester.widget<Text>(textIn('llm', long));
+    expect(t.maxLines, isNull);
+    expect(t.overflow, isNot(TextOverflow.ellipsis));
+    expect(tester.getSize(row('llm')).height, greaterThan(oneLine * 2));
+    // The lamp stays on the first line, beside the name.
+    expect(tester.getCenter(find.descendant(of: row('llm'), matching: find.byType(StatusLamp))).dy,
+        lessThan(tester.getTopLeft(row('llm')).dy + oneLine));
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a long device name wraps too', (tester) async {
+    connect();
+    await tester.pumpWidget(build(host: _FakeHost('222'), nameOf: (_) => '名' * 40));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(textIn('center', '${'名' * 40} · :28003'), findsOneWidget);
+    expect(tester.widget<Text>(textIn('center', '${'名' * 40} · :28003')).maxLines, isNull);
   });
 
   testWidgets('rows have no tap action', (tester) async {
