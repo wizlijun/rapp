@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/worker_session_port.dart';
 import 'package:rapp/embed/linux_session_host.dart';
+import 'package:rapp/embed/frame_sink.dart';
 import 'package:rapp/embed/session_link.dart';
 import 'package:rapp/embed/session_worker.dart';
 import 'fake_session_link.dart';
@@ -52,6 +53,22 @@ Future<void> until(bool Function() ok) async {
   }
 }
 
+/// Decodes like [ImageFrameSink] but only after the test opens the gate.
+class GatedSink implements FrameSink {
+  final gate = Completer<void>();
+  final _real = const ImageFrameSink();
+  int decodes = 0;
+  @override
+  Future<ui.Image> decode(Uint8List bgra, int width, int height) async {
+    decodes++;
+    await gate.future;
+    return _real.decode(bgra, width, height);
+  }
+
+  @override
+  void retire(ui.Image? image) => _real.retire(image);
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   englishFirstTests();
@@ -81,6 +98,30 @@ void main() {
     await sub.cancel();
   });
 
+  test('a frame waiting in the mailbox is acked once when the session stops', () async {
+    final link = FakeLink();
+    final sink = GatedSink();
+    final port = WorkerSessionPort(OneLink(link), FakeHost(), framePresented: () async {}, sink: sink);
+    final events = <SessionEvent>[];
+    final sub = port.events.listen(events.add);
+    port.seedSessionForTest(3, link, reading: true);
+    link.push(windowsEvent());
+    link.push(frame2x2()); // in flight: decode is held at the gate
+    await until(() => sink.decodes == 1);
+    link.push(frame2x2()); // waits in the mailbox behind it
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(link.acks, 0);
+    port.freeze(3, 'test'); // stops the transport: the mailbox frame is acked now
+    await until(() => events.any((e) => e is DisconnectedEvent));
+    expect(link.acks, 1);
+    sink.gate.complete(); // the in-flight frame finishes: its own ack
+    await until(() => link.acks == 2);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(link.acks, 2); // two frames, each acked exactly once
+    port.dispose();
+    await sub.cancel();
+  });
+
   test('dropTextures forgets pictures and restoreStage brings them back', () async {
     final link = FakeLink();
     final port = WorkerSessionPort(OneLink(link), FakeHost(), framePresented: () async {});
@@ -93,8 +134,13 @@ void main() {
     // 会话断开、不在台上：memoryWarning 调 dropTextures 的情形
     link.failInput();
     await until(() => events.any((e) => e is DisconnectedEvent));
+    final before = events.length;
     port.dropTextures(3);
     expect(port.picturesForTest(3), isEmpty);
+    await Future<void>.delayed(Duration.zero); // the broadcast stream delivers a tick later
+    final told = events.skip(before).whereType<WindowsEvent>().toList();
+    expect(told, isNotEmpty);
+    expect(told.last.windows.every((w) => w.image == null), isTrue);
     port.restoreStageForTest(3); // 等于会话回到台上
     await until(() => port.picturesForTest(3).isNotEmpty);
     expect(link.acks, 1); // 只有那一帧；重画不是新帧，不 ack
@@ -109,15 +155,40 @@ void main() {
     final sub = port.events.listen(events.add);
     port.seedSessionForTest(3, link, reading: true);
     // 读循环到头和输入断开两条路都会喊断开，只能出一次
-    await Future<void>.delayed(const Duration(milliseconds: 300));
+    await until(() => events.any((e) => e is DisconnectedEvent));
+    await Future<void>.delayed(const Duration(milliseconds: 200));
     expect(events.whereType<DisconnectedEvent>().length, 1);
     port.dispose();
     await sub.cancel();
   }, skip: Platform.isWindows ? '要 sh' : null);
 
+  test('an input that breaks gives one disconnected', () async {
+    final link = FakeLink();
+    final port = WorkerSessionPort(OneLink(link), FakeHost(), framePresented: () async {});
+    final events = <SessionEvent>[];
+    final sub = port.events.listen(events.add);
+    port.seedSessionForTest(3, link, reading: true);
+    link.failInput();
+    await until(() => events.any((e) => e is DisconnectedEvent));
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(events.whereType<DisconnectedEvent>().length, 1);
+    port.dispose();
+    await sub.cancel();
+  });
+
   test('init asks the links and the host first', () async {
+    final host = FakeHost();
     final links = FailingLinks(StateError('rapp-session not found: x'));
-    await expectLater(WorkerSessionPort(links, FakeHost()).init(), throwsStateError);
+    await expectLater(
+      WorkerSessionPort(links, host).init(),
+      throwsA(isA<StateError>().having((e) => e.message, 'message', 'rapp-session not found: x')),
+    );
+    expect(host.inits, 0);
+    final order = <String>[];
+    final ok = WorkerSessionPort(OrderLinks(order), OrderHost(order));
+    await ok.init();
+    expect(order.take(2), ['check', 'host.init']);
+    ok.dispose();
   });
 
   testWidgets('Linux picture voice holds cancel, edit and preserve ordinary Alt combinations', (t) async {

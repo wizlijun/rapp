@@ -232,7 +232,7 @@ pub fn run(mut input: impl BufRead + Send + 'static, out: &Output) -> Result<()>
     read_loop(&mut socket, &writer, out, &bytes, &frames, &probe)
 }
 /// Runs one session over `input` (start line, then one command per line) and `writer`
-/// (length-prefixed events and frames). Always ends with one `disconnected` event.
+/// (length-prefixed events and frames). Tries to end with one `disconnected` event (it cannot when the writer has already failed).
 pub fn serve(input: impl BufRead + Send + 'static, writer: impl Write + Send + 'static) {
     let (out, thread) = Output::spawn(writer);
     let reason = match run(input, &out) {

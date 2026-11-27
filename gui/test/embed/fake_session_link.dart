@@ -67,8 +67,12 @@ class FailingLinks implements SessionLinks {
 
 /// No clipboard, no files, no detach, no trace.
 class FakeHost implements SessionHost {
+  /// How many times the port called [init].
+  int inits = 0;
   @override
-  Future<void> init(Future<Object?> Function(MethodCall call) onDetachCall) async {}
+  Future<void> init(Future<Object?> Function(MethodCall call) onDetachCall) async {
+    inits++;
+  }
   @override
   String downloads() => '/nonexistent/downloads';
   @override
@@ -87,4 +91,23 @@ class FakeHost implements SessionHost {
   bool get supportsInlineNativeComposer => true;
   @override
   bool get supportsDetach => false;
+}
+
+/// Opens [link]'s worth of nothing but notes when [check] runs.
+class OrderLinks extends OneLink {
+  OrderLinks(this.order) : super(FakeLink());
+  final List<String> order;
+  @override
+  Future<void> check() async => order.add('check');
+}
+
+/// A [FakeHost] that notes when [init] runs.
+class OrderHost extends FakeHost {
+  OrderHost(this.order);
+  final List<String> order;
+  @override
+  Future<void> init(Future<Object?> Function(MethodCall call) onDetachCall) async {
+    order.add('host.init');
+    await super.init(onDetachCall);
+  }
 }

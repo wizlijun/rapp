@@ -1,5 +1,6 @@
-// Linux uses the same Rust decoder as the standalone GTK client, in a headless
-// child process. Binary pipes carry BGRA frames; no base64 or window reparenting.
+// The shared session port: one rapp-session per session, reached through a SessionLink and
+// a SessionHost. Linux runs it as a headless child process using the same Rust decoder as
+// the standalone GTK client; binary pipes carry BGRA frames, no base64 or window reparenting.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -1449,6 +1450,7 @@ class _Session {
   /// Lets go of every picture and tells the windows. [lastNativeFrame] stays:
   /// [restoreStage] redraws from it.
   void dropPictures() {
+    if (closed) return; // no WindowsEvent after a ClosedEvent
     for (final p in _pictures.values) {
       sink.retire(p.image);
     }

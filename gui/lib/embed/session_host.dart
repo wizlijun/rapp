@@ -13,7 +13,10 @@ abstract class SessionHost {
   Future<SessionCopy?> readClipboard();
   Future<bool> writeClipboard(SessionCopy copy);
   Future<List<String>> chooseFiles();
-  String? get traceDir; // null：不追踪
+  /// The port only uses this as on/off (non-null: write the stream trace to stderr); it never
+  /// writes files there. A link that is not a process and wants trace files must be given the
+  /// directory for the session itself. null: no trace.
+  String? get traceDir;
   MethodChannel? get detachChannel; // 分离窗口那一组；null：没有
   bool get supportsInlineNativeComposer;
   bool get supportsDetach;
