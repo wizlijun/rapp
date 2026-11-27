@@ -526,7 +526,7 @@ git commit -m "feat(gui): MobileChannel shared by rapp/ios and the new rapp/andr
   - `forOs`：`'ios'` 加 `secretStore: keychain, systemLinks: true`；`'android' => PlatformCaps(hubInProcess: true, secretStore: SecretStore.memory, systemLinks: true, opensFolders: false)`；`'linux'` 单列一支（桌面那一整套 + `secretStore: memory`）；`'macos'` 和兜底那支 `secretStore: keychain`（兜底原来也是 macOS 用）；`'windows'` 不变（`none`）
   - `pinchZoom`、`hardwareKeyboard()` 改认 `touchPlatform(defaultTargetPlatform)`（`ui/tokens.dart:312`，已经含安卓）
 
-`onlineUpdate` 在安卓上 P1 先不开（规格 §6.5 写的是 true）：它的两处用法读的是 `ServiceMonitor`，安卓走不到；P3 做更新界面时再开。`systemOpen` 留 false（规格原话）。
+`onlineUpdate` 在安卓上 P1 先不开（规格 §6.5 写的是 true；用户已同意 P1 不带解锁口令落盘、发文件和 App 内更新，分别在 P2、P2、P3 补，2026-11-27）：它的两处用法读的是 `ServiceMonitor`，安卓走不到；P3 做更新界面时再开。`systemOpen` 留 false（规格原话）。
 
 逐处结论（行号是本计划写时的，动手前重新 `/usr/bin/grep -rn 'isIOS\|TargetPlatform.iOS\|iosChannel' gui/lib`）：
 
@@ -792,7 +792,7 @@ git commit -m "feat(gui): Android back key closes one layer at a time, then leav
 | 6 | 外接键盘（`uinput` 虚拟键盘，P0 结果 §5 的做法）：Ctrl+C、Ctrl+V、Ctrl+Enter；看日志页「调试」区 | 「调试」里 `ctrl=1`；Ctrl 当 ⌘ 到 Mac；Ctrl+Enter 开写作版 |
 | 7 | 鼠标：悬停、右键、滚轮 | 和 Linux 版一样 |
 | 8 | 文字剪贴板：Mac 复制 → 安卓粘贴进写作条；安卓复制 → 会话里 Ctrl+V | 两边都到 |
-| 9 | 只在需要时开一次桌面会话（规格 §14.2 写的是桌面会话；单应用会话已经覆盖点和打字，这一项只看画面能出来、能点一下，然后立刻结束） | 画面出来；结束后 Mac 没有被锁 |
+| 9 | 只开一次桌面会话（规格 §14.2 写的是桌面会话；单应用会话已经覆盖点和打字，这一项只看画面能出来、能点一下，然后立刻结束；用户已同意这样做，2026-11-27） | 画面出来；结束后 Mac 没有被锁 |
 | 10 | 开文本终端，打 `ls`，Ctrl+C | 有输出；终端里 Ctrl 是 Ctrl |
 | 11 | 切到后台：`adb shell input keyevent HOME`，等 2 s，`adb shell run-as com.rapphub.rapp cat /proc/net/tcp /proc/net/tcp6 /proc/net/udp /proc/net/udp6`，只看本 App 的 uid（`adb shell dumpsys package com.rapphub.rapp \| /usr/bin/grep userId`） | 本 uid 一行都没有 |
 | 12 | 切回来 | 自动重连，会话恢复，画面是活的 |

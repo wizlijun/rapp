@@ -589,7 +589,7 @@ Expected: 除已知的三条外全过。
 
 - [ ] **Step 2: Linux 实机回归**
 
-Linux 机器要拿到这个分支。功能 session 不能 `git push`（`CLAUDE.md`），所以先用 AskUserQuestion 问用户：由用户把分支推上去，还是这一次允许推这一个分支（只推分支，不推 main、不打 tag）。拿到后在 Linux 机器上：
+Linux 机器要拿到这个分支。功能 session 平时不能 `git push`（`CLAUDE.md`）；**用户已定（2026-11-27）：这一次允许推这一个分支**：`git push origin refactor/session-port`，只推这个分支，不推 main、不打 tag；合并进本机 main 后删掉远端分支（`git push origin --delete refactor/session-port`）。Linux 机器上的 session 拉下来验。拿到后在 Linux 机器上：
 
 ```bash
 git fetch origin && git checkout refactor/session-port
