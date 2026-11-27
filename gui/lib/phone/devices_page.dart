@@ -12,6 +12,7 @@ import '../ui/overview_model.dart';
 import '../ui/session_block.dart';
 import '../ui/session_model.dart';
 import '../ui/tokens.dart';
+import 'enter_when_open.dart';
 import 'phone_nav.dart';
 import 'widgets.dart';
 
@@ -26,50 +27,28 @@ class DeviceList extends StatefulWidget {
 
 class _DeviceListState extends State<DeviceList> {
   bool _adding = false;
-
-  /// A not-open entry the user tapped: go in once it is open, not before. A stopped terminal starts a new one
-  /// under another id, so it waits for the device's next current session instead of its own key.
-  ({String device, String key, bool stopped, String? before})? _pending;
-
-  @override
-  void initState() {
-    super.initState();
-    widget.state.addListener(_onState);
-  }
+  late EnterWhenOpen _enter = EnterWhenOpen(widget.state, widget.nav);
 
   @override
   void didUpdateWidget(DeviceList old) {
     super.didUpdateWidget(old);
-    if (old.state != widget.state) {
-      old.state.removeListener(_onState);
-      widget.state.addListener(_onState);
+    if (old.state != widget.state || old.nav != widget.nav) {
+      _enter.dispose();
+      _enter = EnterWhenOpen(widget.state, widget.nav);
     }
   }
 
   @override
   void dispose() {
-    widget.state.removeListener(_onState);
-    _pending = null;
+    _enter.dispose();
     super.dispose();
-  }
-
-  void _onState() {
-    final p = _pending;
-    if (p == null) return;
-    final s = widget.state;
-    final cur = s.currentKey;
-    if (cur == null || !s.entries.any((e) => e.key == cur && e.sid != null)) return;
-    final landed = p.stopped ? cur != p.before && cur.startsWith('${p.device}/') : cur == p.key;
-    if (!landed) return;
-    _pending = null;
-    widget.nav.enter(cur);
   }
 
   void _tap(SessionEntry e) {
     if (e.sid == null && e.standby != null) {
-      _pending = (device: e.id, key: e.key, stopped: e.standby == Standby.stopped, before: widget.state.currentKey);
+      _enter.arm(device: e.id, key: e.key, stopped: e.standby == Standby.stopped);
     } else {
-      _pending = null;
+      _enter.cancel();
       widget.nav.enter(e.key);
     }
   }

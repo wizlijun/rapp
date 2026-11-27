@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
+import 'package:rapp/state/state_sync.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/phone/home_screen.dart';
 import 'package:rapp/phone/phone_nav.dart';
@@ -13,6 +14,27 @@ import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/tokens.dart';
 
 import '../fakes.dart';
+
+class _Sync extends FakeStateSync {
+  _Sync(super.localDir);
+  final handled = <String>[];
+  @override
+  Future<void> markHandled(String eid) async => handled.add(eid);
+}
+
+const _gb = 1000000000;
+
+Map<String, dynamic> _load(String id) => {
+      'event': 'load', 'id': id, 'at': 1764100000, 'headroom': 10, 'tightest': 'cpu', 'term': true,
+      'items': {'cpu': {'pct': 95}},
+      'disks': [
+        {'mount': '/', 'total': 100 * _gb, 'avail': 6 * _gb, 'level': 'warn', 'paths': []},
+      ],
+      'warnings': [
+        {'item': 'cpu', 'level': 'warn', 'text': 'CPU 持续 90% 以上'},
+      ],
+      'history': [],
+    };
 
 void main() {
   late Directory tmp;
@@ -55,7 +77,7 @@ void main() {
 
   List<Map<String, Object?>> blocked(int n) => [for (var i = 0; i < n; i++) term('w$i', 'blocked', kind: 'permission', msg: 'ok$i?')];
 
-  Future<void> boot(WidgetTester tester, {bool disableAnimations = false, bool noHosts = false, bool termPort = false}) async {
+  Future<void> boot(WidgetTester tester, {bool disableAnimations = false, bool noHosts = false, bool termPort = false, FakeStateSync? sync}) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -71,7 +93,7 @@ void main() {
     }
     await tester.runAsync(flush);
     port = FakeSessionPort();
-    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, termPort: termPort ? FakeTermSessionPort() : null);
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, termPort: termPort ? FakeTermSessionPort() : null, stateSync: sync);
     nav = PhoneNav(s);
     t.onSend = (m) {
       if (m['cmd'] == 'open') {
@@ -187,6 +209,156 @@ void main() {
     expect(nav.now, PhoneView.session);
     expect(s.currentKey, 'm1/term:pty:w0');
     expect(nav.entered, 'm1/term:pty:w0');
+  });
+
+  List<Map<String, Object?>> many(String kind, String state, int n, {bool unread = false}) =>
+      [for (var i = 0; i < n; i++) term('$kind$i', state, unread: unread, msg: '$kind$i')];
+
+  testWidgets('h7 sections only when nothing needs a look', (tester) async {
+    await boot(tester);
+    await terms(tester, [
+      ...many('e', 'error', 2, unread: true),
+      ...many('k', 'working', 2),
+      ...many('d', 'done', 2, unread: true),
+    ]);
+    expect(find.text('4 件等你'), findsOneWidget);
+    expect(find.text('在干活的'), findsNothing);
+    expect(find.text('做完没看的'), findsNothing);
+  });
+
+  testWidgets('h7 mode has at most eight taps', (tester) async {
+    await boot(tester);
+    await terms(tester, [...many('k', 'working', 4), ...many('d', 'done', 3, unread: true)]);
+    expect(find.text('没有等你的。'), findsOneWidget);
+    expect(find.text('在干活的'), findsOneWidget);
+    nav.cameFrom = 'm1/term:pty:k0';
+    nav.notifyListeners();
+    await tester.pump();
+    expect(taps(tester), lessThanOrEqualTo(8));
+  });
+
+  testWidgets('waiting list with working and came from stays within eight taps', (tester) async {
+    await boot(tester);
+    await terms(tester, [...blocked(12), ...many('k', 'working', 2)]);
+    nav.cameFrom = 'm1/term:pty:k0';
+    nav.notifyListeners();
+    await tester.pump();
+    expect(taps(tester), lessThanOrEqualTo(8));
+  });
+
+  testWidgets('second line scrolls only while the list is on screen', (tester) async {
+    await boot(tester);
+    await terms(tester, [...blocked(1), ...many('k', 'working', 2)]);
+    InkWell line() => tester.widget<InkWell>(find.ancestor(of: find.text('2 个在干活'), matching: find.byType(InkWell)));
+    expect(line().onTap, isNull);
+    await terms(tester, many('k', 'working', 2));
+    expect(line().onTap, isNotNull);
+  });
+
+  testWidgets('the last card slides away even when came from clears with it', (tester) async {
+    await boot(tester);
+    await terms(tester, blocked(1));
+    nav.cameFrom = 'm1/term:pty:w0';
+    nav.notifyListeners();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(PhoneCard), findsOneWidget);
+    nav.cameFrom = null;
+    await terms(tester, []);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.byType(PhoneCard), findsOneWidget);
+    expect(find.ancestor(of: find.byType(PhoneCard), matching: find.byType(SlideTransition)), findsWidgets);
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(PhoneCard), findsNothing);
+  });
+
+  testWidgets('an unopened terminal is entered only after it opens', (tester) async {
+    await boot(tester, termPort: true);
+    Map<String, dynamic>? held;
+    t.onSend = (m) {
+      if (m['cmd'] == 'open') held = m;
+    };
+    await terms(tester, blocked(1));
+    await tester.tap(find.text('进去看'));
+    await tester.runAsync(flush);
+    await tester.pump();
+    expect(held, isNotNull);
+    expect(nav.now, PhoneView.home);
+    await emit(tester, {'event': 'opened', 'sid': 9, 'id': held!['id'], 'app': held!['app'], 'path': 'lan', 'req': held!['req'], if (held!['embed'] == true) ...{'port': 5009, 'token': 'tk'}});
+    await tester.runAsync(() async {
+      for (var i = 0; i < 6; i++) {
+        await flush();
+      }
+    });
+    await tester.pump();
+    expect(nav.now, PhoneView.session);
+    expect(s.currentKey, 'm1/term:pty:w0');
+  });
+
+  testWidgets('a failed open leaves the user on home', (tester) async {
+    await boot(tester, termPort: true);
+    t.onSend = (m) {
+      if (m['cmd'] == 'open') t.emit({'event': 'error', 'req': m['req'], 'error': 'offline'});
+    };
+    await terms(tester, blocked(1));
+    await tester.tap(find.text('进去看'));
+    await tester.runAsync(flush);
+    await tester.pump();
+    expect(nav.now, PhoneView.home);
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('offline greys goLook of a terminal that is not open', (tester) async {
+    await boot(tester, termPort: true);
+    await terms(tester, blocked(1));
+    await emit(tester, {'event': 'net', 'level': 'down'});
+    expect(tester.widget<PhoneButton>(find.widgetWithText(PhoneButton, '进去看')).onPressed, isNull);
+  });
+
+  testWidgets('six waiting show every row and no 还有 1 件', (tester) async {
+    await boot(tester);
+    await terms(tester, blocked(6));
+    expect(find.byType(PhoneRow), findsNWidgets(5));
+    expect(find.textContaining('还有'), findsNothing);
+  });
+
+  testWidgets('tapping a row keeps came from', (tester) async {
+    await boot(tester);
+    await terms(tester, blocked(2));
+    nav.cameFrom = 'm1/term:pty:w0';
+    nav.notifyListeners();
+    await tester.pump();
+    await tester.tap(find.byType(PhoneRow).first);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(nav.cameFrom, 'm1/term:pty:w0');
+  });
+
+  testWidgets('got it on a message marks it handled, and is grey offline', (tester) async {
+    final sync = _Sync(tmp.path)..status = StateStatus.connected;
+    await boot(tester, sync: sync);
+    sync.rows = [
+      {'t': 'emit', 'level': 'info', 'eid': 'e1', 'id': 'm1', 'text': 'hi', 'at': 5},
+    ];
+    sync.push();
+    await tester.pump();
+    expect(find.text('hi'), findsOneWidget);
+    await emit(tester, {'event': 'net', 'level': 'down'});
+    expect(tester.widget<PhoneButton>(find.widgetWithText(PhoneButton, '知道了')).onPressed, isNull);
+    await emit(tester, {'event': 'net', 'level': 'strong'});
+    await tester.tap(find.text('知道了'));
+    await tester.pump();
+    expect(sync.handled, ['e1']);
+    expect(find.text('hi'), findsNothing);
+  });
+
+  testWidgets('got it on a resource snoozes it', (tester) async {
+    await boot(tester);
+    await emit(tester, _load('m1'));
+    expect(s.needs.any((n) => n.kind == NeedKind.resource), isTrue);
+    await tester.tap(find.text('知道了'));
+    await tester.pump();
+    expect(s.needs.any((n) => n.kind == NeedKind.resource), isFalse);
+    await emit(tester, {'event': 'load', 'id': 'm1', 'gone': true});
   });
 
   testWidgets('came from row', (tester) async {

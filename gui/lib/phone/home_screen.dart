@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../ui/main_state.dart';
 import '../ui/tokens.dart';
 import 'devices_page.dart';
+import 'enter_when_open.dart';
 import 'home_model.dart';
 import 'phone_nav.dart';
 import 'sheet.dart';
@@ -30,8 +31,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _allWorking = false;
   final _workKey = GlobalKey();
 
-  /// A 进去看 whose terminal is still opening: go in once it is the current one.
-  String? _pending;
+  late final EnterWhenOpen _enter;
 
   MainState get _s => widget.state;
   PhoneNav get _nav => widget.nav;
@@ -39,20 +39,23 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _s.addListener(_onState);
+    _enter = EnterWhenOpen(_s, _nav);
+    _nav.addListener(_onNav);
   }
 
   @override
   void dispose() {
-    _s.removeListener(_onState);
+    _nav.removeListener(_onNav);
+    _enter.dispose();
     super.dispose();
   }
 
-  void _onState() {
-    final p = _pending;
-    if (p != null && _s.currentKey == p) {
-      _pending = null;
-      _nav.enter(p);
+  /// Leaving home drops a waiting enter and the expanded lists.
+  void _onNav() {
+    if (_nav.now != PhoneView.home) {
+      _enter.cancel();
+      _all = false;
+      _allWorking = false;
     }
   }
 
@@ -75,7 +78,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _goLook(HomeItem item) async {
+  void _goLook(HomeItem item) {
     setState(() => _nav.cameFrom = null);
     final need = item.need;
     final key = item.sessionKey;
@@ -83,15 +86,20 @@ class _HomeScreenState extends State<HomeScreen> {
       if (key != null) _nav.enter(key);
       return;
     }
-    // goToNeed returns nothing (it starts the open and returns); a stopped or unopened terminal lands later.
+    // goToNeed returns nothing: it starts the open and returns, so a terminal that is not open yet lands later.
     _s.goToNeed(need);
     final cur = _s.currentKey;
-    if (cur != null && (key == null || cur == key)) {
-      _nav.enter(cur);
-    } else if (key != null) {
-      _pending = key;
+    if (key == null) {
+      if (cur != null) _nav.enter(cur);
+    } else if (cur == key && _enter.isOpen(key)) {
+      _nav.enter(key);
+    } else if (_canOpen(need)) {
+      _enter.arm(device: need.device ?? key.split('/').first, key: key);
     }
   }
+
+  /// A need whose goToNeed starts an open: it needs the hub, and it is not a grey one.
+  bool _canOpen(NeedItem n) => n.greyWord == null && (n.kind != NeedKind.terminal || _s.hubUsable);
 
   void _gotIt(HomeItem item) {
     final sync = _s.stateSync;
@@ -119,6 +127,10 @@ class _HomeScreenState extends State<HomeScreen> {
   VoidCallback? _buttonOf(HomeItem item) {
     switch (item.button) {
       case HomeButton.goLook:
+        final k = item.sessionKey;
+        final need = item.need;
+        // A terminal that is not open cannot be opened without the hub.
+        if (_offline && need?.kind == NeedKind.terminal && (k == null || !_enter.isOpen(k))) return null;
         return () => _goLook(item);
       case HomeButton.reconnect:
         if (_offline || item.need == null) return null;
@@ -145,21 +157,28 @@ class _HomeScreenState extends State<HomeScreen> {
     final style = Theme.of(context).textTheme.bodyMedium!;
     final big = style.copyWith(fontSize: (style.fontSize ?? 14) * 2, fontWeight: FontWeight.w700, color: t.text);
     final m = _model();
-    // With nothing waiting, the finished ones are listed under 做完没看的 (H7), not as cards.
-    final items = m.waiting == 0 ? [for (final i in m.items) if (i.kind != HomeKind.done) i] : m.items;
-    final empty = items.isEmpty && m.working.isEmpty && m.recentDone.isEmpty;
+    // Something to look at: cards and rows. Nothing but finished ones: the H7 lists instead.
+    final h7 = m.items.every((i) => i.kind == HomeKind.done);
+    final items = h7 ? const <HomeItem>[] : m.items;
+    final empty = h7 && m.working.isEmpty && m.recentDone.isEmpty;
     final HomeItem? card = items.isEmpty ? null : (items.where((i) => i.id == _open).firstOrNull ?? items.first);
     final rows = [for (final i in items) if (i != card) i];
-    final cap = _maxRows - (_nav.cameFrom != null ? 1 : 0);
-    final shown = _all ? rows : rows.take(cap).toList();
+    final from = _nav.cameFrom;
+    final cap = _maxRows - (from != null ? 1 : 0);
+    final shown = _all || rows.length <= cap + 1 ? rows : rows.take(cap).toList();
     final more = rows.length - shown.length;
     final second = [
       if (m.working.isNotEmpty) '${m.working.length} 个在干活',
       if (m.doneUnseen > 0) '做完 ${m.doneUnseen} 件',
     ].join(' · ');
-    final from = _nav.cameFrom;
     final fromName = from == null ? null : (_s.entryFor(from)?.title ?? from);
     final noMotion = MediaQuery.disableAnimationsOf(context);
+    // H10: eight taps in all. Header, second line, 刚才在 and the working rows come first; done rows take what is left.
+    final workRows = _allWorking ? m.working.length : m.working.take(_maxWorking).length;
+    final workMore = m.working.length - workRows > 0 ? 1 : 0;
+    final doneRoom = 8 - 2 - (from != null ? 1 : 0) - workRows - workMore;
+    final done = m.recentDone.take(doneRoom < 0 ? 0 : doneRoom).toList();
+    final listOn = h7 && (m.working.isNotEmpty || m.recentDone.isNotEmpty);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -186,52 +205,59 @@ class _HomeScreenState extends State<HomeScreen> {
                         const TextSpan(text: ' 件等你'),
                       ])),
               ),
-              if (second.isNotEmpty)
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () {
-                    final c = _workKey.currentContext;
-                    if (c != null) Scrollable.ensureVisible(c, duration: noMotion ? Duration.zero : const Duration(milliseconds: 250));
-                  },
-                  child: Container(
-                    constraints: const BoxConstraints(minHeight: phoneTap),
-                    alignment: Alignment.centerLeft,
-                    child: Text(second, style: style.copyWith(color: t.muted)),
-                  ),
-                ),
-              if (fromName != null)
-                InkWell(
-                  onTap: () => _nav.enter(from!),
-                  child: Container(
-                    constraints: const BoxConstraints(minHeight: phoneTap),
-                    alignment: Alignment.centerLeft,
-                    child: Text('刚才在：$fromName', style: style.copyWith(color: t.text)),
-                  ),
-                ),
-              if (card != null)
-                AnimatedSwitcher(
-                  duration: noMotion ? Duration.zero : const Duration(milliseconds: 250),
-                  transitionBuilder: (child, anim) => SlideTransition(
-                    position: Tween(begin: const Offset(1, 0), end: Offset.zero).animate(anim),
-                    child: child,
-                  ),
-                  child: Padding(
-                    key: ValueKey(card.gotItKey),
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: PhoneCard(
-                      item: card,
-                      onOpen: null,
-                      onButton: _buttonOf(card),
+              // One column, so the switcher keeps its place when the lines above it come and go.
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (second.isNotEmpty)
+                    InkWell(
+                      onTap: !listOn
+                          ? null
+                          : () {
+                              final c = _workKey.currentContext;
+                              if (c != null) {
+                                Scrollable.ensureVisible(c, duration: noMotion ? Duration.zero : const Duration(milliseconds: 250));
+                              }
+                            },
+                      child: Container(
+                        constraints: const BoxConstraints(minHeight: phoneTap),
+                        alignment: Alignment.centerLeft,
+                        child: Text(second, style: style.copyWith(color: t.muted)),
+                      ),
                     ),
+                  if (fromName != null)
+                    InkWell(
+                      onTap: () => _nav.enter(from!),
+                      child: Container(
+                        constraints: const BoxConstraints(minHeight: phoneTap),
+                        alignment: Alignment.centerLeft,
+                        child: Text('刚才在：$fromName', style: style.copyWith(color: t.text)),
+                      ),
+                    ),
+                  AnimatedSwitcher(
+                    key: const ValueKey('home-card'),
+                    duration: noMotion ? Duration.zero : const Duration(milliseconds: 250),
+                    // Only the card that leaves slides; the one that stays or arrives is just there.
+                    transitionBuilder: (child, anim) => (child.key as ValueKey?)?.value == (card?.gotItKey ?? 'none')
+                        ? child
+                        : SlideTransition(
+                            position: Tween(begin: const Offset(1, 0), end: Offset.zero).animate(anim),
+                            child: child,
+                          ),
+                    child: card == null
+                        ? const SizedBox.shrink(key: ValueKey('none'))
+                        : Padding(
+                            key: ValueKey(card.gotItKey),
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: PhoneCard(item: card, onOpen: null, onButton: _buttonOf(card)),
+                          ),
                   ),
-                ),
+                ],
+              ),
               for (final i in shown)
                 PhoneRow(
                   item: i,
-                  onTap: () => setState(() {
-                    _open = i.id;
-                    _nav.cameFrom = null;
-                  }),
+                  onTap: () => setState(() => _open = i.id),
                 ),
               if (more > 0)
                 InkWell(
@@ -243,8 +269,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Text('还有 $more 件', style: style.copyWith(color: t.muted)),
                   ),
                 ),
-              if (m.waiting == 0 && m.working.isNotEmpty) _working(context, m, style, t),
-              if (m.waiting == 0 && m.recentDone.isNotEmpty) _done(m, style, t),
+              if (listOn)
+                Column(
+                  key: _workKey,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (m.working.isNotEmpty) _working(context, m, style, t),
+                    if (done.isNotEmpty) _done(done, style, t),
+                  ],
+                ),
               if (empty) ...[
                 Padding(
                   padding: const EdgeInsets.only(top: 16, bottom: 8),
@@ -287,7 +320,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final list = _allWorking ? m.working : m.working.take(_maxWorking).toList();
     final rest = m.working.length - list.length;
     return Column(
-      key: _workKey,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _heading('在干活的', style, t),
@@ -324,11 +356,11 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _done(HomeModel m, TextStyle style, RappTokens t) => Column(
+  Widget _done(List<DoneRow> done, TextStyle style, RappTokens t) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _heading('做完没看的', style, t),
-          for (final d in m.recentDone) _small(d.program, d.device, d.sessionKey, style, t, line: d.line),
+          for (final d in done) _small(d.program, d.device, d.sessionKey, style, t, line: d.line),
         ],
       );
 }
