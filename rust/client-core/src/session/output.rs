@@ -2,7 +2,7 @@
 //! delta is decoded, but only the newest compact canvas waits for the pipe.
 //! BGRA expansion happens here, after coalescing, never in the network reader.
 use anyhow::{ensure, Result};
-use rapp_client_core::codec::{DecodedCanvas, Decoder};
+use crate::codec::{DecodedCanvas, Decoder};
 use std::{
     collections::VecDeque,
     io::{self, Write},
@@ -25,7 +25,7 @@ struct State {
 }
 
 #[derive(Clone, Default)]
-pub(super) struct Output(Arc<(Mutex<State>, Condvar)>);
+pub struct Output(Arc<(Mutex<State>, Condvar)>);
 
 impl Output {
     pub fn spawn(writer: impl Write + Send + 'static) -> (Self, JoinHandle<io::Result<()>>) {
@@ -114,16 +114,16 @@ impl Output {
                 }
                 Packet::Frame(header, canvas, sequence) => {
                     output += 1;
-                    crate::session_trace::record("expand-start", format_args!("frame={sequence} output={output}"));
+                    super::trace::record("expand-start", format_args!("frame={sequence} output={output}"));
                     // The reader can continue applying/acknowledging deltas and
                     // replacing its pending snapshot during conversion and I/O.
                     canvas.expand_into(&mut pixels);
-                    crate::session_trace::record("write-start", format_args!("frame={sequence} output={output}"));
+                    super::trace::record("write-start", format_args!("frame={sequence} output={output}"));
                     writer.write_all(&((pixels.len() + 25) as u32).to_le_bytes())?;
                     writer.write_all(&[1])?;
                     writer.write_all(&header)?;
                     writer.write_all(&pixels)?;
-                    crate::session_trace::record("write-end", format_args!("frame={sequence} output={output}"));
+                    super::trace::record("write-end", format_args!("frame={sequence} output={output}"));
                     mutex.lock().unwrap().recycled = canvas;
                 }
             }
