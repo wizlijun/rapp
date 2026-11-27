@@ -14,6 +14,9 @@ import 'package:rapp/embed/phrases.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/quick/key_actions.dart';
+import 'package:rapp/quick/key_layout.dart';
+import 'package:rapp/quick/quick_prefs.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/platform_caps.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -1057,6 +1060,99 @@ void main() {
           collapsesKeyBar(const KeyUpEvent(
               physicalKey: PhysicalKeyboardKey.keyA, logicalKey: LogicalKeyboardKey.keyA, timeStamp: Duration.zero)),
           isFalse);
+    });
+  });
+
+  group('the bar follows the user\'s layout', () {
+    iosTest('a custom layout: ⋯ ends row 1, ↑ sits over ← ↓ →', (tester) async {
+      s.prefs.keyBarMore = true;
+      s.setKeyLayout(const KeyLayout([
+        ['pgup', 'esc', 'up'],
+        ['left', 'down', 'right'],
+      ]));
+      await tester.pumpWidget(bar(tsess, width: 900));
+      expect(tester.getTopLeft(k('pgup')).dy, tester.getTopLeft(k('more')).dy);
+      expect(tester.getTopLeft(k('more')).dx, greaterThan(tester.getTopLeft(k('up')).dx));
+      expect(tester.getTopLeft(k('left')).dy, greaterThan(tester.getTopLeft(k('up')).dy));
+      // The inverted T: ↓ under ↑, → under ⋯, ← one column before.
+      expect(tester.getTopLeft(k('down')).dx, tester.getTopLeft(k('up')).dx);
+      expect(tester.getTopLeft(k('right')).dx, tester.getTopLeft(k('more')).dx);
+      expect(tester.getTopLeft(k('left')).dx, lessThan(tester.getTopLeft(k('up')).dx));
+    });
+
+    iosTest('a key action in row 1 draws, keeps the grid and ↑ stays over ←', (tester) async {
+      s.prefs.keyBarMore = true;
+      s.setKeyLayout(const KeyLayout([
+        ['esc', 'k:search', 'up'],
+        ['left', 'down', 'right'],
+      ]));
+      await tester.pumpWidget(bar(tsess, width: 900));
+      expect(find.byKey(const Key('bar-k-search')), findsOneWidget);
+      expect(tester.getTopLeft(k('down')).dx, tester.getTopLeft(k('up')).dx);
+      expect(tester.getTopLeft(k('right')).dx, tester.getTopLeft(k('more')).dx);
+    });
+
+    iosTest('row 1 without ⋯ (no row 2): no more, bar is one row', (tester) async {
+      s.setKeyLayout(const KeyLayout([
+        ['esc', 'up'],
+        <String>[],
+      ]));
+      await tester.pumpWidget(bar(tsess, width: 900));
+      expect(k('more'), findsNothing);
+      expect(k('esc'), findsOneWidget);
+      expect(keyBarHeightOf(s, tsess), keyBarHeight(1) + (phraseStripShown(s, tsess) ? phraseStripHeight : 0));
+    });
+
+    iosTest('a key action cell sends its chord (Ctrl-R) and counts no use', (tester) async {
+      s.setKeyLayout(const KeyLayout([
+        ['esc', 'k:search'],
+        <String>[],
+      ]));
+      await tester.pumpWidget(bar(tsess, width: 900));
+      await tester.tap(find.byKey(const Key('bar-k-search')));
+      await tester.pump();
+      expect(termKeys(), [
+        ['Ctrl-R'],
+      ]);
+      expect(s.quick.usage.isEmpty, isTrue);
+    });
+
+    iosTest('an unusable key action (⌘K on a terminal) is drawn grey and sends nothing', (tester) async {
+      s.setKeyActions([const KeyAction('ck', label: '清屏', chord: Chord('k', cmd: true))]);
+      s.setKeyLayout(const KeyLayout([
+        ['esc', 'k:ck'],
+        <String>[],
+      ]));
+      await tester.pumpWidget(bar(tsess, width: 900));
+      expect(find.byKey(const Key('bar-k-ck')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('bar-k-ck')));
+      await tester.pump();
+      expect(term.calls.where((c) => c.$1 == 'keys'), isEmpty);
+    });
+
+    iosTest('a synced layout with a missing action, 11 cells and a repeated id still draws', (tester) async {
+      s.prefs.keyBarMore = true;
+      s.quick.adopt('layout', const QuickDoc(9000, {
+        'rows': [
+          ['esc', 'k:gone', 'tab', 'tab', 'cc', 'bksp', 'enter', 'k:search', 'k:search', 'pgup', 'pgdn'],
+          ['left', 'down', 'right'],
+        ],
+      }));
+      await tester.pumpWidget(bar(tsess, width: 900));
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('bar-k-search')), findsOneWidget);
+      expect(find.byKey(const Key('bar-tab')), findsOneWidget);
+      expect(find.byKey(const Key('bar-k-gone')), findsNothing);
+    });
+
+    iosTest('an empty second row hides ⋯', (tester) async {
+      s.prefs.keyBarMore = true;
+      s.setKeyLayout(const KeyLayout([
+        ['esc', 'tab'],
+        <String>[],
+      ]));
+      await tester.pumpWidget(bar(tsess, width: 900));
+      expect(k('more'), findsNothing);
     });
   });
 

@@ -17,7 +17,8 @@ import 'phrase_strip.dart';
 import 'composer_panel.dart' show seeThroughBox;
 import 'phrases.dart';
 import 'remote_session.dart';
-import '../quick/key_layout.dart';
+import '../quick/key_actions.dart';
+import 'phrase_send.dart';
 import 'session_port.dart';
 
 /// A repeating key starts repeating after this long held, then goes every [repeatEvery].
@@ -31,7 +32,10 @@ ModifierLatch keyLatchOf(MainState state, RemoteSession session) =>
     _isTerm(state, session) ? session.keyLatch : state.appLatch;
 
 List<List<String>> _rowsOf(MainState state, RemoteSession session) =>
-    keyBarRows(layout: KeyLayout.fallback, more: state.prefs.keyBarMore);
+    keyBarRows(
+        layout: state.quick.layout,
+        more: state.prefs.keyBarMore,
+        actionIds: {for (final a in state.quick.keys) a.id});
 
 /// Whether [session] is of the terminal kind: a text terminal or a terminal app. The kind picks which quick-area
 /// pref it follows.
@@ -375,24 +379,65 @@ class _KeyBarState extends State<KeyBar> {
     );
   }
 
+  KeyAction? _actionOf(String id) {
+    for (final a in widget.state.quick.keys) {
+      if (a.id == id) return a;
+    }
+    return null;
+  }
+
   /// One row: the arrow block at its end ([keyBarTail]) one column of [keyBarColumns] each, the keys before it
   /// sharing the rest, so the arrows line up across the rows.
   Widget _rowOf(List<String> ids) {
     return LayoutBuilder(builder: (context, c) {
       final column = ((c.maxWidth - (keyBarColumns - 1) * keyBarGap) / keyBarColumns).clamp(0.0, double.infinity);
       final tail = keyBarTail(ids);
-      final children = <Widget>[];
+      // A row made of the arrow block alone has nothing to share the rest: an empty cell holds the columns at the right.
+      final children = <Widget>[if (ids.isNotEmpty && tail == ids.length) const Expanded(child: SizedBox())];
       for (final (i, id) in ids.indexed) {
-        if (i > 0) children.add(const SizedBox(width: keyBarGap));
-        final key = barKeys[id]!;
-        final view = _BarKeyView(
+        if (i > 0 || children.isNotEmpty) children.add(const SizedBox(width: keyBarGap));
+        final Widget view;
+        final action = id.startsWith('k:') ? _actionOf(id.substring(2)) : null;
+        final key = barKeys[id];
+        if (action != null) {
+          final tool = widget.state.stripToolOf(widget.session);
+          final usable = keyActionUsable(action, term: widget.port is TermSessionPort, tool: tool);
+          view = _BarKeyView(
+            key: Key('bar-k-${action.id}'),
+            keyDef: (
+              id: id,
+              label: action.label,
+              spoken: action.label,
+              kind: BarKind.send,
+              wire: null,
+              code: null,
+              mods: 0,
+              bit: null,
+              repeats: false,
+            ),
+            sid: _sid,
+            state: LatchState.off,
+            blocked: _blocked || !usable,
+            onFire: (haptic, flags) {
+              if (_blocked || !usable) return null;
+              if (haptic) unawaited(HapticFeedback.selectionClick());
+              // Key-bar taps do not count usage (spec §9).
+              sendKeyAction(state: widget.state, session: widget.session, port: widget.port, a: action, tool: tool);
+              return null;
+            },
+          );
+        } else if (key == null) {
+          continue; // an id nothing knows (cleaned layouts have none): draw nothing rather than crash
+        } else {
+          view = _BarKeyView(
           key: Key('bar-$id'),
           keyDef: key,
           sid: _sid,
           state: key.bit == null ? LatchState.off : _latch.of(key.bit!),
           blocked: _blocked,
           onFire: (haptic, flags) => _fire(key, haptic: haptic, flags: flags),
-        );
+          );
+        }
         children.add(i >= ids.length - tail ? SizedBox(width: column, child: view) : Expanded(child: view));
       }
       return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: children);
@@ -488,6 +533,7 @@ class _BarKeyViewState extends State<_BarKeyView> {
               child: Center(
                 child: Text(k.label,
                     maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                         fontSize: 13, color: t.text, fontFamily: t.mono, fontFamilyFallback: t.monoFallback)),
               ),
