@@ -2,7 +2,7 @@
 
 日期：2026-11-27
 状态：P0 已完成（2026-11-27），待写 P1 计划
-分支：`docs/android-tablet-design`
+位置：规格已在 `main`；P0 结果来自分支 `docs/android-p0-findings`（`2026-11-27-rapp-android-p0-findings.md`）
 相关规格：iPad 和 Duo（`2026-11-17-rapp-ipad-duo-design.md`，下文叫「iPad 规格」）、Windows（`2026-11-26-rapp-windows-design.md`，下文叫「Windows 规格」）、iOS 内置输入法（`2026-11-20-rapp-ios-rime-ime-design.md`）
 
 名词：**A** 是被控的电脑，**B** 是操作的那一端。安卓平板只做 B。
@@ -219,7 +219,7 @@ librapp_android.so（Rust）
 - hub 的代码不改。选项和 iOS 相同：`owns_access: true, embed_only: true, dual_stack: true, map_ports`。
 - `FfiHubTransport` 现在用 `DynamicLibrary.process()`（iOS 是静态链接）。安卓要 `DynamicLibrary.open('librapp_android.so')`。做法：入口传库的**名字**，`null` 表示 `process()`；iOS 传 `null`，安卓传 `'librapp_android.so'`。`DynamicLibrary` 传不进 `Isolate.run`，`_stopOffThread` 只能按名字重新打开。这不是平台判断，是入口各自传参。（P0 结果 §3）
 - 地址解析不用给安卓单独一支。安卓的 C 库对 `AI_V4MAPPED` 怎么处理，这个问题不用回答：`getaddrinfo_v6` 在各平台都不返回映射地址，映射地址只由 `resolve_for` 自己用 `mapped()` 拼，安卓就走这一支。两台模拟器在「默认」和「只有 IPv4」两种状态下都把 relay 解析成 `::ffff:` 映射地址并连上。还要实机回答的：只有 IPv6 的网络（NAT64/DNS64）上 `getaddrinfo_v6` 能不能拿到合成地址，以及 relay 写成域名时的解析（§14.6 第 8、15 条）。（P0 结果 §3）
-- `cfg(target_os = "linux")` 在安卓上**不成立**（安卓是 `target_os = "android"`），`cfg(unix)` 成立。共用 crate 里按 Linux 写的分支不会编进安卓；P0 要确认没有哪段是安卓也需要的。
+- `cfg(target_os = "linux")` 在安卓上**不成立**（安卓是 `target_os = "android"`），`cfg(unix)` 成立。共用 crate 里按 Linux 写的分支不会编进安卓；P0 已查过，没有哪段是安卓也需要的，见 P0 结果 §2。（P0 结果 §2）
 
 ### 6.2 会话库（Rust）
 

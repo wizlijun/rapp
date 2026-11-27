@@ -44,7 +44,7 @@
 | 1 | 工具和空壳 | **过**。两个模拟器都能装、能启动，截图里是 `rApp P0 shell`。36 上第一次截图撞上「System UI isn't responding」弹框，等一会儿再试正常 | — | §4.5 已改成装完的样子 |
 | 2 | `.so` | **过**。九个名字都导出；四个 `LOAD` 段都是 `0x4000`；11.3 MB，strip 后 7.5 MB；依赖全部直接编过 | — | §6.2 已改：不用 `#[used] static`；闸的顺序和忘了 ack 的后果；hub-ffi 自己包 `catch_unwind` |
 | 3 | 进程内 hub 和网络 | **过**。两个模拟器都起得来 hub、出接入引导；放进 relay 和 key、在设备页按 ID 加上这台 Mac 后在线；「默认」和「只有 IPv4」两种状态下 relay 都解析成 `::ffff:` 映射地址并连上 | relay 存的是 IPv4 字面地址，**域名解析没有拿到**；模拟器上没有全局 IPv6。两样都留给实机，在 P1 第一个包上做（§14.6 第 8、15 条） | §6.1 已改（库按名字传；`AI_V4MAPPED` 的问题不用回答）；§6.5 `systemOpen` 要安卓通道；§14.2 验收加「按 ID 添加」 |
-| 4 | 进程内会话、节流 | **过，模拟器 36 的打字没过**。门禁两轮（对照、慢速 200 ms）在模拟器 34、模拟器 36、平板上都过：慢速时 `p0 fps` 平均 4.4–4.7，traffic `frames` 平均 28.9–29.6；后 6 次减前 6 次的 PSS 是 −10.6 / −5.9 / −7.9 MB，都在 40 MB 以内。P0Moving 的动画面、颜色三台都对。TextEdit 打 `p0probe`：34 上到齐；平板上第一次在发送前也少了第二个 p，重打 `probe` 后到齐；**36 上重复 7 次，到齐 4 次、少字 3 次**（第 4 节「模拟器 36 打字重复测量」），有截图的 2 次在 rApp 的写作条里就已经少了。打字经写作条发出，这一点只凭截图。**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（桌面会话）；其余都是单应用会话，因为桌面会话会把用户自己的会话顶掉。hub 读到超过 64 KiB 的回复行（`watch_load` 首行，Mac 服务起来约 52 分钟以后，量到的区间 51.5–55 分钟）就丢整条连接，会话跟着断；探查里绕过后会话撑过 250 s | 36 的少字：用真键盘和软键盘各打一段，留给实机（§14.6 第 11 条）。64 KiB 行上限：共用代码，main 上没修，记进 `tasks/todo.md`「安卓平板」，P1 接会话前修 | §6.2 规矩 1 已补 |
+| 4 | 进程内会话、节流 | **过，模拟器 36 的打字没过**。第 4 项的硬条件是会话通路（门禁两轮、画面、节流），36 上打字不在其中：少的字在 rApp 写作条里发送前就已经少了，在会话和 FFI 通路的上游；34 和平板（重打后）到齐，所以会话通路过，36 的打字归到规格 §14.6 第 11 条。门禁两轮（对照、慢速 200 ms）在模拟器 34、模拟器 36、平板上都过：慢速时 `p0 fps` 平均 4.4–4.7，traffic `frames` 平均 28.9–29.6；后 6 次减前 6 次的 PSS 是 −10.6 / −5.9 / −7.9 MB，都在 40 MB 以内。P0Moving 的动画面、颜色三台都对。TextEdit 打 `p0probe`：34 上到齐；平板上第一次在发送前也少了第二个 p，重打 `probe` 后到齐；**36 上重复 7 次，到齐 4 次、少字 3 次**（第 4 节「模拟器 36 打字重复测量」），有截图的 2 次在 rApp 的写作条里就已经少了。打字经写作条发出，这一点只凭截图。**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（桌面会话）；其余都是单应用会话，因为桌面会话会把用户自己的会话顶掉。hub 读到超过 64 KiB 的回复行（`watch_load` 首行，Mac 服务起来约 52 分钟以后，量到的区间 51.5–55 分钟）就丢整条连接，会话跟着断；探查里绕过后会话撑过 250 s | 36 的少字：用真键盘和软键盘各打一段，留给实机（§14.6 第 11 条）。64 KiB 行上限：共用代码，main 上没修，记进 `tasks/todo.md`「安卓平板」，P1 接会话前修 | §6.2 规矩 1 已补 |
 | 5 | 键盘和触控板 | **部分过**。过关条件（Ctrl+C/V 在空白区到得了 App，`isControlPressed` 为真）在 34、36 上**过**（`uinput`，内核级，`ctrl=1`）。**平板上没确认，等用户用真键盘按**：键到得了，但 `input keycombination` 发的字母 `metaState` 为 0，平板上 `uinput` 被拒，注入显示不了修饰键状态。36 上文本框有焦点、软键盘打开时 Ctrl+C/V/A/Z/X 都到、`ctrl=1`；36 上原先「到不了」是点在了文本框外，34 和平板的文本框没有重测。Meta 组合都被系统拿走。滚轮是 `PointerScrollEvent kind=mouse`，三台都有 | 平板的 Ctrl+C/V：蓝牙键盘的一分钟检查，在 P1 第一个包上做（§14.6 第 9 条）。触控板双指和捏合：模拟器上测不出，平板没有触控板（§14.6 第 9 条）。Ctrl+SPACE、文本框里单按字母：原因没查明（§14.6 第 14 条） | §14.6 第 9 条已改 |
 | 6 | 语音 | **部分过**。三个目标按 §11 的规则手算都是「不能用」：34 没有识别器（规则 3，正是 34 的过关条件）；36 和平板的 `checkRecognitionSupport` 报 14（规则 4）。**哪里都没有拿到中文字**：36 在线识别收到 `ready`、`begin`、`error 7`（没检测到语音），设备上下载 `cmn-Hans-CN` 后报 `error 13`；分段的静音时长给 `Long` 时 36 的识别器拒绝，给 `int` 不再拒绝，但只来过一个空的 `segment`；平板六次按住说话（普通 ×3、分段 ×2、热词）都没有任何回调。分段结果、热词效果都没有拿到 | 按 U6 的退路：判成不能用，按钮不出现（§11 规则 3、4）。平板上真人对着平板说话：留给实机（§14.6 第 5、13 条） | §11 已改（语言标签、超时、异常、`int`、规则 4、找识别器）；「按下去没回调」的处理是建议 2 |
 | 7 | 自己装自己 | **部分过**。两个模拟器过：`versionCode` 9001 → 9002；`canInstall` 起点是否，开开关后是；装完 App 被杀、没有自己重启；数据文件和开关都还在。`success` 回调没观察到（进程死了）。哈希不对的四个条件在 34 和平板上都过。**平板上没装完，等用户**：荣耀多出安全检测、「已了解…」勾选、锁屏密码三层，密码不能替用户输 | 平板上走完一遍、输锁屏密码：留给实机，在 P1 第一个包上做（§14.6 第 7、10 条） | §13.2 第 4 步已改（装完不重启）；荣耀三层是建议 1，「装完回到桌面」的提示是建议 3 |
@@ -233,11 +233,11 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 | relay | none | `::ffff:` 映射 |
 | `1.1.1.1` | none | `[::ffff:1.1.1.1]:443` |
 | `localhost` | none | `[::ffff:127.0.0.1]:443` |
-| `dns.google` | none | `[::ffff:198.18.2.250]:443` |
+| `dns.google` | none | `[::ffff:198.18.x.x]:443` |
 
 - `getaddrinfo_v6` 四个都是 none，这是**代码本来的意思**，不是安卓的 C 库的毛病：它是 NAT64 那一支，只找「不是 v4 映射」的 IPv6 地址，映射地址一律丢掉（`quic.rs:338-339` 的注释：NAT64 上映射地址到不了）。所以对 IPv4 主机，在哪个平台上都是 none（`quic.rs:654` 的测试就断言 `getaddrinfo_v6("127.0.0.1","9") == None`）。这里另外也没有 AAAA 记录、没有合成的地址，所以四个都是 none。这次测不出 C 库对 `AI_V4MAPPED` 怎么处理。
 - `resolve_for(dual)` 不靠它：先普通解析，有 IPv4 地址且有 IPv4 路由就自己拼 `::ffff:a.b.c.d`。计划里说的「按 IPv4 解析、自己拼 `::ffff:`」的那一支**本来就在 `resolve_for` 里**，安卓走的就是这一支，不用另加。
-- `dns.google` 解析出 `198.18.2.250`：这是 Mac 上 TUN + fake-ip 代理的假地址（198.18.0.0/15），模拟器的 DNS 经 Mac 转发。不影响 relay（relay 是字面地址）。
+- `dns.google` 解析出 `198.18.x.x`：这是 Mac 上 TUN + fake-ip 代理的假地址（198.18.0.0/15），模拟器的 DNS 经 Mac 转发。不影响 relay（relay 是字面地址）。
 - 换回正式包冷启动（强制 relay）：两台在两种状态下都是 `route … path:"relay" result:"ok"`、`presence online:true`，界面上这台 Mac 在线。「只有 IPv4」下连 `::1` 都没有，hub 的双栈 UDP 套接字照样连上了 relay。
 - 日志证据（scratchpad，不进仓库，都已过过滤器）：「只有 IPv4」是 `p0/t3-hub-v4only-{34,36}.txt`；「默认」是 `p0/t3-hub-default-{34,36}.txt`——各自冷开机（`emulator -avd rapp-p0-3x -no-snapshot-load -no-audio`，36 开机后等 90 秒），确认 `/proc/sys/net/ipv6/conf/all/disable_ipv6` 是 0、`ip -o addr` 和上表「默认」一样，`adb install -r t3-main.apk`，`am start -W -n com.rapphub.rapp/.MainActivity`，等 25–40 秒，再 `run-as com.rapphub.rapp cat …/files/rapp/logs/hub.log | mask.sh`，从这次的 `hub_start` 起存下来。两份都是 `hub_start`、`ports`、`route path:"relay" result:"ok"`、`presence online:true`、`ports_asked answered:1`，`grep -c -E '"lvl":"(warn|error)"'` 都是 0。
 - **双栈的真 IPv6 一半测不了**：「默认」状态没有全局 IPv6 地址，relay 也是 IPv4 字面地址。真 IPv6、只有 IPv6 的网络（NAT64，靠 `getaddrinfo_v6` 拿 DNS64 合成的 AAAA 那一支，这次没走到）留给实机，已加进规格 §14.6。
@@ -254,7 +254,7 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 
 ## 4 进程内会话
 
-**状态：过，模拟器 36 的打字没过。** 门禁两轮（对照、慢速 200 ms）在模拟器 34、模拟器 36、平板上都过，见本节「第四次测量」。36 上 TextEdit 打 `p0probe` 不稳：先后 7 次（`input text` 4 次，其中 1 次打的是 `a1abba`；逐键 3 次）里 3 次少一个字符（`p0robe`、`pprobe`），逐键输入也少，不只是 `adb shell input text`；有截图的几次，少的字在写作条里就没有了；34 上到齐；平板上第一次 `input text 'p0probe'` 在发送前也少了第二个 p，退格后重打 `probe` 才到齐。**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（第二次测量的 `p0/t4e-desktop-static-34.png`，桌面会话）；36 和平板只看了 P0Moving 的画面在动、颜色对，没有和 Mac 屏幕逐处对照。到 Mac 的会话从第三次测量起都是单应用会话：桌面会话一次只能一个人开，开了会把用户自己正在用的桌面会话顶掉。强制 relay 的 fps 四次测量都没量。
+**状态：过，模拟器 36 的打字没过。** 第 4 项的硬条件是会话通路，36 上打字不在其中：少的字在写作条里发送前就已经少了，在会话和 FFI 通路的上游；34 和平板（重打后）到齐，所以会话通路过，36 的打字归到规格 §14.6 第 11 条。 门禁两轮（对照、慢速 200 ms）在模拟器 34、模拟器 36、平板上都过，见本节「第四次测量」。36 上 TextEdit 打 `p0probe` 不稳：先后 7 次（`input text` 4 次，其中 1 次打的是 `a1abba`；逐键 3 次）里 3 次少一个字符（`p0robe`、`pprobe`），逐键输入也少，不只是 `adb shell input text`；有截图的几次，少的字在写作条里就没有了；34 上到齐；平板上第一次 `input text 'p0probe'` 在发送前也少了第二个 p，退格后重打 `probe` 才到齐。**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（第二次测量的 `p0/t4e-desktop-static-34.png`，桌面会话）；36 和平板只看了 P0Moving 的画面在动、颜色对，没有和 Mac 屏幕逐处对照。到 Mac 的会话从第三次测量起都是单应用会话：桌面会话一次只能一个人开，开了会把用户自己正在用的桌面会话顶掉。强制 relay 的 fps 四次测量都没量。
 
 本节有四次测量：第一次（模拟器 34，桌面会话和单应用会话）、第二次（模拟器 34，查会话为什么断、加绕过）、第三次（模拟器 34，画面源换成 P0Moving）、第四次（模拟器 34、模拟器 36、平板，门禁和打字），外加模拟器 36 的打字重复测量。
 
@@ -387,7 +387,7 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 | P0Moving 的动画面、颜色 | 模拟器 36 | 色块在动，颜色对。强制 relay 和局域网各看了一次 | 过 | `p0/t4g-moving-36-relay.png`、`p0/t4g-moving-36.png` |
 | 同上 | 平板（实机） | 色块在动，颜色对，局域网 | 过 | `p0/t4g-moving-tab.png` |
 | TextEdit 里打 `p0probe` | 模拟器 36 | 点文档会弹出写作条。`adb -s <目标> shell input text 'p0probe'` 进了写作条，回车（keyevent 66）只在写作条里换行、不发送，点写作条的发送按钮才发到 Mac。字到了 Mac 的文档里，但**少了第二个 p**：osascript 读回来是 `p0robe` 加一个换行（`od -c`：`p 0 r o b e \n`），截图里文档那行也是 `p0robe`，两者一致。少的这个字是在 `input text` 送键、写作条收字、还是发到 Mac 这几段里丢的，没查明（经过见表下） | 没过（少一个字符；重复测量见表下） | `p0/t4g-p0probe-36.png` |
-| 同上 | 平板（实机） | 要绕开拼音输入法，经过见表下。文档显示 `p0probe`，osascript 读到的也是 | 过 | `p0/t4g-p0probe-tab.png`、`p0/t4g-tab-x1.png` |
+| 同上 | 平板（实机） | 要绕开拼音输入法，经过见表下。文档显示 `p0probe`，osascript 读到的也是 | 过（第一次少一个 p，退格重打后到齐） | `p0/t4g-p0probe-tab.png`、`p0/t4g-tab-x1.png` |
 
 **模拟器 36 打字的经过（UTC）。**
 - 09:43:14Z 用 osascript 把文档清空。09:46:14Z 在 36 上开 TextEdit 单应用会话。
@@ -420,7 +420,7 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 - 用退格（keyevent 67）清掉拼音、留下 `p0`（`t4g-type-tab4.png`），再 `input text 'probe'`。
 - 第一个 keyevent 66：拼音输入法把原字母 `probe` 上屏到写作条，写作条变成 `p0probe`，不发送（`t4g-type-tab5.png`）。
 - 第二个 keyevent 66：写作条里的 `p0probe` 发到 Mac，osascript 读回来是 `p0probe`（`t4g-p0probe-tab.png`）。
-- 和 36 不一样：36 上 keyevent 66 只在写作条里换行，要点发送按钮；平板上回车直接发送。为什么不一样没查。
+- 和 36 不一样：36 上 keyevent 66 只在写作条里换行，要点发送按钮；34 和平板上回车直接发送（34 见本节第一张表的「单应用会话打字」行）。为什么不一样没查。
 - 两台都是 `p0` 后面那个 p 没了，34 上（第 4 节前面）同样的 `input text 'p0probe'` 没少字。真键盘、真用户打字没试。
 
 **B 门禁。**
@@ -465,7 +465,7 @@ FFI 会话的生命周期（照代码写，行号是 `probe/android-p0` 分支�
 
 **P1 接手时要改的（读代码看到的，探查里没改）：**
 - `watch_load` 首行超过 64 KiB：探查的绕过 `keeps_link`（`rust/hub/src/link.rs:983`）是按错误文字 `line longer than` 判断的，不能带进 main。真修法在共用代码里：这条回复放宽或去掉读行上限，或者首行分块发；不管哪种，回复太长都不该丢整条连接。已记进 `tasks/todo.md`「安卓平板」。
-- 回车在写作条里：模拟器 36 上 keyevent 66 只在写作条里换行，要点发送按钮才发；平板上回车直接发。P1 做外接键盘时，两边都要试回车是发送还是换行。
+- 回车在写作条里：模拟器 36 上 keyevent 66 只在写作条里换行，要点发送按钮才发；34 和平板上回车直接发。P1 做外接键盘时，两边都要试回车是发送还是换行。
 - `gui/test/session_ffi_test.dart` 靠 40 ms、80 ms 的真等待判断先后，机器忙时可能误报；改用 `fake_async`。
 - `FfiSession` 本身没有测试（现在只测了 `ackedPackets`）。
 - `_FfiSessionWorker` 先把 pid 存成 0，再用 getter 改成会话 id（`gui/lib/embed/session_worker.dart:152`、`:156`），直接传 id 就行。
@@ -565,7 +565,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 
 ## 6 语音
 
-通道 `rapp/p0speech`（Kotlin）：`probe`、`support {onDevice}`、`start {onDevice,segmented,hotwords,lang}`、`stop`、`download`，事件 `start`、`ready`、`begin`、`partial`、`segment`、`segmentsEnd`、`final`、`error {code}`、`end`；每个事件带 `inst`（识别器实例号）、`run`、`rms`（`onRmsChanged` 回调次数）、`rmsMax`（最大 rmsdB）。页面 `P0_PAGE=speech`。三个目标：模拟器 34（Android 14，AOSP）、模拟器 36（Android 16，google_apis）、平板（实机，荣耀，Android 16）。原始证据在 `p0/t6-*.txt`、`p0/t6f-*.txt`（`probe` 和 `support` 的原样回答、每次说话的事件序列）和 `p0/t6f-*-log.txt`（打码后的系统日志摘录）。`inst` 是 9 位数时打码脚本会把它换成 `ID`，所以这类事件只能按先后判断是不是同一个实例。
+通道 `rapp/p0speech`（Kotlin）：`probe`、`support {onDevice}`、`start {onDevice,segmented,hotwords,lang}`、`stop`、`download`（`SpeechRecognizer.triggerModelDownload(intent)`，intent 是 `ACTION_RECOGNIZE_SPEECH` + `EXTRA_LANGUAGE`），事件 `start`、`ready`、`begin`、`partial`、`segment`、`segmentsEnd`、`final`、`error {code}`、`end`；每个事件带 `inst`（识别器实例号）、`run`、`rms`（`onRmsChanged` 回调次数）、`rmsMax`（最大 rmsdB）。页面 `P0_PAGE=speech`。三个目标：模拟器 34（Android 14，AOSP）、模拟器 36（Android 16，google_apis）、平板（实机，荣耀，Android 16）。原始证据在 `p0/t6-*.txt`、`p0/t6f-*.txt`（`probe` 和 `support` 的原样回答、每次说话的事件序列）和 `p0/t6f-*-log.txt`（打码后的系统日志摘录）。`inst` 是 9 位数时打码脚本会把它换成 `ID`，所以这类事件只能按先后判断是不是同一个实例。
 
 ### 6.1 原样回答和「能不能用」
 
@@ -607,7 +607,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 
 下载这一步：当时在屏幕上看到「Download 普通话 (中国大陆) update」对话框、52.97 MB，点了 Download；日志里看到过 `onEndTriggerModelDownload(): success`；这两处没有留文字证据（屏幕只有截图 `p0/t6f-e36-download.png`，日志没存）。下载之后再查 `support`（`p0/t6f-e36-support-after-download.txt`）：`installed` 仍是 `[en-US]`，`pending: [cmn-Hans-CN]`。语言包为什么没就绪，没查明。
 
-第二次测量（36，20:18:29–20:20:12；Mac 未锁屏：Mac 的服务日志 `t6-mac-lock-times.txt` 里 20:16:14 解锁、20:22:40 才自动锁上（文件里是 UTC，加 9 小时），每次也用 `tools/locked` 查过）。两次在线运行（分段 `int`、普通一段）的 `rms` 都只有 1 次、停在 -2.0，包括和第一次测量普通一段设置相同的那次（那次是 5 次、最大 10.0）：Mac 没锁，这两次声音却没进识别器，原因不明，没有查出来。设备上那次不一样：`start` 后约 0.12 s 就 `error 13`，没有 `ready`，`rms` 0，没开始收音。请求是否被接受只看日志，不依赖声音：
+第二次测量（36，20:18:29–20:20:12；Mac 未锁屏：Mac 的服务日志 `t6-mac-lock-times.txt` 里 20:16:14 解锁、20:22:40 才自动锁上（该文件里的时间戳是 UTC，和本行的钟点不是同一个计法），每次也用 `tools/locked` 查过）。两次在线运行（分段 `int`、普通一段）的 `rms` 都只有 1 次、停在 -2.0，包括和第一次测量普通一段设置相同的那次（那次是 5 次、最大 10.0）：Mac 没锁，这两次声音却没进识别器，原因不明，没有查出来。设备上那次不一样：`start` 后约 0.12 s 就 `error 13`，没有 `ready`，`rms` 0，没开始收音。请求是否被接受只看日志，不依赖声音：
 - 分段 `int`：见上，请求被接受，`rms` 1 次 -2.0，没有声音进入的证据。
 - 设备上 `cmn-Hans-CN`：`error 13`、`end`，之后没有 `ready`，松手时没有 `error 5`，日志里也没有 `no preceding #startListening`（`p0/t6g-e36-ondevice-cmn.txt`、`-log.txt`）：`stop` 改成只在会话还在时才调 `stopListening` 以后，`error 5` 不再出现。`error 5` 的原因：`stop` 在会话已经结束后又调了 `stopListening()`，是探查页自己引起的，不是识别器的行为。
 - 普通一段又跑了一次（`p0/t6g-e36-plain.txt`）：`rms` 1 次 -2.0，`error 7`，同样没有声音进入的证据。
@@ -633,6 +633,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 - `checkRecognitionSupport` 在没有识别服务时回调**一直不来**，要自己加超时（探查用了 10 秒）。
 - 清单要 `RECORD_AUDIO` 和 `<queries><intent><action android:name="android.speech.RecognitionService"/></intent></queries>`（探查里加了，没做不加的对比）。
 - 默认识别服务的包名：探查里读了 `Settings.Secure` 的 `voice_recognition_service`，两个有识别服务的目标上都是 `包名/类名`。这是没写进文档的隐藏键，P1 不用它；P1 用 `packageManager.queryIntentServices(Intent(RecognitionService.SERVICE_INTERFACE), 0)` 找识别服务（规格 §11 已改）。
+- `start` 的 intent：`ACTION_RECOGNIZE_SPEECH`，`EXTRA_LANGUAGE_MODEL = LANGUAGE_MODEL_FREE_FORM`、`EXTRA_LANGUAGE`、`EXTRA_PARTIAL_RESULTS = true`；热词（API 33）`EXTRA_BIASING_STRINGS`。
 - 分段：`EXTRA_SEGMENTED_SESSION` 的值写 `EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS`，同一 intent 里再用 `putExtra(…, 2000)` 给 `int`，**不能给 `Long`**：36 的 Google 识别器按 `int` 读，给 `Long` 会读成 0 并忽略分段（原样日志见 6.2）。给 `int` 时 36 的识别器接受（日志里没有拒绝），但还没有收到过带文字的 `segment`（只有一个空的），所以「识别器支持分段」没有确证；P1 要在能出字的机器上再验，`segment` 不来时按规格走「一段结束手还按着就立刻开下一段」。
 - 热词 `EXTRA_BIASING_STRINGS`：没报错，效果没测（`rms` 停在 -2.0）。
 - 识别器的建法（**没有被任何一次保存的运行验证过**）：本探查的写法是一种模式一个 `SpeechRecognizer`、复用、开始前 `cancel()`、只在 `error 11` 时销毁重建；每次运行都是新进程里的 `run: 1`，也没有出现过 `error 11`，销毁重建那条路径没跑过；复用那条至多在一次运行里走到过：`download` 会建好设备上识别器却不增加 `run`，之后同一次页面里的设备上 `start` 走的是复用分支（先 `cancel()`），很可能就是第一次测量的设备上 `cmn-Hans-CN` 那次，它的事件顺序怪（先 `error`、`end`，然后才 `ready`）。所以复用这个设计没有验证过，P1 不要照抄。
@@ -647,7 +648,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
   - 14（`ERROR_CANNOT_CHECK_SUPPORT`，`support` 在线路径）：第一轮（36、平板：`t6-e36-probe-support.txt`、`t6-tab-probe-support.txt`、`t6-tab-support.txt`）和第一次测量（`t6f-e36-support-after-download.txt`、`t6f-tab-plain3support.txt`）；第二次测量没有调 `support`，没有证据。
   - 7（`ERROR_NO_MATCH`）：36 上在线识别，第一轮、第一次测量、第二次测量都有；日志里是 `NO_SPEECH_DETECTED`（`t6f-e36-plain-log.txt`）。
   - 13（`ERROR_LANGUAGE_UNAVAILABLE`，日志里叫 `LANGUAGE_PACK_ERROR`）：36 设备上 `cmn-Hans-CN`，下载之后（第一次、第二次测量）；语言包为什么没就绪没查明。
-  - 12（`ERROR_LANGUAGE_NOT_SUPPORTED`）：只在第一轮见过（36 设备上，中文没装，`t6-e36-ondevice.txt`），之后没再试，没有日志摘录。
+  - 12（`ERROR_LANGUAGE_NOT_SUPPORTED`）：只在第一轮见过（36 设备上，`t6-e36-ondevice.txt`），当时中文包还没下，原因没查实；之后没再试，没有日志摘录。
   - 11（`ERROR_SERVER_DISCONNECTED`）：只在第一轮见过，36（`t6-e36-hotwords.txt`）和平板（`t6-tab-plain2.txt`）都有；当时的探查页在创建前先 `destroy`，可能就是原因，之后的两次测量没有再出现，没验证。
   - 5（`ERROR_CLIENT`）：第一轮 36（`t6-e36-ondevice.txt`、`t6-e36-hotwords.txt`）和第一次测量 36 设备上（`t6f-e36-ondevice-cmn.txt`）都出现过；第一次测量那次，日志里有 `stopListening called with no preceding #startListening`，说明是探查页的 `stop` 在会话已结束后又调了 `stopListening()`，是页面自己引起的；第一轮的两次原因没查。加了 `listening` 判断之后，第二次测量没再出现（那次只有 `error 13` 后直接松手，没有别的事件）。
 - 识别时的时间（第一次测量，36，普通一段、分段、热词三次；`ready`、`begin` 从 `start` 事件起算，`error 7` 从松手 `up` 起算）：`ready` 0.027–0.038 s（从 `start -> started` 那行算是 0.026–0.037 s），`begin` 0.86–0.91 s，`error 7` 0.26–0.80 s；从按下 `down` 算 `ready` 约 0.029–0.041 s；没有结果，没有可量的首字时间。
@@ -655,7 +656,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 
 ## 7 自己装自己
 
-做法：探查页 `install` 显示本包 `versionCode` 和 `canInstall`；「下载并安装」从 `http://127.0.0.1:8765/app.apk` 下到 `<cache>/update/rapp.apk`，对 `app.sha256` 里的 SHA-256，对上才调 `installApk`（`PackageInstaller` 会话，系统要确认就把确认界面拉起来，结果以 `install` 事件回到页面）；「去设置」打开本包的「安装未知应用」页。两个包都是调试包：`p0-old.apk` 是 `versionCode` 9001，`app.apk` 是 9002（`flutter build apk --build-number`）。本机 `python3 -m http.server 8765 --bind 127.0.0.1`，`adb reverse tcp:8765 tcp:8765`。证据在 `p0/t7-*`。
+做法：探查页 `install` 显示本包 `versionCode` 和 `canInstall`；「下载并安装」从 `http://127.0.0.1:8765/app.apk` 下到 `<cache>/update/rapp.apk`，对 `app.sha256` 里的 SHA-256，对上才调 `installApk`（`PackageInstaller` 会话，系统要确认就把确认界面拉起来，结果以 `install` 事件回到页面）。调用写法：`PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)`，`createSession`、写入后 `session.commit(PendingIntent.getBroadcast(this, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE).intentSender)`；`FLAG_MUTABLE` 不能省，安装器要往这个 intent 里填 extras。接收器 `registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)`（API 33 起，低版本用不带标志的重载）。收到 `PackageInstaller.STATUS_PENDING_USER_ACTION`（-1）时，取 `Intent.EXTRA_INTENT`，加 `Intent.FLAG_ACTIVITY_NEW_TASK` 后 `startActivity`；`STATUS_SUCCESS`（0）回 `success`，`STATUS_FAILURE_ABORTED`（3）回 `cancelled`，其余回 `failure`。「去设置」打开本包的「安装未知应用」页。两个包都是调试包：`p0-old.apk` 是 `versionCode` 9001，`app.apk` 是 9002（`flutter build apk --build-number`）。本机 `python3 -m http.server 8765 --bind 127.0.0.1`，`adb reverse tcp:8765 tcp:8765`。证据在 `p0/t7-*`。
 
 ### 结果（三台）
 
@@ -672,8 +673,8 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 | 模拟器 34 | `adb uninstall`，装 `p0-old.apk`，启动 | 页面：`versionCode: 9001`、`canInstall: 否` | `dumpsys` 里 `versionCode=9001`；`appops get … REQUEST_INSTALL_PACKAGES` = `No operations. Default mode: default` | 是 |
 | 模拟器 34 | 点「去设置」 | 打开的是 rApp 那一页，标题 `Install unknown apps`，开关 `Allow from this source`，下面写 `Your phone and personal data are more vulnerable to attack by unknown apps…`（这几句是当时从界面树读出来的，没存成文本文件，证据里只有截图 `t7-e34-2-settings.png`） | — | 是（就是本包那一页） |
 | 模拟器 34 | 点开关，返回 | 返回后页面立刻刷成 `canInstall: 是`（页面回前台时重读） | `appops` = `REQUEST_INSTALL_PACKAGES: allow` | 是：`canInstall` 从否翻成是 |
-| 模拟器 34 | 点「下载并安装」，系统确认 | 对话框 `Do you want to update this app?`，按钮 `CANCEL` / `UPDATE`（不是「安装」：同包名的升级，不弹权限清单） | 页面先收到 `pending`（code -1） | — |
-| 模拟器 34 | 先点 `CANCEL` 试一次 | 页面收到 `cancelled`，code 3，message `INSTALL_FAILED_ABORTED: User rejected permissions`；这一遍之后没有列缓存；缓存里 `rapp.apk` 的存在只在后面那次成功安装之后列过（`t7-e34-step2.txt`） | `t7-e34-cancel-event.txt` | 取消这条路通 |
+| 模拟器 34 | 点「下载并安装」，系统确认 | 对话框 `Do you want to update this app?`，按钮 `CANCEL` / `UPDATE`（不是「安装」：同包名的升级，不弹权限清单） | 页面先收到 `pending`（code -1，`STATUS_PENDING_USER_ACTION`） | — |
+| 模拟器 34 | 先点 `CANCEL` 试一次 | 页面收到 `cancelled`，code 3（`STATUS_FAILURE_ABORTED`），message `INSTALL_FAILED_ABORTED: User rejected permissions`；这一遍之后没有列缓存；缓存里 `rapp.apk` 的存在只在后面那次成功安装之后列过（`t7-e34-step2.txt`） | `t7-e34-cancel-event.txt` | 取消这条路通 |
 | 模拟器 34 | 再下载，点 `UPDATE` | 对话框消失，桌面出现，App 不在 | 2 秒后 `pidof` 为空，之后 12 秒一直空；`versionCode=9002` | **过** |
 | 模拟器 36 | 同上，`canInstall` 起点也是 `否`；设置页标题 `Install unknown apps`，开关 `Allow from this source`，说明文字同 34（同样是当时从界面树读的，文本文件里没有，只有截图 `t7-e36-2-settings.png`） | 开开关后 `appops` = `allow`，页面 `canInstall: 是` | 对话框 `Do you want to update this app?`，`Cancel` / `Update`。文本证据：`t7-e36-confirm-screen.txt` 里抓到的系统界面只有这个更新确认框，没有别的界面，也没有 Play Protect 的。截图 `t7-e36-4-confirm.png` 是另一份证据，里面也只有这个框。没有专门去查 Play Protect | 是 |
 | 模拟器 36 | 点 `Update` | 桌面（Nexus Launcher），App 不在 | `pidof` 空 12 秒；`versionCode=9002` | **过** |
@@ -843,7 +844,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 - §13.2 第 4 步：装完 App 被杀、不会自己重启，成败看下次启动的 `versionCode`；先落盘、删缓存的包；接收器不跟着 Activity；出错 `abandon()`；拷贝不在 UI 线程（第 7 节）。
 - §14.1 第 7 项：过关线改成「装上（App 被杀，用户再点图标）」（第 7 节）。
 - §14.2 验收：「全景看到设备」之前加「在设备页按 ID 添加主机」（第 3 节）。
-- §14.6：第 7、8、9 条改了，第 9 条的检查改在 P1 第一个包上做；新加第 10–15 条：平板走完自己装自己、打字少字、强制 relay 帧率、真人说话、文本框里的真键盘、relay 域名解析（第 3–8 节）。
+- §14.6：第 7 条改了，检查改在 P1 第一个包上做；新加第 8–15 条：平板走完自己装自己、打字少字、强制 relay 帧率、真人说话、文本框里的真键盘、relay 域名解析（第 3–8 节）。
 
 改用户看到的东西的，没改规格，等用户定：
 
