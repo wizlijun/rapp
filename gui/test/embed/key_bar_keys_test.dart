@@ -4,14 +4,28 @@ import 'package:rapp/embed/key_bar_keys.dart';
 import 'package:rapp/embed/modifier_latch.dart';
 
 void main() {
-  test('one row of ten by intent: Tab ⇧Tab, Esc ⌃C, ↑ ↓, ⌫ ⏎, then ⋯ and ⌄ at the end; more adds the second row', () {
+  test('first row: Tab ⇧Tab Esc ⌃C ⌫ ⏎, then ↑ and ⋯ at the end; more adds the second row, ← ↓ → under ↑ ⋯', () {
     for (final app in [false, true]) {
       expect(keyBarRows(app: app, more: false), [
-        ['tab', 'stab', 'esc', 'cc', 'up', 'down', 'bksp', 'enter', 'more', 'hide'],
+        ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more'],
       ], reason: 'app: $app');
-      expect(keyBarRows(app: app, more: true)[1], ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'left', 'right', 'pgup', 'pgdn'],
+      expect(keyBarRows(app: app, more: true)[1],
+          ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'pgup', 'pgdn', 'left', 'down', 'right'],
           reason: 'app: $app');
     }
+  });
+
+  test('the arrow block keeps its columns: ↑ ⋯ over ↓ →, one key wide each, ← left of ↓', () {
+    expect(keyBarColumns, 10);
+    expect(keyBarTail(['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more']), 2);
+    expect(keyBarTail(['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'pgup', 'pgdn', 'left', 'down', 'right']), 3);
+  });
+
+  test('no ⌄ key and no swipe-up keys: Home and End are gone, an arrow is only its arrow', () {
+    expect(barKeys.containsKey('hide'), isFalse);
+    expect(barKeys.containsKey('home'), isFalse);
+    expect(barKeys.containsKey('end'), isFalse);
+    expect(BarKind.values.map((k) => k.name), isNot(contains('hide')));
   });
 
   test('⌘T reads ⌘T, sends nothing by itself (the bar runs it), and is said Command T', () {
@@ -36,16 +50,6 @@ void main() {
       final ids = [for (final row in keyBarRows(app: app, more: true)) ...row];
       expect(ids.toSet().length, ids.length, reason: 'app: $app');
     }
-  });
-
-  test('⌄ folds the 快捷区: a hide key, said 收起快捷区, sending nothing', () {
-    final k = barKeys['hide']!;
-    expect(k.kind, BarKind.hide);
-    expect(k.label, '⌄');
-    expect(k.spoken, '收起快捷区');
-    expect(k.wire, isNull);
-    expect(k.code, isNull);
-    expect(barKeys.containsKey('slim'), isFalse);
   });
 
   test('heights', () {
@@ -92,11 +96,7 @@ void main() {
     expect(barKeys['paste']!.spoken, '粘贴');
   });
 
-  test('key table: arrows swipe to their partner and repeat; non-send keys carry no wire or code', () {
-    expect(barKeys['left']!.alt, 'home');
-    expect(barKeys['up']!.alt, 'pgup');
-    expect(barKeys['down']!.alt, 'pgdn');
-    expect(barKeys['right']!.alt, 'end');
+  test('key table: arrows and ⌫ repeat; non-send keys carry no wire or code', () {
     for (final id in ['left', 'up', 'down', 'right', 'bksp']) {
       expect(barKeys[id]!.repeats, isTrue, reason: id);
     }
@@ -104,7 +104,7 @@ void main() {
     expect(barKeys['ctrl']!.bit, latchCtrl);
     expect(barKeys['opt']!.bit, latchOpt);
     expect(barKeys['cmd']!.bit, latchCmd);
-    for (final id in ['ctrl', 'opt', 'cmd', 'cmdt', 'copy', 'paste', 'more', 'hide']) {
+    for (final id in ['ctrl', 'opt', 'cmd', 'cmdt', 'copy', 'paste', 'more']) {
       final k = barKeys[id]!;
       expect(k.wire, isNull, reason: id);
       expect(k.code, isNull, reason: id);
