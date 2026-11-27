@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -667,4 +668,34 @@ void main() {
       expect(boxToggle, findsNothing);
     });
   }
+
+  dockTest(TargetPlatform.linux,
+      'desktop with voice: corner row keeps [快捷区, 输入/收起, 语音] aligned at the bottom-right open or closed',
+      (tester) async {
+    s.dispose();
+    s = stateWith(voice: FakeVoice());
+    await tester.pumpWidget(layer(tsess));
+    await settle(tester);
+    final voice = find.byKey(const Key('voice-hold'));
+    List<Rect> cornerRects() => [tester.getRect(stackToggle), tester.getRect(toggle), tester.getRect(voice)];
+    final closedShown = cornerRects();
+    expect(closedShown[2].right, stage.width - 12);
+    expect(closedShown[2].bottom, stage.height - 12);
+    expect(closedShown[1].left - closedShown[0].right, 8);
+    expect(closedShown[2].left - closedShown[1].right, 8);
+    expect(closedShown[0].center.dy, closedShown[1].center.dy);
+    expect(closedShown[1].center.dy, closedShown[2].center.dy);
+
+    tsess.composer.open = true;
+    await settle(tester);
+    expect(boxToggle, findsNothing);
+    expect(cornerRects(), closedShown);
+
+    await tester.tap(stackToggle, kind: PointerDeviceKind.mouse);
+    await settle(tester);
+    expect(s.prefs.quickHiddenTerm, isTrue);
+    expect(bar, findsNothing);
+    expect(tsess.composer.open, isTrue);
+    expect(cornerRects(), closedShown);
+  });
 }
