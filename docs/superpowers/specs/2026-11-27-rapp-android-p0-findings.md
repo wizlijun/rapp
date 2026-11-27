@@ -32,6 +32,7 @@
 | 3 | 进程内 hub 和网络 | 过（两个模拟器都起得来 hub、出接入引导；放进 relay 和 key、加上这台 Mac 后在线；默认和只有 IPv4 两种状态下 relay 都解析成 `::ffff:` 映射并连上。relay 是 IPv4 字面地址，域名解析没测到；真 IPv6 一半模拟器上测不了，留给实机） | §6.1 小改（`AI_V4MAPPED` 那个问题不用回答）；§6.5 的 `systemOpen` 要安卓通道；§14.6 加一条 | 2026-11-27 |
 | 4 | 进程内会话、节流 | 过，模拟器 36 的打字除外（门禁两轮在模拟器 34、模拟器 36、平板实机上都过：慢速 200 ms 时 `p0 fps` 平均 4.4–4.7，traffic `frames` 平均 28.9–29.6，后 6 次减前 6 次的 PSS 是 −10.6 / −5.9 / −7.9 MB（1 MB = 1000 dumpsys KB），都在 40 MB 以内；P0Moving 的动画面、颜色在 34、36、平板上都过；TextEdit 打 `p0probe` 在 34、平板上过，**在 36 上没过：Mac 文档收到的是 `p0robe`，少了第二个 p**，丢在哪一段没查明（第 4 节 Task 4G）；打字都经写作条发出；**对着 Mac 屏幕核对画面只在模拟器 34 上做过**（桌面会话）；会话自己断的原因是 hub 的 64 KiB 行上限，探查里绕过后会话撑过 250 s） | 待定；hub 读到超过 64 KiB 的回复行（`watch_load` 首行）就丢整条连接，这段是 main 上的共用代码；会话因此断开只在探查的进程内会话里见过，桌面没测；绕过后，建流时首行已超上限（Mac 服务起来约 52 分钟以后，量到的区间是 51.5–55 分钟）余力就到不了安卓控制端，早于这个时间建流就到得了；Mac 服务重启后从头算 | 2026-11-27 |
 | 5 | 键盘和触控板 | 部分过。计划里的过关条件（Ctrl+C/V 在空白区到得了 App，`isControlPressed` 为真）在 34、36 上**过**（`uinput`，内核级，`ctrl=1`）；**平板（实机）上这一项没做，等用户用真键盘按**：键到得了，但 `input keycombination` 的字母 `metaState` 为 0、平板上 `uinput` 被拒，注入显示不了修饰键状态，真机上的过关没有确认。文本框有焦点、软键盘打开时（36 上重做）Ctrl+C/V/A/Z/X 都到、`ctrl=1`；原先「到不了」是点歪了位置（没点进文本框），结论撤回，Ctrl+SPACE 和单按字母的现象原因没查明。Meta 组合都被系统拿走，到不了 App。滚轮 `PointerScrollEvent kind=mouse`，34、36、平板都有；触控板双指和捏合模拟器上测不出，平板上没触控板，留给实机 | §14.6 加第 9 条（已加，含用户的一分钟真键盘检查） | 2026-11-27 |
+| 6 | 语音 | 部分过：三个目标按规格 §11 的四条规则手算都是「不能用」（34 的结果符合要求；36 和平板是别的原因，见第 6 节）；**36 的「按住说话能出字」没过**：设备上识别器没装中文（`installed` 只有 `en-US`）、在线路径 `checkRecognitionSupport` 报 14，实际按住说话收到 `ready`、`begin` 后是 `error 7`，没出字；**平板（实机）三次普通一段都没出字**（一次什么回调都没有、一次 `error 11`、一次又没有）；分段、热词只在 36 上试了：不报错、也没出字，无法判断是否生效 | 要改：规则 2 靠 `checkRecognitionSupport` 在非设备上识别器上永远报 14，实际走不到；语言标签是 `cmn-Hans-CN` 不是 `zh-CN`（见「规格要改的地方」） | 2026-11-27 |
 | 7 | 自己装自己 | 部分过：两个模拟器过（`versionCode` 9001 → 9002，`canInstall` 起点是否、开开关后是；装完 App 被杀、没自己重启（34 上没查到「打开」通知，36 没查）；`success` 回调没观察到，页面也观察不了（进程死了，日志在内存里）；数据文件和开关都还在；装完缓存里的包还在）；哈希不对的四个条件在 34 和平板上都过；**平板（实机）装不下去：荣耀多出安全检测、`已了解…` 勾选、锁屏密码三层，密码不能替用户输，没做，等用户** | §13.2 第 4 步已改（装完不重启）；§13.2 加一句荣耀的多层确认（见「规格要改的地方」） | 2026-11-27 |
 | 8 | 数字 | 部分过：强制 relay 的 fps 没量；APK、`.so` 大小只量了模拟器 34 的包，模拟器 36 和平板没量（装的是同一个 APK）。量了的（大小只量了模拟器 34 的包，单位 MiB，1 MiB = 1,048,576 字节：APK 28.15；三个 `.so` 分别 7.88 / 11.04 / 7.18；34 上没开会话时 PSS 约 86.7 MiB，开着静态 2560×1600 桌面会话时 6 次平均约 215.2 MiB。Task 4G 的 PSS 单位是 MB = 1000 dumpsys KB：模拟器 36 没会话 89.1、静态单应用会话（TextEdit）158.6；平板没会话 209.0、静态单应用会话 445.7。release 动画面 30 s 平均 `p0 fps`：平板 26.1（屏幕 60 Hz）；模拟器 34 是 26.0、模拟器 36 是 25.1（模拟器，只作参考）。「静态」单应用会话里每秒仍到 3–7 帧，PSS 6 次之间摆动大，平均数只作大概） | 待定 | 2026-11-27 |
 
@@ -478,6 +479,61 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 触控板这一项，修复 1 里又试了一次（`translucent` 之后，36 和 34 各一次，两指同向滚动和两指张开），还是没有事件。不排除是我的事件序列不对；结论只是「这种方式没测出来」。§14.6 第 9 条已加，要在有触控板的实机上看 Flutter 收到 `PointerPanZoom*` 还是 `PointerScrollEvent`。
 
 ## 6 语音
+
+通道 `rapp/p0speech`（Kotlin）：`probe`、`support {onDevice}`、`start {onDevice,segmented,hotwords}`、`stop`，事件 `ready`、`begin`、`rms`、`partial`、`segment`、`final`、`error {code}`、`end`。页面 `P0_PAGE=speech`。三个目标：模拟器 34（Android 14，AOSP）、模拟器 36（Android 16，google_apis）、平板（实机，荣耀，Android 16）。原始证据在 `p0/t6-*.txt`（`probe` 和两次 `support` 的原样回答，以及每次说话的事件序列）。
+
+### 6.1 原样回答和「能不能用」
+
+`probe` 另带了 `services`（所有声明了 `android.speech.RecognitionService` 的服务）和 `sdk`，规格要的三项是 `available`、`onDevice`、`service`。
+
+| | 模拟器 34 | 模拟器 36 | 平板（实机） |
+|---|---|---|---|
+| `probe` | `{available: false, onDevice: false, service: null, services: [], sdk: 34}` | `{available: true, onDevice: true, service: com.google.android.tts/…GoogleTTSRecognitionService, services: [com.google.android.as/…AiAiSpeechRecognitionService, com.google.android.tts/…GoogleTTSRecognitionService], sdk: 36}` | `{available: true, onDevice: false, service: com.hihonor.magicvoice/.voiceui.service.MagicVoiceRecognitionService, services: [com.hihonor.magicvoice/…MagicVoiceRecognitionService], sdk: 36}` |
+| `support` `onDevice=true` | `{error: java.lang.UnsupportedOperationException: On-device recognition is not available}`（`createOnDeviceSpeechRecognizer` 抛异常，不是错误码） | `{installed: [en-US], pending: [], supported: [de-DE, es-ES, fr-FR, it-IT, en-AU, en-GB, en-IE, en-SG, ja-JP, de-AT, de-BE, de-CH, en-CA, en-IN, es-US, fr-BE, fr-CA, fr-CH, hi-IN, id-ID, it-CH, ko-KR, pt-BR, th-TH, cmn-Hans-CN, cmn-Hant-TW, pl-PL, ru-RU, tr-TR, vi-VN], online: []}` | 同 34：`UnsupportedOperationException: On-device recognition is not available` |
+| `support` `onDevice=false` | `{error: timeout 10s}`（没有识别服务，回调一直不来，页面 10 秒后自己放弃） | `{error: 14}` | `{error: 14}` |
+| 哪条规则定的 | 规则 1 不成（无设备上识别器）；规则 2 不成（`isRecognitionAvailable` 假）；落到规则 3 | 规则 1 不成（有设备上识别器，但 `installed` 只有 `en-US`，没有中文）；规则 2：有默认识别器，但在线的 `checkRecognitionSupport` 报 14 = `ERROR_CANNOT_CHECK_SUPPORT`，规则 4 | 规则 1 不成（`onDevice` 假）；规则 2：有默认识别器，`checkRecognitionSupport` 报 14，规则 4 |
+| 结论 | 不能用 | 不能用 | 不能用 |
+| 过关 | 过（34 要求「不能用」） | 照实记：不能用 | 照实记：不能用 |
+
+36 的 `supported` 里中文写作 `cmn-Hans-CN`（简体）和 `cmn-Hant-TW`，没有 `zh-CN`；就算装了，规则 1 里「说中文（`zh-CN`）已装好」的字符串比较也会对不上。
+
+### 6.2 说话
+
+麦克风：36 用 `adb emu avd hostmicon`，`say -v Tingting` 在 Mac 上读，Mac 输出音量 47、未静音，没动；平板自己的麦克风听 Mac 的扬声器，`adb shell input swipe` 按住按钮 8–12 秒。
+
+**模拟器 36**（只试了一遍，没有弹出麦克风许可；Mac 屏幕锁着，没人能点）：
+
+| 次 | 设置 | 事件顺序 | 文字 |
+|---|---|---|---|
+| 普通一段 | 在线，`zh-CN`，`EXTRA_PARTIAL_RESULTS` | 按下后 0.08 s `ready`，约 1.2 s `begin`（说明听到了声音），松手后 1.1 s `error 7`（`NO_MATCH`，日志里是 `agsa_transcription_NO_SPEECH_DETECTED`、`onResults empty final recognition results`），`end` | 没有（没有 `partial`、`final`） |
+| `onDevice: true` | 设备上识别器 | 0.13 s 内 `error 12`（`LANGUAGE_NOT_SUPPORTED`，中文没装），`end`；之后又来了一个 `ready`，松手后 `error 5`（`CLIENT`，我们自己上一次 destroy 引起） | 没有 |
+| `segmented: true` | 在线，`EXTRA_SEGMENTED_SESSION` | 和普通一段完全一样：`ready`、`begin`、`error 7`、`end`。没收到 `segment`，也没报「不支持」之类的错误 | 没有 |
+| `hotwords: [rApp]` | `EXTRA_BIASING_STRINGS` | `ready`、`begin`，`error 5`，没有报「不支持」 | 没有（开头的 `error 11` 是上一轮被我们 destroy 掉的识别器的残留回调，探查页的问题，不是热词引起） |
+
+所以 36 上没有拿到任何中文字，是识别器没出字，不是没听到：`begin` 到了。原因没查明：设备上识别器没中文，在线路径没出字，可能是模拟器上没有 Google 的在线识别后端。分段和热词**这里无从判断**：识别器没出字，两个额外参数既没报错也没看出效果。
+
+**平板（实机）**（按规则是「不能用」，仍照要求试了普通一段，最多三次；没有任何同意书、登录、下载或密码界面弹出）：
+
+| 次 | 按住 | 事件顺序 | 文字 |
+|---|---|---|---|
+| 1 | 8 s，1 s 后开始说 | `start` 后什么回调都没来，没有 `ready`、没有 `error`。系统日志里有 `com.hihonor.magicvoice` 被绑定、麦克风被它占用（`microphone, com.hihonor.magicvoice`） | 没有 |
+| 2 | 12 s，1 s 后说，2 s 后再说一次 | `start` 之后 0.015 s 就 `error 11`（`ERROR_SERVER_DISCONNECTED`，系统日志 `Connection to speech recognition service lost, but no #startListening has been invoked yet`），`end`；松手时又来一次 `error 11` | 没有 |
+| 3 | 12 s，同上 | 同第 1 次：什么回调都没有 | 没有 |
+
+三次后停止，没有继续。平板上 `RECORD_AUDIO` 是用 `pm grant` 给的（唯一改动的设置）。结论：荣耀的 `MagicVoiceRecognitionService` 能被绑定、会开麦克风，但给第三方 App 的回调一个都没来过（或者连接直接断掉）。分段、热词在平板上没试（规则已判不能用，且普通一段都没有结果）。
+
+### 6.3 P1 要知道的
+
+- 判「能不能用」的调用：`SpeechRecognizer.isRecognitionAvailable(context)`、`isOnDeviceRecognitionAvailable(context)`（API 33）、`checkRecognitionSupport(intent, executor, RecognitionSupportCallback)`，intent 是 `ACTION_RECOGNIZE_SPEECH` + `EXTRA_LANGUAGE="zh-CN"`。在线的识别器要用 `createSpeechRecognizer(context)` 创建，设备上的用 `createOnDeviceSpeechRecognizer(context)`（没有设备上识别器时抛 `UnsupportedOperationException`，要 try/catch）。
+- `checkRecognitionSupport` 在没有识别服务时回调**一直不来**，要自己加超时（探查用了 10 秒）。
+- 清单要 `RECORD_AUDIO` 和 `<queries><intent><action android:name="android.speech.RecognitionService"/></intent></queries>`，没有后者在 Android 11 以上看不到识别服务（探查里加了，没做不加的对比）。
+- 默认识别服务的包名：`Settings.Secure.getString(contentResolver, "voice_recognition_service")`，三个目标上都是 `包名/类名`。
+- 看到的错误码：14（`ERROR_CANNOT_CHECK_SUPPORT`，`support` 的回答）；识别时 7（`NO_MATCH`）、12（`LANGUAGE_NOT_SUPPORTED`）、11（`SERVER_DISCONNECTED`）、5（`CLIENT`）。同一个 `SpeechRecognizer` 实例上重开前要先 `destroy`，`destroy` 后旧实例还会补一个 `error 11`/`5`，P1 要按实例分，别把旧实例的错误当成新一轮的。
+- 识别时走哪边：36 上默认创建器的在线路径，不是设备上；设备上的识别器没有中文。拿到第一个结果的时间：没有结果可量；36 上从按下到 `ready` 约 0.08 s，到 `begin` 约 1.2 s，松手到 `error 7` 约 1.1 s。
+- 规格 §11「识别中」第一条（分段）：没有哪个目标上收到过 `segment`；36 上带 `EXTRA_SEGMENTED_SESSION` 不报错、行为和普通一段一样，所以按这次的观察，要走「识别器不支持，就在一段结束、手还按着时立刻开下一段」那一支；但因为根本没出过字，这个判断**没有确证**。
+- 热词：没报错，效果无从判断。
+- 国行平板（荣耀）的真实状态：`probe` 有识别服务，`onDevice` 假，`checkRecognitionSupport` 报 14，实际识别什么回调都没来或者 `error 11`。规格 §11 说的「国行平板上多半走到第 3 条，按钮不出现」得到证实。
+
 ## 7 自己装自己
 
 做法：探查页 `install` 显示本包 `versionCode` 和 `canInstall`；「下载并安装」从 `http://127.0.0.1:8765/app.apk` 下到 `<cache>/update/rapp.apk`，对 `app.sha256` 里的 SHA-256，对上才调 `installApk`（`PackageInstaller` 会话，系统要确认就把确认界面拉起来，结果以 `install` 事件回到页面）；「去设置」打开本包的「安装未知应用」页。两个包都是调试包：`p0-old.apk` 是 `versionCode` 9001，`app.apk` 是 9002（`flutter build apk --build-number`）。本机 `python3 -m http.server 8765 --bind 127.0.0.1`，`adb reverse tcp:8765 tcp:8765`。证据在 `p0/t7-*`。
@@ -645,3 +701,7 @@ Meta 组合和 Meta 单按（空白区、文本框一样）：
 - 建议（待用户定，没改规格）：§13.2 的流程和文案要为荣耀的三层确认留位置：安全检测、必须勾的 `已了解…`、锁屏密码。这影响「在 App 里点一下就更新」的说法；平板上没走完，用户走一遍后再定（第 7 节）。
 - 安卓入口的日志不能用 `stderr`（logcat 看不到），用 `debugPrint` 或写文件。
 - §14.6 加一条（P1 待查）：`adb shell input text` 快速送字时会不会少字。Task 4G 里 `input text 'p0probe'` 在模拟器 36 上到 Mac 的是 `p0robe`，平板上拼音候选里也少了同一个 p；34 上没少。要查清是送键、写作条收字还是发到 Mac 哪一段丢的（第 4 节 Task 4G）。
+- §11 规则 2 靠 `checkRecognitionSupport` 问「在线是否支持中文」：模拟器 36（带 Google）和平板上，不带设备上识别器路径时它都报 14（`ERROR_CANNOT_CHECK_SUPPORT`），规则 4 又把 14 判成不能用，所以规则 2 在这三个目标上没有一个能走通。建议（待定）：规则 2 改成「有默认识别器就按能用，真按下去出 `error` 时给提示」，或者把识别器的试一小段当作判断；不要靠这个查询。
+- §11 规则 1 的语言字符串：36 的 `supported` 里中文写作 `cmn-Hans-CN`、`cmn-Hant-TW`，没有 `zh-CN`；比较时要认 `cmn-Hans-CN`（以及 `zh-CN`、`zh-Hans-CN`）。
+- §11：`createOnDeviceSpeechRecognizer` 在没有设备上识别器时抛 `UnsupportedOperationException`，要先用 `isOnDeviceRecognitionAvailable` 挡住或 try/catch；`checkRecognitionSupport` 没有识别服务时回调不来，要加超时（第 6 节）。
+- §11：识别器报 `error 12`（`LANGUAGE_NOT_SUPPORTED`）时，规格没说怎么处理；设备上识别器没装中文就是这个码，应该和「不能用」同样处理或提示用户去装语言包。
