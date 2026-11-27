@@ -125,8 +125,8 @@ void main() {
 
   test('items without a seq are hidden by id alone', () {
     final m = build(
-      needs: [const NeedItem(NeedKind.device, 'B', 'B 离线', 1, at: 7)],
-      gotIt: {'device\nB'},
+      needs: [const NeedItem(NeedKind.session, 'B/app', 'App @ B 已断开：网络', 1, at: 7)],
+      gotIt: {'session\nB/app'},
     );
     expect(m.items, isEmpty);
   });
@@ -199,5 +199,57 @@ void main() {
     );
     expect(m.recentDone.map((d) => d.id), ['term\nB\ns1', 'term\nA\nd1']);
     expect(m.doneUnseen, 2);
+  });
+
+  test('waiting order uses ps.since, not the first-seen at', () {
+    final m = build(
+      needs: [blocked('A', 'late', 100), blocked('A', 'early', 100)],
+      lists: {
+        'A': TermList('A', terms: [row('late', 'blocked', since: 50), row('early', 'blocked', since: 10)]),
+      },
+    );
+    expect(m.items.map((i) => i.id), ['term\nA\nearly', 'term\nA\nlate']);
+  });
+
+  test('got it on device and resource returns with a new seq', () {
+    NeedItem dev(int seq) => NeedItem(NeedKind.device, 'B', 'B 离线', seq, at: 7);
+    NeedItem res(int seq) => NeedItem(NeedKind.resource, 'B\ncpu', 'B cpu 高', seq, device: 'B', title: 'cpu', at: 7);
+    final d = build(needs: [dev(1)]).items.single;
+    expect(d.gotItKey, 'device\nB\n1');
+    expect(build(needs: [dev(1)], gotIt: {d.gotItKey}).items, isEmpty);
+    expect(build(needs: [dev(2)], gotIt: {d.gotItKey}).items.length, 1);
+    final r = build(needs: [res(1)]).items.single;
+    expect(build(needs: [res(1)], gotIt: {r.gotItKey}).items, isEmpty);
+    expect(build(needs: [res(2)], gotIt: {r.gotItKey}).items.length, 1);
+  });
+
+  test('recent done keeps 3, newest first', () {
+    final m = build(
+      lists: {
+        'A': TermList('A', terms: [for (var i = 1; i <= 5; i++) row('d$i', 'done', unread: true, since: i * 10)]),
+      },
+    );
+    expect(m.doneUnseen, 5);
+    expect(m.recentDone.map((d) => d.id), ['term\nA\nd5', 'term\nA\nd4', 'term\nA\nd3']);
+  });
+
+  test('buttons', () {
+    final m = build(
+      needs: [const NeedItem(NeedKind.session, 'B/app', 'App @ B 已断开：网络', 1, at: 3)],
+      lists: {
+        'A': TermList('A', terms: [row('e', 'error', unread: true)]),
+      },
+      fromService: true,
+      rows: [
+        {'t': 'emit', 'level': 'ask', 'text': 'ok?', 'at': 5, 'eid': 'a1'},
+        {'t': 'emit', 'level': 'clear', 'key': 'k', 'at': 4, 'eid': 'c'},
+        {'t': 'emit', 'level': 'info', 'key': 'k', 'text': 'after', 'at': 6, 'eid': 'i1'},
+      ],
+    );
+    HomeButton of(HomeKind k, [String? id]) => m.items.firstWhere((i) => i.kind == k && (id == null || i.id == id)).button;
+    expect(of(HomeKind.error), HomeButton.goLook);
+    expect(of(HomeKind.disconnected), HomeButton.reconnect);
+    expect(of(HomeKind.message, 'msg\na1'), HomeButton.goLook);
+    expect(of(HomeKind.message, 'msg\ni1'), HomeButton.gotIt);
   });
 }

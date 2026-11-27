@@ -9,6 +9,8 @@
 ///   `state` is `error` / `done` and `seen` is missing or older than `at`.
 /// - message: only when [fromService]; `emit` rows of [serviceRows] with `level` ask / info / done, not `handled`,
 ///   and not followed by a `clear` with the same `key`.
+/// - [lists] covers terminals only, so a device in [lists] still gets its app sessions from [needs] alone; service
+///   app-session rows of such a device are dropped on purpose.
 /// - One terminal, one item (C17): a terminal that is waiting never also shows its error / done.
 ///
 /// Ids are stable while the state changes (C17): `term\n<device>\n<term>`, `app\n<record key>`,
@@ -16,8 +18,8 @@
 ///
 /// "Got it" ([gotIt]) is remembered by the phone for this run only, because without a center service the
 /// terminal's own unread can only be cleared by looking at it. An entry is `'<item id>\n<seq>'`, where seq is the
-/// program status `seq` (a terminal's `ps.seq`, a service session row's `seq`); an item without a seq (device
-/// offline, resource, message, dropped session, app) uses its id alone. A new seq brings the item back.
+/// program status `seq` (a terminal's `ps.seq`, a service session row's `seq`) or, for device offline and resource,
+/// the need's `seq`. Message, dropped session and app have none and use their id alone. A new seq brings the item back.
 /// The UI stores `HomeItem.gotItKey`. `recentDone` holds only the unseen done items that are shown.
 library;
 
@@ -169,7 +171,9 @@ HomeModel buildHome({
             ? (local?.ps?.app ?? local?.fg ?? _s(sr?['app']) ?? _s(sr?['fg']) ?? n.title ?? '')
             : (n.title ?? '');
         final seq = isTerm ? (local?.ps?.seq ?? (sr != null ? _int(sr['seq']) : null)) : null;
-        final since = n.at > 0 ? n.at : (local?.ps?.since ?? _int(sr?['since']));
+        // The program's own since first: `n.at` is when this app first saw the need, equal for all after a cold start.
+        final psSince = local?.ps?.since ?? _int(sr?['since']);
+        final since = psSince > 0 ? psSince : n.at;
         taken.add(id);
         add(
           HomeItem(
@@ -221,6 +225,7 @@ HomeModel buildHome({
             since: n.at,
             need: n,
             button: HomeButton.gotIt,
+            seq: n.seq,
           ),
           5,
         );
@@ -237,6 +242,7 @@ HomeModel buildHome({
             since: n.at,
             need: n,
             button: HomeButton.gotIt,
+            seq: n.seq,
           ),
           5,
         );
@@ -245,7 +251,6 @@ HomeModel buildHome({
 
   // 2. Error / done / working, from one list of candidates per terminal.
   final working = <WorkRow>[];
-  var doneUnseen = 0;
 
   void candidate({
     required String id,
@@ -266,7 +271,6 @@ HomeModel buildHome({
     }
     if (!unseen || taken.contains(id)) return;
     final isErr = state == 'error';
-    final before = out.length;
     add(
       HomeItem(
         kind: isErr ? HomeKind.error : HomeKind.done,
@@ -283,7 +287,6 @@ HomeModel buildHome({
       ),
       isErr ? 1 : 2,
     );
-    if (!isErr && out.length > before) doneUnseen++;
   }
 
   for (final e in lists.entries) {
@@ -381,7 +384,7 @@ HomeModel buildHome({
     items,
     items.where((i) => i.kind == HomeKind.waiting).length,
     working,
-    doneUnseen,
+    doneAll.length,
     doneAll.take(3).toList(),
   );
 }
