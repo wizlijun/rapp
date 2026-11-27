@@ -1648,3 +1648,27 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），依次构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 挂载至已发布的 [v0.15.61](https://github.com/wizlijun/rapp/releases/tag/v0.15.61) 与 [v0.15.62](https://github.com/wizlijun/rapp/releases/tag/v0.15.62) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
 - [x] 对齐 macOS `0.15.61`–`0.15.62`（`fix/ios-center-section`、`feat/overview-local-services`）：在 `gui/test/ui/main_window_test.dart` 补充 Linux 桌面端「设备 → 本机」同时展示 `StateServiceRow` 与 `StateSection`（「中心服务」）连接状态测试，在 `gui/test/ui/overview_test.dart` 补充 Linux 桌面端总览本机列无人接入折为 56px 竖条、远端接入自动展开并展示「连上的服务」（`本机 · :8102` 中心服务与 LLM 网关状态）及断开折回测试；全工作区 20 个 crate 与 3,668 项 Flutter 测试全部通过。
 - [x] `v0.15.62`（源码 `d9020e5d`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json` 含 `v0.15.61` 与 `v0.15.62` 全部 6 项资产、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01561-parity.md` 与 `docs/superpowers/plans/2026-11-27-linux-01562-parity.md`。
+
+## Linux 0.15.63 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 直接挂载至已发布的 [v0.15.63](https://github.com/wizlijun/rapp/releases/tag/v0.15.63) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.63`（`feat/quick-row` 快捷区第一行重构与 `rapp-center` `prefs` 内置同步、`fix/center-host-reask` 总览本机列服务重连重查与长行折行）：在 `scripts/test-linux-bundle.py` 更新 `GET /v1/routes` 断言（`state` + `prefs` 双 builtin）并新增隔离命名空间下 `GET /prefs/v1/all`、`PUT/GET /prefs/v1/stars`、`409` CAS 冲突及 `0600` `local/center/prefs.json` 落盘端到端校验；在 `gui/test/quick/quick_row_widget_test.dart` 新增 Linux 桌面端鼠标点击快捷行按键动作时保持输入块焦点与 IME 预编辑态测试；全工作区 20 个 crate（含 `rapp-center` 82 项单测与集成测试）与 3,820 项 Flutter 测试全部通过。
+- [x] `v0.15.63`（源码 `2f62b35a`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01563-parity.md`。
+
+## Linux 0.15.64 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 直接挂载至已发布的 [v0.15.64](https://github.com/wizlijun/rapp/releases/tag/v0.15.64) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.64`（`fix/quick-row-minors`：`QuickSync.suspend()` 在暂停或重连时放下已关连接、改动待下条连接再发，以及 `常用语▾` / `按键▾` 菜单内拒发项仅在菜单内说明而不污染后方 `KeyBar` 的 `phrase-hint`）：在 `gui/test/embed/phrase_strip_cmds_test.dart` 补充 Linux 桌面端 `常用语▾` 与 `按键▾` 拒发项仅展示 `menu-hint` 且不残留 `phrase-hint` 测试，并在 `scripts/package-linux.sh` 恢复打包时由 Flutter 3.50 SDK 重解析出的 `gui/pubspec.lock`（避免与 macOS 提交的旧版 Flutter `pubspec.lock` 往复覆写，同时继续拦截任何源码/CMake 改动）；全工作区 20 个 crate 与 3,823 项 Flutter 测试全部通过。
+- [x] `v0.15.64`（源码 `631b6645`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json` 含 `v0.15.63` 与 `v0.15.64` 全部 6 项资产、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01564-parity.md`。
+
+## Linux 0.15.65 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 直接挂载至已发布的 [v0.15.65](https://github.com/wizlijun/rapp/releases/tag/v0.15.65) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.65`（`fix/quick-prefs-safety`：读不了且挪不开的 `quick.json` 或更新版本 `v > 1` 写的 `quick.json` 绝不覆盖、启动时未存上的 `lastSaveError` 照常在 `MainState.hint` 提示、以及 `rapp-center` `prefs.json` 重启测试轮询窗口放宽至 10 秒）：在 `gui/test/quick/quick_save_hint_test.dart` 补充 `TargetPlatform.linux` 桌面端回归用例；全工作区 20 个 crate `clippy -- -D warnings`、`rapp-center --test prefs`（13/13）与 Flutter 3,819 项测试全部通过。
+- [x] `v0.15.65`（源码 `2e514b7e`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致。详见 `docs/superpowers/plans/2026-11-27-linux-01565-parity.md`。
+
+## Linux 0.15.66 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 直接挂载至已发布的 [v0.15.66](https://github.com/wizlijun/rapp/releases/tag/v0.15.66) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.66`（`feat/cmd-menu`：快捷区第一行改为 `命令▾` / `常用语▾` 双菜单、去掉按键动作并将 `搜历史` `⌃R` 归回 7 个内置命令、侧栏全局设置拆分为独立「常用语」「命令」「键盘布局」三页，并一次性迁移 `0.15.63`/`64` 的 `keys` doc 与 `k:` 星标/次数/布局格）：更新 Linux 桌面端 `gui/test/quick/quick_row_widget_test.dart`（星标 `搜历史` 鼠标点击发送 `Ctrl-R` 并保持焦点与 IME 预编辑）、`gui/test/embed/phrase_strip_cmds_test.dart`（`命令▾` 拒发仅在菜单内提示）及 `gui/test/ui/cmds_page_test.dart`（`CmdsPage` 7 个内置命令与 `0.15.63`/`64` `keys` doc 迁移）；全工作区 20 个 crate `clippy -- -D warnings`、`rapp-center --test prefs`（13/13）与 Flutter 3,815 项测试全部通过。
+- [x] `v0.15.66`（源码 `177175fc`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间无头冒烟测试（因桌面进入 Omarchy Quickshell 锁屏，Hyprland 暂停实时抓屏帧；Rust 源码与已通过实机 Hyprland QUIC 抓屏的 `0.15.65` 零差异）全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json` 含 `v0.15.63`–`v0.15.66` 全部 6 项资产、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01566-parity.md`。

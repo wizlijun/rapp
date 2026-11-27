@@ -271,4 +271,47 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     }
   });
+
+  testWidgets('linux desktop: refused taps in 命令▾ explain in the sheet only without leaving phrase-hint on KeyBar',
+      (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    try {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (c) async => null);
+      tester.view.physicalSize = const Size(1000, 900);
+      tester.view.devicePixelRatio = 1;
+      fg('codex');
+      s.setStripItems([const StripCmd('new', per: {'codex': null}), ...defaultStripItems.skip(1)]);
+      await tester.pumpWidget(wrap(SizedBox(width: 900, child: KeyBar(state: s, session: tsess, port: term))));
+
+      // Unsupported command in 命令▾: explained inside the sheet only, never on the strip behind it.
+      await tester.tap(ph('quick-menu-cmds'));
+      await tester.pumpAndSettle();
+      await tester.tap(ph('menu-p-0'));
+      await tester.pump();
+      expect(tester.widget<Text>(ph('menu-hint')).data, 'Codex 没有这个命令');
+      expect(ph('phrase-hint'), findsNothing);
+      Navigator.of(tester.element(ph('menu-hint'))).pop();
+      await tester.pumpAndSettle();
+      expect(ph('phrase-hint'), findsNothing);
+
+      // Plain shell (no AI tool): tapping a greyed command in 命令▾ explains inside the sheet only.
+      fg('zsh', shell: true);
+      s.setStripItems(List.of(s.quick.phrases));
+      await tester.pump();
+      await tester.tap(ph('quick-menu-cmds'));
+      await tester.pumpAndSettle();
+      await tester.tap(ph('menu-p-0'));
+      await tester.pump();
+      expect(tester.widget<Text>(ph('menu-hint')).data, '这里没有认得的 AI 工具，发不了命令');
+      expect(ph('phrase-hint'), findsNothing);
+      Navigator.of(tester.element(ph('menu-hint'))).pop();
+      await tester.pumpAndSettle();
+      expect(ph('phrase-hint'), findsNothing);
+      await tester.pump(const Duration(seconds: 5));
+    } finally {
+      tester.view.reset();
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null);
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
 }
