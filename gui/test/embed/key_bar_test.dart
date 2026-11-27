@@ -213,6 +213,21 @@ void main() {
       expect(termKeys(), isEmpty);
     });
 
+    iosTest('a key sent from the bar tells the stage (termSent, back to the latest); a page of history does not',
+        (tester) async {
+      s.prefs.keyBarMore = true;
+      var sent = 0;
+      tsess.termSent = () => sent++;
+      tsess.termPage = (_) => true;
+      await tester.pumpWidget(bar(tsess, width: 900));
+      await tap(tester, 'pgup');
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(sent, 0);
+      await tap(tester, 'enter');
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(sent, 1);
+    });
+
     iosTest('PgUp in a full-screen program (termPage false) goes to it as PageUp', (tester) async {
       s.prefs.keyBarMore = true;
       tsess.termPage = (_) => false;

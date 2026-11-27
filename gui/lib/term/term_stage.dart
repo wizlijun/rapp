@@ -15,6 +15,7 @@ import 'package:flutter/services.dart';
 
 import '../embed/key_bar.dart' show sendLatchedLetter, termWire;
 import '../embed/modifier_latch.dart';
+import '../embed/panel_place.dart';
 import '../embed/remote_session.dart';
 import '../embed/touch_gestures.dart';
 import '../embed/voice_key_gate.dart';
@@ -220,6 +221,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     widget.session.termTakesKey = _takesKey;
     widget.session.termCommand = _command;
     widget.session.termPage = _page;
+    widget.session.termSent = _sentInput;
     _focus.addListener(_onFocus);
     HardwareKeyboard.instance.addHandler(_onKeys);
     _focusSeen = widget.state.termFocusTick;
@@ -250,6 +252,8 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       widget.session.termCommand = _command;
       if (old.session.termPage == _page) old.session.termPage = null;
       widget.session.termPage = _page;
+      if (old.session.termSent == _sentInput) old.session.termSent = null;
+      widget.session.termSent = _sentInput;
       _focusIfWanted();
       // The element is reused for the new session: a hold of the hotkey was on the old one, and ends there.
       _gateTimer?.cancel();
@@ -276,6 +280,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     if (widget.session.termTakesKey == _takesKey) widget.session.termTakesKey = null;
     if (widget.session.termCommand == _command) widget.session.termCommand = null;
     if (widget.session.termPage == _page) widget.session.termPage = null;
+    if (widget.session.termSent == _sentInput) widget.session.termSent = null;
     widget.state.removeListener(_onState);
     HardwareKeyboard.instance.removeHandler(_onKeys);
     _voiceEnds?.cancel();
@@ -518,15 +523,30 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     m.scrollBy(rows);
   }
 
-  /// The key bar's PgUp / PgDn ([RemoteSession.termPage]): a screen of history less one row, so a line carries
-  /// over. The alternate screen (a full-screen program) has no history here: false, the key is the program's.
+  /// The key bar's PgUp / PgDn ([RemoteSession.termPage]): the rows seen less one, so a line carries over. The
+  /// alternate screen (a full-screen program) has no history here: false, the key is the program's.
   bool _page(bool up) {
     final m = _model;
     if (m == null || m.alt || m.screen.isEmpty) return false;
     _stopFling();
-    final rows = math.max(1, m.screen.length - 1);
+    final rows = math.max(1, math.min(_rowsSeen(), m.screen.length) - 1);
     _scroll(up ? rows.toDouble() : -rows.toDouble());
     return true;
+  }
+
+  /// How many grid rows can be read: not those under the soft keyboard or off a zoomed view, nor those under the
+  /// floating input block when its top is in the lower half of the rest (it floats over the stage, which never
+  /// moves; higher up, the user reads below it).
+  int _rowsSeen() {
+    final ch = _zoomed.cellH;
+    if (ch <= 0 || _zfit.isEmpty) return 1 << 30;
+    var grid = _zfit.intersect(Rect.fromLTWH(0, 0, _stage.width, _stage.height - widget.keyboard));
+    final block = panelPlaceOf(widget.session).value;
+    if (grid.height > 0 && block != null && block.top > grid.center.dy && block.top < grid.bottom &&
+        block.left < grid.right && block.right > grid.left) {
+      grid = Rect.fromLTRB(grid.left, grid.top, grid.right, block.top);
+    }
+    return grid.height <= 0 ? 1 : (grid.height / ch + 1e-6).floor();
   }
 
   void _onSignal(PointerSignalEvent e) {

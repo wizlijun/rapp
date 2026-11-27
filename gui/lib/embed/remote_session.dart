@@ -72,6 +72,10 @@ class RemoteSession extends ChangeNotifier {
   /// key is then. Null while no stage is mounted.
   bool Function(bool up)? termPage;
 
+  /// A terminal stage hears that the key bar sent the program input: back to the latest, as a hardware key does
+  /// (H3). Null while no stage is mounted.
+  void Function()? termSent;
+
   /// A terminal's key bar modifiers (⌃ ⌘, sticky); the app's live in [MainState.appLatch].
   final keyLatch = ModifierLatch();
 

@@ -289,6 +289,7 @@ class _KeyBarState extends State<KeyBar> {
       final port = widget.port;
       if (port is! TermSessionPort) return on;
       port.sendKeys(_sid, [termWire(key.wire!, on)]);
+      widget.session.termSent?.call();
     } else {
       widget.port.key(_sid, key.code!, key.mods | on);
     }
@@ -303,6 +304,7 @@ class _KeyBarState extends State<KeyBar> {
     final port = widget.port;
     if (port is TermSessionPort && _term) {
       port.paste(_sid, text);
+      widget.session.termSent?.call();
     } else {
       port.composerSend(_sid, [
         {'text': text},
