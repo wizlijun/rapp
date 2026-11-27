@@ -30,6 +30,8 @@
 | 1 | 工具和空壳 | 过（两个模拟器都能装、能启动、截图有 `rApp P0 shell`；36 上第一次截图撞上 System UI 无响应弹框，再试后正常） | 不用 | 2026-11-27 |
 | 2 | `.so` | 过（九个名字都导出、四个 `LOAD` 段都是 `0x4000`、11.3 MB / strip 后 7.5 MB；依赖全部直接编过） | §6.2 小改：hub 的四个函数不用 `#[used] static` 就能导出 | 2026-11-27 |
 | 3 | 进程内 hub 和网络 | 过（两个模拟器都起得来 hub、出接入引导；放进 relay 和 key、加上这台 Mac 后在线；默认和只有 IPv4 两种状态下 relay 都解析成 `::ffff:` 映射并连上。relay 是 IPv4 字面地址，域名解析没测到；真 IPv6 一半模拟器上测不了，留给实机） | §6.1 小改（`AI_V4MAPPED` 那个问题不用回答）；§6.5 的 `systemOpen` 要安卓通道；§14.6 加一条 | 2026-11-27 |
+| 4 | 进程内会话、节流 | 没测完（34 上画面、颜色和打字都过，打字经写作条发出；release 包会话会自己断；门禁那步慢 Dart 量内存没做，因为 Mac 被 rApp 自动锁屏；36 没做） | 待定 | 2026-11-27 |
+| 8 | 数字 | 部分（APK 28.2 MiB；三个 `.so` 分别 8.3 / 11.6 / 7.5 MB；没开会话时 PSS 约 88.7 MiB；带会话的 PSS 和 fps 没量） | 待定 | 2026-11-27 |
 
 ## 1 工具和空壳
 
@@ -194,10 +196,52 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 
 **结论：过。** hub 在安卓进程里起得来、读得懂数据根、出接入引导；放进 relay 和 key、加上这台 Mac 后，两台模拟器在「默认」和「只有 IPv4」两种状态下都把 relay 解析成 `::ffff:` 映射地址并经 relay 连上。注意这台 Mac 存的 relay 是 IPv4 字面地址，**relay 的域名解析这次没测到**；真 IPv6 和只有 IPv6 的网络也留给实机。
 ## 4 进程内会话
+
+**状态：没测完，停在第 6 步（慢 Dart 量内存）之前。** 只在模拟器 34 上做了；36 没做。
+
+做法：`gui/lib/embed/session_ffi.dart`（新）接 `rapp-android-ffi` 的 `rapp_session_open/send/ack/close/free`。帧包用 `asTypedList(finalizer: rapp_session_free)` 零拷贝交给 Dart。`ackedPackets` 是 `async*`：交出一个帧包，等 `slow`，再 `ack`。这样消费方暂停时不 ack，Rust 的闸也就不放下一帧。`SessionWorker.ffi` 和 `LinuxSessionPort.ffi` 是这两个共用文件里新加的构造函数，旧路径不动。`main_android.dart` 用 `LinuxSessionPort.ffi('librapp_android.so', downloads: () => '<数据根>/files/transfers', slow: P0_SLOW_MS)`。日志每秒打一行 `p0 fps=N`，traffic 事件打 `p0 traffic frames=N`。
+
+单元测试（`gui/test/session_ffi_test.dart`，3 个）：
+- ack 顺序；
+- 消费方暂停时不 ack；
+- `slow` 生效。
+
+先红后绿（`flutter test test/session_ffi_test.dart`）。
+
+`LinuxSessionPort` 在安卓上**没打补丁就跑起来了**。它几处只对 Linux 有意义的地方在安卓上都是空转，见补丁表最后几行：
+- `rapp/linux` 通道：`MissingPluginException` 已被接住；
+- `xdg-open`：`ProcessException` 已被接住；
+- `RAPP_STREAM_TRACE_DIR` 环境变量。
+
+实测（模拟器 34，路由自动，界面显示「局域网」）：
+
+| 看什么 | 结果 | 证据（scratchpad，不进仓库） |
+|---|---|---|
+| 桌面会话有画面、和 Mac 屏幕一致、红蓝没反 | 有。debug 包 `p0 fps` 14–29；release 包 `p0 fps` 10–15，traffic `frames` 13–51 | `p0/t4-desktop-34.png`（debug）、`p0/t4-desktop-release-34.png`（release，截到时已断开，画面停在最后一帧） |
+| 单应用会话打字 | 过，但不是直接打进文稿：`adb shell input tap 1200 700` 后 `adb shell input text 'p0probe'` 进的是 rApp 自己的写作条。按回车（`adb shell input keyevent 66`）后发到 Mac，TextEdit 文稿里出现 `p0probe`，标题变成 Edited。之后没存盘就关掉了 | `p0/t4-type-34.png`（字在写作条）、`p0/t4-type2-34.png`、`p0/t4-p0probe-34.png`（字在文稿里） |
+| 会话稳定性 | **release 包里会话自己断**：三次里两次在 18 s、10 s 后断，安卓侧报 `host disconnected: failed to fill whole buffer`（`client-core/src/protocol.rs:352` 的 `read_exact` 读到 EOF），Mac 侧记 `session_end reason "connection lost"`。断之前那一秒 `p0 fps` 还有 14–15，不是闸卡住。点「重连」能连回来。第三次开了 91 s，是我 `am force-stop` 结束的。debug 包两次各开了 115 s、79 s，Mac 侧结束原因也记的是 `connection lost`，当时是不是我结束的没有记下来 | `p0/t4-textedit-disconnect-34.png` |
+
+**卡住的原因：** 每次会话结束（自己断开也算），Mac 上的 rApp 都会在 10 s 后自动锁屏（`service.log` 里 `auto_lock`，今天共 5 次）。锁上以后要用户输入密码，所以第 6 步需要的「A 上有动的画面」做不了。另外，打开桌面会话会把另一台设备正开着的桌面会话顶掉（`session_end reason "taken over"`）。
+
 ## 5 键盘和触控板
 ## 6 语音
 ## 7 自己装自己
 ## 8 数字
+
+**状态：部分。** 只有模拟器 34 的 release 包；带会话的 PSS 和 release fps 还没量。
+
+- release APK：`flutter build apk --release --target-platform android-arm64`，大小 29,521,063 字节（28.2 MiB）。
+- `unzip -lv` 看三个 `.so`（都是 Stored，不压缩）：
+
+  | `.so` | 字节 |
+  |---|---:|
+  | `libapp.so` | 8,258,448 |
+  | `libflutter.so` | 11,579,920 |
+  | `librapp_android.so` | 7,528,992 |
+
+- 没开会话时的 TOTAL PSS：停在总览页，`adb shell dumpsys meminfo com.rapphub.rapp | grep -E 'TOTAL( PSS)?:?'`，每 10 s 一次共 6 次，得到 90115、92059、89568、90355、91183、91892 KB，平均 90862 KB（约 88.7 MiB）。证据：`p0/t4-sizes.txt`、`p0/t4-pss-nosession-34.txt`。
+- 开着静态 2560×1600 桌面会话时的 PSS、release `p0 fps`（模拟器，只作参考）：**没量**，原因见第 4 节。
+
 ## 探查里打的补丁（P1 的输入）
 
 | 文件和位置 | 改了什么 | 为什么 | P1 里它属于哪个接口 |
@@ -206,7 +250,11 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 | `gui/lib/main.dart:40` | `if (Platform.isAndroid) return mainAndroid();` | 安卓入口 | 入口分流（原样留下） |
 | `gui/lib/main_android.dart` 整个文件 | 从 `main_ios.dart` 抄，去掉 Rime、等网络、`BackgroundWatch`、`FoldFullscreen`；`fullscreen: const NoFullscreen()`；没有 `localOs`、`localIme` | 最小能跑的安卓入口 | `main_android.dart`（§6.3、§6.4 一带）；和 `main_ios.dart` 的共用部分 P1 抽（§15.3） |
 | `main_android.dart` 开头 `caps = const PlatformCaps(hubInProcess: true)` | 旁路能力表 | `forOs('android')` 落进桌面默认，不出接入引导；`systemOpen` 留 false，因为它走 `iosChannel` | §6.5 `PlatformCaps.forOs` 的 `'android'` 项；`systemOpen` 要先接安卓通道 |
-| `main_android.dart` `const SessionPort? port = null` | 会话端口留空 | 第 4 项接 | §6.3 安卓的 `SessionPort` |
+| `main_android.dart` `port = LinuxSessionPort.ffi('librapp_android.so', downloads: () => '<数据根>/files/transfers', slow: P0_SLOW_MS)` | 第 3 项时留空，第 4 项接上；`P0_SLOW_MS` 是探查用的慢 Dart 开关 | 第 4 项 | §6.3 安卓的 `SessionPort`（`P0_SLOW_MS` 不进 P1） |
+| `gui/lib/embed/session_ffi.dart`（新） | `FfiSession`：`NativeCallable.listener` 收包，帧零拷贝（`asTypedList` + `rapp_session_free` finalizer），`ackedPackets` 在下一次取包时 ack；`close` 放进 `Isolate.run`（最多阻塞 2 s）；`p0 fps` / `p0 traffic` 日志 | 进程内会话，不起子进程 | §6.3 `SessionLink`（日志不进 P1） |
+| `gui/lib/embed/session_worker.dart` `SessionWorker.ffi` + `_FfiSessionWorker` | 新加的构造函数，把 `FfiSession` 包成 `SessionWorker`；`pid` 返回会话 id | `LinuxSessionPort` 只认 `SessionWorker` | §6.3 `SessionLink` |
+| `gui/lib/embed/linux_session_port.dart` `LinuxSessionPort.ffi` | 新加的构造函数：`executable = ''`，`init` 不查可执行文件，`start` 用 `SessionWorker.ffi` | 安卓没有 `rapp-session` 可执行文件 | §6.3 `SessionLink`（怎么起会话）；其余留在 `SessionHost` |
+| `linux_session_port.dart` 里没改、安卓上空转的：`rapp/linux` 通道（`init`、剪贴板、detach 的 `nativeFrame` / `nativeWindows` / `focus`），`reveal` 的 `xdg-open`，`_traceStream` 读 `RAPP_STREAM_TRACE_DIR`，`downloads` 默认值读 `Platform.environment` | 没改。异常都已被接住；`downloads` 由入口传 | 第 4 项桌面会话不需要它们 | §6.3 `SessionHost`：P1 给安卓换成安卓通道（剪贴板、打开文件），去掉 detach 和 trace |
 | `main_android.dart` `_log` 用 `debugPrint` | 不用 `stderr.writeln` | 安卓上 stderr 到不了 logcat | 安卓入口的日志（或写文件） |
 | `gui/android/.../MainActivity.kt` | `rapp/android` 通道：`paths`（`filesDir`、`cacheDir`）、`deviceName`（写死 `rApp P0 探查`） | 数据根和设备名 | 安卓平台通道；`deviceName` P1 取真名（`Settings.Global.DEVICE_NAME` 之类） |
 | `gui/android/app/src/main/AndroidManifest.xml` | `INTERNET`、`ACCESS_NETWORK_STATE`、`allowBackup="false"` | 连网；身份密钥不进备份 | §6.4 Kotlin 壳的清单（还差 `dataExtractionRules`、网络安全配置） |
