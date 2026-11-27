@@ -29,7 +29,7 @@
 |---|---|---|---|---|
 | 1 | 工具和空壳 | 过（两个模拟器都能装、能启动、截图有 `rApp P0 shell`；36 上第一次截图撞上 System UI 无响应弹框，再试后正常） | 不用 | 2026-11-27 |
 | 2 | `.so` | 过（九个名字都导出、四个 `LOAD` 段都是 `0x4000`、11.3 MB / strip 后 7.5 MB；依赖全部直接编过） | §6.2 小改：hub 的四个函数不用 `#[used] static` 就能导出 | 2026-11-27 |
-| 3 | 进程内 hub 和网络 | 过（两个模拟器都起得来 hub、出接入引导；放进 relay 和 key、加上这台 Mac 后在线；默认和只有 IPv4 两种状态下 relay 都解析成 `::ffff:` 映射并连上。真 IPv6 一半模拟器上测不了，留给实机） | §6.1 小改；§6.5 的 `systemOpen` 要安卓通道；§14.6 加一条 | 2026-11-27 |
+| 3 | 进程内 hub 和网络 | 过（两个模拟器都起得来 hub、出接入引导；放进 relay 和 key、加上这台 Mac 后在线；默认和只有 IPv4 两种状态下 relay 都解析成 `::ffff:` 映射并连上。relay 是 IPv4 字面地址，域名解析没测到；真 IPv6 一半模拟器上测不了，留给实机） | §6.1 小改（`AI_V4MAPPED` 那个问题不用回答）；§6.5 的 `systemOpen` 要安卓通道；§14.6 加一条 | 2026-11-27 |
 
 ## 1 工具和空壳
 
@@ -128,7 +128,7 @@ $BIN/llvm-readelf -x .note.android.ident $SO
 | `term/src/pty/launch.rs:326,333` | 开终端窗口的命令：Linux `linux_command`，否则 `Command::new("open")` | **走 macOS 的 `open`**（安卓上会失败） | 不要。P1 给安卓直接返回错误，免得去执行 `open` |
 | `term/tests/serve.rs:165,906` | 只在测试里 | 不编 | 不相干 |
 
-hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端会话只能嵌入打开）和 `config::OFF`（`hub/src/terms.rs:11`）；安卓 app 只当控制端、`embed_only`，用不到本机终端和开窗口。另外 `net/src/quic.rs` 里有 `any(macos, ios)` 的分支（`sin6_len`、`AI_FLAGS`），安卓走非 Apple 那条（`AI_V4MAPPED|AI_ADDRCONFIG`），对的。
+hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端会话只能嵌入打开）和 `config::OFF`（`hub/src/terms.rs:11`）；安卓 app 只当控制端、`embed_only`，用不到本机终端和开窗口。另外 `net/src/quic.rs` 里有 `any(macos, ios)` 的分支（`sin6_len`、`AI_FLAGS`），安卓走非 Apple 那条：`AI_FLAGS = AI_V4MAPPED|AI_ADDRCONFIG`，`ai_family = AF_UNSPEC`（`quic.rs:315、324`），结果里只留不是 v4 映射的 IPv6 地址（`quic.rs:339`）。所以 C 库给不给映射地址都不影响结果，见第 3 节。
 
 **还没看的：** 这个 `.so` 还没在模拟器里加载过（第 3、4 项做）。`trace.rs` 仍按进程号开 `worker-{pid}.log`，进程内多个会话会写同一个文件（P1 再处理）。hub-ffi 那四个函数本身没包 `catch_unwind`（现有代码，原样导出），hub 里一恐慌安卓进程就退出，见「规格要改的地方」。规格 §6.2 规矩 5（Windows 门禁上要编得过）P0 没验，探查分支不过那道门禁；P1 合并前在 Windows 机器上看。
 
@@ -150,7 +150,7 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 - 两台都起来了：`hub.log` 只有 `hub_start`（version 0.15.58）、`ports`、`ports_asked` 三行 info；`logcat` 里没有 `hub 起不来`。`files/rapp/local/` 下生成 `device.crt`、`device.key`、只有 `id` 的 `service.json`（0600）。
 - **第一次出的是全景，不是接入引导。** 原因：`PlatformCaps.forOs('android')` 落进桌面的默认项（`hasService`、`hasTray`……，`hubInProcess` 是 false），`MainWindow._needsAccess` 要 `caps.hubInProcess`。探查里在 `mainAndroid()` 开头写 `caps = const PlatformCaps(hubInProcess: true)` 绕过（没改 `platform_caps.dart`）。之后两台都出接入引导（「接入点」「key」「接入」）。
 - **`stderr` 到不了 logcat。** `main_ios.dart` 的 `_log` 用 `stderr.writeln`，安卓上这些字一行也看不到，「`logcat -s flutter` 里没有 `hub 起不来`」这一条就验不了。改成 `debugPrint` 后出现在 `flutter` 标签下。
-- **坑：`adb install -r` 后卡在启动画面。** 34 上把第 1 节的空壳 APK 用 `install -r` 覆盖成正式 APK，启动后一直是启动画面，`logcat` 有 `E flutter: Could not prepare isolate`、`Could not create root isolate`、`Could not launch engine`，Dart 一行没跑。`adb uninstall com.rapphub.rapp` 再装就好了。36 上同样的覆盖没出这个问题；之后两台在正式包和解析包之间 `install -r` 来回换了多次，也都没再出。只见过一次，原因没查。
+- **坑：`adb install -r` 后卡在启动画面。** 34 上把第 1 节的空壳 APK 用 `install -r` 覆盖成正式 APK，启动后一直是启动画面，`logcat` 有 `E flutter: Could not prepare isolate`、`Could not create root isolate`、`Could not launch engine`，Dart 一行没跑。`adb uninstall com.rapphub.rapp` 再装就好了。修正轮（同日）在 34 上又碰到一次，这次前面多一行 `Can't load Kernel binary: Invalid kernel binary: Indicated size is invalid`，查到了原因：debug 包第一次启动时把 `kernel_blob.bin` 解到 `app_flutter/flutter_assets/`，那里的文件只有 8,388,608 字节（APK 里是 47,973,912），是上一轮解到一半模拟器就关了。删掉 `app_flutter/flutter_assets` 和 `app_flutter/res_timestamp-*` 再启动就好，不用卸载。只有 debug 包这样（release 包是 AOT，不解 kernel），P1 不用管。
 
 **第 4 步：放进 relay 和 key。**
 - 这台 Mac 的数据根是 `~/rapp`（没有 `RAPP_HOME`，没有指针文件）。`jq '{relay, key}' ~/rapp/local/service.json > <scratchpad>/p0-service.json`，`chmod 600`。
@@ -158,7 +158,7 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 - **和计划不同：这台 Mac 不会自己出现。** 有了 relay 和 key 之后全景里只有「本机」、设备在线 1/1，`hub.log` 没有任何 relay 的行。hub 只探 `hosts.json` 里存过的主机；正常用法是在设备页「添加设备」填对方的 ID（`add_host` → `add_by_id`）。为了不让 ID 出现在界面和输入记录里，我没走界面，而是用 `jq '[{id: .id, name: "这台 Mac", password: ""}]' ~/rapp/local/service.json` 生成 `hosts.json` 写进 `files/rapp/local/`（0600），再冷启动。
 - 结果（两台一样）：全景里「这台 Mac」在线（苹果标记、0.15.52、正在跑的会话、「打开应用」），设备在线 2/2；`hub.log` 有 `route … path:"lan" result:"ok"` 和 `presence … online:true`，`ports` 映射了这台 Mac 的两个共享端口（28000、28001）。模拟器经 `10.0.2.2` 的 NAT 能直接连到 Mac 的局域网地址，所以「自动」走的是 lan，没走 relay。
 - 为了看 relay 那条路，把 `hosts.json` 里这台的 `route` 改成 `"relay"`（等于 hub 的 `set_route` 设成 relay）再冷启动：`route … path:"relay" result:"ok"`，`presence online:true`，界面同样在线。之后的网络测试都在强制 relay 下做。两台模拟器的 `hosts.json` 现在都留着 `route: relay`。
-- 全程 `hub.log` 没有 `warn`、`error` 行。
+- 存下来的 `hub.log`（见第 5 步末尾）都没有 `warn`、`error` 行。lan 那次和强制 relay 第一次的日志当时没单独存，只在屏幕上看过。
 
 **第 5 步：地址解析。**
 
@@ -176,22 +176,23 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 
 解析结果（`--dart-define=P0_PAGE=resolve` 的包，端口 443；四种组合——34/36 × 默认/只有 IPv4——**完全一样**）：
 
-| 主机 | `getaddrinfo_v6`（`AI_V4MAPPED\|AI_ADDRCONFIG`，`AF_INET6`） | `resolve_for(dual)` |
+| 主机 | `getaddrinfo_v6`（`AF_UNSPEC`，`AI_V4MAPPED\|AI_ADDRCONFIG`，只留非映射的 IPv6） | `resolve_for(dual)` |
 |---|---|---|
 | relay | none | `::ffff:` 映射 |
 | `1.1.1.1` | none | `[::ffff:1.1.1.1]:443` |
 | `localhost` | none | `[::ffff:127.0.0.1]:443` |
 | `dns.google` | none | `[::ffff:198.18.2.250]:443` |
 
-- `getaddrinfo_v6` 在安卓（bionic）上四个都是 none，连数字地址 `1.1.1.1` 也是：**bionic 不按 `AI_V4MAPPED` 给映射地址**，至少在没有全局 IPv6 时如此。规格 §6.1「安卓的 C 库对 `AI_V4MAPPED` 的支持不确定」的答案：不能靠它。
+- `getaddrinfo_v6` 四个都是 none，这是**代码本来的意思**，不是安卓的 C 库的毛病：它是 NAT64 那一支，只找「不是 v4 映射」的 IPv6 地址，映射地址一律丢掉（`quic.rs:338-339` 的注释：NAT64 上映射地址到不了）。所以对 IPv4 主机，在哪个平台上都是 none（`quic.rs:654` 的测试就断言 `getaddrinfo_v6("127.0.0.1","9") == None`）。这里另外也没有 AAAA 记录、没有合成的地址，所以四个都是 none。这次测不出 C 库对 `AI_V4MAPPED` 怎么处理。
 - `resolve_for(dual)` 不靠它：先普通解析，有 IPv4 地址且有 IPv4 路由就自己拼 `::ffff:a.b.c.d`。计划里说的「按 IPv4 解析、自己拼 `::ffff:`」的那一支**本来就在 `resolve_for` 里**，安卓走的就是这一支，不用另加。
 - `dns.google` 解析出 `198.18.2.250`：这是 Mac 上 TUN + fake-ip 代理的假地址（198.18.0.0/15），模拟器的 DNS 经 Mac 转发。不影响 relay（relay 是字面地址）。
 - 换回正式包冷启动（强制 relay）：两台在两种状态下都是 `route … path:"relay" result:"ok"`、`presence online:true`，界面上这台 Mac 在线。「只有 IPv4」下连 `::1` 都没有，hub 的双栈 UDP 套接字照样连上了 relay。
-- **双栈的真 IPv6 一半测不了**：「默认」状态没有全局 IPv6 地址，relay 也是 IPv4 字面地址。真 IPv6、只有 IPv6 的网络（NAT64；`getaddrinfo_v6` 那一支在 bionic 上帮不上）留给实机，已加进规格 §14.6。
+- 日志证据（scratchpad，不进仓库，都已过过滤器）：「只有 IPv4」是 `p0/t3-hub-v4only-{34,36}.txt`；「默认」是修正轮补的 `p0/t3-hub-default-{34,36}.txt`——各自冷开机（`emulator -avd rapp-p0-3x -no-snapshot-load -no-audio`，36 开机后等 90 秒），确认 `/proc/sys/net/ipv6/conf/all/disable_ipv6` 是 0、`ip -o addr` 和上表「默认」一样，`adb install -r t3-main.apk`，`am start -W -n com.rapphub.rapp/.MainActivity`，等 25–40 秒，再 `run-as com.rapphub.rapp cat …/files/rapp/logs/hub.log | mask.sh`，从这次的 `hub_start` 起存下来。两份都是 `hub_start`、`ports`、`route path:"relay" result:"ok"`、`presence online:true`、`ports_asked answered:1`，`grep -c -E '"lvl":"(warn|error)"'` 都是 0。
+- **双栈的真 IPv6 一半测不了**：「默认」状态没有全局 IPv6 地址，relay 也是 IPv4 字面地址。真 IPv6、只有 IPv6 的网络（NAT64，靠 `getaddrinfo_v6` 拿 DNS64 合成的 AAAA 那一支，这次没走到）留给实机，已加进规格 §14.6。
 
 截图（scratchpad，不进仓库）：`p0-t3-access-setup-{34,36}.png`（接入引导）、`p0-t3-online-{34,36}.png`（lan 在线）、`p0-t3-online-relay-{34,36}.png`、`p0-t3-online-v4only-{34,36}.png`、`p0-t3-resolve-{default,v4only}-{34,36}.png`。
 
-**结论：过。** hub 在安卓进程里起得来、读得懂数据根、出接入引导；放进 relay 和 key、加上这台 Mac 后，两台模拟器在「默认」和「只有 IPv4」两种状态下都把 relay 解析成 `::ffff:` 映射地址并经 relay 连上。真 IPv6 留给实机。
+**结论：过。** hub 在安卓进程里起得来、读得懂数据根、出接入引导；放进 relay 和 key、加上这台 Mac 后，两台模拟器在「默认」和「只有 IPv4」两种状态下都把 relay 解析成 `::ffff:` 映射地址并经 relay 连上。注意这台 Mac 存的 relay 是 IPv4 字面地址，**relay 的域名解析这次没测到**；真 IPv6 和只有 IPv6 的网络也留给实机。
 ## 4 进程内会话
 ## 5 键盘和触控板
 ## 6 语音
@@ -221,7 +222,7 @@ hub 用到 `rapp_term` 的只有 `id::is_term`（`hub/src/lib.rs:394`，终端�
 - §6.2 规矩 2（恐慌不能穿过 FFI）要落到 `rapp-hub-ffi` 自己身上：在它的四个 `extern "C"` 函数（`hub-ffi/src/lib.rs` 第 40、121、128、145 行）里包 `catch_unwind`，P1 做，iOS 一起受益。`rapp-android-ffi` 按规格只能 `pub use`、不能写同名转调，自己包不了。
 - §6.2 规矩 1 已写「做成图片或决定丢掉之后就 ack」。补一句后果：忘了 ack（哪怕是丢掉的帧），会话就永远结束不了，`disconnected` 和 kind 2 都不会来（第 2 节）。
 - §6.1：「构造时传入库」改成「入口传库名，`null` 是 `process()`」：`DynamicLibrary` 传不进 `Isolate.run`，`_stopOffThread` 只能按名字重新打开（第 3 节）。
-- §6.1「安卓的 C 库对 `AI_V4MAPPED` 的支持不确定」有答案了：bionic 的 `getaddrinfo(AF_INET6, AI_V4MAPPED|AI_ADDRCONFIG)` 对 IPv4 主机（连 `1.1.1.1`）给 none；`resolve_for` 自己拼 `::ffff:` 的那一支够用，不用另加（第 3 节）。只有 IPv6 的网络留给实机。
+- §6.1「安卓的 C 库对 `AI_V4MAPPED` 的支持不确定」这个问题**不用回答**：三个 `mod sys` 里的 `getaddrinfo_v6` 都不会返回映射地址（unix 用 `AF_UNSPEC` 调 `getaddrinfo`、丢掉映射地址；Windows 用 `to_socket_addrs`、同样丢掉；其他平台直接 `None`），映射地址只由 `resolve_for` 自己用 `mapped()` 拼，安卓就走这一支，不用另加（第 3 节）。这次也没测出 bionic 对 `AI_V4MAPPED` 怎么处理。真正要实机回答的是：只有 IPv6 的网络（NAT64/DNS64）上，`getaddrinfo_v6` 能不能拿到合成的地址（§14.6 第 8 条）。
 - §6.5：`'android'` 那一项写了 `systemOpen: true`，但 `systemOpen` 的四处用法（`main_window.dart:43`、`term_stage.dart:50`、`local_section.dart:43`、`data_section.dart:54`）都走 `iosChannel`。要么给安卓接一个通道，要么先不开。
 - 接入引导之后：放进 relay 和 key，主机不会自己出现，要在设备页按 ID 添加（和 iPad 一样）。§14 的验收步骤里「看到这台 Mac 在线」之前要写上这一步（第 3 节）。
 - §14.6 加一条：双栈的真 IPv6（全局地址、只有 IPv6 的网络）模拟器上测不了，实机上连一次 relay（已加）。
