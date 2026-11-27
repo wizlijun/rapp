@@ -190,6 +190,7 @@ class SessionCard extends StatelessWidget {
     this.backdrop,
     this.border,
     this.titleColor,
+    this.titleWrap = false,
   });
   final Key frameKey;
   final Lamp lamp;
@@ -210,17 +211,25 @@ class SessionCard extends StatelessWidget {
   final Color? border;
   final Color? titleColor;
 
+  /// The title wraps onto as many lines as it needs, and the card grows to fit (the 本机 终端 rows).
+  final bool titleWrap;
+
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     final small = Theme.of(context).textTheme.bodySmall?.copyWith(color: t.muted);
     final radius = BorderRadius.circular(t.r);
+    final height = note.isEmpty ? sessionBlockHeight : sessionBlockNoteHeight;
+    const wrapPad = 6.0;
     final body = Stack(
       children: [
         if (backdrop != null) Positioned.fill(child: DecoratedBox(decoration: backdrop!)),
         Padding(
-          padding: EdgeInsets.only(left: 10, right: trailing == null ? 10 : 2),
-          child: Row(
+          padding: EdgeInsets.only(left: 10, right: trailing == null ? 10 : 2, top: titleWrap ? wrapPad : 0, bottom: titleWrap ? wrapPad : 0),
+          // A wrapping card is at least as tall as the others, its lamp and text centred in it.
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: titleWrap ? height - 2 * wrapPad : 0),
+            child: Row(
             children: [
               ExcludeSemantics(child: leading ?? StatusLamp(lamp)),
               const SizedBox(width: 10),
@@ -235,8 +244,8 @@ class SessionCard extends StatelessWidget {
                           Expanded(
                             child: Text(
                               title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                              maxLines: titleWrap ? null : 1,
+                              overflow: titleWrap ? null : TextOverflow.ellipsis,
                               style: TextStyle(
                                 color: titleColor ?? t.text,
                                 fontWeight: dashed ? null : FontWeight.w600,
@@ -258,6 +267,7 @@ class SessionCard extends StatelessWidget {
               ),
               ?trailing,
             ],
+          ),
           ),
         ),
       ],
@@ -291,7 +301,7 @@ class SessionCard extends StatelessWidget {
         child: card,
       );
     }
-    return SizedBox(height: note.isEmpty ? sessionBlockHeight : sessionBlockNoteHeight, child: card);
+    return titleWrap ? card : SizedBox(height: height, child: card);
   }
 }
 

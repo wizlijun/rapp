@@ -1,0 +1,163 @@
+//! rapp-center (中心服务): one port for every builtin service; today the state queue and the shared
+//! quick-area settings (`prefs`). Listens on 127.0.0.1 only.
+
+mod builtin;
+pub mod disk;
+mod entry;
+pub mod prefs;
+pub mod state;
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use serde_json::{json, Value};
+use tokio::net::TcpListener;
+
+pub use entry::{serve, serve_with_log};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Config {
+    pub port: u16,
+    /// `None` keeps everything in memory.
+    pub data: Option<PathBuf>,
+    pub keep_days: u64,
+    pub keep_events: usize,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config { port: 8102, data: None, keep_days: 7, keep_events: 1000 }
+    }
+}
+
+pub fn parse_args(args: &[String]) -> Result<Config, String> {
+    let mut cfg = Config::default();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--port" => {
+                let v = it.next().ok_or("--port 后面要写端口")?;
+                cfg.port = v.parse().map_err(|_| "--port 后面要写端口".to_string())?;
+            }
+            "--data" => {
+                let v = it.next().ok_or("--data 后面要写目录")?;
+                cfg.data = Some(PathBuf::from(v));
+            }
+            "--keep-days" => {
+                let v = it.next().ok_or("--keep-days 要写正整数")?;
+                cfg.keep_days = v.parse().ok().filter(|n| *n >= 1).ok_or("--keep-days 要写正整数")?;
+            }
+            "--keep-events" => {
+                let v = it.next().ok_or("--keep-events 要写正整数")?;
+                cfg.keep_events = v.parse().ok().filter(|n| *n >= 1).ok_or("--keep-events 要写正整数")?;
+            }
+            other => return Err(format!("不认识的参数：{other}")),
+        }
+    }
+    Ok(cfg)
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+fn log_line(event: &str, fields: Value) -> Value {
+    let mut line = json!({"at": unix_now(), "event": event});
+    if let (Some(l), Value::Object(f)) = (line.as_object_mut(), fields) {
+        l.extend(f);
+    }
+    line
+}
+
+/// Where log lines go. The default writes JSON lines to stderr; tests collect them.
+#[derive(Clone)]
+pub struct Log(Arc<dyn Fn(&Value) + Send + Sync>);
+
+impl Log {
+    pub fn new(f: impl Fn(&Value) + Send + Sync + 'static) -> Log {
+        Log(Arc::new(f))
+    }
+
+    pub fn stderr() -> Log {
+        Log::new(|line| eprintln!("{line}"))
+    }
+
+    /// One JSON line: `{"at":<unix>,"event":"<name>",…}`. `fields` must be an object (or null).
+    pub fn emit(&self, event: &str, fields: Value) {
+        (self.0)(&log_line(event, fields));
+    }
+}
+
+/// One JSON line on stderr: `{"at":<unix>,"event":"<name>",…}`. `fields` must be an object (or null).
+pub fn log(event: &str, fields: Value) {
+    Log::stderr().emit(event, fields);
+}
+
+/// The stderr line another task parses to recognise "port already in use".
+fn bind_failed_line(port: u16, e: &std::io::Error) -> Value {
+    json!({"event": "bind_failed", "port": port, "error": format!("{:?}", e.kind())})
+}
+
+pub async fn run(cfg: Config) -> anyhow::Result<()> {
+    let listener = match TcpListener::bind(("127.0.0.1", cfg.port)).await {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("{}", bind_failed_line(cfg.port, &e));
+            return Err(e.into());
+        }
+    };
+    log("listening", json!({"port": cfg.port}));
+    serve(cfg, listener).await
+}
+
+/// Returns the process exit code: 2 for bad arguments, 1 when the service cannot start or stops.
+pub async fn cli(args: Vec<String>) -> i32 {
+    let cfg = match parse_args(&args) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    };
+    match run(cfg).await {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("rapp-center 起不来：{e}");
+            1
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn args() {
+        let a = |s: &str| parse_args(&s.split_whitespace().map(String::from).collect::<Vec<_>>());
+        assert_eq!(a("").unwrap(), Config::default());
+        assert_eq!(a("").unwrap().port, 8102);
+        let c = a("--port 9000 --data /tmp/x --keep-days 3 --keep-events 10").unwrap();
+        assert_eq!((c.port, c.data.as_deref(), c.keep_days, c.keep_events), (9000, Some(Path::new("/tmp/x")), 3, 10));
+        assert_eq!(a("--port").unwrap_err(), "--port 后面要写端口");
+        assert_eq!(a("--keep-days 0").unwrap_err(), "--keep-days 要写正整数");
+        assert_eq!(a("--frob").unwrap_err(), "不认识的参数：--frob");
+    }
+
+    #[test]
+    fn bind_failed_line_format() {
+        let e = std::io::Error::from(std::io::ErrorKind::AddrInUse);
+        assert_eq!(bind_failed_line(8102, &e), json!({"event":"bind_failed","port":8102,"error":"AddrInUse"}));
+        assert_eq!(bind_failed_line(8102, &e).to_string(), r#"{"error":"AddrInUse","event":"bind_failed","port":8102}"#);
+    }
+
+    #[tokio::test]
+    async fn bind_failure_exits_1() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        assert_eq!(cli(vec!["--port".into(), port.to_string()]).await, 1);
+        assert_eq!(cli(vec!["--frob".into()]).await, 2);
+    }
+}

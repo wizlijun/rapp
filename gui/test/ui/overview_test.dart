@@ -16,6 +16,7 @@ import 'package:rapp/ui/workspace_store.dart';
 import 'package:rapp/ui/main_window.dart';
 import 'package:rapp/ui/fullscreen.dart';
 import 'package:rapp/service_client.dart';
+import 'package:rapp/state/state_sync.dart';
 import 'dart:async';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/overview.dart';
@@ -61,7 +62,13 @@ void main() {
 
   /// Builds the state, opens [apps] (`id/app`) in order and shows the overview.
   Future<void> boot(WidgetTester tester,
-      {List<String> apps = const [], bool embed = true, TermSessionPort? termPort, String? stateRules, DeviceOs? localOs}) async {
+      {List<String> apps = const [],
+      bool embed = true,
+      TermSessionPort? termPort,
+      String? stateRules,
+      DeviceOs? localOs,
+      StateSync? stateSync,
+      ServiceMonitor? monitor}) async {
     tester.view.physicalSize = const Size(1194, 834);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -93,6 +100,8 @@ void main() {
       clock: () => epoch,
       builtinStateRules: stateRules,
       localOs: localOs,
+      stateSync: stateSync,
+      monitor: monitor,
     );
     await tester.runAsync(() async {
       for (var i = 0; i < 8; i++) {
@@ -1443,18 +1452,197 @@ void main() {
       expect(size.width, greaterThanOrEqualTo(44));
     });
 
-    testWidgets('a local service keeps the column open, with no fold button', (tester) async {
-      await boot(tester);
+    Future<_Mon> showPc(WidgetTester tester, [_Mon? given]) async {
       s.toggleOverview();
-      final m = ServiceMonitor(readToken: () async => null);
+      final m = given ?? _Mon();
       addTearDown(m.dispose);
       await tester.pumpWidget(wrap(SizedBox(width: 1194, height: 700, child: Overview(state: s, monitor: m))));
       await tester.pump();
-      expect(find.byKey(const Key('column-local-folded')), findsNothing);
-      expect(find.byKey(const Key('column-local-fold')), findsNothing);
-      expect(tester.getSize(find.byKey(const Key('column-local'))).width, 220);
+      return m;
+    }
+
+    final one = [const ServiceSession(1, 'm1', 'desktop:', 'relay', null)];
+    final two = [...one, const ServiceSession(2, 'm1', 'term:', 'relay', null)];
+
+    testWidgets('PC with nobody connected in: 本机 starts folded', (tester) async {
+      await boot(tester);
+      await showPc(tester);
+      expect(find.byKey(const Key('column-local-folded')), findsOneWidget);
+      expect(tester.getSize(find.byKey(const Key('column-local'))).width, 56);
     });
+
+    testWidgets('PC opens 本机 while someone is connected in, folds when they leave', (tester) async {
+      await boot(tester);
+      final m = await showPc(tester);
+      m.set(one);
+      await tester.pump();
+      expect(tester.getSize(find.byKey(const Key('column-local'))).width, 220);
+      expect(find.byKey(const Key('column-local-fold')), findsOneWidget);
+      m.set(const []);
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsOneWidget);
+    });
+
+    testWidgets('a manual fold sticks while sessions come and go', (tester) async {
+      await boot(tester);
+      final m = await showPc(tester);
+      m.set(one);
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('column-local-fold')));
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsOneWidget);
+      for (final x in [two, const <ServiceSession>[], one]) {
+        m.set(x);
+        await tester.pump();
+        expect(find.byKey(const Key('column-local-folded')), findsOneWidget, reason: '${x.length}');
+      }
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      m.set(const []);
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsNothing);
+      expect(find.byKey(const Key('column-local-fold')), findsOneWidget);
+    });
+
+    TermList terms(List<(String, String?)> rows) => TermList('local', terms: [
+          for (final (id, host) in rows) TermRow(id, id.substring(9), 'zsh', host, 1, 0, 1, false, false),
+        ]);
+
+    testWidgets('the local column opens itself while a rapp terminal runs', (tester) async {
+      await boot(tester);
+      final m = await showPc(tester);
+      m.setTerms(terms([('term:pty:a', null)]));
+      await tester.pump();
+      expect(find.byKey(const Key('local-terms')), findsOneWidget);
+      expect(find.byKey(const Key('local-term-term:pty:a')), findsOneWidget);
+      // The card is the column's first block, above the sessions.
+      expect(tester.getTopLeft(find.byKey(const Key('local-terms'))).dy,
+          lessThan(tester.getTopLeft(find.byKey(const Key('local-services'))).dy));
+      m.setTerms(terms(const []));
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsOneWidget);
+    });
+
+    testWidgets('rows from other hosts are not shown and do not open the column', (tester) async {
+      await boot(tester);
+      final m = await showPc(tester);
+      m.setTerms(terms([('term:pty@srv:b', 'srv')]));
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      expect(find.byKey(const Key('local-terms')), findsOneWidget);
+      expect(find.byKey(const Key('local-term-term:pty@srv:b')), findsNothing);
+    });
+
+    testWidgets('no card without terminal support', (tester) async {
+      await boot(tester);
+      await showPc(tester);
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      expect(find.byKey(const Key('local-terms')), findsNothing);
+    });
+
+    testWidgets('新建 on the card opens one on this machine; a second tap while it waits does nothing', (tester) async {
+      // The app hands the window and its state the same monitor.
+      final m = _Mon();
+      await boot(tester, monitor: m);
+      await showPc(tester, m);
+      m.setTerms(const TermList('local', hosts: [TermHost(null, launchers: ['Terminal'])]));
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('local-terms-new')));
+      await tester.pump();
+      expect(m.opens, 1);
+      await tester.tap(find.byKey(const Key('local-terms-new')));
+      await tester.pump();
+      expect(m.opens, 1);
+      m.gate.complete('term:pty:n');
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+    });
+
+    testWidgets('the open 本机 column shows 连上的服务; the strip does not', (tester) async {
+      hubVersion = '0.14.7';
+      await boot(tester);
+      await show(tester);
+      expect(find.byKey(const Key('local-services')), findsNothing);
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      expect(find.byKey(const Key('local-services')), findsOneWidget);
+      expect(tester.getTopLeft(find.byKey(const Key('local-services'))).dy,
+          lessThan(tester.getTopLeft(find.byKey(const Key('version-local'))).dy));
+    });
+
+    testWidgets('remote columns have no 连上的服务', (tester) async {
+      hosts = [{'id': 'm1', 'name': 'mac1'}];
+      await boot(tester);
+      await show(tester);
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      expect(find.descendant(of: find.byKey(const Key('column-m1')), matching: find.byKey(const Key('local-services'))),
+          findsNothing);
+      expect(find.byKey(const Key('local-services')), findsOneWidget);
+    });
+
+    testWidgets('Linux desktop: 本机 folds while idle, opens on inbound with 本机 · :8102 center status, and folds back',
+        (tester) async {
+      final sync = FakeStateSync(tmp.path)
+        ..status = StateStatus.connected
+        ..url = Uri.parse('http://127.0.0.1:8102');
+      addTearDown(sync.dispose);
+      await boot(tester, localOs: DeviceOs.omarchy, stateSync: sync);
+      s.toggleOverview();
+      final m = _Mon(localId: 'linux999', host: 'linux999')..set(const []);
+      addTearDown(m.dispose);
+      await tester.pumpWidget(wrap(SizedBox(width: 1194, height: 700, child: Overview(state: s, monitor: m))));
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsOneWidget);
+      expect(tester.getSize(find.byKey(const Key('column-local'))).width, 56);
+      expect(find.byKey(const Key('local-services')), findsNothing);
+
+      m.set(one);
+      await tester.pump();
+      await tester.pump();
+      expect(tester.getSize(find.byKey(const Key('column-local'))).width, 220);
+      expect(find.byKey(const Key('local-services')), findsOneWidget);
+      expect(find.text('本机 · :8102'), findsOneWidget);
+      expect(find.text('LLM 网关'), findsOneWidget);
+
+      m.set(const []);
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsOneWidget);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
   });
+}
+
+/// A monitor that never connects: the test sets who is connected in.
+class _Mon extends ServiceMonitor {
+  _Mon({this.localId, this.host}) : super(readToken: () async => null);
+  final String? localId;
+  final String? host;
+
+  void set(List<ServiceSession> sessions) {
+    status = ServiceStatus(id: localId, sessions: sessions);
+    notifyListeners();
+  }
+
+  void setTerms(TermList? l) {
+    localTerms = l;
+    notifyListeners();
+  }
+
+  @override
+  Future<String?> stateHost() async => host;
+
+  var opens = 0;
+  final gate = Completer<String>();
+
+  @override
+  Future<String> termOpen({String? shell, required String app, String? from}) {
+    opens++;
+    return gate.future;
+  }
 }
 
 class _Fs implements FullscreenControl {

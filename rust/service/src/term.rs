@@ -274,6 +274,29 @@ impl LocalWatch<'_> {
     }
 }
 
+/// This machine's session lists for the local app: every list as a line with `ok`, until the app hangs up; a
+/// refused or ended watch is one error line, then the end.
+pub(crate) async fn follow_local<S: AsyncRead + AsyncWrite + Unpin>(state: &Arc<State>, s: &mut S) -> Result<()> {
+    let mut watch = match watch_local(state).await {
+        Ok(w) => w,
+        Err(e) => return finish(s, &err(&format!("{e:#}"))).await,
+    };
+    let mut buf = [0u8; 256];
+    loop {
+        tokio::select! {
+            n = s.read(&mut buf) => if !matches!(n, Ok(1..)) {
+                let _ = s.shutdown().await;
+                return Ok(());
+            },
+            line = watch.next() => match line {
+                Ok(Some(v)) => write_json(s, &ok(v)).await?,
+                Ok(None) => return finish(s, &err("the terminal worker ended the watch")).await,
+                Err(e) => return finish(s, &err(&format!("{e:#}"))).await,
+            },
+        }
+    }
+}
+
 /// The worker's watch, passed on to B. The worker's session count stays up until the watch ends, so it is not
 /// stopped as idle meanwhile.
 async fn watch<S: AsyncRead + AsyncWrite + Unpin + Send>(

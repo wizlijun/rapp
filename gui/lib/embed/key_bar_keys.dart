@@ -1,5 +1,6 @@
 // The keys of the virtual key bar (iOS input toggle) and which of them each row holds at a given width and mode.
 // Pure data and layout: the widget draws what keyBarRows says and sends what barKeys says.
+import '../quick/key_layout.dart';
 import 'modifier_latch.dart';
 
 enum BarKind { send, mod, copy, paste, cmdT, more }
@@ -54,21 +55,15 @@ const barKeys = <String, BarKey>{
   'more': (id: 'more', label: '⋯', spoken: '更多按键', kind: BarKind.more, wire: null, code: null, mods: 0, bit: null, repeats: false),
 };
 
-/// The rows of the bar, each a list of key ids, grouped by what the key is for (key-bar-keys research, 2026-11-25).
-/// First row, eight keys: complete and switch mode (Tab ⇧Tab), stop (Esc ⌃C), ⌫ ⏎, then ↑ and ⋯ (second row) at the
-/// right end. [more] adds the second row (bar-cmd, 2026-11-27): copy and paste (shown as ⌘C ⌘V), ⌘T, the sticky ⌘ and
-/// ⌃, PgUp PgDn (on a terminal a page of rApp's own history, in a full-screen program its keys), then ← ↓ → under ↑ ⋯,
-/// the arrows as on a keyboard (user 2026-11-27: 「和普通键盘里面的上下左右是比较一致的视觉」). Any ⌃ key is the sticky ⌃
-/// and a typed letter; on a terminal the sticky ⌘ and a letter is rApp's own shortcut. No ⌄: the 快捷区 folds from
-/// its toggle beside 语音 and 输入 only (user 2026-11-27). The rows are the same for an app and a terminal; [app] is
-/// kept for the callers that tell them apart.
-List<List<String>> keyBarRows({required bool app, required bool more}) {
-  const first = ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more'];
-  if (!more) return [first];
-  return [
-    first,
-    ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'pgup', 'pgdn', 'left', 'down', 'right'],
-  ];
+/// The rows of the bar, each a list of cell ids, from [layout] cleaned.
+/// The default layout is the grouping of the key-bar-keys research (2026-11-25, bar-cmd 2026-11-27): first row Tab
+/// ⇧Tab Esc ⌃C ⌫ ⏎ ↑, then ⋯; [more] adds the second row, whose ← ↓ → stand under ↑ ⋯ as on a keyboard. ⋯ is added
+/// at the end of row 1 only when row 2 holds keys. No ⌄: the 快捷区 folds from its toggle beside 语音 and 输入 only.
+List<List<String>> keyBarRows({required KeyLayout layout, required bool more}) {
+  final rows = layout.cleaned().rows;
+  if (rows[1].isEmpty) return [rows[0]];
+  final first = [...rows[0], 'more'];
+  return more ? [first, rows[1]] : [first];
 }
 
 /// The bar's column grid: the arrow block's keys are each one column of [keyBarColumns] wide, so ↓ stands under ↑

@@ -2,6 +2,7 @@
 // It takes the stage's place; the top bar and overlays stay as they are.
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
 import '../embed/traffic_label.dart';
@@ -9,6 +10,8 @@ import '../service_client.dart';
 import 'inbound.dart';
 import 'lamp.dart';
 import 'load_row.dart';
+import 'local_services.dart';
+import 'local_terms.dart';
 import 'os_mark.dart';
 import 'main_state.dart';
 import 'open_apps_menu.dart';
@@ -71,9 +74,9 @@ class Overview extends StatelessWidget {
                   runSpacing: _gap,
                   children: [
                     for (final c in cols)
-                      // No local service (iPad/Duo): 本机 holds nothing, so it starts as a narrow strip.
-                      if (c.id == null && monitor == null)
-                        _LocalFold(state: state, col: c)
+                      // 本机 folds to a narrow strip while nobody is connected in (always on iPad/Duo).
+                      if (c.id == null)
+                        _LocalFold(state: state, col: c, monitor: monitor)
                       else
                         _Column(state: state, col: c, monitor: monitor),
                   ],
@@ -287,16 +290,20 @@ class _CountCell extends StatelessWidget {
   }
 }
 
-/// The 本机 column without a local service: folded to a strip until tapped; open for the rest of this run
-/// ([MainState.localColumnOpen]).
+/// The 本机 column: a strip while nobody is connected in, open while someone is; once the user opens or folds it,
+/// it stays as they chose for the rest of this run ([MainState.localColumnOpen]).
 class _LocalFold extends StatelessWidget {
-  const _LocalFold({required this.state, required this.col});
+  const _LocalFold({required this.state, required this.col, this.monitor});
   final MainState state;
   final DeviceColumn col;
+  final ServiceMonitor? monitor;
 
   @override
-  Widget build(BuildContext context) => state.localColumnOpen
-      ? _Column(state: state, col: col, onFold: () => state.openLocalColumn(false))
+  Widget build(BuildContext context) =>
+      state.localColumnOpen(
+          inbound: monitor?.status?.sessions.isNotEmpty ?? false,
+          terms: MainState.localTermRows(monitor?.localTerms).isNotEmpty)
+      ? _Column(state: state, col: col, monitor: monitor, onFold: () => state.openLocalColumn(false))
       : _FoldedColumn(col: col, onOpen: () => state.openLocalColumn(true));
 }
 
@@ -387,7 +394,7 @@ class _Column extends StatelessWidget {
             else
               Row(children: [
                 Expanded(child: title),
-                // A touch-sized target (this column only folds on iPad/Duo).
+                // A touch-sized target (only 本机 folds).
                 Semantics(
                   button: true,
                   label: '折叠 ${col.name}',
@@ -422,6 +429,16 @@ class _Column extends StatelessWidget {
         // The sessions, then this device's favourites that are not open (one tap opens one). The page scrolls,
         // so the column is as tall as what it holds.
         Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          // The text terminals rapp-term runs here, first: the ones other devices can open too.
+          if (id == null && monitor?.localTerms != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: LocalTerms(
+                rows: MainState.localTermRows(monitor!.localTerms),
+                onNew: state.newLocalTermBusy ? null : state.newLocalTerm,
+                onFront: defaultTargetPlatform == TargetPlatform.macOS ? state.frontLocalTerm : null,
+              ),
+            ),
           if (col.entries.isEmpty) Text('没有打开的 app', style: TextStyle(color: t.muted)),
           for (final (i, e) in col.entries.indexed) ...[
             if (i > 0) const SizedBox(height: 8),
@@ -461,6 +478,16 @@ class _Column extends StatelessWidget {
             ],
           ],
         ]),
+        // rapp's own services this device uses (中心服务, LLM 网关), only on 本机.
+        if (id == null)
+          LocalServices(
+            sync: state.stateSync,
+            llm: state.llm,
+            llmApi: state.llmApi,
+            hostApi: monitor ?? state.hub,
+            localId: monitor?.status?.id,
+            nameOf: state.deviceName,
+          ),
         // The version, and on a remote column 打开应用 at the right: all its apps in one menu.
         if (col.version != null || id != null)
           Padding(

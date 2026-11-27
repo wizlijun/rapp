@@ -1,14 +1,20 @@
-// 常用语条 (iOS): the row of phrases on top of the key bar, 「全部 ›」 pinned at its right (phrases spec §2, §5).
-// A tap sends ([sendPhrase]); a long press gives 放进输入框再改 / 编辑 / 移到最前 / 删除. Like the keys, nothing here
-// takes the focus.
+// 常用语条, the 快捷区 first row (phrases spec §2, §5; quick-row spec §5): the starred items, or every item by use
+// count, then 「命令▾」「常用语▾」 pinned at its right (cmd-menu design). A tap sends ([sendPhrase], [sendStripCmd]) and
+// counts a use; a long press gives 放进输入框再改 / 编辑 / 打星 / 移到最前 / 删除. Like the keys, nothing here takes the
+// focus.
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../pages/cmds_page.dart';
 import '../pages/phrases_page.dart';
+import '../quick/quick_row.dart';
+import '../quick/quick_usage.dart';
 import '../ui/controls.dart';
 import '../ui/main_state.dart';
+import '../ui/star_button.dart';
 import '../ui/tokens.dart';
 import 'composer_plus.dart';
 import 'phrase_send.dart';
@@ -17,6 +23,9 @@ import 'remote_session.dart';
 import 'session_port.dart';
 import 'strip_cmds.dart';
 import 'strip_tools.dart';
+
+/// What a command says in 命令▾ when no AI tool it knows is in front.
+const noToolHint = '这里没有认得的 AI 工具，发不了命令';
 
 class PhraseStrip extends StatefulWidget {
   const PhraseStrip({super.key, required this.state, required this.session, required this.port});
@@ -29,11 +38,27 @@ class PhraseStrip extends StatefulWidget {
   State<PhraseStrip> createState() => _PhraseStripState();
 }
 
+/// Which of the two menus a sheet lists.
+enum _Kind { cmds, phrases }
+
 class _PhraseStripState extends State<PhraseStrip> {
-  /// The chip that just went, shown with ✓ for [phraseTickTime].
-  int? _ticked;
+  /// The ref (`p:<id>`) of the chip that just went, shown with ✓ for [phraseTickTime].
+  String? _ticked;
   String? _hint;
   Timer? _tickTimer, _hintTimer;
+
+  /// The row's order, worked out once per (session, stars, phrases `at`) (Ruling 9): counts going up while in use do
+  /// not reshuffle it.
+  List<String>? _order;
+  Object? _orderSid;
+  List<String> _orderStars = const [];
+  int _orderPhrasesAt = -1;
+
+  @override
+  void didUpdateWidget(PhraseStrip old) {
+    super.didUpdateWidget(old);
+    if (old.session != widget.session) _order = null;
+  }
 
   @override
   void dispose() {
@@ -44,43 +69,62 @@ class _PhraseStripState extends State<PhraseStrip> {
 
   AgentTool? get _tool => widget.state.stripToolOf(widget.session);
 
-  /// What the strip shows now: each item with its index in the whole `prefs.phrases` (the key and the edit index).
-  /// Commands only with a tool in front.
-  List<(int, StripItem)> get _items {
-    final tool = _tool;
-    return [
-      for (final (i, it) in widget.state.prefs.phrases.indexed)
-        if (it is Phrase || tool != null) (i, it),
-    ];
+  /// The refs in row order (all of them; whether one may show here is the caller's business).
+  List<String> _rowOrder() {
+    final q = widget.state.quick;
+    final pAt = q.atOf('phrases');
+    if (_order == null ||
+        _orderSid != widget.session.sid ||
+        !listEquals(_orderStars, q.stars) ||
+        _orderPhrasesAt != pAt) {
+      _orderSid = widget.session.sid;
+      _orderStars = List.of(q.stars);
+      _orderPhrasesAt = pAt;
+      _order = quickRowOrder(
+        refs: [for (final it in q.phrases) refOf(it)],
+        stars: q.stars,
+        totals: usageTotals([q.usage, ...q.others.values], DateTime.now()),
+      );
+    }
+    return _order!;
   }
 
-  /// One tap on [p] (the [i]th of the whole list; null from the 全部 sheet).
-  PhraseOutcome _tap(Phrase p, int? i) =>
-      _done(sendPhrase(state: widget.state, session: widget.session, port: widget.port, p: p), i);
+  /// What a refused tap says ([o] not sent or put); null when there is nothing to say.
+  String? _why(PhraseOutcome o, {AgentTool? tool}) {
+    if (o == PhraseOutcome.missing && tool == null) return null;
+    return stripHint(o, tool: tool);
+  }
+
+  /// One tap on [p]. [say] false: a menu sheet tells the refusal itself, so the strip keeps quiet (here and below).
+  PhraseOutcome _tap(Phrase p, String ref, {bool say = true}) =>
+      _done(sendPhrase(state: widget.state, session: widget.session, port: widget.port, p: p), ref, say: say);
 
   /// One tap on the command [c]: grey ones say what is missing.
-  PhraseOutcome _tapCmd(StripCmd c, int? i) {
+  PhraseOutcome _tapCmd(StripCmd c, String ref, {bool say = true}) {
     final tool = _tool;
     if (tool == null) return PhraseOutcome.missing;
-    if (actionFor(c, tool) == null) return _done(PhraseOutcome.missing, i, tool: tool);
+    if (actionFor(c, tool) == null) return _done(PhraseOutcome.missing, ref, tool: tool, say: say);
     final o = sendStripCmd(state: widget.state, session: widget.session, port: widget.port, c: c, tool: tool);
-    return _done(o, i, tool: tool);
+    return _done(o, ref, tool: tool, say: say);
   }
 
-  PhraseOutcome _done(PhraseOutcome o, int? i, {AgentTool? tool}) {
+  PhraseOutcome _done(PhraseOutcome o, String ref, {AgentTool? tool, bool say = true}) {
     if (!mounted) return o;
     switch (o) {
       case PhraseOutcome.sent:
+        widget.state.recordUse(ref);
         unawaited(HapticFeedback.lightImpact());
         _tickTimer?.cancel();
-        setState(() => _ticked = i);
+        setState(() => _ticked = ref);
         _tickTimer = Timer(phraseTickTime, () {
           if (mounted) setState(() => _ticked = null);
         });
+      case PhraseOutcome.put:
+        widget.state.recordUse(ref);
       case PhraseOutcome.offline || PhraseOutcome.busy || PhraseOutcome.missing:
-        final h = stripHint(o, tool: tool);
+        final h = say ? _why(o, tool: tool) : null;
         if (h != null) _say(h);
-      case PhraseOutcome.put || PhraseOutcome.tooSoon:
+      case PhraseOutcome.tooSoon:
         break;
     }
     return o;
@@ -94,19 +138,25 @@ class _PhraseStripState extends State<PhraseStrip> {
     });
   }
 
-  /// The long-press menu of the [i]th item of the whole list.
+  RappMenuItem<String> _starItem(String ref) => RappMenuItem(
+      value: 'star', key: const Key('phrase-menu-star'), label: widget.state.quick.stars.contains(ref) ? '取消星标' : '打星');
+
+  /// The long-press menu of the [i]th item of the 常用语 doc.
   Future<void> _menu(int i, Offset at) async {
-    final all = widget.state.prefs.phrases;
+    final all = widget.state.quick.phrases;
     if (i >= all.length) return;
     final item = all[i];
+    final ref = refOf(item);
     final pick = await showRappMenu<String>(context, position: menuAt(context, at), items: [
       if (item is Phrase) const RappMenuItem(value: 'put', key: Key('phrase-menu-put'), label: '放进输入框再改'),
       const RappMenuItem(value: 'edit', key: Key('phrase-menu-edit'), label: '编辑'),
-      const RappMenuItem(value: 'first', key: Key('phrase-menu-first'), label: '移到最前'),
+      _starItem(ref),
+      if (widget.state.quick.stars.contains(ref))
+        const RappMenuItem(value: 'first', key: Key('phrase-menu-first'), label: '移到最前'),
       const RappMenuItem(value: 'delete', key: Key('phrase-menu-delete'), label: '删除'),
     ]);
     if (!mounted || pick == null) return;
-    final l = List.of(widget.state.prefs.phrases);
+    final l = List.of(widget.state.quick.phrases);
     final at0 = l.indexOf(item);
     if (at0 < 0) return; // changed meanwhile
     switch (pick) {
@@ -116,69 +166,136 @@ class _PhraseStripState extends State<PhraseStrip> {
         final StripItem? e =
             item is StripCmd ? await editStripCmd(context, c: item) : await editPhrase(context, p: item as Phrase);
         if (e == null) return;
-        final now = List.of(widget.state.prefs.phrases);
+        final now = List.of(widget.state.quick.phrases);
         final j = now.indexOf(item);
         if (j >= 0) widget.state.setStripItems(now..[j] = e);
+      case 'star':
+        widget.state.toggleStar(ref);
       case 'first':
-        widget.state.setStripItems([item, ...l..removeAt(at0)]);
+        widget.state.starFirst(ref);
       case 'delete':
         widget.state.setStripItems(l..removeAt(at0));
     }
   }
 
-  Future<void> _all() => showModalBottomSheet<void>(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: RappTokens.of(context).bg,
-        builder: (sheet) {
-          final t = RappTokens.of(sheet);
-          return SafeArea(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * .6),
-              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
-                  child: Row(children: [
-                    Expanded(child: Text('常用语', style: TextStyle(color: t.text, fontSize: t.textSize + 2))),
-                    RappButton.quiet(
-                      key: const Key('phrases-all-edit'),
-                      label: '编辑',
-                      onPressed: () {
-                        Navigator.of(sheet).pop();
-                        openPhrasesPage(context, widget.state);
-                      },
-                    ),
-                  ]),
-                ),
-                Flexible(
-                  child: ListView(shrinkWrap: true, children: [
-                    for (final (i, it) in _items)
-                      if (it case final StripCmd c)
-                        ListTile(
-                          key: Key('phrases-all-$i'),
-                          title: Text(c.labelOf(), style: TextStyle(color: t.text)),
-                          onTap: () {
-                            final o = _tapCmd(c, i);
-                            if (o == PhraseOutcome.sent) Navigator.of(sheet).pop();
-                          },
-                        )
-                      else if (it case final Phrase p)
-                        ListTile(
-                          key: Key('phrases-all-$i'),
-                          title: Text(p.text, style: TextStyle(color: t.text)),
-                          trailing: p.put ? Icon(Icons.keyboard_return, color: t.muted, size: 18) : null,
-                          onTap: () {
-                            final o = _tap(p, i);
-                            if (o == PhraseOutcome.sent || o == PhraseOutcome.put) Navigator.of(sheet).pop();
-                          },
-                        ),
-                  ]),
-                ),
-              ]),
-            ),
-          );
-        },
-      );
+  /// 「命令▾」 (every command) or 「常用语▾」 (every phrase), in list order with stars, then 设置… for that kind's page. A
+  /// tap uses the item and closes the sheet; a refused one says why on its row and the sheet stays; a star only stars.
+  Future<void> _sheet(_Kind kind) {
+    // The row last refused, and why; kept across the sheet's rebuilds.
+    (String, String)? said;
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: RappTokens.of(context).bg,
+      builder: (sheet) => StatefulBuilder(
+        builder: (sheet, setSheet) => ListenableBuilder(
+          listenable: widget.state,
+          builder: (sheet, _) {
+            final t = RappTokens.of(sheet);
+            final q = widget.state.quick;
+            final tool = _tool;
+
+            void use(String ref, PhraseOutcome Function() go) {
+              final o = go();
+              if (o == PhraseOutcome.sent || o == PhraseOutcome.put) {
+                Navigator.of(sheet).pop();
+                return;
+              }
+              final h = _why(o, tool: tool);
+              setSheet(() => said = h == null ? null : (ref, h));
+            }
+
+            Widget row({
+              required Key key,
+              required Key starKey,
+              required String ref,
+              required String title,
+              bool put = false,
+              bool grey = false,
+              required VoidCallback onTap,
+            }) {
+              final starred = q.stars.contains(ref);
+              final hint = said?.$1 == ref ? said!.$2 : null;
+              final tile = ListTile(
+                key: key,
+                title: Text(title, style: TextStyle(color: t.text)),
+                subtitle: hint == null
+                    ? null
+                    : Text(hint, key: const Key('menu-hint'), style: TextStyle(color: t.muted, fontSize: 13)),
+                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                  if (put) Icon(Icons.keyboard_return, color: t.muted, size: 18),
+                  StarButton(key: starKey, starred: starred, onPressed: () => widget.state.toggleStar(ref)),
+                ]),
+                onTap: onTap,
+              );
+              return grey ? Opacity(opacity: .4, child: tile) : tile;
+            }
+
+            final rows = [
+              for (final (i, it) in q.phrases.indexed)
+                if (kind == _Kind.cmds && it is StripCmd && tool == null)
+                  // No AI tool in front: the command is there but grey, a tap says why (spec §5.4).
+                  row(
+                    key: Key('menu-p-$i'),
+                    starKey: Key('menu-star-p-$i'),
+                    ref: refOf(it),
+                    title: it.labelOf(),
+                    grey: true,
+                    onTap: () => setSheet(() => said = (refOf(it), noToolHint)),
+                  )
+                else if (kind == _Kind.cmds && it is StripCmd)
+                  row(
+                    key: Key('menu-p-$i'),
+                    starKey: Key('menu-star-p-$i'),
+                    ref: refOf(it),
+                    title: it.labelOf(),
+                    grey: actionFor(it, tool!) == null,
+                    onTap: () => use(refOf(it), () => _tapCmd(it, refOf(it), say: false)),
+                  )
+                else if (kind == _Kind.phrases && it is Phrase)
+                  row(
+                    key: Key('menu-p-$i'),
+                    starKey: Key('menu-star-p-$i'),
+                    ref: refOf(it),
+                    title: it.text,
+                    put: it.put,
+                    onTap: () => use(refOf(it), () => _tap(it, refOf(it), say: false)),
+                  ),
+            ];
+            return SafeArea(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * .6),
+                child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+                    child: Text(kind == _Kind.cmds ? '命令' : '常用语',
+                        style: TextStyle(color: t.text, fontSize: t.textSize + 2)),
+                  ),
+                  Flexible(
+                    child: ListView(shrinkWrap: true, children: [
+                      ...rows,
+                      ListTile(
+                        key: const Key('menu-settings'),
+                        title: Text('设置…', style: TextStyle(color: t.text)),
+                        onTap: () {
+                          Navigator.of(sheet).pop();
+                          if (kind == _Kind.cmds) {
+                            openCmdsPage(context, widget.state);
+                          } else {
+                            openPhrasesPage(context, widget.state);
+                          }
+                        },
+                      ),
+                    ]),
+                  ),
+                ]),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -220,7 +337,34 @@ class _PhraseStripState extends State<PhraseStrip> {
         }
 
         final tool = _tool;
-        final list = _items;
+        final q = widget.state.quick;
+        // Refs to items: a phrase or command by its index in the doc (the chip's key).
+        final phraseAt = <String, int>{};
+        for (final (i, it) in q.phrases.indexed) {
+          phraseAt.putIfAbsent(refOf(it), () => i);
+        }
+        final chips = <Widget>[];
+        for (final ref in _rowOrder()) {
+          final i = phraseAt[ref];
+          if (i != null) {
+            final it = q.phrases[i];
+            if (it case final StripCmd c) {
+              if (tool == null) continue;
+              chips.add(chip(Key('phrase-$i'), c.labelOf(),
+                  ticked: _ticked == ref,
+                  cmd: true,
+                  grey: actionFor(c, tool) == null,
+                  onTap: () => _tapCmd(c, ref),
+                  onLong: (d) => _menu(i, d.globalPosition)));
+            } else if (it case final Phrase p) {
+              chips.add(chip(Key('phrase-$i'), p.text,
+                  ticked: _ticked == ref,
+                  put: p.put,
+                  onTap: () => _tap(p, ref),
+                  onLong: (d) => _menu(i, d.globalPosition)));
+            }
+          }
+        }
         return SizedBox(
           height: phraseStripChip,
           child: Row(children: [
@@ -236,26 +380,12 @@ class _PhraseStripState extends State<PhraseStrip> {
                         key: const Key('phrase-strip-list'),
                         scrollDirection: Axis.horizontal,
                         padding: EdgeInsets.zero,
-                        children: [
-                          for (final (i, it) in list)
-                            if (it case final StripCmd c)
-                              chip(Key('phrase-$i'), c.labelOf(),
-                                  ticked: _ticked == i,
-                                  cmd: true,
-                                  grey: tool != null && actionFor(c, tool) == null,
-                                  onTap: () => _tapCmd(c, i),
-                                  onLong: (d) => _menu(i, d.globalPosition))
-                            else if (it case final Phrase p)
-                              chip(Key('phrase-$i'), p.text,
-                                  ticked: _ticked == i,
-                                  put: p.put,
-                                  onTap: () => _tap(p, i),
-                                  onLong: (d) => _menu(i, d.globalPosition)),
-                        ],
+                        children: chips,
                       ),
                     ),
             ),
-            chip(const Key('phrases-all'), '全部 ›', onTap: _all),
+            chip(const Key('quick-menu-cmds'), '命令▾', onTap: () => _sheet(_Kind.cmds)),
+            chip(const Key('quick-menu-phrases'), '常用语▾', onTap: () => _sheet(_Kind.phrases)),
           ]),
         );
       },

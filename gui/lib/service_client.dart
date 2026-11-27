@@ -5,6 +5,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import 'hub_client.dart' show TermList, termListFromJson;
 import 'labels.dart';
 import 'state/service_switch.dart';
 import 'load_model.dart';
@@ -12,6 +13,13 @@ import 'shares.dart';
 import 'update.dart';
 
 const servicePort = 22029;
+
+/// `term_front` errors: no tab of the terminal app holds it / macOS is asking for automation consent.
+const termFrontNotFound = 'not-found';
+const termFrontConsent = 'consent';
+
+/// The user refused rApp control of Terminal; only 系统设置 turns it back on.
+const termFrontDenied = 'denied';
 
 class ServiceException implements Exception {
   ServiceException(this.message, {this.page});
@@ -305,12 +313,16 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi, ServiceSwitchA
     required this.readToken,
     this.port = servicePort,
     this.retry = const Duration(seconds: 2),
+    this.rewatchGap = const Duration(seconds: 5),
   });
 
   /// Reads `ipc.token`; null when the file is missing.
   final Future<String?> Function() readToken;
   final int port;
   final Duration retry;
+
+  /// After a `term_watch` ends (text terminals turned off, say), a `changed` event opens it again, at most once per gap.
+  final Duration rewatchGap;
 
   ServiceStatus? status;
   String? error;
@@ -323,10 +335,22 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi, ServiceSwitchA
   /// first line, while disconnected, from an old service, and always on iOS (no service there).
   DeviceLoad? load;
 
+  /// This machine's text terminals from the service's `term_watch` (the 本机 column's 终端 card); null before the
+  /// first list, while the watch is down (terminals off, disconnected), from an old service, and always on iOS.
+  TermList? localTerms;
+
   ServiceConnection? _cmd;
   ServiceConnection? _sub;
   ServiceConnection? _remote;
   ServiceConnection? _load;
+  ServiceConnection? _terms;
+
+  /// Set when the service answered `term_watch` with `unknown cmd`: not asked again until the next connection.
+  var _termsOld = false;
+  var _termsOpening = false;
+  /// When the terminal watch was last opened; a later one waits until [rewatchGap] after it, on [_termsTimer].
+  DateTime? _termsTried;
+  Timer? _termsTimer;
 
   /// Counts [_closeAll]s, so a load watch opened for an earlier connection does not take over.
   var _gen = 0;
@@ -369,6 +393,7 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi, ServiceSwitchA
       error = null;
       if (_disposed) return _closeAll();
       unawaited(_watchLoad(token));
+      unawaited(_watchTerms(token));
       notifyListeners();
     } catch (e) {
       _closeAll();
@@ -418,6 +443,76 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi, ServiceSwitchA
     });
   }
 
+  /// The terminal list stream, on a connection of its own. It ends with an error line when text terminals are off;
+  /// [refresh] opens it again on a later `changed`. An old service's `unknown cmd` is not asked again until reconnect.
+  Future<void> _watchTerms(String token) async {
+    if (defaultTargetPlatform == TargetPlatform.iOS || _termsOpening) return;
+    final gen = _gen;
+    _termsOpening = true;
+    _termsTried = DateTime.now();
+    final ServiceConnection c;
+    try {
+      c = await ServiceConnection.connect(token: token, port: port);
+    } catch (_) {
+      return;
+    } finally {
+      _termsOpening = false;
+    }
+    if (_disposed || gen != _gen) {
+      c.close();
+      return;
+    }
+    _terms = c;
+    c.watch({'cmd': 'term_watch'}).listen((m) {
+      if (!identical(_terms, c)) return;
+      if (m['ok'] != true) {
+        if ('${m['error']}'.contains('unknown cmd')) _termsOld = true;
+        c.close();
+        return;
+      }
+      localTerms = termListFromJson(m, 'local');
+      notifyListeners();
+    });
+    c.done.then((_) {
+      if (!identical(_terms, c)) return;
+      _terms = null;
+      if (localTerms == null) return;
+      localTerms = null;
+      if (!_disposed) notifyListeners();
+    });
+  }
+
+  /// On a `changed`: the terminal watch is down (not from an old service) → open it again, at most once per
+  /// [rewatchGap]; one that comes sooner waits for the gap's end rather than being dropped (terminals turned off
+  /// and straight back on send their last `changed` inside it).
+  Future<void> _rewatchTerms() async {
+    if (_terms != null || _termsOld || _termsOpening || _cmd == null || _termsTimer != null) return;
+    final tried = _termsTried;
+    final wait = tried == null ? Duration.zero : rewatchGap - DateTime.now().difference(tried);
+    if (wait > Duration.zero) {
+      _termsTimer = Timer(wait, () {
+        _termsTimer = null;
+        unawaited(_rewatchTerms());
+      });
+      return;
+    }
+    final token = await readToken();
+    if (token == null || token.isEmpty || _terms != null || _cmd == null) return;
+    await _watchTerms(token);
+  }
+
+  /// Opens a text terminal on this machine in the terminal app [app]; the new terminal's id.
+  Future<String> termOpen({String? shell, required String app, String? from}) async {
+    final r = await _remoteRequest({'cmd': 'term_open', 'app': app, 'shell': ?shell, 'from': ?from});
+    return '${r['id'] ?? ''}';
+  }
+
+  /// Brings this machine's text terminal [term] to the front in its terminal app. Errors: [termFrontNotFound],
+  /// [termFrontConsent], `unsupported`.
+  Future<void> termFront(String term) async {
+    await _remoteRequest({'cmd': 'term_front', 'term': term});
+  }
+
   /// This machine's load once; [top] asks for the process list too.
   Future<Map<String, dynamic>> loadNow({bool top = false}) => _remoteRequest({'cmd': 'load', if (top) 'top': true});
 
@@ -428,6 +523,7 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi, ServiceSwitchA
       status = await c.status();
       await _readLabels(c);
       if (!_disposed) notifyListeners();
+      unawaited(_rewatchTerms());
     } catch (_) {
       // _lost handles a dead connection.
     }
@@ -470,8 +566,14 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi, ServiceSwitchA
   }
 
   void _closeAll() {
-    final c = _cmd, s = _sub, r = _remote, l = _load;
+    final c = _cmd, s = _sub, r = _remote, l = _load, t = _terms;
     _gen++;
+    _terms = null;
+    localTerms = null;
+    _termsOld = false;
+    _termsTried = null;
+    _termsTimer?.cancel();
+    _termsTimer = null;
     _cmd = null;
     _sub = null;
     _remote = null;
@@ -481,6 +583,7 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi, ServiceSwitchA
     s?.close();
     r?.close();
     l?.close();
+    t?.close();
   }
 
   ServiceConnection _need() => _cmd ?? (throw ServiceException('service not running'));
@@ -504,7 +607,7 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi, ServiceSwitchA
 
   Future<List<Map<String, dynamic>>> history({int limit = 50}) => _need().history(limit: limit);
 
-  /// The address of the rapp-state service this machine's service knows of; null when there is none or on any error.
+  /// The address of the center service (rapp-center) this machine's service knows of; null when there is none or on any error.
   Future<String?> stateUrl() async {
     try {
       final r = await _need().request({'cmd': 'state'});

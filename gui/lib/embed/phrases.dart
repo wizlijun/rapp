@@ -6,23 +6,47 @@ abstract interface class StripItem {
   Map<String, Object?> toJson();
 }
 
-/// One 常用语. [put] (放进输入框) appends it to the draft instead of sending.
+/// [all] with the items of kind [T] replaced by [items], in order (cmd-menu design): the slots [T] holds take [items] one
+/// by one, slots left over are dropped (a delete removes the item from [all] itself), and any extra go right after [T]'s last slot (or at the end when [T] has none).
+/// The other kind stays where it was. The 命令 and 常用语 pages edit their own kind of the one 常用语 doc through this.
+List<StripItem> withKind<T extends StripItem>(List<StripItem> all, List<T> items) {
+  final out = <StripItem>[];
+  var k = 0;
+  int? after;
+  for (final it in all) {
+    if (it is! T) {
+      out.add(it);
+    } else if (k < items.length) {
+      out.add(items[k++]);
+      after = out.length;
+    }
+  }
+  out.insertAll(after ?? out.length, items.skip(k));
+  return out;
+}
+
+/// One 常用语. [put] (放进输入框) appends it to the draft instead of sending. [id] names it for stars, counts and sync
+/// (quick-row spec §9); it is not part of `==`, and QuickPrefs gives every phrase one.
 class Phrase implements StripItem {
-  const Phrase(this.text, {this.put = false});
+  const Phrase(this.text, {this.put = false, this.id});
   final String text;
   final bool put;
+  final String? id;
 
-  Phrase copyWith({String? text, bool? put}) => Phrase(text ?? this.text, put: put ?? this.put);
+  Phrase copyWith({String? text, bool? put}) => Phrase(text ?? this.text, put: put ?? this.put, id: id);
+
+  Phrase withId(String id) => Phrase(text, put: put, id: id);
 
   @override
-  Map<String, Object> toJson() => {'text': text, if (put) 'put': true};
+  Map<String, Object> toJson() => {'text': text, if (put) 'put': true, 'id': ?id};
 
-  /// Null when [j] is not a phrase with a non-blank text.
+  /// Null when [j] is not a phrase with a non-blank text. A blank or non-string id reads as none.
   static Phrase? fromJson(Object? j) {
     if (j is! Map) return null;
     final t = j['text'];
     if (t is! String || t.trim().isEmpty) return null;
-    return Phrase(t, put: j['put'] == true);
+    final id = j['id'];
+    return Phrase(t, put: j['put'] == true, id: id is String && id.isNotEmpty ? id : null);
   }
 
   @override

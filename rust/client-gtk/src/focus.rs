@@ -6,7 +6,7 @@ use std::collections::HashMap;
 pub fn grayscale(surface: &cairo::ImageSurface) -> Option<cairo::ImageSurface> {
     let mut bytes = Vec::new();
     surface.with_data(|data| bytes.extend_from_slice(data)).ok()?;
-    for pixel in bytes.chunks_exact_mut(4) {
+    for pixel in bytes.as_chunks_mut::<4>().0 {
         let luma = ((77 * pixel[2] as u32 + 150 * pixel[1] as u32 + 29 * pixel[0] as u32) / 256) as u8;
         pixel[..3].fill(luma);
     }

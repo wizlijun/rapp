@@ -30,7 +30,7 @@ ModifierLatch keyLatchOf(MainState state, RemoteSession session) =>
     _isTerm(state, session) ? session.keyLatch : state.appLatch;
 
 List<List<String>> _rowsOf(MainState state, RemoteSession session) =>
-    keyBarRows(app: !_isTerm(state, session), more: state.prefs.keyBarMore);
+    keyBarRows(layout: state.quick.layout, more: state.prefs.keyBarMore);
 
 /// Whether [session] is of the terminal kind: a text terminal or a terminal app. The kind picks which quick-area
 /// pref it follows.
@@ -50,13 +50,11 @@ bool typedIntoPicture(MainState state, RemoteSession session, KeyEvent e) =>
     !session.composer.editorFocused &&
     state.voiceMouseHold != session.sid;
 
-/// Whether the 常用语条 tops the bar (phrases spec §2): 显示常用语条 on, something to show (a phrase, or a command with a
-/// tool in front), a text terminal or an app whose profile has 常用语条 on. Whether the quick area is folded is not its business.
-bool phraseStripShown(MainState state, RemoteSession session) {
-  final p = state.prefs;
-  if (!p.phraseStrip || !(_isTerm(state, session) || session.profile.phrases)) return false;
-  return p.phrases.any((i) => i is Phrase) || (p.phrases.isNotEmpty && state.stripToolOf(session) != null);
-}
+/// Whether the 常用语条 tops the bar (phrases spec §2, quick-row spec §5.1): 显示常用语条 on, and a text terminal or an
+/// app whose profile has 常用语条 on. It need not have a chip to show: its two menus are of use alone. Whether the quick
+/// area is folded is not its business.
+bool phraseStripShown(MainState state, RemoteSession session) =>
+    state.prefs.phraseStrip && (_isTerm(state, session) || session.profile.phrases);
 
 /// How high the bar is, with the modes now on (the 常用语条 included).
 double keyBarHeightOf(MainState state, RemoteSession session) =>
@@ -228,7 +226,7 @@ class _KeyBarState extends State<KeyBar> {
   void initState() {
     super.initState();
     _bind();
-    // A key typed into the picture folds the 快捷区 (打字后自动收起); the toggle in the box, or beside 输入, shows it again.
+    // A key typed into the picture folds the 快捷区 (打字后自动收起); the toggle beside 输入 (收起) shows it again.
     HardwareKeyboard.instance.addHandler(_onKey);
   }
 
@@ -376,28 +374,108 @@ class _KeyBarState extends State<KeyBar> {
     );
   }
 
-  /// One row: the arrow block at its end ([keyBarTail]) one column of [keyBarColumns] each, the keys before it
-  /// sharing the rest, so the arrows line up across the rows.
-  Widget _rowOf(List<String> ids) {
+  Widget _rowOf(List<String> ids) => KeyBarRow(ids: ids, cell: _cellOf);
+
+  Widget? _cellOf(String id) {
+    final key = barKeys[id];
+    if (key == null) return null; // an id nothing knows (cleaned layouts have none): draw nothing rather than crash
+    return _BarKeyView(
+      key: Key('bar-$id'),
+      keyDef: key,
+      sid: _sid,
+      state: key.bit == null ? LatchState.off : _latch.of(key.bit!),
+      blocked: _blocked,
+      onFire: (haptic, flags) => _fire(key, haptic: haptic, flags: flags),
+    );
+  }
+}
+
+/// One row of the bar: the arrow block at its end ([keyBarTail]) one column of [keyBarColumns] each, the keys before it
+/// sharing the rest, so the arrows line up across the rows. [cell] draws one id (null: nothing). The key settings page
+/// draws its layout editor with the same row, so the widths are the bar's.
+class KeyBarRow extends StatelessWidget {
+  const KeyBarRow({super.key, required this.ids, required this.cell});
+  final List<String> ids;
+  final Widget? Function(String id) cell;
+
+  @override
+  Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, c) {
       final column = ((c.maxWidth - (keyBarColumns - 1) * keyBarGap) / keyBarColumns).clamp(0.0, double.infinity);
       final tail = keyBarTail(ids);
-      final children = <Widget>[];
+      // A row made of the arrow block alone has nothing to share the rest: an empty cell holds the columns at the right.
+      final children = <Widget>[if (ids.isNotEmpty && tail == ids.length) const Expanded(child: SizedBox())];
       for (final (i, id) in ids.indexed) {
-        if (i > 0) children.add(const SizedBox(width: keyBarGap));
-        final key = barKeys[id]!;
-        final view = _BarKeyView(
-          key: Key('bar-$id'),
-          keyDef: key,
-          sid: _sid,
-          state: key.bit == null ? LatchState.off : _latch.of(key.bit!),
-          blocked: _blocked,
-          onFire: (haptic, flags) => _fire(key, haptic: haptic, flags: flags),
-        );
+        final view = cell(id);
+        if (view == null) continue;
+        if (children.isNotEmpty) children.add(const SizedBox(width: keyBarGap));
         children.add(i >= ids.length - tail ? SizedBox(width: column, child: view) : Expanded(child: view));
       }
       return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: children);
     });
+  }
+}
+
+/// A face that is one symbol (⏎ ⌫ ↑ ⌘ ⋯), not a word or a chord like ⌃C: drawn bigger, the way a keycap prints it.
+bool isSymbolKeyLabel(String label) =>
+    label.runes.length == 1 && !RegExp(r'[\p{L}\p{N}]', unicode: true).hasMatch(label);
+
+/// Each platform's own UI font for key faces, so ⏎ ⌫ ↑ look like that platform's keyboard: SF Pro on Apple, Segoe UI
+/// on Windows, Roboto on Android, the system sans on Linux, each with the symbol fonts the platform ships behind it.
+/// Never the mono font: SF Mono and Menlo draw these arrows small and thin.
+TextStyle keyFaceStyle(TargetPlatform platform, String label) {
+  final (family, fallback) = switch (platform) {
+    TargetPlatform.iOS || TargetPlatform.macOS => ('CupertinoSystemText', const ['Apple Symbols']),
+    TargetPlatform.windows => ('Segoe UI', const ['Segoe UI Symbol', 'Segoe UI Emoji']),
+    TargetPlatform.android => ('Roboto', const ['Noto Sans Symbols', 'Noto Sans Symbols 2']),
+    TargetPlatform.linux || TargetPlatform.fuchsia =>
+      ('sans-serif', const ['DejaVu Sans', 'Noto Sans', 'Noto Sans Symbols', 'Noto Sans Symbols 2']),
+  };
+  return TextStyle(
+    fontFamily: family,
+    fontFamilyFallback: fallback,
+    fontSize: isSymbolKeyLabel(label) ? 19 : 14,
+    fontWeight: FontWeight.w500,
+  );
+}
+
+/// The face of a key: a rounded box with its [label]; [lit] draws the accent border (a lit modifier, or a selected cell
+/// in the layout editor), [locked] also tints it. Never focusable: a tap leaves the caret where it was.
+class KeyFace extends StatelessWidget {
+  const KeyFace({super.key, required this.label, this.lit = false, this.locked = false, this.onTap});
+  final String label;
+  final bool lit;
+  final bool locked;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    final accent = lit || locked;
+    return Material(
+      color: locked ? Color.alphaBlend(t.accent.withValues(alpha: .18), t.raise.first) : t.raise.first,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(t.r),
+        side: BorderSide(color: accent ? t.accent : t.line, width: accent ? 2 : 1),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        canRequestFocus: false,
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          child: Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(label,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: keyFaceStyle(Theme.of(context).platform, label).copyWith(color: t.text)),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -458,13 +536,8 @@ class _BarKeyViewState extends State<_BarKeyView> {
 
   @override
   Widget build(BuildContext context) {
-    final t = RappTokens.of(context);
     final k = _k;
     final once = widget.state == LatchState.once, locked = widget.state == LatchState.locked;
-    final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(t.r),
-      side: BorderSide(color: once || locked ? t.accent : t.line, width: once || locked ? 2 : 1),
-    );
     return Semantics(
       button: true,
       label: k.spoken,
@@ -478,22 +551,7 @@ class _BarKeyViewState extends State<_BarKeyView> {
           onPointerDown: _down,
           onPointerUp: (_) => _stop(),
           onPointerCancel: (_) => _stop(),
-          child: Material(
-            color: locked ? Color.alphaBlend(t.accent.withValues(alpha: .18), t.raise.first) : t.raise.first,
-            shape: shape,
-            clipBehavior: Clip.antiAlias,
-            // Never focusable: a tap leaves the caret where it was.
-            child: InkWell(
-              canRequestFocus: false,
-              onTap: widget.blocked ? null : () {},
-              child: Center(
-                child: Text(k.label,
-                    maxLines: 1,
-                    style: TextStyle(
-                        fontSize: 13, color: t.text, fontFamily: t.mono, fontFamilyFallback: t.monoFallback)),
-              ),
-            ),
-          ),
+          child: KeyFace(label: k.label, lit: once, locked: locked, onTap: widget.blocked ? null : () {}),
         ),
       ),
     );

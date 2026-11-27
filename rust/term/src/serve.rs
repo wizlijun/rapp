@@ -108,7 +108,8 @@ enum Req {
     },
     /// The saved terminals with their directory and command, for this machine's own CLI: the service never
     /// forwards it from a peer.
-    Saved,
+    Saved,    /// Bring this machine's terminal `term` to the front in its Terminal window.
+    Front { term: String },
 }
 
 /// The session list: this machine's sessions, and what it offers.
@@ -335,6 +336,16 @@ impl Worker {
             Req::Forget { keys } => {
                 let v = match cfg {
                     Ok(_) => json!({ "ok": true, "forgot": self.forget(&keys).await }),
+                    Err(e) => json!({ "error": e }),
+                };
+                reply(&mut w, &v).await
+            }
+            Req::Front { term } => {
+                let v = match cfg {
+                    Ok(_) => match self.front(&term).await {
+                        Ok(()) => json!({ "ok": true }),
+                        Err(e) => json!({ "error": e.as_str() }),
+                    },
                     Err(e) => json!({ "error": e }),
                 };
                 reply(&mut w, &v).await
@@ -620,6 +631,19 @@ impl Worker {
             one = self.opening.lock() => one,
         };
         self.start(app, &shell, source.cwd.as_deref(), None, source.tty.as_deref()).await.map(|s| pty_id(&s))
+    }
+
+    /// Bring the live local pty session `term` to the front by its holder's tty.
+    async fn front(&self, term: &str) -> Result<(), launch::FrontRefused> {
+        let id = TermId::parse(term).ok().filter(|id| id.backend == PTY && id.host.is_none());
+        let Some(id) = id else { return Err(launch::FrontRefused::NotFound) };
+        let statuses = self.pty_statuses().await;
+        let tty = statuses.iter().find(|s| is_session(s, &id.name)).and_then(|s| s.tty.clone()).filter(|t| !t.is_empty());
+        let Some(tty) = tty else { return Err(launch::FrontRefused::NotFound) };
+        let with = self.opts.launch_with.clone();
+        tokio::task::spawn_blocking(move || launch::front(&tty, with.as_deref()))
+            .await
+            .unwrap_or(Err(launch::FrontRefused::NotFound))
     }
 
     /// What 新建 takes after: the live terminal typed in last (moved last, when none was typed in); with none, the
@@ -1405,6 +1429,8 @@ mod tests {
         let r: Req = serde_json::from_str(r#"{"op":"forget","keys":["0123456789abcdef"]}"#).unwrap();
         assert!(matches!(r, Req::Forget { ref keys } if keys.len() == 1), "{r:?}");
         assert!(matches!(serde_json::from_str(r#"{"op":"saved"}"#).unwrap(), Req::Saved));
+        let r: Req = serde_json::from_str(r#"{"op":"front","term":"term:pty:ab"}"#).unwrap();
+        assert!(matches!(r, Req::Front { ref term } if term == "term:pty:ab"), "{r:?}");
         assert!(serde_json::from_str::<Req>(r#"{"op":"restore","keys":"x"}"#).is_err());
     }
 

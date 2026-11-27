@@ -1,6 +1,6 @@
 // The writing panel (spec §3, W1–W16): a 720-wide box at the bottom of the stage, one line to
 // start, growing upward to half the stage. From the top: the outgoing items, the hint line,
-// the box with [＋] [快捷区] [editor] [发送]. The editor owns the text; the model copies it out
+// the box with [＋] [editor] [发送]. The editor owns the text; the model copies it out
 // at send, session switch, 1 s idle and collapse (spec §5). The draft is the session's (R18).
 import 'dart:async';
 import 'dart:math' as math;
@@ -55,9 +55,8 @@ const _minText = 120.0;
 /// The box row's width that does not scale: the border and the text's 8 on either side.
 const _fixed = _border + 2 * 8;
 
-/// The box row's key width per unit of zoom: ＋, the toggle and 发送 (40 each), the 4 between ＋ and the toggle, and
-/// [_edge] on both sides of each group.
-const _keysPerScale = 3 * 40 + 4 + 4 * _edge;
+/// The box row's key width per unit of zoom: ＋ and 发送 (40 each), and [_edge] on both sides of each.
+const _keysPerScale = 2 * 40 + 4 * _edge;
 
 /// The panel's boxes let the picture behind show through: the float fill 30% transparent.
 const composerFillOpacity = 0.7;
@@ -442,35 +441,28 @@ class _ComposerPanelState extends State<ComposerPanel> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    // ＋ and the 快捷区 toggle on the left, 发送 on the right: 40 square, [_edge] to the border on
-                    // every side (one line), 4 between the two on the left, all times the keys' zoom; all sit at the bottom as the text
-                    // grows.
+                    // ＋ on the left, 发送 on the right: 40 square, [_edge] to the border on every side (one line),
+                    // times the keys' zoom; both sit at the bottom as the text grows. The 快捷区 toggle is not here:
+                    // it stays beside 收起 (bar-cmd addendum).
                     Padding(
                       padding: EdgeInsets.all(edge),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          ComposerPlus(
-                            state: widget.state,
-                            session: _s,
-                            port: widget.port,
-                            onAttach: _attach,
-                            history: widget.state.history,
-                            historyKey: widget.state.historyKeyOf(_s),
-                            onAddPhrase: widget.state.addPhrase,
-                            onPress: () => widget.state.holdForPanel(_s),
-                            onReturnAfter: _s.appId.isEmpty
-                                ? null
-                                : (on) => widget.state.setAfterSend(_s, on ? AfterSend.pressReturn : AfterSend.none),
-                            terminal: _terminal,
-                            blocked: _blocked,
-                            scale: kk,
-                            zoom: widget.state.composerZoom.value,
-                            onZoom: widget.state.setComposerZoom,
-                          ),
-                          SizedBox(width: 4 * kk),
-                          QuickToggle(state: widget.state, session: _s, look: QuickToggleLook.box, scale: kk),
-                        ],
+                      child: ComposerPlus(
+                        state: widget.state,
+                        session: _s,
+                        port: widget.port,
+                        onAttach: _attach,
+                        history: widget.state.history,
+                        historyKey: widget.state.historyKeyOf(_s),
+                        onAddPhrase: widget.state.addPhrase,
+                        onPress: () => widget.state.holdForPanel(_s),
+                        onReturnAfter: _s.appId.isEmpty
+                            ? null
+                            : (on) => widget.state.setAfterSend(_s, on ? AfterSend.pressReturn : AfterSend.none),
+                        terminal: _terminal,
+                        blocked: _blocked,
+                        scale: kk,
+                        zoom: widget.state.composerZoom.value,
+                        onZoom: widget.state.setComposerZoom,
                       ),
                     ),
                     Expanded(
@@ -637,8 +629,8 @@ Widget _cornerRow(BuildContext context, MainState state, RemoteSession session, 
       ),
       if (button) const SizedBox(width: 8),
     ],
-    // With the text area folded the 快捷区 toggle stands left of 输入 (quick-toggle spec §6); open, it is in the box.
-    if (button && !open) ...[
+    // The 快捷区 toggle stands left of 输入 (收起 while open), the text area open or not (bar-cmd addendum).
+    if (button) ...[
       QuickToggle(state: state, session: session, look: QuickToggleLook.corner),
       const SizedBox(width: 8),
     ],
@@ -678,8 +670,8 @@ Widget _cornerRow(BuildContext context, MainState state, RemoteSession session, 
   );
 }
 
-/// iOS's stage stack, its bottom [bottom] up off the [stage]'s bottom: 语音 and 输入 (收起 while the panel is open)
-/// one element either way, so the toggle's icon turns over; closed, 还原 and the upload strip too. [upright] as
+/// iOS's stage stack, its bottom [bottom] up off the [stage]'s bottom: 语音, 输入 (收起 while the panel is open: one
+/// element either way, so its icon turns over) and the 快捷区 toggle; closed, 还原 and the upload strip too. [upright] as
 /// [stackUprightOf] has it: a portrait stage, or a column with no room above the block.
 Widget _iosStack(BuildContext context, MainState state, RemoteSession session, SessionPort port, VoiceHold? hold,
     double bottom, Size stage, bool upright) {
@@ -690,7 +682,7 @@ Widget _iosStack(BuildContext context, MainState state, RemoteSession session, S
   // A disallowed panel hides 输入, so the strip shows here.
   if (transfer == null && !button && !zoomed) return const SizedBox.shrink();
   final t = RappTokens.of(context);
-  // An open panel keeps only 语音 and 收起 (user 2026-11-18: 「输入版打开的时候不要隐藏这个语音输入」).
+  // An open panel keeps 语音 (user 2026-11-18: 「输入版打开的时候不要隐藏这个语音输入」), the 快捷区 toggle and 收起.
   final hint = hold == null || hold.hint == null || (open && hold.active)
       ? null
       : voiceHint(hold, maxWidth: open ? stage.width - 2 * stageButtonsIn - stageButtonSize - 12 : null);
@@ -705,8 +697,8 @@ Widget _iosStack(BuildContext context, MainState state, RemoteSession session, S
         hidden: hold?.active ?? false,
         upright: upright,
         input: button ? _openToggle(session) : null,
-        // Folded, the 快捷区 toggle stands above 输入 (quick-toggle spec §6); open, it is in the box.
-        quick: button && !open ? QuickToggle(state: state, session: session, look: QuickToggleLook.stage) : null,
+        // The 快捷区 toggle stands above 输入 (收起 while open), the text area open or not (bar-cmd addendum).
+        quick: button ? QuickToggle(state: state, session: session, look: QuickToggleLook.stage) : null,
         restore: zoomed
             ? RappButton.stage(
                 key: const Key('zoom-reset'),
@@ -811,10 +803,8 @@ class _TidyLayer extends StatelessWidget {
         stage: stage,
         block: panelPlaceOf(session).value,
         keyboard: keyboard,
-        columnHeight: stackColumnHeight(open: _open, buttons: buttons, voice: voice));
-    final h = _open
-        ? openStackHeight(upright, voice)
-        : closedStackHeight(buttons: buttons, upright: upright);
+        columnHeight: stackHeightOf(buttons: buttons, upright: false));
+    final h = stackHeightOf(buttons: buttons, upright: upright);
     final bottom =
         stackBottomOf(stage: stage, block: panelPlaceOf(session).value, keyboard: keyboard, stackHeight: h) + h + 12;
     return Offset(x, stage.height - bottom - card.height);

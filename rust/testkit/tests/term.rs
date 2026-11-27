@@ -479,3 +479,72 @@ async fn ipc_term_commands_with_terminals_off() {
     }
     assert!(term_log(a.bins.path()).is_none_or(|l| !l.contains("restore") && !l.contains("forget")));
 }
+
+#[tokio::test]
+async fn local_term_open_reaches_the_worker() {
+    let a = service().await;
+    let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"term_open","app":"Terminal","from":"last"})).await;
+    assert_eq!(r, json!({"ok":true,"id":"term:pty:opened"}));
+    assert_eq!(term_requests(a.bins.path(), "open"), [json!({"op":"open","app":"Terminal","from":"last"})]);
+    let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"term_open","app":"Terminal","shell":"/bin/zsh"})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(term_requests(a.bins.path(), "open")[1], json!({"op":"open","app":"Terminal","shell":"/bin/zsh"}));
+}
+
+#[tokio::test]
+async fn local_term_front_reaches_the_worker() {
+    let a = service().await;
+    let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"term_front","term":"term:pty:a"})).await;
+    assert_eq!(r, json!({"ok":true}));
+    let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"term_front","term":"term:pty:gone"})).await;
+    assert_eq!(r, json!({"ok":false,"error":"not-found"}));
+    assert_eq!(term_requests(a.bins.path(), "front")[0], json!({"op":"front","term":"term:pty:a"}));
+    assert!(!service_log_text(a.home.path()).contains("term:pty:a"));
+}
+
+#[tokio::test]
+async fn local_term_watch_pushes_changes_then_ends_when_off() {
+    let a = service().await;
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    ipc.send(json!({"cmd":"term_watch"})).await;
+    let first = ipc.next().await;
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(first["terms"][0]["id"], "term:pty:work", "{first}");
+    add_row(a.home.path(), "x");
+    loop {
+        let v = ipc.next().await;
+        assert_eq!(v["ok"], true, "{v}");
+        if v["terms"].as_array().unwrap().iter().any(|t| t["id"] == "term:pty:x") {
+            break;
+        }
+    }
+    std::fs::write(a.home.path().join("term.json"), r#"{"allow":false}"#).unwrap();
+    let end = ipc.next().await;
+    assert_eq!(end["ok"], false, "{end}");
+    assert!(end["error"].is_string(), "{end}");
+    assert_eq!(ipc.next().await, Value::Null);
+}
+
+#[tokio::test]
+async fn local_term_watch_ends_when_the_app_hangs_up() {
+    let a = service().await;
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    ipc.send(json!({"cmd":"term_watch"})).await;
+    assert_eq!(ipc.next().await["ok"], true);
+    drop(ipc);
+    wait_term_log(a.bins.path(), "watch closed").await;
+}
+
+#[tokio::test]
+async fn local_term_commands_with_terminals_off_are_refused() {
+    let a = service().await;
+    std::fs::write(a.home.path().join("term.json"), r#"{"allow":false}"#).unwrap();
+    for cmd in [json!({"cmd":"term_open","app":"Terminal"}), json!({"cmd":"term_front","term":"term:pty:a"})] {
+        assert_eq!(ipc_once(&a.svc, a.home.path(), cmd.clone()).await, json!({"ok":false,"error":OFF}), "{cmd}");
+    }
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    ipc.send(json!({"cmd":"term_watch"})).await;
+    assert_eq!(ipc.next().await, json!({"ok":false,"error":OFF}));
+    assert_eq!(ipc.next().await, Value::Null);
+    assert_eq!(term_log(a.bins.path()), None);
+}

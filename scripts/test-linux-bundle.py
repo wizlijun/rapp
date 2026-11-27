@@ -26,7 +26,7 @@ version = tomllib.loads((repo / 'rust/Cargo.toml').read_text())['workspace']['pa
 protocol_source = (repo / 'rust/client-core/src/protocol.rs').read_text()
 protocol = re.search(r'^pub const VERSION: u8 = (\d+);$', protocol_source, re.MULTILINE)
 assert protocol, 'client protocol version declaration not found'
-for name in ['rapp', 'rapp-gui', 'rapp-cli', 'rapp-client', 'rapp-session', 'rapp-host', 'rapp-service', 'rapp-hub', 'rapp-term', 'rapp-state', 'rapp-speech']:
+for name in ['rapp', 'rapp-gui', 'rapp-cli', 'rapp-client', 'rapp-session', 'rapp-host', 'rapp-service', 'rapp-hub', 'rapp-term', 'rapp-center', 'rapp-speech']:
     assert (bundle / name).is_file() and os.access(bundle / name, os.X_OK), name
 assert subprocess.check_output([bundle / 'rapp', '--version'], text=True).strip() == f'rapp {version}'
 assert json.loads(subprocess.check_output([bundle / 'rapp-client', 'version', '--json'], text=True)) == {
@@ -157,7 +157,7 @@ with tempfile.TemporaryDirectory(prefix='rapp-bundle-') as td, EchoServer(('127.
                         apps = ask({'cmd': 'apps', 'id': host})
                         expected_os = 'omarchy' if Path('/usr/share/omarchy/shell').exists() else 'linux'
                         assert apps.get('os') == expected_os, apps
-                        assert apps['capabilities']['applications'] is False, apps
+                        assert apps['capabilities']['applications'] is (status['permissions'].get('applications') is True), apps
                         assert any(a['app'] == 'desktop:' and a['displays'] for a in apps['apps']), apps
                         opened = ask({'cmd': 'open', 'id': host, 'app': 'desktop:', 'embed': True})
                         with socket.create_connection(('127.0.0.1', opened['port']), timeout=10) as view:
@@ -236,13 +236,18 @@ with tempfile.TemporaryDirectory(prefix='rapp-bundle-') as td, EchoServer(('127.
                 assert cli('term', 'restore', '--forget') == '已清掉 1 个\n'
                 assert not snap_file.exists()
                 assert cli('term', 'restore', '--list') == '没有可以恢复的终端\n'
+                center0 = cli('center')
                 state0 = cli('state')
-                assert '状态服务：没开' in state0, state0
+                assert center0 == state0 and '中心服务：没开' in center0, (center0, state0)
                 assert ipc({'cmd': 'state'})['url'] is None
-                state_on = cli('state', 'on')
-                assert '已打开状态服务' in state_on, state_on
+                center_on = cli('center', 'on')
+                assert '已打开中心服务' in center_on, center_on
+                assert cli('center') == cli('state') and '中心服务：开着' in cli('center')
                 st_ipc = ipc({'cmd': 'state'})
                 assert st_ipc['running'] is True and st_ipc['url'] == 'http://127.0.0.1:8102', st_ipc
+                svcs_cfg = json.loads((local / 'services.json').read_text())
+                assert svcs_cfg.get('center', {}).get('on') is True and 'state' not in svcs_cfg, svcs_cfg
+                assert (local / 'center').is_dir(), list(local.iterdir())
                 sse = http.client.HTTPConnection('127.0.0.1', 8102, timeout=3)
                 try:
                     sse.request('GET', '/v1/watch', headers={'Accept': 'text/event-stream'})
@@ -254,11 +259,48 @@ with tempfile.TemporaryDirectory(prefix='rapp-bundle-') as td, EchoServer(('127.
                     sse.close()
                 desk_http = http.client.HTTPConnection('127.0.0.1', 8102, timeout=3)
                 try:
+                    desk_http.request('GET', '/v1/health')
+                    health_resp = desk_http.getresponse()
+                    health_json = json.loads(health_resp.read().decode('utf-8'))
+                    assert health_resp.status == 200 and health_json == {
+                        'name': 'rapp-state', 'service': 'rapp-center', 'v': 2, 'routes': True,
+                    }, (health_resp.status, health_json)
+                    desk_http.request('GET', '/v1/routes')
+                    routes_resp = desk_http.getresponse()
+                    routes_json = json.loads(routes_resp.read().decode('utf-8'))
+                    assert routes_resp.status == 200 and routes_json == {
+                        'routes': [
+                            {'name': 'state', 'kind': 'builtin', 'v': 1},
+                            {'name': 'prefs', 'kind': 'builtin', 'v': 1},
+                        ],
+                    }, (routes_resp.status, routes_json)
+                    desk_http.request('GET', '/prefs/v1/all')
+                    prefs_all_resp = desk_http.getresponse()
+                    prefs_all = json.loads(prefs_all_resp.read().decode('utf-8'))
+                    assert prefs_all_resp.status == 200 and len(prefs_all.get('store', '')) == 16, (prefs_all_resp.status, prefs_all)
+                    stars_put = json.dumps({'at': 1700000000001, 'base': 0, 'data': ['k:search']})
+                    desk_http.request('PUT', '/prefs/v1/stars', body=stars_put, headers={'Content-Type': 'application/json'})
+                    stars_put_resp = desk_http.getresponse()
+                    stars_put_resp.read()
+                    assert stars_put_resp.status == 204, stars_put_resp.status
+                    desk_http.request('GET', '/prefs/v1/stars')
+                    stars_get_resp = desk_http.getresponse()
+                    stars_doc = json.loads(stars_get_resp.read().decode('utf-8'))
+                    assert stars_get_resp.status == 200 and stars_doc == {'at': 1700000000001, 'data': ['k:search']}, stars_doc
+                    desk_http.request('PUT', '/prefs/v1/stars', body=stars_put, headers={'Content-Type': 'application/json'})
+                    stars_conflict_resp = desk_http.getresponse()
+                    stars_conflict_doc = json.loads(stars_conflict_resp.read().decode('utf-8'))
+                    assert stars_conflict_resp.status == 409 and stars_conflict_doc == stars_doc, (stars_conflict_resp.status, stars_conflict_doc)
+                    prefs_file = local / 'center' / 'prefs.json'
+                    prefs_deadline = time.monotonic() + 3
+                    while not prefs_file.is_file() and time.monotonic() < prefs_deadline:
+                        time.sleep(.1)
+                    assert prefs_file.is_file() and (prefs_file.stat().st_mode & 0o777) == 0o600, prefs_file
                     desk_body = json.dumps({
                         'device': 'linux-box',
                         'sessions': [{'id': '123456789', 'app': 'term:pty:t1', 'name': 'claude'}],
                     })
-                    desk_http.request('PUT', '/v1/desk/linuxfp1', body=desk_body, headers={'Content-Type': 'application/json'})
+                    desk_http.request('PUT', '/state/v1/desk/linuxfp1', body=desk_body, headers={'Content-Type': 'application/json'})
                     desk_resp = desk_http.getresponse()
                     desk_resp.read()
                     assert desk_resp.status == 204, desk_resp.status
@@ -266,6 +308,10 @@ with tempfile.TemporaryDirectory(prefix='rapp-bundle-') as td, EchoServer(('127.
                     state_resp = desk_http.getresponse()
                     state_snap = json.loads(state_resp.read().decode('utf-8'))
                     assert state_resp.status == 200, state_resp.status
+                    desk_http.request('GET', '/state/v1/state')
+                    alias_resp = desk_http.getresponse()
+                    alias_snap = json.loads(alias_resp.read().decode('utf-8'))
+                    assert alias_resp.status == 200 and alias_snap == state_snap, (alias_resp.status, alias_snap)
                     assert any(
                         d.get('fp') == 'linuxfp1'
                         and d.get('device') == 'linux-box'
@@ -279,9 +325,9 @@ with tempfile.TemporaryDirectory(prefix='rapp-bundle-') as td, EchoServer(('127.
                 st_on_ipc = ipc({'cmd': 'state', 'on': True})
                 assert st_on_ipc.get('on') is True and st_on_ipc.get('running') is True, st_on_ipc
                 state_off = cli('state', 'off')
-                assert '已关掉状态服务' in state_off, state_off
+                assert '已关掉中心服务' in state_off, state_off
                 assert ipc({'cmd': 'state'})['url'] is None
-                assert not ipc({'cmd': 'shares'})['shares'], 'state off left a share behind'
+                assert not ipc({'cmd': 'shares'})['shares'], 'center/state off left a share behind'
                 load_end = time.monotonic() + 8
                 load_json = None
                 while time.monotonic() < load_end:

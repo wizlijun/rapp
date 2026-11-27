@@ -171,7 +171,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('each remote device page has a 状态服务 row only when a switch api is given', (tester) async {
+  testWidgets('each remote device page has a 中心服务 row only when a switch api is given', (tester) async {
     await pumpTab(tester, serviceSwitch: _NoSwitch());
     await selectMini(tester);
     expect(find.byKey(const ValueKey('state-service-111')), findsOneWidget);

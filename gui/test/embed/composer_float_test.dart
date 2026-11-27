@@ -233,6 +233,42 @@ void main() {
       expect(tester.getCenter(grip).dx, 400);
     });
 
+    pullTest('the grip spans the whole top edge of the block', (tester) async {
+      await show(tester, TargetPlatform.iOS);
+      expect(tester.getSize(grip).width, tester.getSize(body).width);
+      expect(tester.getSize(grip).height, gripSize.height);
+    });
+
+    pullTest('a drag from either end of the grip moves the panel', (tester) async {
+      await show(tester, TargetPlatform.iOS, at: const InputPoint(0.5, 300));
+      // The block's own ends (the body is as wide as the block), at the grip row's height; measured
+      // again each time, since the first drag moves the block.
+      for (final left in [true, false]) {
+        final y = top(tester);
+        final end = Offset(left ? tester.getTopLeft(body).dx + 4 : tester.getTopRight(body).dx - 4, tester.getCenter(grip).dy);
+        await drag(tester, end, [30, 30]);
+        expect(top(tester), closeTo(y + 60, 1), reason: left ? 'left end' : 'right end');
+      }
+      expect(placed, hasLength(2));
+    });
+
+    pullTest('a double-tap at the grip\'s left end goes back to the default place', (tester) async {
+      await show(tester, TargetPlatform.iOS, at: const InputPoint(0.5, 300));
+      final end = Offset(tester.getTopLeft(body).dx + 4, tester.getCenter(grip).dy);
+      await tester.tapAt(end);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tapAt(end);
+      await tester.pump(kDoubleTapTimeout);
+      expect(placed, [null]);
+    });
+
+    pullTest('the bar is a third of the block, between 48 and 160', (tester) async {
+      await show(tester, TargetPlatform.iOS);
+      final bar = find.descendant(of: find.byKey(const Key('composer-grip-bar')), matching: find.byType(Container));
+      final w = tester.getSize(body).width;
+      expect(tester.getSize(bar).width, closeTo((w / 3).clamp(48.0, 160.0), 0.5));
+    });
+
     pullTest('macOS: no composer-grip-close, and no pull', (tester) async {
       await show(tester, TargetPlatform.macOS, pull: false);
       expect(find.byKey(const Key('composer-grip-close')), findsNothing);

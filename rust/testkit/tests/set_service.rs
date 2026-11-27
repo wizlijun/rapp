@@ -38,9 +38,10 @@ async fn wait_state(a: &TestService, want: bool) -> Value {
     }
 }
 
+/// `on` as rApp reads it: the `center` entry, else the older `state` one.
 fn file_on(home: &Path) -> Option<bool> {
     let v: Value = serde_json::from_slice(&std::fs::read(home.join("services.json")).ok()?).ok()?;
-    v["state"]["on"].as_bool()
+    v["center"]["on"].as_bool().or_else(|| v["state"]["on"].as_bool())
 }
 
 async fn a_and_b(a_port: u16) -> (TestService, TestService, rapp_wire::Key) {

@@ -1,4 +1,4 @@
-// The 快捷区 toggle in the writing box (quick-toggle spec §1, §8): lit while the 快捷区 shows, one pref per kind.
+// The 快捷区 toggle beside 输入/收起, the text area open or not (quick-toggle spec §1, §8; bar-cmd addendum): lit while the 快捷区 shows, one pref per kind.
 import 'dart:io';
 
 import 'package:flutter/gestures.dart';
@@ -52,7 +52,7 @@ void main() {
       height: 700,
       child: Stack(children: composerLayer(state: es, session: s, port: port, editor: FlutterEditor.new))));
 
-  final toggle = find.byKey(const Key('quick-toggle'));
+  final toggle = find.byKey(const Key('quick-toggle-stack'));
   bool lit(WidgetTester tester) => tester.widget<RappButton>(toggle).active;
   // The toggle's own label: the old corner handle (gone in Task 4) is also named 显示快捷区.
   String? label(WidgetTester tester) => tester.widget<RappButton>(toggle).semanticLabel;
@@ -218,25 +218,6 @@ void main() {
     expect(node.label, '收起快捷区');
     expect(node.tooltip, isEmpty);
     handle.dispose();
-  }, variant: TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
-
-  testWidgets('beside 输入 the toggle fades in as the box folds, at once under reduced motion', (tester) async {
-    big(tester);
-    app.composer.open = false;
-    final fade = find.byKey(const Key('quick-toggle-fade'));
-    double opacity() => tester.widget<Opacity>(fade).opacity;
-    await tester.pumpWidget(layer(app));
-    expect(opacity(), lessThan(0.5));
-    await tester.pumpAndSettle();
-    expect(opacity(), 1);
-    await tester.pumpWidget(const SizedBox());
-    await tester.pumpWidget(wrap(
-        SizedBox(
-            width: 1000,
-            height: 700,
-            child: Stack(children: composerLayer(state: es, session: app, port: port, editor: FlutterEditor.new))),
-        disableAnimations: true));
-    expect(opacity(), 1);
   }, variant: TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
 
   testWidgets('tooltip names the action', (tester) async {

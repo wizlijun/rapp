@@ -1,4 +1,4 @@
-// 设置里的“状态服务”：这台设备怎么找 rapp-state（自动 / 关 / 手填地址），以及现在连得怎么样。
+// 设置里的“中心服务”：这台设备怎么找中心服务（rapp-center）（自动 / 关 / 手填地址），以及现在连得怎么样。
 import 'package:flutter/material.dart';
 
 import '../state/state_config.dart';
@@ -42,7 +42,7 @@ class _StateSectionState extends State<StateSection> {
   String _status() => switch (_sync.status) {
     StateStatus.connected => '已连上 ${_sync.url ?? ''}',
     StateStatus.unreachable => '连不上',
-    StateStatus.none => '没找到状态服务',
+    StateStatus.none => '没找到中心服务',
     StateStatus.off => '已关',
     StateStatus.connecting => '连接中…',
   };
@@ -74,7 +74,7 @@ class _StateSectionState extends State<StateSection> {
     listenable: _sync,
     builder: (context, _) {
       final mode = _manual ? StateMode.manual : _sync.config.mode;
-      return SectionCard(title: '状态服务', children: [
+      return SectionCard(title: '中心服务', children: [
         _choice('自动', StateMode.auto, mode),
         _choice('关', StateMode.off, mode),
         _choice('手填地址', StateMode.manual, mode),

@@ -82,30 +82,46 @@ void main() {
       child: PhraseStrip(state: s, session: rs, port: rs == tsess ? term : port)));
   Finder ph(String id) => find.byKey(Key(id));
 
-  iosTest('claude in front: the first six are commands, with 「命令：」 semantics', (tester) async {
+  iosTest('claude in front: the commands come first, with 「命令：」 semantics', (tester) async {
     await tester.pumpWidget(strip(tsess));
+    // Nothing counted yet: the seven commands (搜历史 last) lead the row, then the phrases.
     expect(find.descendant(of: ph('phrase-0'), matching: find.text('新对话')), findsOneWidget);
-    expect(find.descendant(of: ph('phrase-5'), matching: find.text('搜历史')), findsOneWidget);
-    expect(find.descendant(of: ph('phrase-6'), matching: find.text('继续')), findsOneWidget);
+    expect(find.descendant(of: ph('phrase-1'), matching: find.text('切模式')), findsOneWidget);
+    expect(find.descendant(of: ph('phrase-5'), matching: find.text('用量')), findsOneWidget);
+    expect(find.descendant(of: ph('phrase-6'), matching: find.text('搜历史')), findsOneWidget);
+    final xs = [for (var i = 0; i <= 6; i++) tester.getTopLeft(ph('phrase-$i')).dx];
+    expect(xs, [...xs]..sort());
+    expect(xs.first, tester.getTopLeft(ph('phrase-strip-list')).dx);
     expect(find.bySemanticsLabel('命令：新对话'), findsOneWidget);
+    expect(find.bySemanticsLabel('命令：搜历史'), findsOneWidget);
   });
 
   iosTest('back to the shell: commands go, the first is 继续, the bar is as high', (tester) async {
     final h = keyBarHeightOf(s, tsess);
     fg('zsh', shell: true);
-    s.setStripItems(List.of(s.prefs.phrases)); // notify
+    s.setStripItems(List.of(s.quick.phrases)); // notify
     await tester.pumpWidget(strip(tsess));
     expect(find.text('新对话'), findsNothing);
-    expect(find.descendant(of: ph('phrase-6'), matching: find.text('继续')), findsOneWidget);
+    // The seven commands are gone, 搜历史 with them: 继续 (eighth in the list) leads.
+    expect(find.text('搜历史'), findsNothing);
+    expect(find.descendant(of: ph('phrase-7'), matching: find.text('继续')), findsOneWidget);
+    expect(tester.getTopLeft(ph('phrase-7')).dx, tester.getTopLeft(ph('phrase-strip-list')).dx);
     expect(keyBarHeightOf(s, tsess), h);
   });
 
-  iosTest('phraseStripShown: commands only show with a tool in front', (tester) async {
+  iosTest('phraseStripShown: commands only and no tool in front: the strip shows, its commands do not', (tester) async {
     s.setStripItems([for (final c in defaultStripItems.whereType<StripCmd>()) c]);
     fg('zsh', shell: true);
-    expect(phraseStripShown(s, tsess), isFalse);
+    expect(phraseStripShown(s, tsess), isTrue, reason: 'the two menus are of use alone (quick-row §5.1)');
+    await tester.pumpWidget(strip(tsess));
+    expect(find.text('新对话'), findsNothing);
+    expect(ph('quick-menu-cmds'), findsOneWidget);
+    expect(ph('quick-menu-phrases'), findsOneWidget);
     fg('claude');
+    s.setStripItems(List.of(s.quick.phrases)); // notify
+    await tester.pump();
     expect(phraseStripShown(s, tsess), isTrue);
+    expect(find.descendant(of: ph('phrase-0'), matching: find.text('新对话')), findsOneWidget);
   });
 
   iosTest('Codex without 新对话: grey, and a tap says so', (tester) async {
@@ -120,48 +136,72 @@ void main() {
     await tester.pump(const Duration(seconds: 5));
   });
 
-  iosTest('long press on a command: 编辑 · 移到最前 · 删除 only; 移到最前 and 删除 keep the order', (tester) async {
+  iosTest('long press on a command: 编辑 · 打星 · 删除 (移到最前 once starred); 打星 and 删除 keep the order', (tester) async {
     await tester.pumpWidget(strip(tsess));
-    await tester.longPress(ph('phrase-2'));
+    await tester.longPress(ph('phrase-3'));
     await tester.pumpAndSettle();
     expect(ph('phrase-menu-put'), findsNothing);
     expect(ph('phrase-menu-edit'), findsOneWidget);
-    await tester.tap(ph('phrase-menu-first'));
+    expect(ph('phrase-menu-first'), findsNothing);
+    await tester.tap(ph('phrase-menu-star'));
     await tester.pumpAndSettle();
-    expect((s.prefs.phrases.first as StripCmd).id, 'compact');
-    expect((s.prefs.phrases[1] as StripCmd).id, 'new');
-    await tester.longPress(ph('phrase-0'));
+    expect(s.quick.stars, ['p:compact']);
+    expect((s.quick.phrases.first as StripCmd).id, 'new', reason: 'a star leaves the list as it was');
+    await tester.longPress(ph('phrase-3'));
     await tester.pumpAndSettle();
+    expect(ph('phrase-menu-first'), findsOneWidget);
     await tester.tap(ph('phrase-menu-delete'));
     await tester.pumpAndSettle();
-    expect((s.prefs.phrases.first as StripCmd).id, 'new');
-    expect(s.prefs.phrases.whereType<StripCmd>(), hasLength(5));
+    expect((s.quick.phrases.first as StripCmd).id, 'new');
+    expect((s.quick.phrases[3] as StripCmd).id, 'resume');
+    expect(s.quick.phrases.whereType<StripCmd>(), hasLength(6)); // seven, one deleted
+    expect(s.quick.stars, isEmpty);
   });
 
-  iosTest('全部 ›: lists commands when a tool is recognised, none under zsh', (tester) async {
+  iosTest('a refused tap in 命令▾ is told in the sheet only, not on the strip behind it', (tester) async {
+    fg('codex');
+    s.setStripItems([const StripCmd('new', per: {'codex': null}), ...defaultStripItems.skip(1)]);
     await tester.pumpWidget(strip(tsess));
-    await tester.tap(ph('phrases-all'));
+    await tester.tap(ph('quick-menu-cmds'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.ancestor(of: find.text('新对话'), matching: find.byType(ListTile)));
+    await tester.pump();
+    expect(tester.widget<Text>(ph('menu-hint')).data, 'Codex 没有这个命令');
+    expect(ph('phrase-hint'), findsNothing, reason: 'the sheet says it; the strip under it stays quiet');
+    Navigator.of(tester.element(ph('menu-hint'))).pop();
+    await tester.pumpAndSettle();
+    expect(ph('phrase-hint'), findsNothing, reason: 'no stale hint once the sheet is gone');
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  iosTest('命令▾: lists commands when a tool is recognised, grey under zsh (spec §5.4)', (tester) async {
+    await tester.pumpWidget(strip(tsess));
+    await tester.tap(ph('quick-menu-cmds'));
     await tester.pumpAndSettle();
     expect(find.descendant(of: find.byType(ListTile), matching: find.text('新对话')), findsOneWidget);
     Navigator.of(tester.element(find.byType(ListTile).first)).pop();
     await tester.pumpAndSettle();
     fg('zsh', shell: true);
-    s.setStripItems(List.of(s.prefs.phrases));
+    s.setStripItems(List.of(s.quick.phrases));
     await tester.pump();
-    await tester.tap(ph('phrases-all'));
+    await tester.tap(ph('quick-menu-cmds'));
     await tester.pumpAndSettle();
-    expect(find.descendant(of: find.byType(ListTile), matching: find.text('新对话')), findsNothing);
-    expect(find.descendant(of: find.byType(ListTile), matching: find.text('继续')), findsOneWidget);
+    final cmd = find.ancestor(of: find.text('新对话'), matching: find.byType(ListTile));
+    expect(cmd, findsOneWidget);
+    expect(find.ancestor(of: cmd, matching: find.byWidgetPredicate((w) => w is Opacity && w.opacity < 1)), findsOneWidget);
+    expect(find.descendant(of: find.byType(ListTile), matching: find.text('继续')), findsNothing,
+        reason: 'the phrases are in 常用语▾');
   });
 
   iosTest('an app session with 常用语条 on shows no commands', (tester) async {
     app.setProfile(const ResolvedProfile(phrases: true));
     await tester.pumpWidget(strip(app));
     expect(find.text('新对话'), findsNothing);
-    expect(find.descendant(of: ph('phrase-6'), matching: find.text('继续')), findsOneWidget);
+    expect(find.descendant(of: ph('phrase-7'), matching: find.text('继续')), findsOneWidget);
   });
 
-  testWidgets('linux desktop KeyBar sends tool commands and Ctrl-R while preserving TextField caret', (tester) async {
+  testWidgets('linux desktop KeyBar sends tool commands, Ctrl-R from 搜历史 among them, while preserving TextField caret',
+      (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
     try {
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (c) async => null);
@@ -192,28 +232,82 @@ void main() {
       expect(ctl.selection, const TextSelection(baseOffset: 1, extentOffset: 3));
 
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 1050)));
-      // Claude Code: 搜历史 sends Ctrl-R over TermSessionPort.
-      await tester.tap(ph('phrase-5'));
+      // Claude Code: the 搜历史 command (the last command) sends Ctrl-R over TermSessionPort.
+      final list = find.descendant(of: ph('phrase-strip-list'), matching: find.byType(Scrollable));
+      await tester.scrollUntilVisible(ph('phrase-6'), 200, scrollable: list);
+      await tester.pump();
+      await tester.tap(ph('phrase-6'));
       await tester.pump();
       expect(term.calls.where((c) => c.$1 == 'keys').last.$2['keys'], ['Ctrl-R']);
       expect(focus.hasFocus, isTrue);
+      expect(ctl.selection, const TextSelection(baseOffset: 1, extentOffset: 3));
 
       await tester.pump(const Duration(seconds: 3));
-      // Antigravity (agy) on Linux: 搜历史 is unsupported -> greyed + hint; bash shell hides commands.
+      // Antigravity (agy) on Linux: 搜历史 is unsupported -> grey, a tap sends nothing; bash hides commands.
       fg('agy');
-      s.setStripItems(List.of(s.prefs.phrases));
+      s.setStripItems(List.of(s.quick.phrases));
       await tester.pump();
-      await tester.tap(ph('phrase-5'));
+      // Used once, 搜历史 is now up front (the list changed, so it was re-counted): scroll back to it.
+      await tester.scrollUntilVisible(ph('phrase-6'), -200, scrollable: list);
+      expect(find.ancestor(of: find.text('搜历史'), matching: find.byWidgetPredicate((w) => w is Opacity && w.opacity < 1)),
+          findsOneWidget);
+      final sent = term.calls.length;
+      await tester.tap(ph('phrase-6'));
       await tester.pump();
-      expect(tester.widget<Text>(ph('phrase-hint')).data, 'Antigravity 没有这个命令');
+      expect(term.calls.length, sent);
+      expect(focus.hasFocus, isTrue);
       await tester.pump(const Duration(seconds: 5));
 
       fg('bash', shell: true);
-      s.setStripItems(List.of(s.prefs.phrases));
+      s.setStripItems(List.of(s.quick.phrases));
       await tester.pump();
       expect(find.text('新对话'), findsNothing);
-      expect(find.descendant(of: ph('phrase-6'), matching: find.text('继续')), findsOneWidget);
+      expect(find.text('搜历史'), findsNothing);
       expect(focus.hasFocus, isTrue);
+      expect(ctl.selection, const TextSelection(baseOffset: 1, extentOffset: 3));
+    } finally {
+      tester.view.reset();
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null);
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('linux desktop: refused taps in 命令▾ explain in the sheet only without leaving phrase-hint on KeyBar',
+      (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    try {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (c) async => null);
+      tester.view.physicalSize = const Size(1000, 900);
+      tester.view.devicePixelRatio = 1;
+      fg('codex');
+      s.setStripItems([const StripCmd('new', per: {'codex': null}), ...defaultStripItems.skip(1)]);
+      await tester.pumpWidget(wrap(SizedBox(width: 900, child: KeyBar(state: s, session: tsess, port: term))));
+
+      // Unsupported command in 命令▾: explained inside the sheet only, never on the strip behind it.
+      await tester.tap(ph('quick-menu-cmds'));
+      await tester.pumpAndSettle();
+      await tester.tap(ph('menu-p-0'));
+      await tester.pump();
+      expect(tester.widget<Text>(ph('menu-hint')).data, 'Codex 没有这个命令');
+      expect(ph('phrase-hint'), findsNothing);
+      Navigator.of(tester.element(ph('menu-hint'))).pop();
+      await tester.pumpAndSettle();
+      expect(ph('phrase-hint'), findsNothing);
+
+      // Plain shell (no AI tool): tapping a greyed command in 命令▾ explains inside the sheet only.
+      fg('zsh', shell: true);
+      s.setStripItems(List.of(s.quick.phrases));
+      await tester.pump();
+      await tester.tap(ph('quick-menu-cmds'));
+      await tester.pumpAndSettle();
+      await tester.tap(ph('menu-p-0'));
+      await tester.pump();
+      expect(tester.widget<Text>(ph('menu-hint')).data, '这里没有认得的 AI 工具，发不了命令');
+      expect(ph('phrase-hint'), findsNothing);
+      Navigator.of(tester.element(ph('menu-hint'))).pop();
+      await tester.pumpAndSettle();
+      expect(ph('phrase-hint'), findsNothing);
+      await tester.pump(const Duration(seconds: 5));
     } finally {
       tester.view.reset();
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null);

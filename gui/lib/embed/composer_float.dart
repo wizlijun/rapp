@@ -15,8 +15,12 @@ import 'remote_session.dart';
 /// The panel keeps this far from every stage edge.
 const composerMargin = 8.0;
 
-/// The grip's hit area (spec: at least 48×20).
+/// The grip row's height, and its narrowest width (spec: at least 48×20). The row spans the block's whole top
+/// edge (user 2026-11-27: grab it anywhere along the top).
 const gripSize = Size(48, 20);
+
+/// The bar drawn in the grip row: a third of the block, never under 48 or over 160.
+double gripBarWidth(double block) => (block / 3).clamp(48.0, 160.0);
 
 /// Wrap a subtree in `MetaData(metaData: composerNoDrag)`: neither a drag nor a held touch starts a move there.
 final composerNoDrag = Object();
@@ -262,18 +266,21 @@ class _FloatingComposerState extends State<FloatingComposer> with SingleTickerPr
           triggerMode: TooltipTriggerMode.manual,
           child: Semantics(
             label: '移动写作面板',
-            child: SizedBox.fromSize(
-              size: gripSize,
+            child: SizedBox(
+              height: gripSize.height,
+              width: double.infinity,
               // Hidden but still there to grab: the bar only shows with the pointer over the panel.
-              child: Center(
-                child: AnimatedOpacity(
-                  key: const Key('composer-grip-bar'),
-                  opacity: _hover || _touched || _drag != null ? 1 : 0,
-                  duration: const Duration(milliseconds: 120),
-                  child: Container(
-                    width: 32,
-                    height: 4,
-                    decoration: BoxDecoration(color: t.line, borderRadius: BorderRadius.circular(2)),
+              child: LayoutBuilder(
+                builder: (_, c) => Center(
+                  child: AnimatedOpacity(
+                    key: const Key('composer-grip-bar'),
+                    opacity: _hover || _touched || _drag != null ? 1 : 0,
+                    duration: const Duration(milliseconds: 120),
+                    child: Container(
+                      width: gripBarWidth(c.maxWidth),
+                      height: 4,
+                      decoration: BoxDecoration(color: t.line, borderRadius: BorderRadius.circular(2)),
+                    ),
                   ),
                 ),
               ),
@@ -336,7 +343,7 @@ class _FloatingComposerState extends State<FloatingComposer> with SingleTickerPr
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          if (gripRow != null) Center(child: gripRow),
+                          ?gripRow,
                           Flexible(child: widget.child),
                         ],
                       ),

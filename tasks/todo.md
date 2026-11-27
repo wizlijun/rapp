@@ -1482,9 +1482,13 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 8 终端里开 `less` 或 vim：PgUp/PgDn 由程序自己翻页
 - [ ] 9 应用会话（如 Safari）里点 PgUp/PgDn：网页上下翻一屏
 - [x] 追加（`feat/quick-one`）：去掉快捷区上的 ⌄（只从开关收起）；第一行 `Tab ⇧Tab Esc ⌃C ⌫ ⏎ ↑ ⋯`，第二行 `⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →`，↓ 对齐在 ↑ 下、→ 在 ⋯ 下；去掉方向键上滑和 Home/End。flutter analyze 通过；全量只剩 `linux_detach_test`（新 worktree 没有 `rapp-session`，main 上同样失败）
-- [ ] 10 iPhone Duo / iPad 上打开快捷区：快捷区上没有 ⌄；收起只能点输入块里的开关，收起后语音、输入旁边的开关还在，点它再打开
+- [ ] 10 iPhone Duo / iPad 上打开快捷区：快捷区上没有 ⌄；收起只能点语音、输入旁边的开关，点它再打开（13 改过：输入框里不再有开关）
 - [ ] 11 点 ⋯：↓ 正好在 ↑ 下面，→ 在 ⋯ 下面，← 在 ↓ 左边；竖屏、横屏、iPad 都对齐
 - [ ] 12 方向键上没有角标；往上滑 ↑ 只发 ↑；按住 ← 连发
+- [x] 追加（`feat/quick-stay`）：快捷区开关不进输入框，文本区展开时也留在语音、收起旁边（iOS 按钮列、桌面右下角）；输入框里只剩 ＋ 和发送；按钮列高度展开收起同一套算法。flutter analyze 通过；全量只剩 `linux_detach_test` 2 条（没有 `rapp-session`）
+- [ ] 13 iPhone Duo / iPad 点输入打开文本区：输入框里只有 ＋、文字、发送；从下往上是语音、收起、快捷区开关；点它快捷区收起、再点打开，文本区一直开着、草稿不丢
+- [ ] 14 iPhone 横屏打开文本区和快捷区：按钮列放不下时排成一行，不压在快捷区上；整理卡片在按钮列上方
+- [ ] 15 Mac 打开文本区：右下角是 快捷区开关 · 收起（语音在最右）；用鼠标点开关，输入框里的光标、选中和拼音都不丢
 
 ## Linux 0.15.55 版本跟随对齐与发布（2026-11-27）
 
@@ -1513,11 +1517,10 @@ macOS、Linux、Duo、iPad 各一遍。
 
 - **接线已合进本机 `main`（2026-11-27）。** 用户定的：Mac 门禁绿了就合，不等 Windows 门禁。对已有 crate 的改动（约 55 个文件）、`rust/host-windows/` 和 `rust/svc-windows/` 进成员表，都在 `main` 里了。这次合并改的是共用代码，算 macOS 的改动。
 - **Windows 那一支没验过。** `cfg(windows)` 里的代码在 Mac 上编不到，`scripts\check-windows.ps1` 一次都没跑过；`CLAUDE.md` 说这类代码要先过 Windows 门禁再合并，这一次是用户知情后放行的例外。Windows 机器装好后的第一件事就是在 `main` 上跑它，红了在 Windows 上修，按 `CLAUDE.md` 的 Windows 集成 session 推回来。
-- **Linux 那一支也没编过。** 动到 Linux 专有代码的只有 `rust/service/src/instance.rs`（加了几处 `#[cfg(target_os = "linux")]`，在 Linux 上不改变编进去的东西）和 testkit `service.rs` 里两处条件（Linux 上值不变）。Linux 的 session 下次合并 `origin/main` 时编一遍。
-
+- **Linux 那一支已编译验证通过（`0.15.58`，`9083e22d`）。** 全工作区 19 个 crate 在 Linux x86_64 下通过 `cargo clippy --workspace --all-targets -- -D warnings`（顺手清理 `rapp-client-gtk` `as_chunks_mut` 告警）、单测与 `testkit` 集成测试。
 - A 段做完后，一台 Windows 机器能：编出全部 Rust crate（`rapp-relay`、`rapp-host-linux`、`rapp-client-gtk`、`rapp-hub-ffi` 除外）、跑过测试和 clippy（`scripts\check-windows.ps1`）、编出 Flutter 界面、用 `scripts\stage-windows.ps1` 摆出开发用的版本目录、从 `bin\rapp.exe` 启动界面、当控制端连别的设备。
 - 还不能：当被控端（没有 `rapp-host`，D 段）、开文本终端（E 段）、自己升级（G 段）、有监督程序和系统服务（`rapp-svc`，C 段）、语音（H 段）、安装包（G 段）。
-- **给 Linux session 的发现**（规格 §6.1、§19.3 第 14 条）：`rust/service/src/workers.rs` 的 `permissions()` 没有把 `applications` 留下，`capabilities()` 读到的永远是“没有”，所以 Linux 被控端一直对外报不能开单个 app，控制端不显示它的 app 入口（`gui/lib/ui/device_apps.dart:16` 等四处）。有意还是漏了，由 Linux 的 session 判断；Windows 这次没有改它。
+- **给 Linux session 的发现**（规格 §6.1、§19.3 第 14 条）：`rust/service/src/workers.rs` 的 `permissions()` 没有把 `applications` 留下，`capabilities()` 读到的永远是“没有”，所以 Linux 被控端一直对外报不能开单个 app，控制端不显示它的 app 入口（`gui/lib/ui/device_apps.dart:16` 等四处）。有意还是漏了，由 Linux 的 session 判断；Windows 这次没有改它。（已由 Linux session 在 `9083e22d` 确认是 `0.15.9` 遗漏，并在 `#[cfg(target_os = "linux")]` 下补齐透传与单测。）
 - **要在实机上看的**（未验证）：
   - [ ] 1. 中文用户名（带空格）的账户下：`<数据根>\local` 的访问权限只有本人、SYSTEM、Administrators；数据根搬到 D 盘以后还是这样（规格 §13.2 的验收）。
   - [ ] 2. `cmd`、Windows PowerShell 5.1、Windows Terminal 里 `rapp --help` 的中文都不乱码（规格 §8.2【未验证】）。
@@ -1532,6 +1535,7 @@ macOS、Linux、Duo、iPad 各一遍。
 现状（2026-11-27）：在 Mac 上编过、测过，**接线已合进本机 `main`**（用户定的：Mac 门禁绿了就合）。**没在 Windows 上跑过。**
 
 - `main` 已合进分支（含 A 段接线 `5e39bb91`），成员表里 host-core、host-windows、svc-windows 都在。合并后的树上 Mac 门禁全绿：`cargo test --workspace`、clippy `-D warnings`、`swift test`、`flutter analyze`、`flutter test`（`linux_detach_test` 要先 `cargo build --release -p rapp-client-core --bin rapp-session`）。
+- **Linux x86_64 门禁已编译验证通过（`0.15.59`，`a1b9135c`）。** 全工作区 20 个 crate（含 `rapp-host-core` 及 `libz-sys` `stock-zlib`）通过 `cargo clippy --workspace --locked --all-targets -- -D warnings`，`rapp-host-core` 全部单测与 Swift 样本逐字节对拍，以及 `rapp-testkit` `host_service`（2 个）和 `host_session`（71 个）全部通过。
 - Swift 样本（`30cdd17a`）全部对上，deflate 和 Swift 逐字节相同（`libz-sys` 原版 zlib，加了 `stock-zlib`）；会话测试 71 个、服务对接 2 个都过。修的地方和逐条原因见 `rust/host-core/PORTING.md` 和分支的提交记录；样本和生成器一个没改。
 - 交接文档 3.2 节剩下的四条：窗口移不动和保持唤醒失败的两行日志已照 Swift 补上（平台接口 `move_to` 返回 bool、`stay_awake` 返回 `Option<String>`，计划同一提交改了）；焦点日志里的控件角色、规则看到的语言、焦点区测试的 8 点误差三条认下，写进 `PORTING.md` 第 4 部分。
 - 接下来：Windows 机器装好后在 `main` 上跑 `scripts\check-windows.ps1`（A、B 两段的接线都在 `main` 里了，不用再到分支上做）。`host-core` 是共用代码，这次合并算 macOS 的改动；macOS 的被控端还是 Swift 的 `rapp-host`，安装包里不带 `host-core`，行为不变。
@@ -1546,6 +1550,144 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 3 在一个真的程序里打字（中英文都打，每段超过 20 个字），字都到了，没丢也没重复
 - [ ] 4 从 Mac 粘贴文件到 Windows：文件落在 NTFS 的下载目录里。名字是保留名（如 `CON.txt`、`aux`）时改名为 `_CON.txt` 这类，同名再来时编号为 `_CON (2).txt`；SHA-256 和原文件一致
 - [ ] 5 锁屏后经系统服务解锁：B 端输入密码，A 真的解开；密码错时 A 保持锁着，B 端还显示「已锁」；日志里没有密码
+
+## Linux 0.15.56 与 0.15.58 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），将 Linux / Omarchy `x86_64` 产物依次构建并挂载至已发布的 [v0.15.56](https://github.com/wizlijun/rapp/releases/tag/v0.15.56) 与 [v0.15.58](https://github.com/wizlijun/rapp/releases/tag/v0.15.58) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.56`–`0.15.58`（`feat/bar-cmd`、`feat/windows-foundation`、`feat/bar-pgup`、`feat/quick-one`）并修复 Linux 被控端 `applications` 能力透传：快捷区精简重排为第一行 `Tab ⇧Tab Esc ⌃C ⌫ ⏎ ↑ ⋯`（移除 `⌄`）、第二行 `⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →`（倒 T 方向键对齐、终端 `PgUp`/`PgDn` 回滚翻页、粘滞 `⌘`+字母 rApp 快捷键及收起松开 `⌃`/`⌘`）；在 Linux 上完成 Windows A 段接线后的全工作区 19 个 crate `clippy -- -D warnings` 与测试验证；在 `rust/service/src/workers.rs` 以 `#[cfg(target_os = "linux")]` 修复 `permissions()` 漏拷 `applications` 的遗漏。
+- [x] `v0.15.58`（源码 `9083e22d`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01556-parity.md` 与 `docs/superpowers/plans/2026-11-27-linux-01558-parity.md`。
+
+## Linux 0.15.59 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 直接挂载至已发布的 [v0.15.59](https://github.com/wizlijun/rapp/releases/tag/v0.15.59) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.59`（`feat/quick-stay`）并完成 Windows B 段 `rapp-host-core` 在 Linux x86_64 上的全量验证：快捷区开关在桌面端输入面板展开与收起时均固定在右下角按钮列（`[快捷区开关] [输入/收起] [语音]`）且鼠标点击不丢失焦点、选区与 Fcitx5/IBus 未上屏预编辑；补充 `gui/test/embed/input_dock_test.dart` Linux 桌面带语音常驻对齐测试；全工作区 20 个 crate（含 `rapp-host-core`、`libz-sys` `stock-zlib`、Swift 样本对拍及 `host_session` 71 项集成测试）与 3,648 项 Flutter 测试在 Linux 上全部通过。
+- [x] `v0.15.59`（源码 `a1b9135c`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01559-parity.md`。
+
+## 中心服务 G1（规格 `docs/superpowers/specs/2026-11-27-rapp-center-design.md`，计划 `docs/superpowers/plans/2026-11-27-rapp-center-g1.md`，分支 `feat/center-g1`，2026-11-27）
+
+- **G3（`prefs`）不要另做**：2026-11-27 用户定，`prefs` 由快捷区第一行的第二期来做（分支 `feat/quick-row`，规格 `2026-11-27-rapp-quick-row-design.md` §10.2），同步五样：常用语、按键动作、键盘布局、星标、使用次数。合并规则以那份规格为准。中心服务规格 §8 已在那条分支上标成历史。
+
+- 状态服务改名为中心服务 `rapp-center`（源码 `services/center/`），改动如下：
+  - 新加一个入口，内置能力放在它后面。现在只有一块 `state`，旧路径不变。
+  - 新加 `GET /v1/routes`，health 升到 v2；状态接口另有一份 `/state/v1/…` 前缀的路径可用。
+  - 命令改成 `rapp center on|off`，原来的 `rapp state` 照样能用。界面上的名字改成「中心服务」。
+  - `services.json` 的键改成 `center`，旧键 `state` 照样认，下次写入时换成新键。数据目录从 `local/state/` 自动搬到 `local/center/`。
+- 对外的名字一个没变：health 的 `name:"rapp-state"`、Host `rapp-state`、IPC `{"cmd":"state"}`、分享的 `kind:"state"` 都和原来一样，所以新旧版本的 app 和发件箱可以混用。
+- 实机检查：
+  - [ ] ① 从 0.15.x 升级后，中心服务仍是开着的，队列里的东西还在（`local/state/` 已变成 `local/center/`）
+  - [ ] ② `rapp center` 和 `rapp state` 输出一样
+  - [ ] ③ 设置里显示的名字是「中心服务」
+  - [ ] ④ 另一台装旧版 app 的设备连这台，状态照常显示
+  - [ ] ⑤ 回滚到旧版后，中心服务是关的，队列是空的（已知后果：旧版只认 `services.json` 的 `state` 键和 `local/state/`。升级后改过开关的话，键已经换成 `center`，旧版就当它是关的；数据目录已经搬走，旧版只能从空队列开始。这些是 7 天内的临时数据，规格接受这个后果）
+- [x] 补漏（`fix/ios-center-section`，2026-11-27）：iPad / Duo 的本机页没有「中心服务」这一栏（P2 的计划要放，当时只加在了桌面版），看不出连没连上。现在本机页里有，和桌面一样：自动 / 关 / 手填地址，下面写 已连上 / 没找到中心服务 / 连不上
+  - [ ] ⑥ Duo 上打开设备 → 本机：有「中心服务」，选着「自动」；Mac 上开着中心服务时写「已连上 http://localhost:<分享号>」，Mac 上关掉后一会儿变成「没找到中心服务」
+
+## Linux 0.15.60 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 直接挂载至已发布的 [v0.15.60](https://github.com/wizlijun/rapp/releases/tag/v0.15.60) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.60`（`feat/center-g1` 中心服务 G1：`rapp-state` 改名 `rapp-center`）并修复两处 Linux 遗漏：在 `scripts/linux/rapp` 补齐 `rapp center [on|off]` 子命令转发至 `rapp-cli`（此前漏写会落入 `rapp-gui`；同步扩充 `scripts/test-linux-launcher.py`），并更新 `scripts/test-linux-bundle.py` 在隔离命名空间中端到端验证 `rapp center` 与 `rapp state` 输出一致、「中心服务」文案、`local/services.json` `center` 键、`local/center/` 目录、`GET /v1/health` v2、`GET /v1/routes` 及 `/state/v1/…` 前缀别名；全工作区 20 个 crate 与 3,649 项 Flutter 测试全部通过。
+- [x] `v0.15.60`（源码 `1f3c0d64`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01560-parity.md`。
+
+## 总览本机列：连上的服务（feat/overview-local-services）
+
+规格 `docs/superpowers/specs/2026-11-27-rapp-overview-local-services-design.md`，计划 `docs/superpowers/plans/2026-11-27-rapp-overview-local-services.md`（2026-11-27）。
+
+- [x] 本机列展开时，在会话和「正在被接入」下面、版本号上面多一组「连上的服务」：中心服务（在哪台设备 · 端口）和 LLM 网关（地址或探测失败的那句话），各带一盏灯；只看不点
+- [x] PC 上没人接入时本机列也折成 56px 竖条；有人接入自己展开，全部断开再折；手动开或折以后这次运行里不再自动改
+- 实机检查：
+  - [ ] ① PC 上没人接入，启动后本机是竖条
+  - [ ] ② 另一台设备接入，本机自己展开；断开后折回去
+  - [ ] ③ 手动折起或点开以后，接入有没有都不再自己变，重启 app 后恢复自动
+  - [ ] ④ 本机展开时，中心服务是绿灯，写「<设备> · :<端口>」；`rapp center off` 之后变成「没找到」或「已关」
+  - [ ] ⑤ LLM 网关是绿灯，写地址；把 key 改错，一分钟内变成红灯「key 不对」
+  - [ ] ⑥ Duo / iPad 上点开本机，两行都看得到
+- [x] 补两处（`fix/center-host-reask`，2026-11-27）：中心服务断开重连时重新查它在哪台设备（地址不变也查，断开前没回来的答复丢掉）；一行写不下时折行显示全，不再被截断
+  - [ ] ⑦ 中心服务从 A 挪到 B 但分享号不变，断开重连后本机列写的是 B 的名字
+  - [x] ⑧ 把窗口缩窄或让 LLM 探测失败（长原因），右边的字折成多行，能读全，灯还在第一行（2026-11-27 用户在 Duo 上确认）
+
+## 快捷区第一行（计划 `docs/superpowers/plans/2026-11-27-rapp-quick-row.md`，分支 `feat/quick-row`）
+
+中心服务要升到带 `prefs` 的版本（`/v1/routes` 里有它）；旧服务不同步、不报错，设置页只显示「只存在本机」。实机检查：
+
+- [x] ~~1. 新装：第一行是今天的常用语和命令，后面接按键动作，末尾两个菜单。~~ 作废：按键动作已去掉，见下面「命令▾ / 常用语▾」1。
+- [x] ~~2. 老用户升级：「搜历史」从常用语菜单移到按键菜单。~~ 作废：搜历史回到命令，见下面 2。
+- [ ] 3. 在菜单里打星：第一行立刻只剩打星的，按打星先后。
+- [ ] 4. 取消所有星：回到按次数排；连用几次「跑下测试」后重开快捷区，它排到前面；用着的时候不跳。
+- [x] ~~5. 按键动作在各处发对了键。~~ 作废：按键动作已去掉。
+- [x] ~~6. 新增按键动作「⌃⌥X」。~~ 作废：按键动作已去掉。
+- [ ] 7. 布局（全局设置 → 键盘布局）：把 PgUp 拖到第 1 行、删掉 ⌘T；快捷键盘跟着变；倒 T 还在。
+- [ ] 8. 键盘布局的「恢复默认」恢复布局。
+- [ ] 9. （P2）Mac 改布局，iPad 几秒后一样；iPad 断网改常用语，连上后 Mac 看到。
+- [ ] 10. （P2）没有中心服务：设置页显示「只存在本机」，其余一切照常。
+- [ ] 11. （P2）两台都各自改过常用语再第一次接上同一个服务：两边的常用语都在，谁也没丢。
+- [ ] 12. 输入块的抓手是整条顶边：在顶边最左、最右按住都能拖，双击回到底部居中；横线比原来长（块宽的三分之一，48–160）。
+
+### 命令▾ / 常用语▾（分支 `feat/cmd-menu`，设计 `docs/superpowers/specs/2026-11-27-rapp-cmd-menu-design.md`）
+
+用户纠正（2026-11-27）：第一行的两个菜单是把常用语里的**命令**（/new /compact 那些）分出来，不是另做按键动作。按键动作、它的编辑页和布局里的 `k:` 格子整套去掉；搜历史回到命令（`p:search`）；键盘布局在全局设置里单独一行。flutter analyze 通过；全量只剩 `linux_detach_test` 2 条（worktree 没有 `rapp-session`）。实机检查：
+
+- [ ] 1. 第一行末尾是「命令▾」「常用语▾」，没有「按键▾」；命令▾ 里只有命令（含搜历史），常用语▾ 里只有常用语；各自最后一项「设置…」进对应的页。
+- [ ] 2. 从 0.15.63/64 升级：给按键菜单里「搜历史」打过的星、用过的次数，都跟到命令「搜历史」上；布局里加过的按键动作格子不再画，其余键照旧。
+- [ ] 3. 不在 Claude Code / Codex 里（普通 shell）：命令▾ 里的命令是灰的，点了提示原因；常用语照常能发。
+- [ ] 4. 全局设置有三行：常用语（N 条，只数常用语）、命令（N 个）、键盘布局；三页都能打开。
+- [ ] 5. 命令页：拖动排序、左滑删除、＋ 新增命令、恢复默认，都只动命令，常用语的顺序不变；常用语页反过来也一样。
+- [ ] 6. （P2）一台改了命令顺序，另一台几秒后一样；旧版本（0.15.63/64）同步来的 `keys` 文档不会让新版本出错。
+
+### 快捷区键面字形（分支 `feat/key-glyphs`）
+
+键面原来用等宽字体（SF Mono / Menlo），⏎ ⌫ ↑ 又小又细。现在每个平台用自己的界面字体：苹果 SF Pro（`CupertinoSystemText`，缺字退 Apple Symbols），Windows Segoe UI → Segoe UI Symbol，Android Roboto → Noto Sans Symbols，Linux 系统 sans → DejaVu Sans / Noto。单符号键 19 号、文字键 14 号，都 w500；字太宽就缩小，不再出省略号。键盘布局页同样生效。flutter analyze 通过；全量只剩 `linux_detach_test` 2 条。实机检查：
+
+- [ ] 1. Mac：⌫ ⏎ ↑↓←→ ⌘ ⌃ ⌥ 和苹果键盘上印的一样粗、一样大；Tab Esc PgUp 是 SF Pro，不是等宽字。
+- [ ] 2. iPad / Duo：同上，竖屏窄键上 PgUp、⇧Tab 整个显示（缩小），没有「…」。
+- [ ] 3. 全局设置 → 键盘布局：编辑页里的键面和快捷区一样。
+- [ ] 4. Linux：⌫ ⏎ 方向键不是方框（缺字体就装 `fonts-dejavu` 或 Noto）。
+- [ ] 5. Windows / Android（以后）：⌫ ⏎ 方向键能显示，不是方框。
+
+## Linux 0.15.61 与 0.15.62 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），依次构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 挂载至已发布的 [v0.15.61](https://github.com/wizlijun/rapp/releases/tag/v0.15.61) 与 [v0.15.62](https://github.com/wizlijun/rapp/releases/tag/v0.15.62) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.61`–`0.15.62`（`fix/ios-center-section`、`feat/overview-local-services`）：在 `gui/test/ui/main_window_test.dart` 补充 Linux 桌面端「设备 → 本机」同时展示 `StateServiceRow` 与 `StateSection`（「中心服务」）连接状态测试，在 `gui/test/ui/overview_test.dart` 补充 Linux 桌面端总览本机列无人接入折为 56px 竖条、远端接入自动展开并展示「连上的服务」（`本机 · :8102` 中心服务与 LLM 网关状态）及断开折回测试；全工作区 20 个 crate 与 3,668 项 Flutter 测试全部通过。
+- [x] `v0.15.62`（源码 `d9020e5d`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json` 含 `v0.15.61` 与 `v0.15.62` 全部 6 项资产、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01561-parity.md` 与 `docs/superpowers/plans/2026-11-27-linux-01562-parity.md`。
+
+## Linux 0.15.63 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 直接挂载至已发布的 [v0.15.63](https://github.com/wizlijun/rapp/releases/tag/v0.15.63) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.63`（`feat/quick-row` 快捷区第一行重构与 `rapp-center` `prefs` 内置同步、`fix/center-host-reask` 总览本机列服务重连重查与长行折行）：在 `scripts/test-linux-bundle.py` 更新 `GET /v1/routes` 断言（`state` + `prefs` 双 builtin）并新增隔离命名空间下 `GET /prefs/v1/all`、`PUT/GET /prefs/v1/stars`、`409` CAS 冲突及 `0600` `local/center/prefs.json` 落盘端到端校验；在 `gui/test/quick/quick_row_widget_test.dart` 新增 Linux 桌面端鼠标点击快捷行按键动作时保持输入块焦点与 IME 预编辑态测试；全工作区 20 个 crate（含 `rapp-center` 82 项单测与集成测试）与 3,820 项 Flutter 测试全部通过。
+- [x] `v0.15.63`（源码 `2f62b35a`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01563-parity.md`。
+
+## Linux 0.15.64 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 直接挂载至已发布的 [v0.15.64](https://github.com/wizlijun/rapp/releases/tag/v0.15.64) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.64`（`fix/quick-row-minors`：`QuickSync.suspend()` 在暂停或重连时放下已关连接、改动待下条连接再发，以及 `常用语▾` / `按键▾` 菜单内拒发项仅在菜单内说明而不污染后方 `KeyBar` 的 `phrase-hint`）：在 `gui/test/embed/phrase_strip_cmds_test.dart` 补充 Linux 桌面端 `常用语▾` 与 `按键▾` 拒发项仅展示 `menu-hint` 且不残留 `phrase-hint` 测试，并在 `scripts/package-linux.sh` 恢复打包时由 Flutter 3.50 SDK 重解析出的 `gui/pubspec.lock`（避免与 macOS 提交的旧版 Flutter `pubspec.lock` 往复覆写，同时继续拦截任何源码/CMake 改动）；全工作区 20 个 crate 与 3,823 项 Flutter 测试全部通过。
+- [x] `v0.15.64`（源码 `631b6645`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json` 含 `v0.15.63` 与 `v0.15.64` 全部 6 项资产、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01564-parity.md`。
+
+## Linux 0.15.65 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 直接挂载至已发布的 [v0.15.65](https://github.com/wizlijun/rapp/releases/tag/v0.15.65) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.65`（`fix/quick-prefs-safety`：读不了且挪不开的 `quick.json` 或更新版本 `v > 1` 写的 `quick.json` 绝不覆盖、启动时未存上的 `lastSaveError` 照常在 `MainState.hint` 提示、以及 `rapp-center` `prefs.json` 重启测试轮询窗口放宽至 10 秒）：在 `gui/test/quick/quick_save_hint_test.dart` 补充 `TargetPlatform.linux` 桌面端回归用例；全工作区 20 个 crate `clippy -- -D warnings`、`rapp-center --test prefs`（13/13）与 Flutter 3,819 项测试全部通过。
+- [x] `v0.15.65`（源码 `2e514b7e`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致。详见 `docs/superpowers/plans/2026-11-27-linux-01565-parity.md`。
+
+## Linux 0.15.66 版本跟随对齐与发布（2026-11-27）
+
+- [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 直接挂载至已发布的 [v0.15.66](https://github.com/wizlijun/rapp/releases/tag/v0.15.66) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
+- [x] 对齐 macOS `0.15.66`（`feat/cmd-menu`：快捷区第一行改为 `命令▾` / `常用语▾` 双菜单、去掉按键动作并将 `搜历史` `⌃R` 归回 7 个内置命令、侧栏全局设置拆分为独立「常用语」「命令」「键盘布局」三页，并一次性迁移 `0.15.63`/`64` 的 `keys` doc 与 `k:` 星标/次数/布局格）：更新 Linux 桌面端 `gui/test/quick/quick_row_widget_test.dart`（星标 `搜历史` 鼠标点击发送 `Ctrl-R` 并保持焦点与 IME 预编辑）、`gui/test/embed/phrase_strip_cmds_test.dart`（`命令▾` 拒发仅在菜单内提示）及 `gui/test/ui/cmds_page_test.dart`（`CmdsPage` 7 个内置命令与 `0.15.63`/`64` `keys` doc 迁移）；全工作区 20 个 crate `clippy -- -D warnings`、`rapp-center --test prefs`（13/13）与 Flutter 3,815 项测试全部通过。
+- [x] `v0.15.66`（源码 `177175fc`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间无头冒烟测试（因桌面进入 Omarchy Quickshell 锁屏，Hyprland 暂停实时抓屏帧；Rust 源码与已通过实机 Hyprland QUIC 抓屏的 `0.15.65` 零差异）全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json` 含 `v0.15.63`–`v0.15.66` 全部 6 项资产、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01566-parity.md`。
+
+## 总览本机列：终端卡片（feat/overview-local-terms）
+
+规格 `docs/superpowers/specs/2026-11-27-rapp-overview-local-terms-design.md`，计划 `docs/superpowers/plans/2026-11-27-rapp-overview-local-terms.md`（2026-11-27）。
+
+- [x] 本机列最上面一组「终端」：列出这台机器上 rapp-term 开的文本终端（灯 + 名字 + 程序状态，有人在看写「N 个在看」）；「新建」在「终端」app（或本机选过的终端 app）里开一个，从上次的目录开始；macOS 上点一行把它的窗口切到前面
+- [x] 有 rapp 终端时本机列自己展开，全部退出后折回；文本终端关掉时卡片不见，再打开以后回来；旧服务不认 term_watch 就不显示，也不再反复问
+- 实机检查：
+  - [ ] ① 新建开在「终端」app
+  - [ ] ② 新终端出现在卡片里
+  - [ ] ③ 别的设备能同时打开它，行尾显示「1 个在看」
+  - [ ] ④ 点一行切到对应的标签页（包括最小化的窗口）
+  - [ ] ⑤ 第一次授权的提示：macOS 弹授权框时写「点「允许」（可能连着两个），点完再试一次」
+  - [ ] ⑥ 关掉再打开文本终端以后卡片回来
+  - [ ] ⑦ 有终端时本机列自己展开，全部退出后折回
+  - [ ] ⑧ Linux 上行不可点，新建可用
 
 ## 安卓平板
 

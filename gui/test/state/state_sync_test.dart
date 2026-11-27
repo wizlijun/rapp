@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/quick/quick_prefs.dart';
+import 'package:rapp/quick/quick_sync.dart';
 import 'package:rapp/state/state_config.dart';
 import 'package:rapp/state/state_link.dart';
 import 'package:rapp/state/state_out.dart';
@@ -25,6 +27,8 @@ class CountOut extends StateOut {
 class FakeLink extends StateLink {
   FakeLink(super.base);
   bool healthy = true;
+  bool hasPrefs = false;
+  int prefsAllCalls = 0;
   Map<String, Object?> stateBody = {'devices': [], 'needs': []};
   Map<String, Object?> queueBody = {'events': [], 'more': false};
   Object? seenError;
@@ -43,7 +47,32 @@ class FakeLink extends StateLink {
   Future<bool> health() async {
     healthCalls++;
     calls.add('health');
+    prefs = hasPrefs;
     return healthy;
+  }
+
+  /// Every PUT tried over this link (`closed:<name>` once it is closed); [served] is the service's copy, shared by
+  /// the links of one service.
+  final puts = <String>[];
+  Map<String, Object?> served = {};
+  @override
+  Future<QuickDoc?> putPref(String name, {required int at, required int base, required Object? data}) async {
+    if (closed) {
+      puts.add('closed:$name');
+      throw StateError('put on a closed link');
+    }
+    puts.add(name);
+    served[name] = {'at': at, 'data': data};
+    return null;
+  }
+
+  @override
+  Future<void> putUsage(String device, {required int at, required Object? data}) async {}
+
+  @override
+  Future<Map<String, Object?>> prefsAll() async {
+    prefsAllCalls++;
+    return {'store': 's1', ...served};
   }
 
   @override
@@ -188,6 +217,26 @@ void main() {
     c.add({'what': 'session', 'fp': 'F', 'session': 't2', 'row': null});
     await settle();
     expect(sync.session('F', 't2'), isNull);
+    sync.dispose();
+  });
+
+  test('pushes it does not know (prefs.phrases, routes) are ignored and the watch stays open', () async {
+    withState();
+    make().start();
+    await settle();
+    final c = links.single.watchCtl;
+    c.add({'what': 'hello'});
+    await settle();
+    final before = sync.rows.length;
+    c.add({'what': 'prefs.phrases', 'rev': 1, 'items': []});
+    c.add({'what': 'routes', 'routes': []});
+    c.add({'what': 'queue', 'row': row('F:e:9', 900)});
+    await settle();
+    expect(sync.status, StateStatus.connected);
+    expect(sync.rows.length, before + 1);
+    expect(sync.rows.first['eid'], 'F:e:9');
+    expect(links.length, 1);
+    expect(links.single.closed, isFalse);
     sync.dispose();
   });
 
@@ -710,6 +759,144 @@ void main() {
     await settle();
     expect(out.snapshot!['desks'], isEmpty);
     sync.dispose();
+  });
+
+  group('quick sync', () {
+    late QuickPrefs qp;
+    late QuickSync quick;
+    setUp(() {
+      qp = QuickPrefs.migrate(const []);
+      quick = QuickSync(prefs: qp, localDir: dir.path, device: 'dev-a');
+    });
+    tearDown(() => quick.dispose());
+
+    StateSync makeQ() => sync = StateSync(
+          localDir: dir.path,
+          find: () async => found,
+          quick: quick,
+          link: (u) {
+            final l = configure(FakeLink(u));
+            links.add(l);
+            return l;
+          },
+        );
+
+    test('a service with prefs: synced; without: local; dropped: waiting', () async {
+      configure = (l) => l..hasPrefs = true;
+      makeQ().start();
+      await settle();
+      links.single.watchCtl.add({'what': 'hello'});
+      await settle();
+      expect(quick.status, QuickSyncStatus.synced);
+      expect(links.single.prefsAllCalls, 1);
+      links.single.watchCtl.addError('boom');
+      await settle();
+      expect(quick.status, QuickSyncStatus.waiting);
+      sync.dispose();
+
+      links.clear();
+      configure = (l) => l;
+      makeQ().start();
+      await settle();
+      links.single.watchCtl.add({'what': 'hello'});
+      await settle();
+      expect(quick.status, QuickSyncStatus.local);
+      sync.dispose();
+    });
+
+    test('a pushed prefs doc changes the local prefs', () async {
+      configure = (l) => l..hasPrefs = true;
+      makeQ().start();
+      await settle();
+      final c = links.single.watchCtl;
+      c.add({'what': 'hello'});
+      await settle();
+      c.add({
+        'what': 'prefs.stars',
+        'doc': {'at': DateTime.now().millisecondsSinceEpoch + 100000, 'data': ['p:mode']},
+      });
+      await settle();
+      expect(qp.stars, ['p:mode']);
+      sync.dispose();
+    });
+
+    test('refresh reconnects and fetches /prefs/v1/all again', () async {
+      configure = (l) => l..hasPrefs = true;
+      makeQ().start();
+      await settle();
+      links.single.watchCtl.add({'what': 'hello'});
+      await settle();
+      sync.refresh();
+      await settle();
+      links.last.watchCtl.add({'what': 'hello'});
+      await settle();
+      expect(links.fold<int>(0, (a, l) => a + l.prefsAllCalls), 2);
+      sync.dispose();
+    });
+
+    test('a failed first try after refresh keeps the quick line synced', () {
+      fakeAsync((fa) {
+        configure = (l) => l..hasPrefs = true;
+        makeQ().start();
+        fa.flushMicrotasks();
+        links.single.watchCtl.add({'what': 'hello'});
+        fa.flushMicrotasks();
+        expect(quick.status, QuickSyncStatus.synced);
+        final seen = <QuickSyncStatus>[];
+        quick.addListener(() => seen.add(quick.status));
+        sync.pause();
+        configure = (l) => l
+          ..hasPrefs = true
+          ..healthy = false;
+        sync.refresh();
+        fa.flushMicrotasks();
+        expect(links, hasLength(2));
+        expect(quick.status, QuickSyncStatus.synced, reason: 'one failed try after a refresh is not an outage yet');
+        fa.elapse(const Duration(seconds: 2, milliseconds: 100));
+        expect(links, hasLength(3));
+        expect(quick.status, QuickSyncStatus.waiting, reason: 'the second one is');
+        expect(seen, [QuickSyncStatus.waiting]);
+        sync.dispose();
+      });
+    });
+
+    test('a pause drops the closed link: an edit waits and goes over the next link', () {
+      fakeAsync((fa) {
+        // Built inside the fake zone, or its sync chain waits on the real microtask queue.
+        quick.dispose();
+        quick = QuickSync(prefs: qp, localDir: dir.path, device: 'dev-a');
+        final served = <String, Object?>{};
+        configure = (l) => l
+          ..hasPrefs = true
+          ..served = served;
+        makeQ().start();
+        fa.flushMicrotasks();
+        links.single.watchCtl.add({'what': 'hello'});
+        fa.elapse(const Duration(seconds: 3));
+        final first = links.single;
+        first.puts.clear();
+        sync.pause();
+        qp.toggleStar('p:usage');
+        fa.elapse(const Duration(seconds: 3));
+        expect(first.puts, isEmpty, reason: 'nothing is sent over the link the pause closed');
+        expect(quick.status, QuickSyncStatus.synced, reason: 'a pause is not an outage');
+        sync.refresh();
+        fa.flushMicrotasks();
+        links.last.watchCtl.add({'what': 'hello'});
+        fa.elapse(const Duration(seconds: 3));
+        expect(links.last, isNot(same(first)));
+        expect(links.last.puts, contains('stars'));
+        sync.dispose();
+      });
+    });
+
+    test('off goes back to local', () async {
+      const StateConfig(StateMode.off).save(dir.path);
+      makeQ().start();
+      await settle();
+      expect(quick.status, QuickSyncStatus.local);
+      sync.dispose();
+    });
   });
 }
 

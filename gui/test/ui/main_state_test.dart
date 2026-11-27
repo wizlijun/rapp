@@ -10,6 +10,9 @@ import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/phrases.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/embed/strip_cmds.dart' show refOf;
+import 'package:rapp/quick/key_layout.dart';
+import 'package:rapp/quick/quick_prefs.dart';
 import 'package:rapp/ui/app_profile_store.dart';
 import 'package:rapp/embed/stream_choice.dart';
 import 'package:rapp/paths.dart';
@@ -118,7 +121,29 @@ void main() {
     expect(s.addPhrase('跑一下测试'), isTrue);
     expect(s.addPhrase('继续'), isFalse);
     expect(s.addPhrase('  '), isFalse);
-    expect(UiPrefs.load(s.data.prefsDir()!).phrases, const [Phrase('继续'), Phrase('跑一下测试')]);
+    expect(QuickPrefs.load(s.data.prefsDir()!, legacy: const []).phrases, const [Phrase('继续'), Phrase('跑一下测试')]);
+  });
+
+  test('the strip list lives in quick.json; gui.json keeps the old phrases as they were', () {
+    Directory('${tmp.path}/local').createSync(recursive: true);
+    File('${tmp.path}/local/service.json').writeAsStringSync('{"id":"dev1"}');
+    final before = List.of(s.prefs.phrases);
+    var n = 0;
+    s.addListener(() => n++);
+    s.setStripItems(const [Phrase('只在新文件')]);
+    expect(n, greaterThan(0));
+    expect(s.quick.phrases, const [Phrase('只在新文件')]);
+    expect(s.prefs.phrases, before);
+    s.savePrefs();
+    expect(UiPrefs.load(s.data.prefsDir()!).phrases, before);
+    s.toggleStar(refOf(s.quick.phrases.single));
+    s.recordUse('p:x');
+    s.setKeyLayout(const KeyLayout([['esc'], []]));
+    s.starFirst('p:x');
+    final back = QuickPrefs.load(s.data.prefsDir()!, legacy: const []);
+    expect(back.stars, ['p:x', refOf(s.quick.phrases.single)]);
+    expect(back.usage.keys, ['p:x']);
+    expect(back.layout.rows[0], ['esc']);
   });
 
   test('setFirst persists and leaves the current grouping alone', () {
@@ -6103,7 +6128,7 @@ void main() {
     });
 
     test('unreachable: back to local rows and one outage line', () {
-      const line = '状态服务连不上，先用本机的';
+      const line = '中心服务连不上，先用本机的';
       connect([row('F:e:1', 'working')]);
       sync
         ..status = StateStatus.unreachable

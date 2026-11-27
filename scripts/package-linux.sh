@@ -32,6 +32,10 @@ for artifact in "$name.tar.gz" "$package" "$checksums"; do
   [[ ! -e "$dist_dir/$artifact" && ! -L "$dist_dir/$artifact" ]] || { echo "Already exists: $dist_dir/$artifact" >&2; exit 1; }
 done
 ./scripts/build-linux.sh
+# macOS builds may commit gui/pubspec.lock from an older Flutter SDK, while Linux requires Flutter >= 3.50.0 whose
+# SDK pins re-resolve transitive packages in pubspec.lock during `flutter build linux`. Line 19 already verified a
+# clean tree before building; restore pubspec.lock alone and still reject any CMake or source migration.
+git checkout -- gui/pubspec.lock
 # Flutter may migrate files for a different SDK. Do not mislabel such a build.
 [[ -z $(git status --porcelain) ]] || { echo 'Build modified source files; review and commit before packaging.' >&2; exit 1; }
 work=$(mktemp -d "$dist_dir/.linux-package.XXXXXX")
@@ -81,11 +85,22 @@ Esc cancels; Tab edits before sending. Change the shortcut in the sidebar.
 AI correction learning and prompt/chat modes use the shared LLM endpoint.
 Gateway hotwords provide spelling context to local recognition on each recording.
 Cached correction rules fix recognized words locally before sending or editing.
-The input dock, quick-area toggle, regrouped key bar (first row ending with
-⋯ and ⌄; second row starting with ⌘C ⌘V and adding ⌃L), tool-aware phrase-strip
-commands (新对话 / 换模型 / 压缩 / 恢复 / 用量 / 搜历史 Ctrl-R for Claude Code,
-Codex, Gemini CLI, agy and opencode, hidden on plain shells and excluded from
-input history), overview Open App
+The input dock (with a full-top-edge drag handle and 1/3-width grip bar), corner
+quick-area toggle (staying beside 收起/输入 and 语音 whether the writing panel is
+open or closed), customizable key bar (default first row `Tab Esc ⌃C ⌫ ⏎ ↑ ⋯`,
+editable in the sidebar `键盘布局` page; second row
+`⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →` with inverted-T arrows aligning `↓` under `↑`
+and `→` under `⋯`, terminal `PgUp`/`PgDn` history paging or alt-screen keys,
+terminal `⌘T`, sticky `⌘` + letter rApp shortcuts, and automatic `⌃`/`⌘`
+release when `⋯` folds), redesigned quick-area first row (starred items or
+30-day usage-ranked items in front, pinned `命令▾` and `常用语▾` menus on the
+right whose refused items explain why inside the menu only, dedicated sidebar
+`常用语`, `命令`, and `键盘布局` pages, and 7 built-in AI tool commands 新对话 /
+切模式 / 换模型 / 压缩 / 恢复 / 用量 / 搜历史 for Claude Code, Codex, Gemini CLI,
+agy and opencode, stored in `quick.json` with one-time migration from `0.15.63`/`64`
+key actions without overwriting unreadable unmovable files or newer-version schemas,
+and synced across devices via `rapp-center` `/prefs/v1/…` while dropping closed links
+on pause or reconnect), overview Open App
 dropdown menu, overview Local column inbound sessions, OSC 7501 program
 status, GUI app state rules client support, top-bar status queue, Needs You
 direct jump, OSC 0/1/2 terminal titles (with · 2 numbering on clashes),
@@ -102,24 +117,26 @@ Devices-tab saved-terminal recovery, zsh/bash/fish OSC 7502 shell hooks with
 venv/conda reactivation and non-executing command prefill, secret-line filtering,
 and 新建 / Ctrl+Shift+T starting in the current or last terminal's directory),
 device headroom/load bars with 1-hour detail sparklines and Needs You resource
-warnings, companion state service (`rapp-state`), event outbox and cross-device
+warnings, companion center service (`rapp-center`, migrating `local/state/` to
+`local/center/` and `services.json` `state` to `center`), event outbox and cross-device
 StateSync / StateOut status queue, Needs You `推断` inferred waits, `别处开着`
-open-elsewhere session cards (`/v1/watch`, `/v1/seen`, `/v1/desk/<fp>`, 状态服务
-settings, and per-device `SetService` switches), intent-following
+open-elsewhere session cards (`/v1/watch`, `/v1/seen`, `/v1/desk/<fp>`, `/v1/routes`,
+`/state/v1/…`, `/prefs/v1/…`, 中心服务 settings, per-device `SetService` switches, and overview
+本机 `连上的服务` status rows for 中心服务 and LLM 网关 with reconnect host refresh and line wrapping), intent-following
 IME switching (local `fcitx5-remote` / `ibus` Chinese in the writing panel and
 English on the stage, remote auto-English before stage keys, streamed terminal
-`typeToCompose: false` default, and folded 本机 column when no local service is
-present), remote macOS Terminal consent prompts with screen preservation,
+`typeToCompose: false` default, and overview 本机 column auto-folding to a 56 px
+strip while nobody is connected in), remote macOS Terminal consent prompts with screen preservation,
 `Ctrl+Shift+V` Linux terminal paste with Wayland selection roundtrip, and the
 enlarged 3-line non-blocking `WaitCard` stage overlay (for slow `Ctrl+Shift+T`,
 新建, 恢复, standby 启动 and device-tab shell opens, with queued counts and
-automatic switch to a remote Mac's desktop on consent) share the macOS 0.15.55
+automatic switch to a remote Mac's desktop on consent) share the macOS 0.15.66
 layout and rules.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and
 reattach without reconnecting. This release uses protocol v16 (compatible with
-macOS 0.15.35–0.15.55); update both peers when coming from protocol v15. Incoming GUI
+macOS 0.15.35–0.15.66); update both peers when coming from protocol v15. Incoming GUI
 state rules are forwarded by the Linux client to compatible hosts (such as
 macOS 0.15.35+) and safely ignored by the Linux desktop/app host. Off-stage and
 hidden/minimized embedded or detached sessions pause pictures but keep activity
@@ -150,8 +167,8 @@ Linux can share ports and text terminals. New terminal windows require a graphic
 session, a supported terminal app, and a working systemd user manager.
 They run in separate transient user services and survive a rapp-service restart.
 Run `rapp share`, `rapp unshare`, `rapp hosts`, `rapp pipe`, `rapp term restore`
-(`--list` / `--forget` / `<number|name>...`), `rapp state` (`on` / `off`),
-`rapp load` (`pick` / `--top` / `--json`), or `rapp update`
+(`--list` / `--forget` / `<number|name>...`), `rapp center` (`on` / `off`, with
+`rapp state` kept as an alias), `rapp load` (`pick` / `--top` / `--json`), or `rapp update`
 (`status` / `check` / `rollback`, with `--json`) for CLI access; on Linux
 online self-replacement is disabled (`not_launchd`, exit 7) and directs to the
 release packages, while `rapp update status` reports the installed version.
@@ -200,7 +217,7 @@ sha256sums=('$(sha256sum "$archive" | cut -d' ' -f1)')
 package() {
   install -d "\$pkgdir/opt/rapp" "\$pkgdir/usr/bin"
   cp -a "\$srcdir/$name/." "\$pkgdir/opt/rapp/"
-  for binary in rapp rapp-client rapp-host rapp-hub rapp-service rapp-term rapp-state rapp-cli; do
+  for binary in rapp rapp-client rapp-host rapp-hub rapp-service rapp-term rapp-center rapp-cli; do
     ln -s "/opt/rapp/\$binary" "\$pkgdir/usr/bin/\$binary"
   done
   install -Dm644 "\$srcdir/$name/LICENSE" "\$pkgdir/usr/share/licenses/rapp-omarchy/LICENSE"

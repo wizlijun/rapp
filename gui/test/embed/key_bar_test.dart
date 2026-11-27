@@ -14,6 +14,8 @@ import 'package:rapp/embed/phrases.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/quick/key_layout.dart';
+import 'package:rapp/quick/quick_prefs.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/platform_caps.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -47,6 +49,7 @@ void main() {
     port = FakeSessionPort();
     term = FakeTermSessionPort();
     s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(phrases: _oldTen), port: port, termPort: term);
+    s.setStripItems(_oldTen); // the list these tests were written for: phrases only (the migration adds 切模式)
     term.seed(2);
     app = RemoteSession(1, 'Safari');
     tsess = RemoteSession(2, 'term');
@@ -121,6 +124,10 @@ void main() {
     });
 
     iosTest('⇧Tab sends Shift-Tab; ⌃C sends Ctrl-C', (tester) async {
+      s.setKeyLayout(const KeyLayout([
+        ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up'],
+        ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'pgup', 'pgdn', 'left', 'down', 'right'],
+      ])); // ⇧Tab is not in the default row any more; put it back
       await tester.pumpWidget(bar(tsess));
       await tap(tester, 'stab');
       await tap(tester, 'cc');
@@ -268,6 +275,10 @@ void main() {
   group('app', () {
     setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →
     iosTest('⇧Tab sends key(48, latchShift); ⌃ then ↑ sends key(126, latchCtrl) after keyEvent(59, down)', (tester) async {
+      s.setKeyLayout(const KeyLayout([
+        ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up'],
+        ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'pgup', 'pgdn', 'left', 'down', 'right'],
+      ])); // ⇧Tab is not in the default row any more; put it back
       await tester.pumpWidget(bar(app, width: 900));
       await tap(tester, 'stab');
       expect(appKeys(), [('key', 1, 48, latchShift)]);
@@ -574,11 +585,11 @@ void main() {
       ]);
     });
 
-    iosTest('left to right: Tab ⇧Tab Esc ⌃C ⌫ ⏎ ↑ ⋯, no ⌄', (tester) async {
+    iosTest('left to right: Tab Esc ⌃C ⌫ ⏎ ↑ ⋯, no ⌄', (tester) async {
       await tester.pumpWidget(bar(tsess));
       expect(k('hide'), findsNothing);
       expect(find.descendant(of: find.byType(KeyBar), matching: find.bySemanticsLabel('收起快捷区')), findsNothing);
-      const order = ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more'];
+      const order = ['tab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more'];
       final xs = [for (final id in order) tester.getCenter(k(id)).dx];
       for (var i = 1; i < xs.length; i++) {
         expect(xs[i], greaterThan(xs[i - 1]), reason: '${order[i]} is right of ${order[i - 1]}');
@@ -732,7 +743,8 @@ void main() {
       await tester.pumpWidget(bar(tsess, width: 900));
       expect(ph('phrase-0'), findsOneWidget);
       expect(find.text('继续'), findsOneWidget);
-      expect(ph('phrases-all'), findsOneWidget);
+      expect(ph('quick-menu-cmds'), findsOneWidget);
+      expect(ph('quick-menu-phrases'), findsOneWidget);
       expect(tester.getSize(find.byType(KeyBar)).height, 90);
       s.setPhraseStrip(false);
       await tester.pump();
@@ -749,11 +761,16 @@ void main() {
       expect(ph('phrase-0'), findsOneWidget);
     });
 
-    iosTest('no phrases: no strip', (tester) async {
+    iosTest('no phrases: the strip still shows, its two menus alone', (tester) async {
       s.setStripItems(const []);
-      expect(phraseStripShown(s, tsess), isFalse);
-      s.setStripItems(defaultPhrases);
       expect(phraseStripShown(s, tsess), isTrue);
+      await tester.pumpWidget(bar(tsess, width: 900));
+      expect(ph('phrase-0'), findsNothing);
+      expect(ph('quick-menu-cmds'), findsOneWidget);
+      expect(ph('quick-menu-phrases'), findsOneWidget);
+      expect(tester.getSize(find.byType(KeyBar)).height, 90);
+      s.setPhraseStrip(false);
+      expect(phraseStripShown(s, tsess), isFalse);
     });
 
     for (final platform in [TargetPlatform.iOS, TargetPlatform.macOS, TargetPlatform.linux]) {
@@ -787,33 +804,36 @@ void main() {
       await tester.pump(phraseRepeatWindow);
     });
 
-    iosTest('long press: 移到最前 and 删除, nothing sent', (tester) async {
+    iosTest('long press: 打星 and 删除, nothing sent', (tester) async {
       await tester.pumpWidget(bar(tsess, width: 900));
       term.calls.clear();
       await tester.longPress(ph('phrase-1'));
       await tester.pumpAndSettle();
-      await tester.tap(ph('phrase-menu-first'));
+      await tester.tap(ph('phrase-menu-star'));
       await tester.pumpAndSettle();
-      expect((s.prefs.phrases.first as Phrase).text, '确认');
-      await tester.longPress(ph('phrase-0'));
+      expect(s.quick.stars, ['p:${(s.quick.phrases[1] as Phrase).id}']);
+      expect(ph('phrase-0'), findsNothing, reason: 'a star: the row is the starred alone');
+      await tester.longPress(ph('phrase-1'));
       await tester.pumpAndSettle();
       await tester.tap(ph('phrase-menu-delete'));
       await tester.pumpAndSettle();
-      expect((s.prefs.phrases.first as Phrase).text, '继续');
-      expect(s.prefs.phrases, hasLength(_oldTen.length - 1));
+      expect((s.quick.phrases.first as Phrase).text, '继续');
+      expect(s.quick.phrases, hasLength(_oldTen.length - 1));
+      expect(s.quick.stars, isEmpty);
+      expect(ph('phrase-0'), findsOneWidget);
       expect(term.calls.where((c) => c.$1 != 'composer'), isEmpty);
     });
 
-    iosTest('全部 ›: the whole list; a tap sends and closes it', (tester) async {
+    iosTest('常用语▾: the whole list; a tap sends and closes it', (tester) async {
       app.setProfile(const ResolvedProfile(phrases: true));
       await tester.pumpWidget(bar(app));
-      await tester.tap(ph('phrases-all'));
+      await tester.tap(ph('quick-menu-phrases'));
       await tester.pumpAndSettle();
-      expect(ph('phrases-all-9'), findsOneWidget);
+      expect(ph('menu-p-9'), findsOneWidget);
       port.calls.clear();
-      await tester.tap(ph('phrases-all-2'));
+      await tester.tap(ph('menu-p-2'));
       await tester.pumpAndSettle();
-      expect(ph('phrases-all-2'), findsNothing);
+      expect(ph('menu-p-2'), findsNothing);
       expect(port.calls.where((c) => c.$1 == 'composer_send').single.$2.toString(), contains('听你的'));
       await tester.pump(phraseRepeatWindow);
     });
@@ -946,14 +966,14 @@ void main() {
       }
     });
 
-    testWidgets('Linux: first row has 8 keys ending in ↑ ⋯; second row has ⌘C ⌘V ⌘T ⌘ ⌃', (tester) async {
+    testWidgets('Linux: first row has 7 keys ending in ↑ ⋯; second row has ⌘C ⌘V ⌘T ⌘ ⌃', (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.linux;
       try {
         tester.view.physicalSize = const Size(1000, 900);
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.reset);
         await tester.pumpWidget(bar(tsess, width: 720));
-        const first = ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more'];
+        const first = ['tab', 'esc', 'cc', 'bksp', 'enter', 'up', 'more'];
         final xs = [for (final id in first) tester.getCenter(k(id)).dx];
         for (var i = 1; i < xs.length; i++) {
           expect(xs[i], greaterThan(xs[i - 1]), reason: '${first[i]} right of ${first[i - 1]}');
@@ -972,8 +992,13 @@ void main() {
         expect(find.descendant(of: k('copy'), matching: find.bySemanticsLabel('复制')), findsOneWidget);
         expect(find.descendant(of: k('paste'), matching: find.bySemanticsLabel('粘贴')), findsOneWidget);
         expect(k('cd'), findsNothing);
+        expect(k('hide'), findsNothing);
         expect(k('cmdt'), findsOneWidget);
         expect(k('cmd'), findsOneWidget);
+        expect(k('pgup'), findsOneWidget);
+        expect(k('pgdn'), findsOneWidget);
+        expect((tester.getCenter(k('down')).dx - tester.getCenter(k('up')).dx).abs(), lessThan(0.5));
+        expect((tester.getCenter(k('right')).dx - tester.getCenter(k('more')).dx).abs(), lessThan(0.5));
         await tester.pumpWidget(bar(app, width: 720));
         port.calls.clear();
         await tap(tester, 'cmdt');
@@ -1043,6 +1068,118 @@ void main() {
           collapsesKeyBar(const KeyUpEvent(
               physicalKey: PhysicalKeyboardKey.keyA, logicalKey: LogicalKeyboardKey.keyA, timeStamp: Duration.zero)),
           isFalse);
+    });
+  });
+
+  group('the bar follows the user\'s layout', () {
+    iosTest('a custom layout: ⋯ ends row 1, ↑ sits over ← ↓ →', (tester) async {
+      s.prefs.keyBarMore = true;
+      s.setKeyLayout(const KeyLayout([
+        ['pgup', 'esc', 'up'],
+        ['left', 'down', 'right'],
+      ]));
+      await tester.pumpWidget(bar(tsess, width: 900));
+      expect(tester.getTopLeft(k('pgup')).dy, tester.getTopLeft(k('more')).dy);
+      expect(tester.getTopLeft(k('more')).dx, greaterThan(tester.getTopLeft(k('up')).dx));
+      expect(tester.getTopLeft(k('left')).dy, greaterThan(tester.getTopLeft(k('up')).dy));
+      // The inverted T: ↓ under ↑, → under ⋯, ← one column before.
+      expect(tester.getTopLeft(k('down')).dx, tester.getTopLeft(k('up')).dx);
+      expect(tester.getTopLeft(k('right')).dx, tester.getTopLeft(k('more')).dx);
+      expect(tester.getTopLeft(k('left')).dx, lessThan(tester.getTopLeft(k('up')).dx));
+    });
+
+    iosTest('a ⌃R key in row 1 draws, keeps the grid and ↑ stays over ←', (tester) async {
+      s.prefs.keyBarMore = true;
+      s.setKeyLayout(const KeyLayout([
+        ['esc', 'cr', 'up'],
+        ['left', 'down', 'right'],
+      ]));
+      await tester.pumpWidget(bar(tsess, width: 900));
+      expect(find.byKey(const Key('bar-cr')), findsOneWidget);
+      expect(tester.getTopLeft(k('down')).dx, tester.getTopLeft(k('up')).dx);
+      expect(tester.getTopLeft(k('right')).dx, tester.getTopLeft(k('more')).dx);
+    });
+
+    iosTest('row 1 without ⋯ (no row 2): no more, bar is one row', (tester) async {
+      s.setKeyLayout(const KeyLayout([
+        ['esc', 'up'],
+        <String>[],
+      ]));
+      await tester.pumpWidget(bar(tsess, width: 900));
+      expect(k('more'), findsNothing);
+      expect(k('esc'), findsOneWidget);
+      expect(keyBarHeightOf(s, tsess), keyBarHeight(1) + (phraseStripShown(s, tsess) ? phraseStripHeight : 0));
+    });
+
+    iosTest('a 按键动作 cell an older version left in the layout is not drawn', (tester) async {
+      s.setKeyLayout(const KeyLayout([
+        ['esc', 'k:search', 'tab'],
+        <String>[],
+      ]));
+      await tester.pumpWidget(bar(tsess, width: 900));
+      expect(find.byKey(const Key('bar-k-search')), findsNothing);
+      expect(k('esc'), findsOneWidget);
+      expect(k('tab'), findsOneWidget);
+    });
+
+    iosTest('a synced row 1 of 11 distinct cells draws 9 of them and ⋯ at the end, no overflow', (tester) async {
+      s.prefs.keyBarMore = true;
+      s.quick.adopt('layout', const QuickDoc(9000, {
+        'rows': [
+          ['esc', 'tab', 'stab', 'cc', 'cr', 'co', 'ct', 'cb', 'cl', 'bksp', 'enter'],
+          ['left', 'down', 'right'],
+        ],
+      }));
+      await tester.pumpWidget(bar(tsess, width: 1000));
+      expect(tester.takeException(), isNull);
+      final row1 = tester.getTopLeft(k('esc')).dy;
+      final drawn = [
+        for (final id in ['esc', 'tab', 'stab', 'cc', 'cr', 'co', 'ct', 'cb', 'cl', 'bksp', 'enter', 'more'])
+          if (k(id).evaluate().isNotEmpty && tester.getTopLeft(k(id)).dy == row1) id,
+      ];
+      expect(drawn, ['esc', 'tab', 'stab', 'cc', 'cr', 'co', 'ct', 'cb', 'cl', 'more']);
+      expect(k('bksp'), findsNothing);
+      final xs = [for (final id in drawn) tester.getTopLeft(k(id)).dx];
+      expect(xs.last, xs.reduce((a, b) => a > b ? a : b), reason: '⋯ is last in the row');
+    });
+
+    iosTest('a synced layout with 按键动作 cells and repeated ids draws each real key once', (tester) async {
+      s.prefs.keyBarMore = true;
+      s.quick.adopt('layout', const QuickDoc(9000, {
+        'rows': [
+          ['esc', 'k:gone', 'tab', 'tab', 'cc', 'k:search', 'cr', 'cr'],
+          ['left', 'down', 'right'],
+        ],
+      }));
+      await tester.pumpWidget(bar(tsess, width: 900));
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('bar-cr')), findsOneWidget);
+      expect(find.byKey(const Key('bar-tab')), findsOneWidget);
+      expect(find.byKey(const Key('bar-k-gone')), findsNothing);
+      expect(find.byKey(const Key('bar-k-search')), findsNothing);
+    });
+
+    iosTest('↑ not directly before ⋯: the user\'s order wins, ← ↓ → stay right-aligned under ⋯', (tester) async {
+      s.prefs.keyBarMore = true;
+      s.setKeyLayout(const KeyLayout([
+        ['esc', 'up', 'cr'],
+        ['left', 'down', 'right'],
+      ]));
+      await tester.pumpWidget(bar(tsess, width: 900));
+      expect(tester.takeException(), isNull);
+      expect(tester.getTopLeft(k('right')).dx, tester.getTopLeft(k('more')).dx);
+      final col = tester.getSize(k('more')).width + keyBarGap;
+      expect(tester.getTopLeft(k('down')).dx, tester.getTopLeft(k('more')).dx - col);
+    });
+
+    iosTest('an empty second row hides ⋯', (tester) async {
+      s.prefs.keyBarMore = true;
+      s.setKeyLayout(const KeyLayout([
+        ['esc', 'tab'],
+        <String>[],
+      ]));
+      await tester.pumpWidget(bar(tsess, width: 900));
+      expect(k('more'), findsNothing);
     });
   });
 

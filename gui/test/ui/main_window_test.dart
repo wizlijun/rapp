@@ -3,12 +3,15 @@ import 'dart:io';
 
 import 'package:rapp/paths.dart';
 import 'package:rapp/pages/ios_local_section.dart';
+import 'package:rapp/pages/state_section.dart';
+import 'package:rapp/state/state_sync.dart';
 import 'package:rapp/pages/rime_settings_section.dart';
 import 'package:rapp/embed/rime_glue.dart';
 import 'package:rapp_rime/rapp_rime.dart';
 import 'package:rapp/pages/local_section.dart';
 import 'package:rapp/platform_caps.dart';
 import 'package:rapp/ui/access_setup.dart';
+import 'package:rapp/ui/devices_tab.dart';
 import 'package:rapp/ui/shares_section.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -289,6 +292,19 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
+    testWidgets('本机 shows the 中心服务 block, so the pad can see whether it found one', (tester) async {
+      hasKey = true;
+      final sync = FakeStateSync(tmp.path)..status = StateStatus.connected;
+      s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), stateSync: sync)..overview = true;
+      await pumpIos(tester);
+      s.togglePanel(PanelTab.devices);
+      await settle(tester);
+      expect(find.byType(IosLocalSection), findsOneWidget);
+      expect(find.byType(StateSection), findsOneWidget);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpWidget(const SizedBox());
+    });
+
     testWidgets('全局设置 has the built-in input method\'s block while its switch is on, and nothing (no gap) when off',
         (tester) async {
       hasKey = true;
@@ -428,6 +444,28 @@ void main() {
     await settle(tester);
     expect(find.byKey(const ValueKey('shares-111')), findsOneWidget);
   });
+
+  testWidgets('Linux desktop: 本机 shows LocalSection, StateServiceRow and StateSection (中心服务)', (tester) async {
+    final was = caps;
+    caps = PlatformCaps.forOs('linux');
+    addTearDown(() => caps = was);
+    s.dispose();
+    final sync = FakeStateSync(tmp.path)
+      ..status = StateStatus.connected
+      ..url = Uri.parse('http://localhost:28003');
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), stateSync: sync);
+    await pump(tester);
+    s.togglePanel(PanelTab.devices);
+    await settle(tester);
+    expect(find.byType(LocalSection), findsOneWidget);
+    expect(find.byKey(const ValueKey('state-service-local')), findsOneWidget);
+    final devTab = find.byType(DevicesTab);
+    expect(find.descendant(of: devTab, matching: find.byType(StateSection)), findsOneWidget);
+    expect(find.descendant(of: devTab, matching: find.text('中心服务')), findsWidgets);
+    expect(find.descendant(of: devTab, matching: find.textContaining('http://localhost:28003')), findsOneWidget);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpWidget(const SizedBox());
+  }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 
   Future<void> pumpInsets(WidgetTester tester, MediaQueryData Function(MediaQueryData) edit) async {
     tester.view.physicalSize = const Size(1194, 834);
