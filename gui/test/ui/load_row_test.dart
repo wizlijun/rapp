@@ -315,6 +315,9 @@ void main() {
       addTearDown(monitor.dispose);
       monitor.load = load();
       await show(tester, monitor: monitor);
+      // Nobody is connected in, so 本机 starts as a strip: open it.
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
       expect(find.descendant(of: find.byKey(const Key('column-local')), matching: find.byKey(const Key('load-bar-local'))),
           findsOneWidget);
     });

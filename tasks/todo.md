@@ -1587,3 +1587,17 @@ macOS、Linux、Duo、iPad 各一遍。
 - [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 直接挂载至已发布的 [v0.15.60](https://github.com/wizlijun/rapp/releases/tag/v0.15.60) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
 - [x] 对齐 macOS `0.15.60`（`feat/center-g1` 中心服务 G1：`rapp-state` 改名 `rapp-center`）并修复两处 Linux 遗漏：在 `scripts/linux/rapp` 补齐 `rapp center [on|off]` 子命令转发至 `rapp-cli`（此前漏写会落入 `rapp-gui`；同步扩充 `scripts/test-linux-launcher.py`），并更新 `scripts/test-linux-bundle.py` 在隔离命名空间中端到端验证 `rapp center` 与 `rapp state` 输出一致、「中心服务」文案、`local/services.json` `center` 键、`local/center/` 目录、`GET /v1/health` v2、`GET /v1/routes` 及 `/state/v1/…` 前缀别名；全工作区 20 个 crate 与 3,649 项 Flutter 测试全部通过。
 - [x] `v0.15.60`（源码 `1f3c0d64`）双格式包逐字节对比（42 文件 / 15 个 ELF）、`BUILD-INFO.json`、systemd 终端驻留及隔离网络命名空间测试全部通过，远端 SHA256 摘要校验一致，仓库下载快照已同步（`website/releases.json`、`website/README.md`）。详见 `docs/superpowers/plans/2026-11-27-linux-01560-parity.md`。
+
+## 总览本机列：连上的服务（feat/overview-local-services）
+
+规格 `docs/superpowers/specs/2026-11-27-rapp-overview-local-services-design.md`，计划 `docs/superpowers/plans/2026-11-27-rapp-overview-local-services.md`（2026-11-27）。
+
+- [x] 本机列展开时，在会话和「正在被接入」下面、版本号上面多一组「连上的服务」：中心服务（在哪台设备 · 端口）和 LLM 网关（地址或探测失败的那句话），各带一盏灯；只看不点
+- [x] PC 上没人接入时本机列也折成 56px 竖条；有人接入自己展开，全部断开再折；手动开或折以后这次运行里不再自动改
+- 实机检查：
+  - [ ] ① PC 上没人接入，启动后本机是竖条
+  - [ ] ② 另一台设备接入，本机自己展开；断开后折回去
+  - [ ] ③ 手动折起或点开以后，接入有没有都不再自己变，重启 app 后恢复自动
+  - [ ] ④ 本机展开时，中心服务是绿灯，写「<设备> · :<端口>」；`rapp center off` 之后变成「没找到」或「已关」
+  - [ ] ⑤ LLM 网关是绿灯，写地址；把 key 改错，一分钟内变成红灯「key 不对」
+  - [ ] ⑥ Duo / iPad 上点开本机，两行都看得到
