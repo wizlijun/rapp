@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:flutter/services.dart';
+import 'dart:typed_data';
 import 'linux_transfer.dart';
 
-class LinuxCopy {
-  const LinuxCopy(
+class SessionCopy {
+  const SessionCopy(
     this.kind, {
     this.text,
     this.bytes,
@@ -22,18 +22,18 @@ class LinuxCopy {
     'files': files,
     'uti': uti,
   };
-  static LinuxCopy? fromMap(Object? value) {
+  static SessionCopy? fromMap(Object? value) {
     if (value is! Map) return null;
     final kind = value['kind'];
     if (kind == 'text' && value['text'] is String) {
-      return LinuxCopy(
+      return SessionCopy(
         'text',
         text: value['text'] as String,
         uti: 'public.utf8-plain-text',
       );
     }
     if (kind == 'files' && value['files'] is List) {
-      return LinuxCopy(
+      return SessionCopy(
         'files',
         files: List<String>.from(value['files'] as List),
         uti: 'public.file-url',
@@ -42,7 +42,7 @@ class LinuxCopy {
     if ((kind == 'image' || kind == 'data') && value['bytes'] is Uint8List) {
       final bytes = value['bytes'] as Uint8List;
       if (bytes.length > linuxMemoryLimit) throw StateError('这一项超过 256 MB');
-      return LinuxCopy(
+      return SessionCopy(
         kind as String,
         bytes: bytes,
         uti:
@@ -54,43 +54,8 @@ class LinuxCopy {
   }
 }
 
-class LinuxDesktop {
-  LinuxDesktop({this.channel = const MethodChannel('rapp/linux')});
-  final MethodChannel channel;
-  Future<LinuxCopy?> readClipboard() async {
-    try {
-      return LinuxCopy.fromMap(
-        await channel.invokeMethod<Object?>('clipboard_read'),
-      );
-    } on MissingPluginException {
-      final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
-      return text == null
-          ? null
-          : LinuxCopy('text', text: text, uti: 'public.utf8-plain-text');
-    }
-  }
-
-  Future<bool> writeClipboard(LinuxCopy copy) async {
-    if (copy.kind == 'text') {
-      await Clipboard.setData(ClipboardData(text: copy.text!));
-      return true;
-    }
-    if (copy.kind == 'files') {
-      for (final path in copy.files) {
-        if (!await File(path).exists()) return false;
-      }
-    }
-    return await channel.invokeMethod<bool>('clipboard_write', copy.toMap()) ??
-        false;
-  }
-
-  Future<List<String>> chooseFiles() async => List<String>.from(
-    await channel.invokeMethod<List<Object?>>('choose_files') ?? [],
-  );
-}
-
-Future<String> saveLinuxCopy(
-  LinuxCopy copy,
+Future<String> saveSessionCopy(
+  SessionCopy copy,
   String textDir,
   String fileDir,
   String stem,
@@ -146,7 +111,7 @@ Future<String> saveLinuxCopy(
   }
 }
 
-Future<LinuxCopy?> loadLinuxCopy(String path) async {
+Future<SessionCopy?> loadSessionCopy(String path) async {
   if (await Directory(path).exists()) {
     if (path.endsWith('.rapp-clip') && await File('$path/clip.json').exists()) {
       final m = jsonDecode(await File('$path/clip.json').readAsString());
@@ -155,7 +120,7 @@ Future<LinuxCopy?> loadLinuxCopy(String path) async {
           await File('$path/data').length() > linuxMemoryLimit) {
         return null;
       }
-      return LinuxCopy(
+      return SessionCopy(
         'data',
         uti: m['uti'] as String,
         bytes: await File('$path/data').readAsBytes(),
@@ -168,18 +133,18 @@ Future<LinuxCopy?> loadLinuxCopy(String path) async {
       }
     }
     files.sort();
-    return LinuxCopy('files', files: files, uti: 'public.file-url');
+    return SessionCopy('files', files: files, uti: 'public.file-url');
   }
   final file = File(path);
   if (await file.length() > linuxMemoryLimit) return null;
   if (path.endsWith('.md')) {
-    return LinuxCopy(
+    return SessionCopy(
       'text',
       text: await file.readAsString(),
       uti: 'public.utf8-plain-text',
     );
   }
-  return LinuxCopy(
+  return SessionCopy(
     path.endsWith('.png') ? 'image' : 'data',
     bytes: await file.readAsBytes(),
     uti: path.endsWith('.png') ? 'public.png' : 'public.data',

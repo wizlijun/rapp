@@ -16,46 +16,37 @@ import 'state_rules.dart' show stateRulesLimit;
 import 'modifier_latch.dart';
 import 'voice_key_gate.dart';
 import 'linux_transfer.dart';
-import 'linux_clipboard.dart';
-import '../paths.dart';
+import 'session_copy.dart';
+import 'session_host.dart';
+import 'linux_session_host.dart';
 import 'session_worker.dart';
 
 export 'session_worker.dart' show sessionPackets;
 
 // Opt-in timing only. Never include input text, clipboard data, tokens or pixels.
-final _traceStream =
-    Platform.environment['RAPP_STREAM_TRACE_DIR']?.isNotEmpty == true;
-void _streamTrace(int worker, String stage, String detail) {
-  if (_traceStream) {
-    stderr.writeln(
-      'stream-trace ${DateTime.now().microsecondsSinceEpoch} worker=$worker $stage $detail',
-    );
-  }
+void _streamTrace(SessionHost host, int worker, String stage, String detail) {
+  if (host.traceDir == null) return;
+  stderr.writeln(
+    'stream-trace ${DateTime.now().microsecondsSinceEpoch} worker=$worker $stage $detail',
+  );
 }
 
 class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
   LinuxSessionPort(
     this.executable, {
     Future<void> Function()? framePresented,
-    LinuxDesktop? desktop,
-    String Function()? downloads,
-  }) : desktop = desktop ?? LinuxDesktop(),
-       downloads =
-           downloads ??
-           (() =>
-               Platform.environment['RAPP_DOWNLOADS'] ??
-               '${dataRoot(Platform.environment, Platform.operatingSystem)}/files/transfers'),
+    SessionHost? host,
+  }) : host = host ?? LinuxSessionHost(),
        _framePresented =
            framePresented ?? (() => SchedulerBinding.instance.endOfFrame);
   final Future<void> Function() _framePresented;
   final String executable;
-  final LinuxDesktop desktop;
-  final String Function() downloads;
+  final SessionHost host;
   final _events = StreamController<SessionEvent>.broadcast();
   final _sessions = <Object, _Session>{};
   final _starting = <Object>{};
   final _cancelledStarts = <Object>{};
-  final _copies = <int, LinuxCopy>{};
+  final _copies = <int, SessionCopy>{};
   int _nextCopy = 1;
   Object? _focused;
   final _voiceGate = VoiceKeyGate();
@@ -108,12 +99,11 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
   static final _printable = RegExp(r'^\P{C}$', unicode: true);
   bool _disposed = false;
 
-  bool _native = false;
   Object? _dropSid;
   @override
-  bool get supportsDetach => _native;
+  bool get supportsDetach => host.supportsDetach;
   @override
-  bool get supportsInlineNativeComposer => true;
+  bool get supportsInlineNativeComposer => host.supportsInlineNativeComposer;
   @override
   Stream<SessionEvent> get events => _events.stream;
 
@@ -122,12 +112,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     if (!await File(executable).exists()) {
       throw StateError('rapp-session not found: $executable');
     }
-    try {
-      _native = await desktop.channel.invokeMethod<bool>('init') ?? false;
-      desktop.channel.setMethodCallHandler(_nativeEvent);
-    } on MissingPluginException {
-      _native = false;
-    }
+    await host.init(_nativeEvent);
     WidgetsBinding.instance.addObserver(this);
     return 500;
   }
@@ -138,7 +123,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     if (e.sid == _focused && ((e is SecureFocusEvent && e.on) || e is DisconnectedEvent)) {
       _voiceFeed(VoiceGateInput.resign);
     }
-    if (_native && s?.detached == true) {
+    if (host.supportsDetach && s?.detached == true) {
       if (e is SecureFocusEvent) {
         _nativeCall('secure_focus', {'sid': e.sid, 'on': e.on});
       }
@@ -167,8 +152,8 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
 
   void _nativeCall(String method, Map<String, Object?> args) {
     unawaited(
-      desktop.channel
-          .invokeMethod<void>(method, args)
+      host.detachChannel
+          ?.invokeMethod<void>(method, args)
           .catchError((Object _) {}),
     );
   }
@@ -217,7 +202,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         call.method == 'composer_attach') {
       final result = call.method == 'drop_files'
           ? await s.insert(
-              LinuxCopy(
+              SessionCopy(
                 'files',
                 files: List<String>.from(args['files'] as List),
               ),
@@ -424,8 +409,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
       _framePresented,
       0,
       '',
-      downloads,
-      desktop,
+      host,
     );
     _focused = sid;
   }
@@ -434,7 +418,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
   @visibleForTesting
   int seedCopyForTest(String text) {
     final copy = _nextCopy++;
-    _copies[copy] = LinuxCopy(
+    _copies[copy] = SessionCopy(
       'text',
       text: text,
       uti: 'public.utf8-plain-text',
@@ -446,14 +430,14 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
   Future<Object?> invoke(String method, Map<String, Object?> args) async {
     if (method == 'copy_local') {
       final copy = _copies[args['copy']];
-      return copy != null && await desktop.writeClipboard(copy);
+      return copy != null && await host.writeClipboard(copy);
     }
     if (method == 'pin_save') {
       final copy = _copies[args['copy']];
       if (copy == null) return null;
       try {
         return {
-          'path': await saveLinuxCopy(
+          'path': await saveSessionCopy(
             copy,
             args['text_dir'] as String,
             args['file_dir'] as String,
@@ -466,7 +450,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     }
     if (method == 'pin_load') {
       try {
-        final value = await loadLinuxCopy(args['path'] as String);
+        final value = await loadSessionCopy(args['path'] as String);
         if (value == null) return null;
         final copy = _nextCopy++;
         _copies[copy] = value;
@@ -482,16 +466,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     if (method == 'reveal') {
       final path = args['path'];
       if (path is! String) return false;
-      final file = File(path);
-      if (!await file.exists()) return false;
-      try {
-        return (await Process.run('xdg-open', [
-              file.absolute.parent.path,
-            ])).exitCode ==
-            0;
-      } on ProcessException {
-        return false;
-      }
+      return host.reveal(path);
     }
     if (method == 'set_voice_hotkey') {
       final hotkey = VoiceHotkey.fromJson(args['hotkey']);
@@ -552,8 +527,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         _framePresented,
         args['port'] as int,
         args['token'] as String,
-        downloads,
-        desktop,
+        host,
       );
       s.stream = {
         'mode': args['mode'],
@@ -600,15 +574,15 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     }
     switch (method) {
       case 'detach':
-        if (!_native || s.detached) return null;
+        if (!host.supportsDetach || s.detached) return null;
         try {
-          await desktop.channel.invokeMethod<void>('detach', {
+          await host.detachChannel?.invokeMethod<void>('detach', {
             'sid': sid,
             'text': args['text'],
             'blocks': args['blocks'],
           });
           if (_disposed || s.closed || !identical(_sessions[sid], s)) {
-            await desktop.channel.invokeMethod<void>('attach', {'sid': sid, 'discard': true});
+            await host.detachChannel?.invokeMethod<void>('attach', {'sid': sid, 'discard': true});
             return null;
           }
           if (s.disconnected) throw StateError('连接已断开');
@@ -629,12 +603,12 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
           _emit(WindowVisibleEvent(s.sid, s.windowVisible));
         } catch (_) {
           s.restoreStage();
-          await desktop.channel.invokeMethod<void>('attach', {'sid': sid, 'discard': true}).catchError((Object _) {});
+          await host.detachChannel?.invokeMethod<void>('attach', {'sid': sid, 'discard': true}).catchError((Object _) {});
           rethrow;
         }
       case 'attach':
         if (!s.detached) return null;
-        await desktop.channel.invokeMethod<void>('attach', {'sid': sid});
+        await host.detachChannel?.invokeMethod<void>('attach', {'sid': sid});
         s.restoreStage();
         _emit(DetachedEvent(s.sid, false, current: s.selected));
       case 'raise_detached':
@@ -715,14 +689,14 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         s.send({'cmd': 'move', 'window': id, 'x': slot, 'y': slot});
       case 'composer_paste':
         try {
-          return await s.insert(await desktop.readClipboard());
+          return await s.insert(await host.readClipboard());
         } catch (e) {
           return {'status': '粘贴没成功：$e'};
         }
       case 'composer_attach':
         try {
           return await s.insert(
-            LinuxCopy('files', files: await desktop.chooseFiles()),
+            SessionCopy('files', files: await host.chooseFiles()),
           );
         } catch (e) {
           return {'status': '添加没成功：$e'};
@@ -753,7 +727,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
               ),
             );
           } else {
-            await desktop.writeClipboard(copy);
+            await host.writeClipboard(copy);
           }
         } catch (e) {
           s.showStatus(
@@ -833,13 +807,12 @@ class _Session {
     this.framePresented,
     this.port,
     this.token,
-    String Function() downloads,
-    this.desktop,
+    this.host,
   ) {
     transfers = LinuxTransfers(
       port,
       token,
-      downloads: downloads,
+      downloads: host.downloads,
       progress: (p) {
         emit(
           TransferProgressEvent(
@@ -871,7 +844,7 @@ class _Session {
     );
   }
   late final LinuxTransfers transfers;
-  final LinuxDesktop desktop;
+  final SessionHost host;
   bool detached = false;
   bool windowVisible = true;
   Map<String, Object?> composerOptions = {};
@@ -882,7 +855,7 @@ class _Session {
   void nativeFocus() {
     if (!detached) return;
     final f = focusWanted ? focusRegion : null;
-    unawaited(desktop.channel.invokeMethod<void>('focus', {
+    unawaited(host.detachChannel?.invokeMethod<void>('focus', {
       'sid': sid, 'window': f?.window ?? 0,
       'rects': [for (final r in f?.rects ?? <ui.Rect>[]) [r.left, r.top, r.width, r.height]],
     }).catchError((Object _) {}));
@@ -895,8 +868,8 @@ class _Session {
   void nativeClips() {
     if (detached) {
       unawaited(
-        desktop.channel
-            .invokeMethod<void>('clips', {
+        host.detachChannel
+            ?.invokeMethod<void>('clips', {
               'sid': sid,
               'clips': [
                 for (final c in clips.entries.toList().reversed)
@@ -917,12 +890,12 @@ class _Session {
   List<dynamic> nativeMenuTable = [];
   Future<void> nativeWindows() async {
     if (detached && !closed) {
-      await desktop.channel.invokeMethod<void>('windows', {
+      await host.detachChannel?.invokeMethod<void>('windows', {
         'sid': sid,
         'windows': [for (final w in nativeWindowTable) if (!hidden.contains(w['id'])) w],
       });
       if (closed) return;
-      await desktop.channel.invokeMethod<void>('menus', {
+      await host.detachChannel?.invokeMethod<void>('menus', {
         'sid': sid,
         'items': nativeMenuTable,
       });
@@ -931,7 +904,7 @@ class _Session {
 
   Future<void> nativeFrame() async {
     if (detached && !closed && lastNativeFrame != null) {
-      await desktop.channel.invokeMethod<void>('frame', {
+      await host.detachChannel?.invokeMethod<void>('frame', {
         'sid': sid,
         'bytes': lastNativeFrame,
       });
@@ -977,6 +950,7 @@ class _Session {
     _restorePending = restore;
     _pendingSequence = ++_receivedFrames;
     _streamTrace(
+      host,
       process.pid,
       'pipe-frame',
       'output=$_pendingSequence bytes=${bytes.length}',
@@ -993,9 +967,9 @@ class _Session {
         final restore = _restorePending;
         _restorePending = false;
         _pendingFrame = null;
-        _streamTrace(process.pid, 'image-start', 'output=$sequence');
+        _streamTrace(host, process.pid, 'image-start', 'output=$sequence');
         await frame(bytes, restore: restore);
-        _streamTrace(process.pid, 'image-ready', 'output=$sequence');
+        _streamTrace(host, process.pid, 'image-ready', 'output=$sequence');
         if (!closed && !disconnected) {
           // Use a per-frame stop signal: registering on one long-lived future
           // would retain a callback for every displayed frame until disconnect.
@@ -1008,7 +982,7 @@ class _Session {
             stop.future,
           ]);
           _renderWait = null;
-          _streamTrace(process.pid, 'flutter-frame', 'output=$sequence');
+          _streamTrace(host, process.pid, 'flutter-frame', 'output=$sequence');
         }
       }
     } catch (e) {
@@ -1020,8 +994,8 @@ class _Session {
   }
 
   final clips = <int, Map<String, dynamic>>{};
-  final blocks = <int, LinuxCopy>{};
-  final _fetched = <int, LinuxCopy>{};
+  final blocks = <int, SessionCopy>{};
+  final _fetched = <int, SessionCopy>{};
   int _nextItem = 1;
   final held = <int>{};
   int latched = 0;
@@ -1059,7 +1033,7 @@ class _Session {
       for (final piece in pieces) {
         if (piece is! Map) throw StateError('无效的输入内容');
         final copy = piece['text'] is String
-            ? LinuxCopy(
+            ? SessionCopy(
                 'text',
                 text: piece['text'] as String,
                 uti: 'public.utf8-plain-text',
@@ -1127,14 +1101,14 @@ class _Session {
     }
   }
 
-  Future<LinuxCopy> fetch(int id) async {
+  Future<SessionCopy> fetch(int id) async {
     if (_fetched.containsKey(id)) return _fetched[id]!;
     final info = clips[id];
     if (info == null) throw StateError('unknown clip');
     final kind = info['kind'] as String;
-    late final LinuxCopy result;
+    late final SessionCopy result;
     if (kind == 'text') {
-      result = LinuxCopy(
+      result = SessionCopy(
         'text',
         text: info['text'] as String,
         uti: 'public.utf8-plain-text',
@@ -1154,9 +1128,9 @@ class _Session {
               as String,
         );
       }
-      result = LinuxCopy('files', files: files, uti: 'public.file-url');
+      result = SessionCopy('files', files: files, uti: 'public.file-url');
     } else if (kind == 'image' || kind == 'data') {
-      result = LinuxCopy(
+      result = SessionCopy(
         kind,
         uti: kind == 'image' ? 'public.png' : info['uti'] as String,
         bytes:
@@ -1176,7 +1150,7 @@ class _Session {
     return result;
   }
 
-  Future<Map<String, Object?>> insert(LinuxCopy? copy) async {
+  Future<Map<String, Object?>> insert(SessionCopy? copy) async {
     if (copy == null || closed) return {};
     if (copy.kind == 'text' &&
         copy.text!.runes.length < 800 &&
@@ -1187,7 +1161,7 @@ class _Session {
     final values = copy.kind == 'files'
         ? [
             for (final path in copy.files)
-              LinuxCopy('files', files: [path], uti: 'public.file-url'),
+              SessionCopy('files', files: [path], uti: 'public.file-url'),
           ]
         : [copy];
     String? status;
@@ -1254,9 +1228,9 @@ class _Session {
             info['truncated'] = m['truncated'];
             if (info['kind'] == 'text') {
               unawaited(
-                desktop
+                host
                     .writeClipboard(
-                      LinuxCopy('text', text: info['text'] as String),
+                      SessionCopy('text', text: info['text'] as String),
                     )
                     .catchError((Object _) => false),
               );
@@ -1287,7 +1261,7 @@ class _Session {
           } else {
             if (method == 'menu') nativeMenuTable = m['items'] as List;
             if (detached && method == 'menu') {
-              await desktop.channel.invokeMethod<void>('menus', {
+              await host.detachChannel?.invokeMethod<void>('menus', {
                 'sid': sid,
                 'items': m['items'],
               });
@@ -1473,8 +1447,8 @@ class _Session {
     lastNativeFrame = null;
     if (detached) {
       unawaited(
-        desktop.channel
-            .invokeMethod<void>('attach', {'sid': sid, 'discard': true})
+        host.detachChannel
+            ?.invokeMethod<void>('attach', {'sid': sid, 'discard': true})
             .catchError((Object _) {}),
       );
     }

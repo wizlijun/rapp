@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_protocol.dart';
 import 'package:rapp/embed/linux_transfer.dart';
-import 'package:rapp/embed/linux_clipboard.dart';
+import 'package:rapp/embed/session_copy.dart';
 import 'linux_text_upload_test.dart' as wire;
 
 void main() {
@@ -200,26 +200,26 @@ void main() {
       final source = File('${dir.path}/source.txt')
         ..writeAsStringSync('original');
       final copies = [
-        LinuxCopy(
+        SessionCopy(
           'image',
           bytes: Uint8List.fromList([1, 2, 3]),
           uti: 'public.png',
         ),
-        LinuxCopy(
+        SessionCopy(
           'data',
           bytes: Uint8List.fromList([4, 5]),
           uti: 'application/x-rapp-test',
         ),
-        LinuxCopy('files', files: [source.path]),
+        SessionCopy('files', files: [source.path]),
       ];
       for (final copy in copies) {
-        final path = await saveLinuxCopy(
+        final path = await saveSessionCopy(
           copy,
           '${dir.path}/text',
           '${dir.path}/pins',
           'same',
         );
-        final loaded = await loadLinuxCopy(path);
+        final loaded = await loadSessionCopy(path);
         expect(loaded!.kind, copy.kind);
         if (copy.kind == 'files') {
           source.deleteSync();
