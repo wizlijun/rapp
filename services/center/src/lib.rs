@@ -1,9 +1,9 @@
 //! rapp-center (中心服务): one port for every builtin service; today the state queue. Listens on 127.0.0.1 only.
 
+mod builtin;
 pub mod disk;
-mod http;
-pub mod event;
-pub mod store;
+mod entry;
+pub mod state;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -12,7 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
 
-pub use http::{serve, serve_with_log};
+pub use entry::{serve, serve_with_log};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
