@@ -40,7 +40,7 @@ void main() {
     tmp.deleteSync(recursive: true);
   });
 
-  Future<void> boot(WidgetTester tester, {List<String> apps = const []}) async {
+  Future<void> boot(WidgetTester tester, {List<String> apps = const [], bool term = false}) async {
     t = FakeTransport();
     port = FakeSessionPort();
     t.onSend = (m) {
@@ -67,7 +67,7 @@ void main() {
         });
       }
     };
-    s = MainState(hub: HubClient(t), data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
+    s = MainState(hub: HubClient(t), data: DataDir(tmp.path), prefs: UiPrefs(), port: port, termPort: term ? FakeTermSessionPort() : null);
     nav = PhoneNav(s);
     await tester.runAsync(() async {
       for (var i = 0; i < 8; i++) {
@@ -188,6 +188,43 @@ void main() {
         await tester.pump();
         expect(nav.now, PhoneView.home);
         expect(find.byKey(const Key('block-m1/a')), findsOneWidget);
+      });
+
+      testWidgets('stopped standby enters the new terminal once open', (tester) async {
+        size(tester);
+        await boot(tester, apps: ['m1/a'], term: true);
+        s.hub!.termLists['m1'] = TermList('m1', terms: const [], hosts: [TermHost(null, launchers: const ['Terminal'])]);
+        final inner = t.onSend!;
+        t.onSend = (m) {
+          if (m['cmd'] == 'open_term') {
+            t.emit({'event': 'term_created', 'req': m['req'], 'id': m['id'], 'term': 'term:pty:new'});
+          } else if (m['cmd'] == 'terms') {
+            t.emit({
+              'event': 'terms', 'req': m['req'], 'id': m['id'], 'terms': [],
+              'hosts': [{'host': null, 'launchers': ['Terminal']}],
+            });
+          } else {
+            inner(m);
+          }
+        };
+        await labelOn(tester, 'term:pty:old');
+        await tester.pumpWidget(app(th, DevicesPage(state: s, nav: nav)));
+        await tester.pump();
+        holdOpen = true;
+        await tester.tap(find.byKey(const Key('block-m1/term:pty:old')));
+        await tester.pump();
+        await tester.runAsync(() async {
+          for (var i = 0; i < 8; i++) {
+            await flush();
+          }
+        });
+        await tester.pump();
+        expect(nav.now, PhoneView.home);
+        expect(held, isNotNull);
+        expect(held!['app'], 'term:pty:new');
+        await land(tester);
+        expect(nav.now, PhoneView.session);
+        expect(s.currentKey, 'm1/term:pty:new');
       });
 
       testWidgets('add device expands the form', (tester) async {
