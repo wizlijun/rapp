@@ -27,11 +27,27 @@
 | 段 | 计划 | 代码 | 在哪 | 状态 |
 |---|---|---|---|---|
 | P 探针 | 有 | 没有 | —— | 没跑。要一台 Windows 11 和一台 Server 2022（实机或虚拟机） |
-| A 地基 | 有 | **草稿，写完了** | 分支 `feat/windows-foundation`，worktree `.worktrees/windows-foundation` | 没编译、没测试、没在 Windows 上碰过。任务 2–7 的代码都写了；任务 1、8、9 里要上机器的步骤没做（见 3.1） |
-| B 主机核心 | 有 | **草稿，写完了**（任务 1–19；任务 20 收尾要上机器，没做） | `feat/windows-host-core`（任务 7–12 写在 `feat/windows-host-core-rules` 上，已合进来，那个分支可以不用再看） | 同上；Swift 样本文件一个都还没生成；任务 19 的真机走查没做（见 3.2） |
+| A 地基 | 有 | **草稿，写完了** | Mac 不编译的部分在 `main`；接线在分支 `feat/windows-foundation`，worktree `.worktrees/windows-foundation`（见 2.1） | 没编译、没测试、没在 Windows 上碰过。任务 2–7 的代码都写了；任务 1、8、9 里要上机器的步骤没做（见 3.1） |
+| B 主机核心 | 有 | **草稿，写完了**（任务 1–19，任务 20 的步骤 4、5；其余收尾要上机器，没做） | `rust/host-core/` 在 `main`；接线在分支 `feat/windows-host-core`，worktree `.worktrees/windows-host-core`（见 2.1） | 同上；Swift 样本文件一个都还没生成；任务 19 的真机走查没做（见 3.2） |
 | C–H | 有 | 没有 | —— | 等接手的人按计划做 |
 
-所有代码草稿都从 main 的 `7ed6c7e4` 分出来，**没有合并进 main**。草稿的每个提交标题都带 `(草稿，未编译未验证)`。
+草稿的每个提交标题都带 `(草稿，未编译未验证)`。
+
+### 2.1 草稿是怎么进 main 的（2026-11-27）
+
+用户定的三件事：草稿合进 `main`；不编译；Windows 版不能影响 macOS 和 iOS 发版。草稿没编译过，一旦参与 Mac 的门禁，编不过就会卡住发版。所以只让 Mac 不编译的部分进 `main` 的文件，其余的留在分支上：
+
+| | 在 `main` 的文件里 | 只在分支上（接线） |
+|---|---|---|
+| A | `rust/host-windows/`、`rust/svc-windows/`、`scripts/check-windows.ps1`、`scripts/stage-windows.ps1`、`.gitattributes`、文档 | 对已有 crate 的全部改动（约 55 个文件）、`rust/.cargo/config.toml`、`rust/Cargo.toml` 的成员表 |
+| B | `rust/host-core/` 整个目录、文档 | `rust/Cargo.toml` 的成员表、`rust/testkit` 里的假平台、`fake-host-core` 和两组会话测试、`Tests/RappCoreTests/HostCoreFixtures/`（Swift 样本生成器） |
+
+- 做法：合并前在每个分支上加一个“撤下接线”的提交（A 是 `118b1f72`，B 是 `6b27449b`），再合并（A 是 `75d4e57e`，B 是 `474d75a7`）。合并后在分支上把那个提交还原（A 是 `cb51604b`，B 是 `afe62df5`）。所以**分支 = `main` + 这一段的接线**，草稿的全部历史都在 `main` 里。
+- 三个新 crate 不在 `rust/Cargo.toml` 的成员表里，`cargo … --workspace` 看不到它们。在这三个目录里直接跑 cargo 会报“不在 workspace 里”，这是预期的，要到分支上跑。
+- 合并前后核对过：`rust/` 里已有的 crate、`rust/Cargo.toml`、`Cargo.lock`、`Sources/`、`Tests/`、`Package.swift`、`gui/`、`services/` 没有任何变化。两次合并都不该触发发版，合并提交的标题和 `tasks/todo.md` 里都写了。
+- **接线进 `main` 的条件**：A 要 Mac 门禁和 Windows 门禁都绿；B 要 Mac 门禁绿。之后照常 `git merge main`、`git merge --no-ff`。两段的接线都改成员表和 `rust/testkit/tests/common/mod.rs`，后合的一方解冲突。
+- 不要再用“还原撤下提交”的办法另起分支，直接用这两个分支。
+- 一处没带进来：A 段给 `2026-11-12-rapp-requirements-feedback.md` 第 14 条写的“已定”那句。合并时主 checkout 里用户正在改这个文件，这句就撤掉了，等用户提交后再补。
 
 ## 3. 草稿是怎么写出来的，能信多少
 
@@ -43,15 +59,16 @@
 
 ### 3.1 A 段草稿的实际情况
 
-说明文件：分支上的 `docs/superpowers/plans/notes/2026-11-26-windows-a-draft-notes.md`（六节：写了什么、没写什么、和计划不同的地方、计划的错、编译风险、先验什么）。
+说明文件：`docs/superpowers/plans/notes/2026-11-26-windows-a-draft-notes.md`（七节：写了什么、没写什么、和计划不同的地方、计划的错、编译风险、先验什么、第二轮读查）。
 
 - **写了的**：两个空壳 crate 进 workspace；`rapp-net` 的 Windows 部分（`rust/net/src/win.rs`，新增的 `unsafe` 只在这一个文件）；`rapp-service` 的单实例和 `--supervised`；`rapp-term` 的 unix 部分包起来；`rapp-cli` 在 Windows 上的入口；测试在 Windows 上的写法（七处权限断言、testkit 复制四个假程序）；`.gitattributes`；`rust/.cargo/config.toml`；`scripts/stage-windows.ps1`、`scripts/check-windows.ps1`；规格 §19.2 列的旧文档句子；`tasks/todo.md` 末尾两个新标题。
-- **没做的**：`CLAUDE.md` 草稿没动（四条已由用户 2026-11-27 同意，直接加在 main 上了，见第 5 节第 1 步）；所有要 Windows 机器的步骤；Flutter 的 Windows 构建；§17.2 的完成标记；合并。
+- **没做的**：`CLAUDE.md` 草稿没动（四条已由用户 2026-11-27 同意，直接加在 main 上了，见第 5 节第 1 步）；所有要 Windows 机器的步骤；Flutter 的 Windows 构建；§17.2 的完成标记；接线的合并（见 2.1）。
+- **第二轮（2026-11-27，仍然不编译）**：合上了当时的 main；main 在草稿之后新进的代码（rapp-state P3、等待卡片等）逐个看过，没有新的缝要补；改了三处读得出来的错（`UpdateOpts::windows` 的闭包 `f628efe7`；`rapp-service` 读参数遇到非 UTF-8 会崩 `40a7db52`；`paired.json` 补了 Windows 的访问列表测试 `375bf339`）；Mac 上会编译的文件逐个对过 `main`，unix 那一支只有换成 `rapp_net::proc`、加 `cfg` 这几类改动。唯一改了 unix 测试内容的是 `a_stuck_disk_gets_one_thread_not_one_per_read`（`/dev` 换成临时目录），要在 macOS 和 Linux 上实际跑过才算数。
 - **计划里错的，已经改回计划 A**：中继只改 `audit.rs` 不够（见 4.2，用户已同意再改 `admin.rs`，草稿里已经写了：提交 `132111ad`、`ddbdc52b`；Windows 上因此关掉“换钥”一组八个测试，首发前手工验一次，在计划 H 任务 5）；`rapp-state` 和余力的 `disks.rs` 是计划之后才进 main 的 unix 代码；testkit 的假程序是四个不是三个；`rapp-term` 的“改名检查”要改成比内容；`rust/.cargo/config.toml` 只在当前目录是 `rust\` 时生效。
 - **最先会撞上的**：
   1. `Cargo.lock` 没重新生成。第一次跑 cargo 会改它，这是加依赖的正常结果，和功能一起提交（只是不许动里面的版本号行，那归发版 session）。
-  2. `rust/net/src/win.rs` 里 `windows-sys` 0.61 的签名和特性开关（`SetNamedSecurityInfoW`、`EXPLICIT_ACCESS_W`/`TRUSTEE_W`、`GetAce`、`GetDiskFreeSpaceExW`）是凭记忆写的。
-  3. `rust/service/src/lib.rs` 里 `UpdateOpts::windows` 的闭包类型可能推不出来。
+  2. `rust/net/src/win.rs` 里 `windows-sys` 的签名和特性开关（`SetNamedSecurityInfoW`、`EXPLICIT_ACCESS_W`/`TRUSTEE_W`、`GetAce`、`GetDiskFreeSpaceExW`）第二轮对着本机缓存的 0.61.2 源码核过，没发现不合；仍然没编译。
+  3. 中继在别的系统上的管理接口是替身。Windows 上 clippy 要是报 `server.rs` 里的东西没用到，改 `server.rs` 超出了用户批准的两处，要先问用户。
   4. 两个 PowerShell 脚本没跑过；`Step` 靠脚本块返回一个布尔值，命令往管道里多吐东西就会被判成失败。
 - **先在 Mac 上做的**：`cargo check --workspace`（确认没碰坏 macOS），再 `cargo check --target x86_64-pc-windows-msvc`（只查类型，不链接），然后才上 Windows 机器。
 
@@ -101,18 +118,21 @@ B 段分三批写，前两批在两个分支上并行，互相没看过对方的
 - **写了的**：平台接口、入口 `run.rs`、握手和接管、testkit 里的假平台（13）；采集、编码、发送的循环，含暂停、视区、省流（14）；输入、遮挡提示、焦点窗格、状态规则接进会话（15）；剪贴板、粘贴、文件传输（16）；锁屏和解锁（17）；`PORTING.md` 和摘要测试（18）；`fake-host-core` 程序和服务对接测试（19 的步骤 1、2、5）。会话代码在 `rust/host-core/src/session/` 下十一个文件，会话测试在 `rust/testkit/tests/host_session.rs` 和 `host_service.rs`。
 - **没做的**：任务 19 步骤 4，用真的 Mac 控制端连 `fake-host-core` 走一遍（五种模式、滚动、打字、粘贴文件），只能手工做；任务 20 收尾；所有“运行”步骤。
 - **草稿和 Swift 不一样、接手的人要补或者认下来的**：
-  1. **锁着时开始的会话，画布总是按主显示器报**。Swift 会先找这个程序的窗口在哪块屏上（`Server.swift:676-697`）。草稿的平台接口在锁屏时拿不到窗口位置，所以没用上已经移植好的 `locked_start_display`。多显示器的机器上会和 macOS 表现不同。D 段做平台层时，如果 Windows 锁屏下能列出窗口，就给平台接口加这个入口并接上。
-  2. **焦点窗格没有控件角色**：起点写成 `-`，选中的写成 `depth<n>`。角色要平台层给，属于 D 段。
-  3. `menuPick` 既没处理也没拦（计划说收到后忽略、会话继续）。要确认它确实什么都不改。
-  4. 移植了 `lock::StayAwake`，但会话直接调平台的 `stay_awake`，前者没用上，这两处调用也没有测试。
-  5. 语言固定取 `en` 或环境变量 `RAPP_LOCALE`。
-  6. “目标程序不在最前时复制不通知”这条路径没有测试。
-  7. 焦点区的会话测试用 Rust 自己算的期望值，允许差 8 点，不是和 Swift 样本逐值比。
+  1. **焦点窗格没有控件角色**：起点写成 `-`，选中的写成 `depth<n>`。角色要平台层给，属于 D 段。
+  2. 语言固定取 `en` 或环境变量 `RAPP_LOCALE`。
+  3. 焦点区的会话测试用 Rust 自己算的期望值，允许差 8 点，不是和 Swift 样本逐值比。
+  4. 少两行日志：Swift 在窗口移不动时写 `could not move a window`（`Server.swift:484-486`），在保持唤醒失败时写 `could not keep A awake`。草稿的 `WindowOps::move_to` 和 `LockOps::stay_awake` 不返回结果，写不出这两行。补的话要改平台接口的签名（计划 B 任务 13）；这是留给实现的人定的事，定了写进 `PORTING.md`。
+- **第四批（2026-11-27，仍然不编译）补上的**，原来也在上面这张单子里：
+  - 锁着时开始的会话按程序所在的显示器报画布（`7649a3e0`）。平台接口新增 `Platform::locked_app_windows`，D 段的 Windows 平台必须实现。
+  - `menuPick` 和 Swift 一样先过闸门，过了只写一行日志，会话继续（`a8624d30`）。
+  - `StayAwake` 照 Swift 接上（`bbea8c91`）。顺带修了一个真错：打开目标后锁屏句柄会换成目标的，结束时关保持唤醒落到了另一个句柄上，关不掉。
+  - “目标程序不在最前”有了测试（`e2c41102`）；帧率档位有了测试（`ed9f0c86`，Swift 不取整，只收 30/15/5/1 和 0）。
+  - crate 根导出 `run`、`WorkerIo`（`c4effbea`）；任务 20 步骤 4、5（`40ef3bd2`）：`tasks/todo.md` 的「Windows B 段」和 `rust/host-core/PORTING.md` 第 5 部分「B 段交接」（探针结果页还不存在，所以写在这里）。
 - **计划里错的，已经改回计划 B**（提交 `cdbed67e`）：密码输错后不会再发一次“已锁”（Swift 只在状态变了才发）；鼠标坐标换算用的是“显示器原点 + 窗口左上角 + (x, y)”，不是 `global_point`；状态报告里没有 `os` 字段；超大的规则包在协议解码时就被拒，会话以 `bad data from client: rules too large` 结束；收到不该收的消息时文字是 `unexpected message from client`；`stats` 事件里没有在途帧数。
 - **最先会撞上的**：
-  1. 借用和类型推断：`session/unlock.rs` 里几个闭包（`is_locked` 被移进另一个闭包、`with_unlock_lock` 的 `FnOnce`/`FnMut` 约束），`run.rs` 里读标准输入那段。
+  1. 借用和类型推断：`session/unlock.rs` 里几个闭包、`run.rs` 里读标准输入那段。第四批逐处读过，改了一处写法（`a3489af0`），其余判断能编；`session/session.rs` 里 `stay_awake` 的闭包要 `Send + 'static`，等编译确认。
   2. `Cargo.lock` 会变：testkit 加了依赖和一个新程序。照 3.1 第 1 条处理。
-  3. 会话测试用 20 倍速的时钟，几处时间窗很紧（输错密码后的 8–10 秒、暂停 2 秒、每 5 毫秒 20 个单位、粘贴后 0.15 秒和 2 秒恢复）。失败时先单独重跑，分清是负载还是逻辑。
+  3. 会话测试用 20 倍速的时钟，几处时间窗很紧（输错密码后的 8–10 秒、暂停 2 秒、每 5 毫秒 20 个单位、粘贴后 0.15 秒和 2 秒恢复；第四批新加的 `menu_pick_is_ignored` 和 `paste_when_the_target_stays_behind_fails_with_the_fixed_text` 实际只有 100 毫秒和 25 毫秒）。失败时先单独重跑，分清是负载还是逻辑。
   4. `host_service.rs` 对真的服务有四个假定：正好两个程序且 `desktop:` 在前；权限正好是录屏和辅助功能两项为真；`session_start` 带 `name`；`worker_exit` 的原因是 `stdin closed`。对不上先看服务这边实际输出什么。
   5. 比较时类型不一致（`&String` 对 `&str`、`Vec<String>` 对数组）。
 - **B 段整体先验的顺序**：
@@ -164,22 +184,22 @@ B 段分三批写，前两批在两个分支上并行，互相没看过对方的
 
 **2. 探针**（计划 P），在 Windows 实机上。一级探针先跑（G1、G2、H1、H3、H5、S1、S2、S4、T1、T5、C1）：它们的结果能推翻结构。每个结果写进探针结果文件；和计划假设不一样的，照那份计划开头的表改计划，再动代码。表里写了“回来问用户”的（S1、S2、H1 的退路、I1 的退路）必须问。
 
-**3. A 段草稿（`feat/windows-foundation`）**，在 Mac 上：
-   1. `git merge main`；读说明文件。
-   2. 重新生成 `Cargo.lock`（`cargo metadata` 或一次 `cargo build`；**不改版本号**）。
-   3. `cargo build`、`cargo test --workspace --no-fail-fast`、`cargo clippy --workspace --all-targets -- -D warnings`、`swift test`、`flutter analyze`、`flutter test`。修到全绿。修的时候守住：unix 那一支的行为不变（拿 main 上同一条测试对）。
-   4. 到 Windows 机器上：`scripts\check-windows.ps1`（计划 A 任务 8），修到 `EXIT=0`。
-   5. 计划 A 每个任务的“实机检查”逐条做，结果写进 `tasks/todo.md`。
-   6. 两个门禁都绿了再合并（`merge: …（feat/windows-foundation）`，文字见计划 A）。
+**3. A 段草稿**，以 Windows 为主（用户 2026-11-27 定），在分支 `feat/windows-foundation` 上做（它是 `main` 加 A 段的接线，见 2.1；`main` 上的三个新 crate 没进 workspace，在 `main` 上编不到它们）：
+   1. Mac：`git merge main`，把分支推到 origin（只推分支，不推 `main`）。
+   2. Windows：读说明文件；让 `Cargo.lock` 自己更新（**不改版本号**）；`scripts\check-windows.ps1`（计划 A 任务 8），修到 `EXIT=0`。改到 unix 也编译的代码时记一张清单，unix 那一支的行为不变。
+   3. Windows：计划 A 每个任务的“实机检查”逐条做，结果写进 `tasks/todo.md`；推分支。
+   4. Mac：在同一个提交上跑完整门禁：`cargo test --workspace --no-fail-fast`、`cargo clippy --workspace --all-targets -- -D warnings`、`swift test`、`flutter analyze`、`flutter test`。修到全绿，照那张清单核对 unix 那一支（拿 main 上同一条测试对）。Mac 上改到 Windows 也编译的代码，就回 Windows 再跑一次门禁。
+   5. 两个门禁在同一个提交上都绿了，在 Mac 上把接线合进 `main`（`merge: …（feat/windows-foundation）`，文字见计划 A）。这次合并改的是共用代码，算 macOS 的改动。
 
-**4. B 段草稿**，在 Mac 上：
-   1. 两个分支已经合好了，只用 `feat/windows-host-core`。先读 3.2 节和分支上的三个说明文件（`…windows-b1/b2/b3-draft-notes.md`）。
-   2. 任务 3（压缩）要先有探针 C1 的结论。
-   3. 生成样本：`RAPP_WRITE_FIXTURES=1 swift test`（每个任务里写了各自的 `--filter`），然后不带那个变量再跑一遍（比对方式）。生成器只调用 `Sources/RappCore/` 的代码；Swift 符号在测试里看不到时，照计划 B 任务 2 的办法绕，**不改 Swift 的访问级别**。
-   4. `cargo test -p rapp-host-core`。红的地方：以 Swift 为准改 Rust。做不到一个字节不差的，按计划 B“Fixture rules”最后一条处理并写进 `PORTING.md`。
-   5. 任务 13–19 的草稿写完了：`cargo test -p rapp-testkit --test host_session`，再 `--test host_service`。然后补 3.2 节“草稿和 Swift 不一样”的七条。
-   6. 用真的控制端连 `fake-host-core` 试一次（计划 B 任务 19）。
-   7. `host-core` 是共用代码：过完整的 Mac 门禁，合并后照常发 macOS 版。Mac 门禁不能明显变慢（`host-core` 的测试加会话测试 60 秒以内）。
+**4. B 段草稿**，同样以 Windows 为主，在分支 `feat/windows-host-core` 上做（它是 `main` 加 B 段的接线，见 2.1）：
+   1. Mac：`git merge main`；做探针 C1，任务 3（压缩）要它的结论；生成样本：`RAPP_WRITE_FIXTURES=1 swift test --filter 'Fixtures/'`，然后不带那个变量再跑一遍（比对方式）；提交；推分支。生成器只调用 `Sources/RappCore/` 的代码；Swift 符号在测试里看不到时，照计划 B 任务 2 的办法绕，**不改 Swift 的访问级别**。这一步只修生成器，不修 Rust。
+   2. Windows（A 段在 Windows 上绿了以后）：`git merge main`，再把 `feat/windows-foundation` 合进这个分支，testkit 依赖的 crate 要有 A 段的接线才能在 Windows 上编。读 3.2 节和三个说明文件（`…windows-b1/b2/b3-draft-notes.md`）。
+   3. Windows：`cargo test -p rapp-host-core`。红的地方：以 Swift 为准改 Rust，不改样本。做不到一个字节不差的，按计划 B“Fixture rules”最后一条处理并写进 `PORTING.md`。样本本身错了就回 Mac 重新生成。
+   4. Windows：任务 13–19 的草稿写完了：`cargo test -p rapp-testkit --test host_session`，再 `--test host_service`。然后补或者认下 3.2 节“草稿和 Swift 不一样”剩下的四条。`scripts\check-windows.ps1` 全绿后推分支。
+   5. Mac：过完整的 Mac 门禁，不能明显变慢（`host-core` 的测试加会话测试 60 秒以内）；用真的控制端连 `fake-host-core` 试一次（计划 B 任务 19）。
+   6. `host-core` 是共用代码：排在 A 段后面，在 Mac 上把接线合进 `main`，合并后照常发 macOS 版。
+
+两份开工提示词就是照这个顺序写的：`2026-11-27-rapp-windows-kickoff-mac.md`（一头一尾）和 `…-kickoff-windows.md`（中间）。计划 A“Global Constraints”原来写的是在 Windows 机器上合并；改成在 Mac 上合并，因为最后一次门禁在 Mac 上跑，而且这次合并要触发 macOS 发版。
 
 **5. C → D → E → F → G → H**，照计划做。依赖（规格 §17.2）：C 要 A 和探针 G2；D 要 A、B 和 H1、H3、H5；E 要 A 和 T1、T5（界面那一半要 C）；F 要 D（管道协议来自 C）和 S1、S2；G 要 C、F 和 S4、I1；H 要全部。C 和 D 可以两个人同时做。F 段做完要换一个没写这段代码的人审规格 §18.2。
 
