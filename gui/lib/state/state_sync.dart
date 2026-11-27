@@ -164,6 +164,7 @@ class StateSync extends ChangeNotifier {
 
   void _cancelAll() {
     out.detach();
+    quick?.suspend(); // the link below is closed; the 快捷区 line keeps what it showed until the next try settles
     _timer?.cancel();
     _timer = null;
     _refetch?.cancel();

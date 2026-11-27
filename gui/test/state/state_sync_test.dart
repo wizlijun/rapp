@@ -51,8 +51,20 @@ class FakeLink extends StateLink {
     return healthy;
   }
 
+  /// Every PUT tried over this link (`closed:<name>` once it is closed); [served] is the service's copy, shared by
+  /// the links of one service.
+  final puts = <String>[];
+  Map<String, Object?> served = {};
   @override
-  Future<QuickDoc?> putPref(String name, {required int at, required int base, required Object? data}) async => null;
+  Future<QuickDoc?> putPref(String name, {required int at, required int base, required Object? data}) async {
+    if (closed) {
+      puts.add('closed:$name');
+      throw StateError('put on a closed link');
+    }
+    puts.add(name);
+    served[name] = {'at': at, 'data': data};
+    return null;
+  }
 
   @override
   Future<void> putUsage(String device, {required int at, required Object? data}) async {}
@@ -60,7 +72,7 @@ class FakeLink extends StateLink {
   @override
   Future<Map<String, Object?>> prefsAll() async {
     prefsAllCalls++;
-    return {'store': 's1'};
+    return {'store': 's1', ...served};
   }
 
   @override
@@ -844,6 +856,36 @@ void main() {
         expect(links, hasLength(3));
         expect(quick.status, QuickSyncStatus.waiting, reason: 'the second one is');
         expect(seen, [QuickSyncStatus.waiting]);
+        sync.dispose();
+      });
+    });
+
+    test('a pause drops the closed link: an edit waits and goes over the next link', () {
+      fakeAsync((fa) {
+        // Built inside the fake zone, or its sync chain waits on the real microtask queue.
+        quick.dispose();
+        quick = QuickSync(prefs: qp, localDir: dir.path, device: 'dev-a');
+        final served = <String, Object?>{};
+        configure = (l) => l
+          ..hasPrefs = true
+          ..served = served;
+        makeQ().start();
+        fa.flushMicrotasks();
+        links.single.watchCtl.add({'what': 'hello'});
+        fa.elapse(const Duration(seconds: 3));
+        final first = links.single;
+        first.puts.clear();
+        sync.pause();
+        qp.toggleStar('k:esc');
+        fa.elapse(const Duration(seconds: 3));
+        expect(first.puts, isEmpty, reason: 'nothing is sent over the link the pause closed');
+        expect(quick.status, QuickSyncStatus.synced, reason: 'a pause is not an outage');
+        sync.refresh();
+        fa.flushMicrotasks();
+        links.last.watchCtl.add({'what': 'hello'});
+        fa.elapse(const Duration(seconds: 3));
+        expect(links.last, isNot(same(first)));
+        expect(links.last.puts, contains('stars'));
         sync.dispose();
       });
     });
