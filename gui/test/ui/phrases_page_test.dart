@@ -145,7 +145,7 @@ void main() {
       expect(find.text('命令只在文字终端里认出 Claude Code、Codex 等工具时出现。'), findsOneWidget);
     });
 
-    testWidgets('deleting a phrase keeps the six commands in order', (tester) async {
+    testWidgets('deleting a phrase keeps the seven commands in order', (tester) async {
       await open(tester);
       await tester.drag(k('phrase-row-7'), const Offset(-600, 0));
       await tester.pumpAndSettle();

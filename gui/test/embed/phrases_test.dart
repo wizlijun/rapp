@@ -17,7 +17,7 @@ void main() {
     expect(p.phraseCmdsSeeded, isTrue);
   });
 
-  test('an old file gets the six commands in front, once', () {
+  test('an old file gets the seven commands in front, once', () {
     File('${tmp.path}/gui.json').writeAsStringSync('{"phrases":[{"text":"a"}]}');
     final p = UiPrefs.load(tmp.path);
     expect(p.phrases, [for (final id in builtinCmdOrder) StripCmd(id), const Phrase('a')]);

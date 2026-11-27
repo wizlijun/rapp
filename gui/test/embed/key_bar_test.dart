@@ -125,10 +125,10 @@ void main() {
     });
 
     iosTest('⇧Tab sends Shift-Tab; ⌃C sends Ctrl-C', (tester) async {
-    s.setKeyLayout(const KeyLayout([
-      ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up'],
-      ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'pgup', 'pgdn', 'left', 'down', 'right'],
-    ])); // ⇧Tab is not in the default row any more; put it back
+      s.setKeyLayout(const KeyLayout([
+        ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up'],
+        ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'pgup', 'pgdn', 'left', 'down', 'right'],
+      ])); // ⇧Tab is not in the default row any more; put it back
       await tester.pumpWidget(bar(tsess));
       await tap(tester, 'stab');
       await tap(tester, 'cc');
@@ -276,10 +276,10 @@ void main() {
   group('app', () {
     setUp(() => s.prefs.keyBarMore = true); // the second row holds ⌘C ⌘V ⌘T ⌘ ⌃ PgUp PgDn ← ↓ →
     iosTest('⇧Tab sends key(48, latchShift); ⌃ then ↑ sends key(126, latchCtrl) after keyEvent(59, down)', (tester) async {
-    s.setKeyLayout(const KeyLayout([
-      ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up'],
-      ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'pgup', 'pgdn', 'left', 'down', 'right'],
-    ])); // ⇧Tab is not in the default row any more; put it back
+      s.setKeyLayout(const KeyLayout([
+        ['tab', 'stab', 'esc', 'cc', 'bksp', 'enter', 'up'],
+        ['copy', 'paste', 'cmdt', 'cmd', 'ctrl', 'pgup', 'pgdn', 'left', 'down', 'right'],
+      ])); // ⇧Tab is not in the default row any more; put it back
       await tester.pumpWidget(bar(app, width: 900));
       await tap(tester, 'stab');
       expect(appKeys(), [('key', 1, 48, latchShift)]);

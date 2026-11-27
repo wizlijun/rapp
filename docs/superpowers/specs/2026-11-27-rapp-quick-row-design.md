@@ -34,7 +34,7 @@
 | 东西 | 现在 |
 |---|---|
 | 常用语条 | `gui/lib/embed/phrase_strip.dart`：一行可横滑的小块，右端固定「全部 ›」（`phrase_strip.dart:139`），点开底部弹出完整列表（`_all`）。长按：放进输入框再改 / 编辑 / 移到最前 / 删除。iOS 和 macOS/Linux 用同一个组件 |
-| 条里的内容 | `UiPrefs.phrases`（`gui/lib/ui/prefs.dart:93`）：`StripItem` 列表，混着 `Phrase`（文字）和 `StripCmd`（命令，按 AI 工具发不同的文字或键，`gui/lib/embed/strip_cmds.dart`）。内置 6 条命令，其中「搜历史」发 ⌃R（`CmdKey('cr')`），其余发文字 |
+| 条里的内容 | `UiPrefs.phrases`（`gui/lib/ui/prefs.dart:93`）：`StripItem` 列表，混着 `Phrase`（文字）和 `StripCmd`（命令，按 AI 工具发不同的文字或键，`gui/lib/embed/strip_cmds.dart`）。内置 7 条命令（含切模式），其中「搜历史」发 ⌃R（`CmdKey('cr')`），其余发文字 |
 | 显示条件 | `phraseStripShown`（`gui/lib/embed/key_bar.dart:56`）：`phrase_strip` 开、是文字终端或 App 配置开了常用语条、且有能显示的项 |
 | 管理页 | `gui/lib/pages/phrases_page.dart`：开关、拖动排序、左滑删除、编辑、新增、恢复默认 |
 | 快捷键盘 | `keyBarRows`（`gui/lib/embed/key_bar_keys.dart:65`）写死：第 1 行 `tab stab esc cc bksp enter up more`（今天的样子；新默认去掉 `stab`，见 §8、§6.2），`⋯`（`more`，存 `key_bar_more`）展开第 2 行 `copy paste cmdt cmd ctrl pgup pgdn left down right`。10 列网格，`keyBarTail` 把末尾的 ↑ / ← ↓ → 排成倒 T |
