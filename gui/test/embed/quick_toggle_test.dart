@@ -191,6 +191,7 @@ void main() {
   testWidgets('Linux: folding an app key bar via ⌄ releases a lit sticky ⌃', (tester) async {
     big(tester);
     es.setQuickHidden(term: false, hidden: false);
+    es.prefs.keyBarMore = true; // ⌃ is on the second row
     await tester.pumpWidget(layer(app));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('bar-ctrl')), kind: PointerDeviceKind.mouse);
