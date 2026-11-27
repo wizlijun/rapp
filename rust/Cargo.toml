@@ -3,7 +3,7 @@ resolver = "2"
 members = ["wire", "conn", "relay", "net", "service", "ports", "hub", "hub-ffi", "testkit", "update", "term", "client-core", "client-gtk", "cli", "host-linux", "host-core", "speech-linux", "host-windows", "svc-windows", "../services/center"]
 
 [workspace.package]
-version = "0.15.64"
+version = "0.15.65"
 edition = "2021"
 publish = false
 
