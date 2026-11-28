@@ -1379,6 +1379,45 @@ async fn stay_awake_failure_is_logged() {
     assert_eq!(awake_count(a.bins.path(), "start"), 0);
     let h = ipc_once(&a.svc, home, json!({"cmd":"history"})).await;
     assert!(h["events"].as_array().unwrap().iter().any(|e| e["ev"] == "no_lock_hold_failed"), "{h}");
+    // The retry 1 s later fails too, and is not logged: one line per streak.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let st = ipc_once(&a.svc, home, json!({"cmd":"status"})).await;
+    assert_eq!(st["no_lock_held"], false, "{st}");
+    // The log folds an identical next line into a `repeat` count, written out by the next other line.
+    set_no_lock(&a, false).await;
+    let log = log_events(home);
+    let fails = log.iter().filter(|v| v["ev"] == "no_lock_hold_failed").count();
+    assert_eq!(fails, 1, "{log:?}");
+    assert!(!log.iter().any(|v| v["ev"] == "repeat"), "{log:?}");
+}
+
+#[tokio::test]
+async fn no_lock_without_rapp_host_logs_once_per_switch_on() {
+    if !MAC {
+        return;
+    }
+    let (home, bins) = (tempfile::tempdir().unwrap(), bins());
+    std::fs::remove_file(bins.path().join("rapp-host")).unwrap();
+    service_json(home.path());
+    let svc = start_service(home.path(), bins.path(), Duration::from_secs(60)).await;
+    let set = |on: bool| {
+        let (svc, home) = (&svc, home.path());
+        async move {
+            let r = ipc_once(svc, home, json!({"cmd":"set_no_lock","on":on})).await;
+            assert_eq!(r["ok"], true, "{r}");
+        }
+    };
+    let fails = || log_events(home.path()).into_iter().filter(|v| v["ev"] == "no_lock_hold_failed").collect::<Vec<_>>();
+    set(true).await;
+    let fail = wait_log(home.path(), "no_lock_hold_failed", |_| true).await;
+    assert_eq!((&fail["code"], &fail["stderr"]), (&Value::Null, &json!("could not start the keep-awake helper")), "{fail}");
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(fails().len(), 1, "no retries: {:?}", fails());
+    set(false).await;
+    set(true).await;
+    wait_until("a second line", || fails().len() == 2).await;
+    let st = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await;
+    assert_eq!((&st["no_lock"], &st["no_lock_held"]), (&json!(true), &json!(false)), "{st}");
 }
 
 /// A client-only Linux package still serves terminals and shared ports. Missing a
