@@ -29,6 +29,26 @@ import '../ui/main_state.dart';
 
 enum HomeKind { waiting, error, done, disconnected, device, resource, message }
 
+/// Who wrote the review points: the agent itself (`plan:`) or a rule hook (`plan-rule:`).
+enum PointsBy { agent, rule }
+
+const planKeyPrefix = 'plan:';
+const planRuleKeyPrefix = 'plan-rule:';
+
+/// The first 3 non-empty lines of [text], without list markers (`- `, `* `, `1.`, `1)`).
+List<String> pointLines(String text) {
+  final out = <String>[];
+  for (final raw in text.split('\n')) {
+    final l = raw.trim().replaceFirst(RegExp(r'^(?:[-*]\s+|\d+[.)]\s*)'), '').trim();
+    if (l.isEmpty) continue;
+    out.add(l);
+    if (out.length == 3) break;
+  }
+  return out;
+}
+
+const _planWaitingLine = '出了计划，等你点头';
+
 enum HomeButton { goLook, reconnect, gotIt }
 
 /// What a card says when the program gave no message.
@@ -49,6 +69,9 @@ class HomeItem {
     this.need,
     this.eid,
     this.seq,
+    this.points,
+    this.pointsBy,
+    this.pointsEid,
   });
 
   final HomeKind kind;
@@ -74,6 +97,13 @@ class HomeItem {
 
   /// The status seq in the [HomeModel] `gotIt` key; null when the item has none.
   final int? seq;
+
+  /// Up to 3 plan review points on a waiting card (CC's approve plan); null when there are none.
+  final List<String>? points;
+  final PointsBy? pointsBy;
+
+  /// The emit row the points came from.
+  final String? pointsEid;
 
   /// What 「知道了」 stores.
   String get gotItKey => seq == null ? id : '$id\n$seq';
@@ -150,6 +180,62 @@ HomeModel buildHome({
     out.add((it, group));
   }
 
+  // 0. Review points: emit rows keyed `plan:<session>` / `plan-rule:<session>`.
+  final rows0 = fromService ? serviceRows.where((r) => r['t'] == 'emit').toList() : const <_Row>[];
+  // Current (msg, since) of a terminal, from its own list or else the center service's row.
+  (String, int)? termNow(String dev, String term) {
+    for (final r in lists[dev]?.terms ?? const <TermRow>[]) {
+      if (r.id == term && r.ps != null) return (r.ps!.msg ?? '', r.ps!.since > 0 ? r.ps!.since : r.activity);
+    }
+    final sr = svcRow(dev, term);
+    if (sr == null) return null;
+    return (_s(sr['msg']) ?? '', _int(sr['since']) > 0 ? _int(sr['since']) : _int(sr['at']));
+  }
+
+  final waitingPlan = <String, int>{}; // `dev\nterm` -> since, for terminals waiting on approve plan
+  for (final n in needs) {
+    if (n.kind != NeedKind.terminal) continue;
+    final dev = n.device ?? '';
+    final now = termNow(dev, n.target);
+    if (now != null && now.$1 == 'approve plan') waitingPlan['$dev\n${n.target}'] = now.$2;
+  }
+  final usedPoints = <_Row>{}; // emit rows taken by a card, or stale: not shown as messages
+  final pointsOf = <String, (List<String>, PointsBy, String)>{};
+  {
+    final best = <String, _Row>{};
+    final bestRule = <String, _Row>{};
+    for (final r in rows0) {
+      final key = _s(r['key']);
+      final session = _s(r['session']);
+      final eid = _s(r['eid']);
+      if (key == null || session == null || eid == null || r['handled'] == true || r['level'] == 'clear') continue;
+      final by = key.startsWith(planKeyPrefix) && key.length > planKeyPrefix.length
+          ? PointsBy.agent
+          : key.startsWith(planRuleKeyPrefix) && key.length > planRuleKeyPrefix.length
+              ? PointsBy.rule
+              : null;
+      if (by == null || pointLines(_s(r['text']) ?? '').isEmpty) continue;
+      final dev = _s(r['id']) ?? '';
+      final slot = '$dev\n$session';
+      final since = waitingPlan[slot];
+      if (since != null) {
+        if (_int(r['at']) < since - 120) continue;
+        final m = by == PointsBy.agent ? best : bestRule;
+        final old = m[slot];
+        if (old == null || _int(r['at']) >= _int(old['at'])) m[slot] = r;
+        usedPoints.add(r);
+      } else {
+        final now = termNow(dev, session);
+        if (now != null && _int(r['at']) < now.$2) usedPoints.add(r); // stale
+      }
+    }
+    for (final slot in {...best.keys, ...bestRule.keys}) {
+      final agent = best[slot];
+      final r = agent ?? bestRule[slot]!;
+      pointsOf[slot] = (pointLines(_s(r['text']) ?? ''), agent != null ? PointsBy.agent : PointsBy.rule, _s(r['eid'])!);
+    }
+  }
+
   // 1. Needs.
   for (final n in needs) {
     switch (n.kind) {
@@ -175,6 +261,8 @@ HomeModel buildHome({
         final psSince = local?.ps?.since ?? _int(sr?['since']);
         final since = psSince > 0 ? psSince : n.at;
         taken.add(id);
+        final pts = isTerm ? pointsOf['$dev\n${n.target}'] : null;
+        final planWait = isTerm && msg == 'approve plan';
         add(
           HomeItem(
             kind: HomeKind.waiting,
@@ -183,12 +271,15 @@ HomeModel buildHome({
             what: _whatWaiting(psKind),
             program: program,
             device: deviceName(dev),
-            line: msg.isEmpty ? goLookLine : msg,
+            line: planWait ? _planWaitingLine : (msg.isEmpty ? goLookLine : msg),
             since: since,
             sessionKey: isTerm ? sessionKeyOf(dev, n.target) : n.target,
             need: n,
             button: HomeButton.goLook,
             seq: seq,
+            points: pts?.$1,
+            pointsBy: pts?.$2,
+            pointsEid: pts?.$3,
           ),
           0,
         );
@@ -332,8 +423,9 @@ HomeModel buildHome({
 
   // 3. Messages from the center service.
   if (fromService) {
-    final rows = serviceRows.where((r) => r['t'] == 'emit').toList();
+    final rows = rows0;
     for (final r in rows) {
+      if (usedPoints.contains(r)) continue;
       final level = r['level'];
       final eid = _s(r['eid']);
       if (eid == null || (level != 'ask' && level != 'info' && level != 'done')) continue;
