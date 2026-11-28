@@ -3,6 +3,7 @@
 //! `data-root` pointer, `~/rapp`); `$RAPP_LOCAL` names it directly (for tests).
 
 mod args;
+mod emit;
 // Called on Windows only; its tests run everywhere.
 #[cfg_attr(not(windows), allow(dead_code))]
 mod gui;
@@ -79,7 +80,7 @@ async fn main() {
         Ok(c) => c,
         Err(line) => {
             // An agent asking for JSON gets its usage error as JSON too.
-            if matches!(argv.first().map(String::as_str), Some("update" | "load")) && argv.iter().any(|a| a == "--json") {
+            if matches!(argv.first().map(String::as_str), Some("update" | "load" | "emit")) && argv.iter().any(|a| a == "--json") {
                 out::Out { json: true }.fail("usage", &line, None);
             }
             eprintln!("{line}\n{}", args::USAGE);
@@ -155,6 +156,7 @@ async fn main() {
         }
         Cmd::Pipe { to, port } => pipe(to, port).await,
         Cmd::Load { .. } | Cmd::LoadPick { .. } => load::run(cmd).await,
+        Cmd::Emit { .. } => emit::run(cmd).await,
         Cmd::TermRestore { list, forget, picks } => term_restore(list, forget, picks).await,
         Cmd::Update { what, yes, timeout, json } => update::run(what, yes, timeout, out::Out { json }).await,
     }

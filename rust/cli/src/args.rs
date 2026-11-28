@@ -16,7 +16,8 @@ rapp update rollback [--timeout 秒] [--json]    回到上一版
 rapp center                                     看中心服务
 rapp center on|off                              在这台上开、关中心服务
 rapp load [设备…] [--top] [--json]   各设备的余力、各项数值、警告；不写设备名就列出全部，含本机
-rapp load pick [--json]              推荐一台设备，并说明原因";
+rapp load pick [--json]              推荐一台设备，并说明原因
+rapp emit <done|ask|info|clear> \"<文字>\" [--key 键] [--json]   把一句话告诉中心服务";
 
 #[derive(Debug, PartialEq)]
 pub enum Cmd {
@@ -33,6 +34,8 @@ pub enum Cmd {
     Center { on: Option<bool> },
     Load { devices: Vec<String>, top: bool, json: bool },
     LoadPick { json: bool },
+    /// `rapp emit <level> <text> [--key k] [--json]`: the program tells the center service.
+    Emit { level: String, text: String, key: Option<String>, json: bool },
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -85,8 +88,29 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
             [w, ..] => Err(format!("不认识的命令：{name} {w}")),
         },
         "load" => load(rest),
+        "emit" => emit(rest),
         other => Err(format!("不认识的命令：{other}")),
     }
+}
+
+fn emit(args: &[String]) -> Result<Cmd, String> {
+    let (mut json, mut key, mut words) = (false, None, Vec::new());
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--json" => json = true,
+            "--key" => key = Some(it.next().ok_or("--key 后面要写键")?.clone()),
+            flag if flag.starts_with("--") => return Err(format!("不认识的选项：{flag}")),
+            _ => words.push(a.clone()),
+        }
+    }
+    let mut w = words.into_iter();
+    let level = w.next().ok_or("要写级别和文字")?;
+    let text = w.next().ok_or("要写文字")?;
+    if let Some(extra) = w.next() {
+        return Err(format!("多写了：{extra}"));
+    }
+    Ok(Cmd::Emit { level, text, key, json })
 }
 
 fn load(args: &[String]) -> Result<Cmd, String> {
@@ -215,6 +239,20 @@ mod tests {
         assert_eq!(p("state x"), Err("不认识的命令：state x".into()));
         assert_eq!(p("state up"), Err("不认识的命令：state up".into()));
         assert_eq!(p("state on x"), Err("多写了：x".into()));
+    }
+
+    #[test]
+    fn emit_parses() {
+        let a = |v: &[&str]| parse(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(
+            a(&["emit", "ask", "要你看一下", "--key", "k1", "--json"]),
+            Ok(Cmd::Emit { level: "ask".into(), text: "要你看一下".into(), key: Some("k1".into()), json: true })
+        );
+        assert_eq!(a(&["emit", "info", "x"]), Ok(Cmd::Emit { level: "info".into(), text: "x".into(), key: None, json: false }));
+        assert!(a(&["emit", "ask"]).is_err());
+        assert!(a(&["emit"]).is_err());
+        assert!(a(&["emit", "ask", "x", "y"]).is_err());
+        assert!(a(&["emit", "ask", "x", "--key"]).is_err());
     }
 
     #[test]

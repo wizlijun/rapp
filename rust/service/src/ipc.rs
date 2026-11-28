@@ -106,6 +106,7 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
                     "unshare" => crate::share_cmds::unshare(state, &cmd).await,
                     "hosts" => hosts(state).await,
                     "state" => crate::companion::ipc(state, &cmd).await,
+                    "emit" => emit_reply(&state.outbox, &cmd),
                     "load" => crate::load::serve::reply(state, cmd["history"] == true, cmd["top"] == true),
                     "load_all" => load_all(state, &cmd).await,
                     // `serve::follow` writes the first line itself.
@@ -390,4 +391,37 @@ async fn reached(state: &Arc<State>, id: &str, name: &str, mut shares: Value) ->
 async fn pipe(state: &State, cmd: &Value) -> Result<(Pipe, &'static str), String> {
     let port = crate::sharing::port_of(&cmd["port"]).ok_or("bad port")?;
     crate::pipe::open(state, cmd["to"].as_str().unwrap_or(""), port).await.map_err(|e| e.as_str().to_string())
+}
+
+/// IPC `emit`: queue one event for the central service. The text goes nowhere else (no log).
+fn emit_reply(outbox: &crate::outbox::Outbox, cmd: &Value) -> Value {
+    let level = cmd["level"].as_str().unwrap_or("");
+    if !matches!(level, "done" | "ask" | "info" | "clear") {
+        return err("bad level");
+    }
+    let Some(text) = cmd["text"].as_str() else { return err("text") };
+    let mut body = json!({"t": "emit", "src": "emit", "level": level, "text": text});
+    for k in ["key", "session"] {
+        if let Some(v) = cmd[k].as_str().filter(|v| !v.is_empty()) {
+            body[k] = json!(v);
+        }
+    }
+    ok(json!({"sink": outbox.emit(body)}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::outbox::Outbox;
+
+    #[test]
+    fn emit_rejects_bad_level() {
+        let o = Outbox::new();
+        let r = emit_reply(&o, &json!({"cmd":"emit","level":"loud","text":"x"}));
+        assert_eq!(r, json!({"ok":false,"error":"bad level"}));
+        let r = emit_reply(&o, &json!({"cmd":"emit","level":"info","text":"x"}));
+        assert_eq!(r, json!({"ok":true,"sink":false}));
+        let r = emit_reply(&o, &json!({"cmd":"emit","level":"info"}));
+        assert_eq!(r, json!({"ok":false,"error":"text"}));
+    }
 }
