@@ -72,6 +72,7 @@ void main() {
   test('pointLines keeps three', () {
     expect(pointLines('- a\n* b\n\n1. c\n2) d\n3. e'), ['a', 'b', 'c']);
     expect(pointLines('  \n'), isEmpty);
+    expect(pointLines('1.5x faster\n10 files changed\n2. real item'), ['1.5x faster', '10 files changed', 'real item']);
   });
 
   test('bare approve plan reads 出了计划，等你点头', () {

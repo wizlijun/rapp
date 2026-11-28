@@ -39,7 +39,7 @@ const planRuleKeyPrefix = 'plan-rule:';
 List<String> pointLines(String text) {
   final out = <String>[];
   for (final raw in text.split('\n')) {
-    final l = raw.trim().replaceFirst(RegExp(r'^(?:[-*]\s+|\d+[.)]\s*)'), '').trim();
+    final l = raw.trim().replaceFirst(RegExp(r'^(?:[-*]\s+|\d+[.)]\s+)'), '').trim();
     if (l.isEmpty) continue;
     out.add(l);
     if (out.length == 3) break;
