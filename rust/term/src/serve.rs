@@ -1415,7 +1415,8 @@ mod tests {
             ps: None,
             title: Some("t".repeat(64)),
             fg: None,
-            shell: None,            reply: false,
+            shell: None,
+            reply: false,
         };
         let hosts = vec![HostRow { host: None, launchers: Vec::new(), shells: installed_shells(), saved: Vec::new() }];
         let list = TermList { terms: (0..1000).map(row).collect(), hosts };
