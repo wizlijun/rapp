@@ -17,7 +17,7 @@ use super::grid::Emu;
 use super::ps::{Fed, Tracker, MAX_REPLIES, PROBE_REPLY};
 use super::saved::{self, Snapshot};
 use super::{local, view, Meta, Shared};
-use crate::id::{clean_name, default_name, session_name};
+use crate::id::{clean_name, default_name, session_name, TermId};
 use anyhow::{anyhow, Context};
 use portable_pty::{native_pty_system, CommandBuilder, ExitStatus, MasterPty, PtySize};
 use std::io::{Read, Write};
@@ -233,6 +233,8 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
             c
         }
     };
+    // The id the list reports for this terminal, so `rapp emit` can say which terminal it came from.
+    cmd.env("RAPP_TERM", TermId { backend: "pty".into(), host: None, name: shared.meta.key.clone() }.to_string());
     if let Some(d) = opts.cwd.clone().or(start_dir).or_else(|| std::env::var_os("HOME").map(PathBuf::from)) {
         cmd.cwd(d);
     }

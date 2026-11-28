@@ -10,7 +10,9 @@ pub(crate) mod send;
 
 pub use cache::Cache;
 pub use diff::Diff;
-pub use pump::{backoff, pump, PumpEnd, Stats};
+#[cfg(test)]
+pub use pump::pump;
+pub use pump::{backoff, PumpEnd, Stats};
 pub use send::{Dial, DialErr};
 
 use crate::pipe::{self, PipeErr};
@@ -18,6 +20,7 @@ use crate::sink::{self, Dest, Sinks};
 use crate::state::State;
 use rapp_net::log::{Log, Lvl};
 use serde_json::{json, Value};
+use std::collections::VecDeque;
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -32,6 +35,8 @@ pub const SOURCE_RETRY: Duration = Duration::from_secs(60);
 const REWATCH: Duration = Duration::from_secs(2);
 /// Session lists waiting for the pump, at most.
 const LISTS_MAX: usize = 64;
+/// `emit` events waiting for the pump, at most; the oldest goes first.
+const EMITS_MAX: usize = 50;
 
 /// Who the events are from.
 #[derive(Clone, Debug)]
@@ -79,11 +84,36 @@ pub struct Outbox {
     poke: Notify,
     /// The numbers of this start, for every run.
     numbers: Numbers,
+    /// `emit` bodies the pump has not taken yet.
+    emits: Mutex<VecDeque<Value>>,
+    /// Woken when `emits` got one.
+    emit_wake: Notify,
 }
 
 impl Outbox {
     pub fn new() -> Outbox {
-        Outbox { stats: Mutex::default(), dest: Mutex::new(None), poke: Notify::new(), numbers: Numbers::default() }
+        Outbox { stats: Mutex::default(), dest: Mutex::new(None), poke: Notify::new(), numbers: Numbers::default(), emits: Mutex::default(), emit_wake: Notify::new() }
+    }
+
+    /// Queue an `emit` event body for the central service and wake the pump. False (nothing kept)
+    /// when there is no service to send to.
+    pub fn emit(&self, body: Value) -> bool {
+        if self.dest.lock().unwrap_or_else(|e| e.into_inner()).is_none() {
+            return false;
+        }
+        let mut q = self.emits.lock().unwrap_or_else(|e| e.into_inner());
+        if q.len() >= EMITS_MAX {
+            q.pop_front();
+        }
+        q.push_back(body);
+        drop(q);
+        self.emit_wake.notify_one();
+        true
+    }
+
+    /// What `emit` queued, oldest first.
+    fn take_emits(&self) -> Vec<Value> {
+        self.emits.lock().unwrap_or_else(|e| e.into_inner()).drain(..).collect()
     }
 
     /// Terminal sessions may have been turned on: look at `term.json` now, not at the next retry.
@@ -95,6 +125,8 @@ impl Outbox {
     fn reset(&self, dest: Option<Dest>) {
         *self.stats.lock().unwrap_or_else(|e| e.into_inner()) = Stats::default();
         *self.dest.lock().unwrap_or_else(|e| e.into_inner()) = dest;
+        // Queued for the run before: not for this one.
+        self.emits.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 }
 
@@ -202,7 +234,7 @@ async fn run_dest(state: Arc<State>, me: Me, dest: Dest) -> PumpEnd {
     let (tx, rx) = mpsc::channel(LISTS_MAX);
     let dial = StateDial { state: state.clone(), dest };
     tokio::select! {
-        end = pump(me, rx, dial, &state.log, &state.outbox.stats) => end,
+        end = pump::pump_with(me, rx, Some(&state.outbox), dial, &state.log, &state.outbox.stats) => end,
         () = terms(&state, tx) => PumpEnd::ListsClosed,
     }
 }
@@ -397,6 +429,41 @@ mod tests {
         assert_eq!(*runs.lock().unwrap(), 1, "not run again without a change");
         let st = status_of(&outbox);
         assert_eq!(st, json!({"active":false,"cached":0,"sent":0,"dropped":0,"refused":0,"last_ok":null,"up":false,"dest":{"local":8102}}));
+    }
+
+    #[test]
+    fn emit_without_dest_is_dropped() {
+        let o = Outbox::new();
+        assert!(!o.emit(json!({"t":"emit","level":"info","text":"x"})));
+        let mut st = pump::State::new(me());
+        st.take_emits(&o, 5);
+        assert!(st.cache.head(1).is_empty());
+    }
+
+    #[test]
+    fn emit_reaches_cache_with_src_emit() {
+        let o = Outbox::new();
+        o.reset(Some(Dest::Local(8102)));
+        let body = json!({"t":"emit","src":"emit","level":"ask","text":"look","key":"plan:s","session":"term:pty:a"});
+        assert!(o.emit(body));
+        let mut st = pump::State::new(me());
+        st.take_emits(&o, 7);
+        let e = &st.cache.head(1)[0];
+        assert_eq!((e["src"].as_str(), e["t"].as_str(), e["level"].as_str()), (Some("emit"), Some("emit"), Some("ask")));
+        assert_eq!((e["text"].as_str(), e["key"].as_str(), e["session"].as_str()), (Some("look"), Some("plan:s"), Some("term:pty:a")));
+        assert_eq!(e["at"], 7);
+        assert!(o.emits.lock().unwrap().is_empty(), "drained");
+    }
+
+    #[test]
+    fn emit_queue_keeps_the_newest_fifty() {
+        let o = Outbox::new();
+        o.reset(Some(Dest::Local(8102)));
+        for i in 0..60 {
+            o.emit(json!({"t":"emit","n":i}));
+        }
+        let q = o.take_emits();
+        assert_eq!((q.len(), q[0]["n"].clone()), (50, json!(10)));
     }
 
     #[test]

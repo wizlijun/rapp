@@ -1,7 +1,7 @@
 //! The outbox's one task: take the session lists in, send the events out, one request at a time.
 
 use super::send::{connect, Conn, Dial, DialErr, Posted};
-use super::{Cache, Diff, Me};
+use super::{Cache, Diff, Me, Outbox};
 use rapp_net::log::{Log, Lvl};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -50,9 +50,17 @@ pub enum PumpEnd {
 
 /// Feed `lists` (`(session list, at)`) through the diff into the cache, and send the cache to the
 /// service `dial` reaches: after each (re)connection the cached events in order, then a snap.
-pub async fn pump<D: Dial>(
+#[cfg(test)]
+pub async fn pump<D: Dial>(me: Me, lists: Receiver<(Value, u64)>, dial: D, log: &Log, stats: &Mutex<Stats>) -> PumpEnd {
+    pump_with(me, lists, None, dial, log, stats).await
+}
+
+/// `pump`, which also takes the `emit` events `outbox` has queued: each turn of the loop first
+/// puts them into the cache.
+pub async fn pump_with<D: Dial>(
     me: Me,
     mut lists: Receiver<(Value, u64)>,
+    outbox: Option<&Outbox>,
     dial: D,
     log: &Log,
     stats: &Mutex<Stats>,
@@ -63,6 +71,9 @@ pub async fn pump<D: Dial>(
     // comes in meanwhile never cancels it; it owns its inputs, so the cache stays free to feed.
     let mut busy: Option<Busy<'_>> = None;
     let end = loop {
+        if let Some(o) = outbox {
+            st.take_emits(o, now());
+        }
         if busy.is_none() {
             busy = st.next(&dial);
         }
@@ -71,6 +82,7 @@ pub async fn pump<D: Dial>(
                 None => break PumpEnd::ListsClosed,
                 Some((list, at)) => st.feed(&list, at),
             },
+            () = emit_woke(outbox) => {}
             step = run(&mut busy) => {
                 busy = None;
                 if let Some(end) = st.done(step, log) {
@@ -83,6 +95,14 @@ pub async fn pump<D: Dial>(
     let mut s = stats.lock().unwrap_or_else(|e| e.into_inner());
     (s.active, s.up) = (false, false);
     end
+}
+
+/// The outbox's wake for a queued `emit`, or never when there is no outbox.
+async fn emit_woke(outbox: Option<&Outbox>) {
+    match outbox {
+        Some(o) => o.emit_wake.notified().await,
+        None => std::future::pending().await,
+    }
 }
 
 type Busy<'a> = Pin<Box<dyn Future<Output = Step> + Send + 'a>>;
@@ -110,9 +130,9 @@ enum Step {
     Waited,
 }
 
-struct State {
+pub(super) struct State {
     diff: Diff,
-    cache: Cache,
+    pub(super) cache: Cache,
     /// The connection, when it is idle here (a post in flight owns it).
     conn: Option<Conn>,
     connected: bool,
@@ -139,7 +159,7 @@ fn now() -> u64 {
 }
 
 impl State {
-    fn new(me: Me) -> State {
+    pub(super) fn new(me: Me) -> State {
         State {
             diff: Diff::default(),
             cache: Cache::new(me),
@@ -156,6 +176,24 @@ impl State {
             refused: 0,
             last_ok: None,
         }
+    }
+
+    /// Put the queued `emit` events into the cache, numbered and with the envelope; their own
+    /// `src:"emit"` wins over the envelope's `term`.
+    pub(super) fn take_emits(&mut self, outbox: &Outbox, at: u64) {
+        let bodies = outbox.take_emits();
+        if bodies.is_empty() {
+            return;
+        }
+        let dropped = self.cache.dropped();
+        for body in bodies {
+            self.cache.push(body, at);
+        }
+        if self.connected && self.cache.dropped() > dropped {
+            self.owe_snap = true;
+        }
+        self.at = at;
+        self.started = true;
     }
 
     fn feed(&mut self, list: &Value, at: u64) {
@@ -785,6 +823,29 @@ mod tests {
         assert_eq!(second.len(), 2, "{second:?}");
         assert!(second[0] > *first.last().unwrap(), "{first:?} then {second:?}");
         assert!(second.windows(2).all(|w| w[0] < w[1]), "{second:?}");
+    }
+
+    /// An `emit` queued while the pump waits wakes it and goes to the service as `src:"emit"`.
+    #[tokio::test(start_paused = true)]
+    async fn a_queued_emit_is_sent() {
+        let fake = Fake::new("rapp-state");
+        let dial = FakeDial::new(&fake, true);
+        let (tx, rx) = mpsc::channel(16);
+        let stats = Mutex::new(Stats::default());
+        let log = Log::none();
+        let outbox = Outbox::new();
+        outbox.reset(Some(crate::sink::Dest::Local(1)));
+        let drive = async {
+            tx.send((list("idle", 1, "x"), 1)).await.unwrap();
+            fake.until(|got| got.iter().any(|g| g.lines.iter().any(|l| l["t"] == "snap"))).await;
+            assert!(outbox.emit(json!({"t":"emit","src":"emit","level":"done","text":"ok"})));
+            fake.until(|got| got.iter().any(|g| g.status / 100 == 2 && g.lines.iter().any(|l| l["t"] == "emit"))).await;
+            drop(tx);
+        };
+        tokio::join!(pump_with(me(), rx, Some(&outbox), dial.clone(), &log, &stats), drive);
+        let got = fake.taken();
+        let e = got.iter().find(|l| l["t"] == "emit").unwrap();
+        assert_eq!((e["src"].as_str(), e["level"].as_str()), (Some("emit"), Some("done")));
     }
 
     #[tokio::test(start_paused = true)]
