@@ -44,6 +44,8 @@ pub enum HostCommand {
     /// Swift's `prompt` flag is parsed and dropped: Windows has nothing to ask for.
     Check { json: bool },
     Lock { json: bool },
+    /// Holds the Mac awake until stdin closes (macOS only; other platforms answer not supported).
+    StayAwake { json: bool },
     Version { json: bool },
     /// Windows only: the secure-desktop helper `rapp-svc` starts as SYSTEM (spec §7.4).
     SecureHelper { pipe: String },
@@ -126,7 +128,7 @@ pub fn parse_host_arguments(
     let subcommand = args.first().map(String::as_str).unwrap_or("");
     let tail = if args.is_empty() { args } else { &args[1..] };
     match subcommand {
-        "list-apps" | "check" | "version" | "lock" => {
+        "list-apps" | "check" | "version" | "lock" | "stay-awake" => {
             let bare: &[&str] = if subcommand == "check" { &["--prompt"] } else { &[] };
             let parsed = Arguments::new(tail, &[], bare)?;
             parsed.no_positional()?;
@@ -134,6 +136,7 @@ pub fn parse_host_arguments(
                 "list-apps" => HostCommand::ListApps { json: parsed.json },
                 "check" => HostCommand::Check { json: parsed.json },
                 "lock" => HostCommand::Lock { json: parsed.json },
+                "stay-awake" => HostCommand::StayAwake { json: parsed.json },
                 _ => HostCommand::Version { json: parsed.json },
             })
         }

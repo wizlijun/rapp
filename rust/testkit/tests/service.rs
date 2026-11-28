@@ -1236,6 +1236,207 @@ async fn lock_failure_is_recorded() {
     assert!(!log_events(home).iter().any(|v| v["ev"] == "auto_lock"), "{:?}", log_events(home));
 }
 
+// ---- 不锁屏 (the fake `rapp-host stay-awake` writes `start` / `exit` to `stay-awake.log`) ----
+
+/// The child is the fake `rapp-host stay-awake` only on macOS; Linux runs `systemd-inhibit`.
+const MAC: bool = cfg!(target_os = "macos");
+
+fn awake_log(bins: &std::path::Path) -> Vec<String> {
+    std::fs::read_to_string(bins.join("stay-awake.log")).unwrap_or_default().lines().map(str::to_string).collect()
+}
+
+fn awake_count(bins: &std::path::Path, word: &str) -> usize {
+    awake_log(bins).iter().filter(|l| *l == word).count()
+}
+
+async fn set_no_lock(a: &TestService, on: bool) {
+    let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"set_no_lock","on":on})).await;
+    assert_eq!(r["ok"], true, "{r}");
+}
+
+#[tokio::test]
+async fn set_no_lock_holds_and_releases() {
+    let a = service().await;
+    let (home, bins) = (a.home.path(), a.bins.path());
+    let mut ipc = Ipc::open(&a.svc, home).await;
+    let st = ipc.call(json!({"cmd":"status"})).await;
+    assert_eq!((&st["no_lock"], &st["no_lock_held"]), (&json!(false), &json!(false)), "{st}");
+    set_no_lock(&a, true).await;
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(home.join("service.json")).unwrap()).unwrap();
+    assert_eq!(saved["no_lock"], true, "{saved}");
+    assert_eq!(ipc.call(json!({"cmd":"status"})).await["no_lock"], true);
+    if MAC {
+        wait_status(&mut ipc, |s| s["no_lock_held"] == true).await;
+        wait_until("stay-awake start", || awake_count(bins, "start") == 1).await;
+    }
+    set_no_lock(&a, false).await;
+    assert_eq!(ipc.call(json!({"cmd":"status"})).await["no_lock"], false);
+    if MAC {
+        wait_status(&mut ipc, |s| s["no_lock_held"] == false).await;
+        wait_until("stay-awake exit", || awake_count(bins, "exit") == 1).await;
+    }
+    let set = wait_log(home, "no_lock_set", |v| v["on"] == false).await;
+    assert_eq!(set["by"], "local", "{set}");
+    let h = ipc.call(json!({"cmd":"history"})).await;
+    let sets: Vec<&Value> = h["events"].as_array().unwrap().iter().filter(|e| e["ev"] == "no_lock_set").collect();
+    assert_eq!(sets.iter().map(|e| e["on"].clone()).collect::<Vec<_>>(), [json!(false), json!(true)], "newest first: {h}");
+    let r = ipc.call(json!({"cmd":"set_no_lock"})).await;
+    assert_eq!((&r["ok"], &r["error"]), (&json!(false), &json!("on required")), "{r}");
+}
+
+#[tokio::test]
+async fn no_lock_skips_auto_lock() {
+    let a = service().await;
+    let (home, ep) = (a.home.path(), b_endpoint());
+    set_no_lock(&a, true).await;
+    let b = b_named(&ep, &a, "b-one").await;
+    let s = open_app(&b, "com.example.echo").await;
+    close_app(home, s, 1).await;
+    no_lock_for_a_while(a.bins.path(), home).await;
+}
+
+#[tokio::test]
+async fn turning_no_lock_off_does_not_lock() {
+    let a = service().await;
+    let (home, ep) = (a.home.path(), b_endpoint());
+    set_no_lock(&a, true).await;
+    let b = b_named(&ep, &a, "b-one").await;
+    let s = open_app(&b, "com.example.echo").await;
+    close_app(home, s, 1).await;
+    set_no_lock(&a, false).await;
+    no_lock_for_a_while(a.bins.path(), home).await;
+    let s = open_app(&b, "com.example.echo").await;
+    close_app(home, s, 2).await;
+    wait_log(home, "auto_lock", |_| true).await;
+    assert_eq!(lock_lines(a.bins.path()), 1);
+}
+
+#[tokio::test]
+async fn no_lock_on_at_start_holds() {
+    let (home, bins) = (tempfile::tempdir().unwrap(), bins());
+    let cfg = json!({"id": null, "name": "test-a", "password": PASSWORD, "port": 0, "ipc_port": 0, "no_lock": true});
+    rapp_net::config::write_json(&home.path().join("service.json"), &cfg).unwrap();
+    let svc = start_service(home.path(), bins.path(), Duration::from_secs(60)).await;
+    let mut ipc = Ipc::open(&svc, home.path()).await;
+    wait_status(&mut ipc, |s| s["no_lock"] == true).await;
+    if MAC {
+        wait_status(&mut ipc, |s| s["no_lock_held"] == true).await;
+        wait_until("stay-awake start", || awake_count(bins.path(), "start") == 1).await;
+    }
+}
+
+#[tokio::test]
+async fn no_lock_flip_flop_keeps_one_child() {
+    let a = service().await;
+    let bins = a.bins.path();
+    for on in [true, false, true] {
+        set_no_lock(&a, on).await;
+    }
+    if !MAC {
+        return;
+    }
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    wait_status(&mut ipc, |s| s["no_lock_held"] == true).await;
+    // One child left running: every start but one has its exit (an earlier child may still be on its way out).
+    let one_left = || {
+        let (starts, exits) = (awake_count(bins, "start"), awake_count(bins, "exit"));
+        starts >= 1 && exits == starts - 1
+    };
+    wait_until("one child left", one_left).await;
+    assert_eq!(ipc.call(json!({"cmd":"status"})).await["no_lock_held"], true);
+    // And none leaked: off, every child that started has exited.
+    set_no_lock(&a, false).await;
+    wait_until("every child exited", || awake_count(bins, "start") == awake_count(bins, "exit")).await;
+    wait_status(&mut ipc, |s| s["no_lock_held"] == false).await;
+}
+
+#[tokio::test]
+async fn no_lock_child_exits_with_service() {
+    if !MAC {
+        return;
+    }
+    let a = service().await;
+    let bins = a.bins.path();
+    set_no_lock(&a, true).await;
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    wait_status(&mut ipc, |s| s["no_lock_held"] == true).await;
+    wait_until("stay-awake start", || awake_count(bins, "start") == 1).await;
+    a.svc.stop();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    while awake_log(bins).last().map(String::as_str) != Some("exit") {
+        assert!(tokio::time::Instant::now() < deadline, "{:?}", awake_log(bins));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test]
+async fn stay_awake_failure_is_logged() {
+    if !MAC {
+        return;
+    }
+    let a = service().await;
+    let home = a.home.path();
+    std::fs::write(a.bins.path().join("stay-awake-fail"), "").unwrap();
+    set_no_lock(&a, true).await;
+    let fail = wait_log(home, "no_lock_hold_failed", |_| true).await;
+    assert_eq!(fail["code"], 1, "{fail}");
+    assert_eq!(fail["lvl"], "warn", "{fail}");
+    let st = ipc_once(&a.svc, home, json!({"cmd":"status"})).await;
+    assert_eq!((&st["no_lock"], &st["no_lock_held"]), (&json!(true), &json!(false)), "{st}");
+    assert_eq!(awake_count(a.bins.path(), "start"), 0);
+    let h = ipc_once(&a.svc, home, json!({"cmd":"history"})).await;
+    assert!(h["events"].as_array().unwrap().iter().any(|e| e["ev"] == "no_lock_hold_failed"), "{h}");
+    // The retry 1 s later fails too, and is not logged: one line per streak.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let st = ipc_once(&a.svc, home, json!({"cmd":"status"})).await;
+    assert_eq!(st["no_lock_held"], false, "{st}");
+    // The log folds an identical next line into a `repeat` count, written out by the next other line.
+    set_no_lock(&a, false).await;
+    let log = log_events(home);
+    let fails = log.iter().filter(|v| v["ev"] == "no_lock_hold_failed").count();
+    assert_eq!(fails, 1, "{log:?}");
+    assert!(!log.iter().any(|v| v["ev"] == "repeat"), "{log:?}");
+    // Switching off ends the streak: on again, the first failure is logged afresh.
+    set_no_lock(&a, true).await;
+    wait_until("a fresh failure line", || log_events(home).iter().filter(|v| v["ev"] == "no_lock_hold_failed").count() == 2).await;
+}
+
+/// A missing helper is a failure like any other: retried with the backoff, one line per streak, and a fresh
+/// line when the user switches off and on again.
+#[tokio::test]
+async fn no_lock_without_rapp_host_retries_and_logs_once_per_streak() {
+    if !MAC {
+        return;
+    }
+    let (home, bins) = (tempfile::tempdir().unwrap(), bins());
+    std::fs::remove_file(bins.path().join("rapp-host")).unwrap();
+    service_json(home.path());
+    let svc = start_service(home.path(), bins.path(), Duration::from_secs(60)).await;
+    let set = |on: bool| {
+        let (svc, home) = (&svc, home.path());
+        async move {
+            let r = ipc_once(svc, home, json!({"cmd":"set_no_lock","on":on})).await;
+            assert_eq!(r["ok"], true, "{r}");
+        }
+    };
+    let fails = || log_events(home.path()).into_iter().filter(|v| v["ev"] == "no_lock_hold_failed").collect::<Vec<_>>();
+    set(true).await;
+    let fail = wait_log(home.path(), "no_lock_hold_failed", |_| true).await;
+    assert_eq!((&fail["code"], &fail["stderr"]), (&Value::Null, &json!("could not start the keep-awake helper")), "{fail}");
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(fails().len(), 1, "the retry is not logged: {:?}", fails());
+    set(false).await;
+    set(true).await;
+    wait_until("a second line", || fails().len() == 2).await;
+    let mut ipc = Ipc::open(&svc, home.path()).await;
+    let st = ipc.call(json!({"cmd":"status"})).await;
+    assert_eq!((&st["no_lock"], &st["no_lock_held"]), (&json!(true), &json!(false)), "{st}");
+    // The helper comes back: a retry holds, without the switch going off and on.
+    std::fs::copy(env!("CARGO_BIN_EXE_fake-rapp-host"), bins.path().join("rapp-host")).unwrap();
+    wait_status(&mut ipc, |s| s["no_lock_held"] == true).await;
+    assert_eq!(fails().len(), 2, "{:?}", fails());
+}
+
 /// A client-only Linux package still serves terminals and shared ports. Missing a
 /// graphical host is a capability boundary, not a failed macOS permission check.
 #[cfg(target_os = "linux")]

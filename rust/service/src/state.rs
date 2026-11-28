@@ -74,6 +74,8 @@ pub struct State {
     pub perms_lost: Mutex<bool>,
     pub workers: Workers,
     pub changed: watch::Sender<u64>,
+    /// 不锁屏: whether its child holds A awake right now.
+    pub no_lock: crate::no_lock::NoLock,
     pub cm: Mutex<Option<std::process::Child>>,
     pub log: Log,
     pub log_dir: PathBuf,
@@ -270,6 +272,7 @@ impl State {
             "log_dir": self.log_dir, "update": crate::update::status_json(self),
             "relay_addr": cfg.relay, "has_key": has_key, "relay": relay, "relay_error": relay_error,
             "fp": self.identity.fp.to_string(), "auto_lock": cfg.auto_lock(),
+            "no_lock": cfg.no_lock(), "no_lock_held": self.no_lock.held(),
         })
     }
 }

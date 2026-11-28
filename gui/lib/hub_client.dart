@@ -610,6 +610,15 @@ class HubClient extends ChangeNotifier implements ServiceSwitchApi {
     return r is Map ? Map<String, Object?>.from(r) : <String, Object?>{};
   }
 
+  /// Turns 「不锁屏」 on or off on device [id] (without [on]: asks). Answers the reply; a refusal is thrown with its words.
+  Future<Map<String, Object?>> noLock(String id, {bool? on}) async {
+    final m = await _request({'cmd': 'no_lock', 'id': id, 'on': ?on}, 'no_lock');
+    final r = m['reply'];
+    final reply = r is Map ? Map<String, Object?>.from(r) : <String, Object?>{};
+    if (reply['ok'] != true) throw HubException('${reply['error']}');
+    return reply;
+  }
+
   @override
   Future<String?> stateHost() async => stateMapOf(portMaps)?.id;
 

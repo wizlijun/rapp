@@ -53,6 +53,7 @@ enum JCommand {
     Check { json: bool, #[allow(dead_code)] prompt: bool },
     Version { json: bool },
     Lock { json: bool },
+    StayAwake { json: bool },
 }
 
 #[derive(Debug, Deserialize)]
@@ -70,7 +71,8 @@ fn same_command(got: &HostCommand, want: &JCommand) -> bool {
         (HostCommand::ListApps { json: a }, JCommand::ListApps { json: b })
         | (HostCommand::Check { json: a }, JCommand::Check { json: b, .. })
         | (HostCommand::Version { json: a }, JCommand::Version { json: b })
-        | (HostCommand::Lock { json: a }, JCommand::Lock { json: b }) => a == b,
+        | (HostCommand::Lock { json: a }, JCommand::Lock { json: b })
+        | (HostCommand::StayAwake { json: a }, JCommand::StayAwake { json: b }) => a == b,
         _ => false,
     }
 }

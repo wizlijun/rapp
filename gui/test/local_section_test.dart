@@ -7,6 +7,7 @@ import 'package:rapp/pages/local_section.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/service_client.dart';
 import 'package:rapp/ui/controls.dart';
+import 'package:rapp/ui/tokens.dart';
 import 'package:rapp/linux_firewall.dart';
 
 import 'service_client_test.dart' show FakeService, until;
@@ -343,6 +344,27 @@ void main() {
     expect(svc.received.where((r) => r['cmd'] == 'set_auto_lock'), [
       {'cmd': 'set_auto_lock', 'on': false},
     ]);
+  });
+
+  testWidgets('auto_lock_row_says_no_lock_is_on', (tester) async {
+    const said = '「不锁屏」开着，暂不自动锁屏';
+    svc = FakeService('tok');
+    svc.extraStatus = {'auto_lock': true, 'no_lock': true, 'no_lock_held': true};
+    await pump(tester, platform: TargetPlatform.macOS);
+    expect(find.text(said), findsOneWidget);
+    final t = RappTokens.of(tester.element(find.text(said)));
+    expect(tester.widget<Text>(find.text(said)).style!.color, t.muted);
+    // Under the switch's row; the switch itself is as it was.
+    expect(tester.getTopLeft(find.text(said)).dy, greaterThanOrEqualTo(tester.getBottomLeft(find.text(label)).dy));
+    expect(tester.widget<Switch>(find.byKey(const Key('auto-lock-switch'))).value, isTrue);
+  });
+
+  testWidgets('no no_lock note while it is off', (tester) async {
+    svc = FakeService('tok');
+    svc.extraStatus = {'auto_lock': true, 'no_lock': false};
+    await pump(tester, platform: TargetPlatform.macOS);
+    expect(find.text(label), findsOneWidget);
+    expect(find.text('「不锁屏」开着，暂不自动锁屏'), findsNothing);
   });
 
   testWidgets('the auto-lock switch shows on Linux too, now that Linux can host', (tester) async {

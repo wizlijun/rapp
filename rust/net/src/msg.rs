@@ -123,6 +123,13 @@ pub enum Op {
     },
     /// This device's load with its history, then one line per sample, until the stream closes.
     WatchLoad,
+    /// 不锁屏 of the device asked: turn it on or off; without `on`, only ask where it stands. The reply is
+    /// `{"ok":true,"no_lock":bool,"no_lock_held":bool}`. Same rule as `SetService`: a key-trusted device only.
+    /// An older device answers "unknown op".
+    NoLock {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on: Option<bool>,
+    },
 }
 
 #[cfg(test)]
@@ -201,6 +208,14 @@ mod tests {
         assert_eq!(on, Op::SetService { name: "state".into(), on: Some(true) });
         let ask: Op = serde_json::from_str(r#"{"op":"set_service","name":"state"}"#).unwrap();
         assert_eq!(serde_json::to_value(&ask).unwrap(), json!({"op":"set_service","name":"state"}));
+    }
+
+    #[test]
+    fn no_lock_shapes() {
+        assert_eq!(serde_json::to_value(Op::NoLock { on: None }).unwrap(), json!({"op":"no_lock"}));
+        assert_eq!(serde_json::to_value(Op::NoLock { on: Some(true) }).unwrap(), json!({"op":"no_lock","on":true}));
+        assert_eq!(serde_json::from_value::<Op>(json!({"op":"no_lock"})).unwrap(), Op::NoLock { on: None });
+        assert_eq!(serde_json::from_value::<Op>(json!({"op":"no_lock","on":false})).unwrap(), Op::NoLock { on: Some(false) });
     }
 
     #[test]

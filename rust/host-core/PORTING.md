@@ -50,14 +50,15 @@ on the real platform) or "not on Windows".
 | `Sources/rapp-host/InputSourceWatcher.swift:1-16` | The input-source state B is told about (v8). | `platform::InputSource`; `session::session` `sent_input_source` | `host_session::input_source_is_reported_and_selected` |
 | `Sources/rapp-host/InputSourceWatcher.swift:17-68` | `InputSources.current` and `select`: the system's keyboard sources. | platform: `InputSourceOps::current`, `list`, `select`, `select_english` | phase D |
 | `Sources/rapp-host/InputSourceWatcher.swift:69-103` | The watcher: a changed source is sent to B. | `session::session` `start_input_source`, `send_input_source` | `host_session::input_source_is_reported_and_selected` |
-| `Sources/rapp-host/main.swift:1-25` | Usage text and argument parsing. | `cli` `parse_host_arguments`; `run` `USAGE_TEXT` | `cli::host_arguments_match_swift` |
-| `Sources/rapp-host/main.swift:26-33` | Permissions: screen capture and accessibility. | platform: `Platform::permissions`; `cli` `check_json` | `cli::check_json_carries_platform_fields` |
-| `Sources/rapp-host/main.swift:34-59` | The app listing: apps with windows, desktop entries first. | `cli` `shareable_apps`, `apps_json`, `apps_text` | `cli::apps_json_starts_with_the_desktop_main_display_first`, `cli::apps_json_without_displays_has_no_desktop_entry` |
-| `Sources/rapp-host/main.swift:60-64` | `version`. | `run::run`; `cli` `version_json` | `cli::version_reports_crate_version_and_platform` |
-| `Sources/rapp-host/main.swift:65-76` | `list-apps`. | `run::run` (platform: `Platform::applications`) | `host_session::list_apps_check_version_lock_json` |
-| `Sources/rapp-host/main.swift:77-84` | `check`, `--prompt` accepted and ignored. | `run::run` | `cli::check_prompt_is_accepted_and_ignored` |
-| `Sources/rapp-host/main.swift:85-98` | `lock`: locks A, reports ok, already or failed. | `run::run`; `cli` `lock_json` (platform: `LockOps::lock`) | `host_session::lock_command_reports_ok_already_failed`, `cli::lock_json_lines` |
-| `Sources/rapp-host/main.swift:99-136` | `serve` and its stdin commands (`quit`, `kick`, `peer`, `yield`), exit on EOF. | `run::run`; `cli` `parse_worker_command`; `session::server` `Server` | `host_session::quit_exits_0`, `host_session::stdin_eof_exits_0`, `cli::worker_commands_match_swift` |
+| `Sources/rapp-host/main.swift:1-26` | Usage text and argument parsing. | `cli` `parse_host_arguments`; `run` `USAGE_TEXT` | `cli::host_arguments_match_swift` |
+| `Sources/rapp-host/main.swift:27-34` | Permissions: screen capture and accessibility. | platform: `Platform::permissions`; `cli` `check_json` | `cli::check_json_carries_platform_fields` |
+| `Sources/rapp-host/main.swift:35-60` | The app listing: apps with windows, desktop entries first. | `cli` `shareable_apps`, `apps_json`, `apps_text` | `cli::apps_json_starts_with_the_desktop_main_display_first`, `cli::apps_json_without_displays_has_no_desktop_entry` |
+| `Sources/rapp-host/main.swift:61-65` | `version`. | `run::run`; `cli` `version_json` | `cli::version_reports_crate_version_and_platform` |
+| `Sources/rapp-host/main.swift:66-77` | `list-apps`. | `run::run` (platform: `Platform::applications`) | `host_session::list_apps_check_version_lock_json` |
+| `Sources/rapp-host/main.swift:78-85` | `check`, `--prompt` accepted and ignored. | `run::run` | `cli::check_prompt_is_accepted_and_ignored` |
+| `Sources/rapp-host/main.swift:86-99` | `lock`: locks A, reports ok, already or failed. | `run::run`; `cli` `lock_json` (platform: `LockOps::lock`) | `host_session::lock_command_reports_ok_already_failed`, `cli::lock_json_lines` |
+| `Sources/rapp-host/main.swift:100-123` | `stay-awake`: holds the Mac awake (reason `rapp: 不锁屏`) until stdin closes or SIGTERM; Windows answers not supported. | `run::run` (prints not supported, exit 1) | `cli::host_arguments_match_swift` |
+| `Sources/rapp-host/main.swift:124-161` | `serve` and its stdin commands (`quit`, `kick`, `peer`, `yield`), exit on EOF. | `run::run`; `cli` `parse_worker_command`; `session::server` `Server` | `host_session::quit_exits_0`, `host_session::stdin_eof_exits_0`, `cli::worker_commands_match_swift` |
 | `Sources/rapp-host/MenuBarReader.swift:1-78` | Reads the app's menu bar for `menuBar` (17). | not on Windows: no menu mirror, `menuPick` ignored (spec §6.3, §6.8, §2.2) | `host_session::menu_pick_is_ignored` |
 | `Sources/rapp-host/Paster.swift:1-45` | The paster: one paste at a time, a queue behind it. | `session::clip` `paste`, paster `run` | `rules_clip::paste_session_matches_swift` |
 | `Sources/rapp-host/Paster.swift:46-75` | `paste` and `end`: text inline, an item from the store, a missing item refused. | `session::clip` `paste`, `paste_reply` | `host_session::paste_text_inline`, `host_session::paste_item_not_uploaded` |
@@ -214,7 +215,7 @@ fc9c28644fb89877d304e121b5d1356523cd85e74140da148142f35cdc0f1a00  Sources/RappCo
 eda09c4e90d814e62031d1066f0cdfa379dc75f2a2033bac67ecb2814c549038  Sources/RappCore/StateRules/RuleValue.swift
 ae529827aeee7608aa58726a3635e5d6608a07f4d17467457f1707c1e22df506  Sources/RappCore/StateRules/StateEngine.swift
 75c696ee929c497248a2e7e1e47afa82b7caf18a234e3a7e144800dc5bb8ca46  Sources/RappCore/StateRules/StateTable.swift
-9acfaa06ac0e85ae988b6a011f0e22ce08c99eead636cd98c3a63098cd38ce58  Sources/RappCore/StayAwake.swift
+4990c4a1e07c8a7d49f671e103f55ee9d63bf5925ee8729205ff95ba7ac57e9a  Sources/RappCore/StayAwake.swift
 6885204c71b13cc69d3444f86a489286a578a77ee3d123750ecb71daec3548f1  Sources/RappCore/TileCodec.swift
 38f814922111db6bf0baeae6c23df93d22311a451bc6e68afceca69805661bf3  Sources/RappCore/Timeout.swift
 10846fe7631fe1c6071b0e783d1d3429e4d0ef4318130bf4c0604a42c865fb67  Sources/RappCore/Transfers.swift
@@ -222,7 +223,7 @@ ae529827aeee7608aa58726a3635e5d6608a07f4d17467457f1707c1e22df506  Sources/RappCo
 a47cf139680513718a6f91b8b14276abd7056d0365341143283a3da97747ae81  Sources/RappCore/UpdateGate.swift
 d2126e63ff027ae07e4fd7478d5d5995600d13d59068ef432760c6a7df6d59b0  Sources/RappCore/WeakTier.swift
 855302a591d6b0c5b89869de0d249f8e48fb51fcbf875945152ddd545844fe9f  Sources/RappCore/Windows.swift
-49ea5ebda2fcb6790d297a18e5855ce1bdca3e0f07e8957099932aac46e0fffe  Sources/RappCore/WorkerCLI.swift
+709572e9dbe700f59446dc8ee58bb3645037231ab082825d74024637c62e1a11  Sources/RappCore/WorkerCLI.swift
 53899148e82cc2e79b256a1c845672aa361f579770ebfa3f9d789e15ea321a3a  Sources/rapp-host/AppStateWatcher.swift
 5ebacebf3cbe50dcf01d363b279f3c194df19851c1914ff88d63c05821cc4593  Sources/rapp-host/ClipboardWatcher.swift
 d28e41f0309e501b74d6beaaf1d11c02a531f815ae3fcc6a212bde682eff7b56  Sources/rapp-host/CoverCloser.swift
@@ -232,7 +233,7 @@ f7a9d91f1633cdf383ac941e663868c273ecbe620ca49ef06c69a758ffeca292  Sources/rapp-h
 e5162462bab7eeaec9f5597385f3906658e0d31988440adcd24b14537cbb1a95  Sources/rapp-host/InputSourceWatcher.swift
 379bde0688cbcc190732bc4ed0c81d9917421f73271b240b71ebb6e6a7f2b7b4  Sources/rapp-host/MenuBarReader.swift
 093f781ec28495dd299a6732e55eb8113a88076e3b1aff25039935ce57d380bf  Sources/rapp-host/Paster.swift
-92dd0d976636a9804083ad6bfd4a8522d241ca5c1b0973e6b46956ed9ca06812  Sources/rapp-host/PowerHold.swift
+36f915e13775decc9ef778e228603b35ee1cad6e50588f9fcfba333775e58819  Sources/rapp-host/PowerHold.swift
 94b92bf125436c7d83969c2116ab7cac4e17e509c07043c72c385cd34107ffad  Sources/rapp-host/ScreenLocker.swift
 d45467588b040bea4399e3d9ce23e8981612bb18898801062e29551e3f995524  Sources/rapp-host/SecureFocusWatcher.swift
 8c71cea93dec086968d454bd5b47eef72e20fb9591b89fc1762c1e78d4c5330c  Sources/rapp-host/Server.swift
@@ -242,7 +243,7 @@ e669f56ff9a49750a9db2e17ea1f3b08f6a251488819d851d5573f0864a3a9d3  Sources/rapp-h
 400d898c40f7f68069db725ff6d707f43c4e17b24f45b4fa61c2cbcb71692877  Sources/rapp-host/WindowCapture.swift
 acf7c738941464c3588a4947609f9cd9c3921c0156a04fa94adb305fd503cb51  Sources/rapp-host/WindowResizer.swift
 89ec06578c09941aca07ce1652b2784b1f4194f8a44e5c4d4bdf521cf3203f02  Sources/rapp-host/WindowTracker.swift
-b82f7ac2327ac75eb10c0c5447fb97d1d2f1d5089d8e2385e839c9c6c238aa51  Sources/rapp-host/main.swift
+34fdcd0f4345b0e558beeeb86e6f84a4b6f8c0d1cf5b18a7e6451f50191a832a  Sources/rapp-host/main.swift
 ```
 
 ## 4. Not byte-exact

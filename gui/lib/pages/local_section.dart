@@ -193,6 +193,8 @@ class _LocalSectionState extends State<LocalSection> {
             onChanged: _setAutoLock,
           ),
         ),
+        // 不锁屏 (no-lock spec §7) holds the lock back; the switch itself stays as it is.
+        if (st.noLock) Text('「不锁屏」开着，暂不自动锁屏', style: TextStyle(color: t.muted)),
         Text('锁屏后，B 打开 app 时需要输入这台 Mac 的登录密码。', style: TextStyle(color: t.muted)),
       ]),
     );

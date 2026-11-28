@@ -20,6 +20,13 @@ final class StayAwakeTests: XCTestCase {
         XCTAssertEqual(released, [1])
     }
 
+    func testBeginReportsWhetherAHoldIsInPlace() {
+        XCTAssertTrue(make().begin())
+        let refused = make(granted: false)
+        XCTAssertFalse(refused.begin())
+        XCTAssertFalse(refused.begin())
+    }
+
     func testEndWithoutBeginReleasesNothing() {
         make().end()
         XCTAssertEqual(holds, 0)

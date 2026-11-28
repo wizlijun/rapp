@@ -691,6 +691,62 @@
   {
     "in" : {
       "args" : [
+        "stay-awake",
+        "--json"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 34: [\"stay-awake\", \"--json\"]",
+    "out" : {
+      "ok" : {
+        "cmd" : "stay_awake",
+        "json" : true
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "stay-awake"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 35: [\"stay-awake\"]",
+    "out" : {
+      "ok" : {
+        "cmd" : "stay_awake",
+        "json" : false
+      }
+    }
+  },
+  {
+    "in" : {
+      "args" : [
+        "stay-awake",
+        "extra"
+      ],
+      "env" : {
+        "EMPTY" : "",
+        "RAPP_TOKEN" : "s3cret"
+      },
+      "fn" : "host"
+    },
+    "name" : "args 36: [\"stay-awake\", \"extra\"]",
+    "out" : {
+      "error" : "unexpected argument extra"
+    }
+  },
+  {
+    "in" : {
+      "args" : [
         "serve",
         "--app",
         "a",
@@ -705,7 +761,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 34: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--token-env\", \"RAPP_TOKEN\"]",
+    "name" : "args 37: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--token-env\", \"RAPP_TOKEN\"]",
     "out" : {
       "ok" : {
         "app" : "a",
@@ -734,7 +790,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 35: [\"serve\", \"--app\", \"a\", \"--token-env\", \"RAPP_TOKEN\", \"--token\", \"\"]",
+    "name" : "args 38: [\"serve\", \"--app\", \"a\", \"--token-env\", \"RAPP_TOKEN\", \"--token\", \"\"]",
     "out" : {
       "error" : "the token is empty"
     }
@@ -756,7 +812,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 36: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \"65535\"]",
+    "name" : "args 39: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \"65535\"]",
     "out" : {
       "ok" : {
         "app" : "a",
@@ -785,7 +841,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 37: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \"+80\"]",
+    "name" : "args 40: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \"+80\"]",
     "out" : {
       "ok" : {
         "app" : "a",
@@ -814,7 +870,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 38: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \"-0\"]",
+    "name" : "args 41: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \"-0\"]",
     "out" : {
       "ok" : {
         "app" : "a",
@@ -843,7 +899,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 39: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \"-1\"]",
+    "name" : "args 42: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \"-1\"]",
     "out" : {
       "error" : "bad port -1"
     }
@@ -865,7 +921,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 40: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \"007\"]",
+    "name" : "args 43: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \"007\"]",
     "out" : {
       "ok" : {
         "app" : "a",
@@ -894,7 +950,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 41: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \"\"]",
+    "name" : "args 44: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \"\"]",
     "out" : {
       "error" : "bad port "
     }
@@ -916,7 +972,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 42: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \" 80\"]",
+    "name" : "args 45: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--port\", \" 80\"]",
     "out" : {
       "error" : "bad port  80"
     }
@@ -938,7 +994,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 43: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--app\", \"b\"]",
+    "name" : "args 46: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"--app\", \"b\"]",
     "out" : {
       "ok" : {
         "app" : "b",
@@ -967,7 +1023,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 44: [\"serve\", \"--json\", \"--json\", \"--app\", \"a\", \"--token\", \"t\"]",
+    "name" : "args 47: [\"serve\", \"--json\", \"--json\", \"--app\", \"a\", \"--token\", \"t\"]",
     "out" : {
       "ok" : {
         "app" : "a",
@@ -993,7 +1049,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 45: [\"serve\", \"--app\", \"--token\", \"t\"]",
+    "name" : "args 48: [\"serve\", \"--app\", \"--token\", \"t\"]",
     "out" : {
       "error" : "unexpected argument t"
     }
@@ -1011,7 +1067,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 46: [\"serve\", \"--what\", \"--app\"]",
+    "name" : "args 49: [\"serve\", \"--what\", \"--app\"]",
     "out" : {
       "error" : "unknown argument --what"
     }
@@ -1033,7 +1089,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 47: [\"serve\", \"--app\", \"desktop:2\", \"--token\", \"t\", \"--bind\", \"::1\"]",
+    "name" : "args 50: [\"serve\", \"--app\", \"desktop:2\", \"--token\", \"t\", \"--bind\", \"::1\"]",
     "out" : {
       "ok" : {
         "app" : "desktop:2",
@@ -1060,7 +1116,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 48: [\"serve\", \"--app\", \"中文应用\", \"--token\", \"\\\"q\\\\\\n\"]",
+    "name" : "args 51: [\"serve\", \"--app\", \"中文应用\", \"--token\", \"\\\"q\\\\\\n\"]",
     "out" : {
       "ok" : {
         "app" : "中文应用",
@@ -1088,7 +1144,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 49: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"-x\"]",
+    "name" : "args 52: [\"serve\", \"--app\", \"a\", \"--token\", \"t\", \"-x\"]",
     "out" : {
       "error" : "unexpected argument -x"
     }
@@ -1104,7 +1160,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 50: [\"dance\"]",
+    "name" : "args 53: [\"dance\"]",
     "out" : {
       "error" : "unexpected argument dance"
     }
@@ -1120,7 +1176,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 51: [\"-\"]",
+    "name" : "args 54: [\"-\"]",
     "out" : {
       "error" : "unexpected argument -"
     }
@@ -1139,7 +1195,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 52: [\"--token\", \"a\", \"--port\", \"1\"]",
+    "name" : "args 55: [\"--token\", \"a\", \"--port\", \"1\"]",
     "out" : {
       "ok" : {
         "app" : null,
@@ -1165,7 +1221,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 53: [\"--token\", \"a\", \"--token-env\", \"RAPP_TOKEN\"]",
+    "name" : "args 56: [\"--token\", \"a\", \"--token-env\", \"RAPP_TOKEN\"]",
     "out" : {
       "error" : "unknown argument --token-env"
     }
@@ -1182,7 +1238,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 54: [\"--token-env\", \"RAPP_TOKEN\"]",
+    "name" : "args 57: [\"--token-env\", \"RAPP_TOKEN\"]",
     "out" : {
       "error" : "unknown argument --token-env"
     }
@@ -1200,7 +1256,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 55: [\"check\", \"--prompt\", \"--prompt\"]",
+    "name" : "args 58: [\"check\", \"--prompt\", \"--prompt\"]",
     "out" : {
       "ok" : {
         "cmd" : "check",
@@ -1222,7 +1278,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 56: [\"version\", \"--json\", \"extra\"]",
+    "name" : "args 59: [\"version\", \"--json\", \"extra\"]",
     "out" : {
       "error" : "unexpected argument extra"
     }
@@ -1239,7 +1295,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 57: [\"list-apps\", \"--json\"]",
+    "name" : "args 60: [\"list-apps\", \"--json\"]",
     "out" : {
       "ok" : {
         "cmd" : "list_apps",
@@ -1259,7 +1315,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 58: [\"lock\", \"--prompt\"]",
+    "name" : "args 61: [\"lock\", \"--prompt\"]",
     "out" : {
       "error" : "unknown argument --prompt"
     }
@@ -1279,7 +1335,7 @@
       },
       "fn" : "host"
     },
-    "name" : "args 59: [\"Serve\", \"--app\", \"a\", \"--token\", \"t\"]",
+    "name" : "args 62: [\"Serve\", \"--app\", \"a\", \"--token\", \"t\"]",
     "out" : {
       "error" : "unknown argument --app"
     }

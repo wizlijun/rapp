@@ -4,8 +4,10 @@ library;
 import 'package:flutter/material.dart';
 
 import '../ui/add_device_form.dart';
+import '../ui/device_os.dart';
 import '../ui/lamp.dart';
 import '../ui/main_state.dart';
+import '../ui/no_lock_card.dart';
 import '../ui/os_mark.dart';
 import '../ui/term_restore_dialog.dart' show showTermRestore;
 import '../ui/overview_model.dart';
@@ -85,6 +87,14 @@ class _DeviceListState extends State<DeviceList> {
                         style: style?.copyWith(color: c.offline ? t.muted : t.text, fontWeight: FontWeight.w600)),
                   ),
                 ]),
+              ),
+              NoLockCard(
+                id: c.id!,
+                load: state.columnLoad(c.id, offline: c.offline),
+                mac: c.os == DeviceOs.macos,
+                onSet: (on) => state.setNoLock(c.id, on),
+                say: state.say,
+                margin: const EdgeInsets.only(bottom: 12),
               ),
               for (final e in c.entries)
                 Padding(

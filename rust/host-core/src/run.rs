@@ -26,12 +26,13 @@ pub struct WorkerIo {
     pub stderr: Box<dyn Write + Send>,
 }
 
-/// `main.swift:7-14`, with Swift's default port.
+/// `main.swift:7-15`, with Swift's default port.
 pub const USAGE_TEXT: &str = "usage: rapp-host --token <secret> [--port 47800]
        rapp-host serve --app <bundle-id> (--token <secret> | --token-env <VAR>) [--port 47800] [--bind <address>] [--json]
        rapp-host list-apps [--json]
        rapp-host check [--prompt] [--json]
        rapp-host lock [--json]
+       rapp-host stay-awake [--json]
        rapp-host version [--json]";
 
 struct Streams {
@@ -244,6 +245,13 @@ pub fn run(
                     out.finish(exit_code::RUNTIME, reason);
                 }
             }
+            rx.recv().unwrap_or(exit_code::RUNTIME)
+        }
+        HostCommand::StayAwake { json } => {
+            // Swift holds an IOKit assertion for the 不锁屏 switch; this port has no such worker.
+            let (out, rx) = Output::new(json, stdout, stderr);
+            out.result(if json { r#"{"ok":false,"error":"not supported"}"# } else { "stay-awake: not supported" });
+            out.finish(exit_code::RUNTIME, "not supported");
             rx.recv().unwrap_or(exit_code::RUNTIME)
         }
         HostCommand::SecureHelper { .. } => {

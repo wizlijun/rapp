@@ -10,6 +10,7 @@ let usage = """
            rapp-host list-apps [--json]
            rapp-host check [--prompt] [--json]
            rapp-host lock [--json]
+           rapp-host stay-awake [--json]
            rapp-host version [--json]
     """
 
@@ -95,6 +96,30 @@ case let .lock(json):
         output.result(json ? jsonLine(["ok": false, "error": reason]) : "lock failed: \(reason)")
         output.finish(ExitCode.runtime, reason)
     }
+
+case let .stayAwake(json):
+    // Holds the Mac awake until stdin closes or SIGTERM, then lets go and exits 0.
+    let output = WorkerOutput(json: json)
+    let awake = PowerHold.stayAwake(reason: "rapp: 不锁屏") { output.log($0) }
+    if !awake.begin() {
+        let reason = "could not keep this Mac awake"
+        output.result(json ? jsonLine(["ok": false, "error": reason]) : "stay-awake: \(reason)")
+        output.finish(ExitCode.runtime, reason)
+    }
+    output.result(json ? jsonLine(["ok": true]) : "staying awake")
+    let finish = {
+        awake.end()
+        exit(ExitCode.ok)
+    }
+    signal(SIGTERM, SIG_IGN)
+    let term = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+    term.setEventHandler(handler: finish)
+    term.resume()
+    Thread.detachNewThread {
+        while FileHandle.standardInput.availableData.count > 0 {}
+        DispatchQueue.main.async(execute: finish)
+    }
+    dispatchMain()
 
 case let .serve(options):
     let output = WorkerOutput(json: options.json)

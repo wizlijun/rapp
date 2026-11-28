@@ -51,6 +51,7 @@ DeviceLoad dev(int headroom, double? cpu, {bool term = true, List<Map<String, dy
     });
 
 void main() {
+  noLockTests();
   test('fromJson reads the example snapshot', () {
     final l = DeviceLoad.fromJson(example());
     expect((l.at, l.headroom, l.tightest, l.term), (1764100000, 30, 'disk', true));
@@ -137,5 +138,16 @@ void main() {
       expect(pickDevice({}, {'a'}), isNull);
       expect(pickDevice({'a': dev(50, 1, term: false)}, {'a'}), isNull);
     });
+  });
+}
+
+void noLockTests() {
+  test('no_lock_keys_parse', () {
+    final a = DeviceLoad.fromJson({...example(), 'no_lock': true, 'no_lock_held': false});
+    expect(a.noLock, isTrue);
+    expect(a.noLockHeld, isFalse);
+    final b = DeviceLoad.fromJson(example());
+    expect(b.noLock, isNull);
+    expect(b.noLockHeld, isFalse);
   });
 }

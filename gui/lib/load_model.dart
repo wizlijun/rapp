@@ -57,6 +57,8 @@ class DeviceLoad {
     this.headroom,
     this.tightest,
     required this.term,
+    this.noLock,
+    this.noLockHeld = false,
     this.items = const {},
     this.disks = const [],
     this.warnings = const [],
@@ -73,6 +75,12 @@ class DeviceLoad {
 
   /// The device can open text terminals now.
   final bool term;
+
+  /// 「不锁屏」 is on; null when the device does not carry the key (it cannot do it).
+  final bool? noLock;
+
+  /// The stay-awake hold is in place now.
+  final bool noLockHeld;
 
   /// `cpu`, `gpu`, `mem`, `heat`, `battery`, as the service sent them; an item it could not read is absent.
   final Map<String, dynamic> items;
@@ -112,6 +120,8 @@ class DeviceLoad {
       headroom: headroom,
       tightest: headroom != null && m['tightest'] is String ? m['tightest'] as String : null,
       term: m['term'] == true,
+      noLock: m['no_lock'] is bool ? m['no_lock'] as bool : null,
+      noLockHeld: m['no_lock_held'] == true,
       items: items is Map ? Map<String, dynamic>.from(items) : const {},
       disks: [
         for (final d in (m['disks'] is List ? m['disks'] as List : const []))

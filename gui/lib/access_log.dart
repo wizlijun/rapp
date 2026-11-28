@@ -42,6 +42,9 @@ HistoryRow historyRow(Map<String, dynamic> ev) {
     'unlock' => ('输入了系统密码', false),
     'auto_lock' => ('远程 app 都已关闭，已自动锁屏', false),
     'auto_lock_failed' => ('自动锁屏失败：${s('error')}', true),
+    'no_lock_set' => (ev['on'] == true ? '打开了「不锁屏」' : '关掉了「不锁屏」', false),
+    'no_lock_refused' => ('拒绝改「不锁屏」：${s('reason')}', true),
+    'no_lock_hold_failed' => ('没能保持唤醒：${s('stderr')}', true),
     final other => (other, false),
   };
   return HistoryRow(

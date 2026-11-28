@@ -135,6 +135,29 @@ void main() {
         expect(nav.now, PhoneView.settings);
       });
 
+      testWidgets('devices_page_shows_no_lock_card', (tester) async {
+        size(tester);
+        await boot(tester, apps: ['m1/a']);
+        await tester.pumpWidget(app(th, DevicesPage(state: s, nav: nav)));
+        t.emit({'event': 'load', 'id': 'm1', 'at': 1764100000, 'term': true, 'no_lock': true, 'no_lock_held': true});
+        t.emit({'event': 'load', 'id': 'm2', 'at': 1764100000, 'term': true});
+        await tester.pump();
+        await tester.pump();
+        final card = find.byKey(const Key('no-lock-card-m1'));
+        expect(card, findsOneWidget);
+        expect(find.byKey(const Key('no-lock-card-m2')), findsNothing);
+        expect(tester.widget<Switch>(find.byKey(const Key('no-lock-switch-m1'))).value, isTrue);
+        // Under the device's title, above its sessions.
+        expect(tester.getTopLeft(card).dy, greaterThanOrEqualTo(tester.getBottomLeft(find.text('mini')).dy));
+        expect(tester.getBottomLeft(card).dy, lessThanOrEqualTo(tester.getTopLeft(find.byKey(const Key('block-m1/a'))).dy));
+        await tester.tap(find.byKey(const Key('no-lock-switch-m1')));
+        await tester.pump();
+        expect(t.sent.where((x) => x['cmd'] == 'no_lock').map((x) => (x['id'], x['on'])), [('m1', false)]);
+        t.emit({'event': 'load', 'id': 'm1', 'gone': true});
+        t.emit({'event': 'load', 'id': 'm2', 'gone': true});
+        await tester.pump();
+      });
+
       testWidgets('device rows are 56', (tester) async {
         size(tester);
         await boot(tester, apps: ['m1/a', 'm1/b', 'm2/a', 'm2/b']);

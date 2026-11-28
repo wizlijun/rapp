@@ -83,6 +83,11 @@ fn disk_share(r: &Value) -> Option<f64> {
 fn without_machine(mut r: Value) -> Value {
     r["at"] = json!(0);
     r["disks"] = json!([]);
+    // The switch's keys depend on the platform: the test below looks at them.
+    if let Some(o) = r.as_object_mut() {
+        o.remove("no_lock");
+        o.remove("no_lock_held");
+    }
     if let Some(ws) = r["warnings"].as_array_mut() {
         ws.retain(|w| {
             let item = w["item"].as_str().unwrap_or("");
@@ -127,6 +132,11 @@ async fn load_answers_a_snapshot() {
     assert!(r.get("top").is_none(), "{r}");
     assert!(r["disks"].is_array(), "{r}");
     assert_eq!(without_machine(r.clone()), want_fake(&r));
+    // 不锁屏 shows only where the device can keep itself awake.
+    assert_eq!(r.get("no_lock").is_some(), r.get("no_lock_held").is_some(), "{r}");
+    if cfg!(target_os = "macos") {
+        assert_eq!((&r["no_lock"], &r["no_lock_held"]), (&json!(false), &json!(false)), "{r}");
+    }
     // `top` is accepted; the first version has nothing to give for it.
     let r = req_ok(&conn, json!({"op":"load","top":true})).await;
     assert!(r.get("top").is_none(), "{r}");
@@ -394,4 +404,41 @@ async fn a_broken_term_json_does_not_fill_the_log() {
     assert_eq!(warned.len(), 1, "{evs:#?}");
     let after = &evs[warned[0] + 1];
     assert_eq!((&after["ev"], &after["op"]), (&json!("request"), &json!("list_terms")), "{evs:#?}");
+}
+
+/// 不锁屏 (spec 2026-11-28 §6): once the hold comes, a line says so at once, not at the next sample. Only the hold
+/// is pushed: a line just after the switch goes on (before the settle) would flash 「没能保持唤醒」 everywhere.
+/// The pushed line has no `point`: no sample was taken.
+#[tokio::test]
+async fn watch_load_pushes_a_line_when_no_lock_changes() {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let (home, bins) = (tempfile::tempdir().unwrap(), bins());
+    service_json(home.path());
+    let mut slow = fake_load();
+    slow.every = Duration::from_secs(60);
+    let svc = service_with_load(home.path(), bins.path(), Some(slow)).await;
+    let mut ipc = Ipc::open(&svc, home.path()).await;
+    ipc.send(json!({"cmd":"watch_load"})).await;
+    let first = ipc.next().await;
+    assert_eq!((&first["ok"], &first["no_lock"], &first["no_lock_held"]), (&json!(true), &json!(false), &json!(false)), "{first}");
+    let r = ipc_once(&svc, home.path(), json!({"cmd":"set_no_lock","on":true})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let soon = Duration::from_secs(3);
+    let held = loop {
+        let line = tokio::time::timeout(soon, ipc.next()).await.expect("a line once the hold settles");
+        assert!(!(line["no_lock"] == true && line["no_lock_held"] == false), "on but not held yet: {line}");
+        if line["no_lock_held"] == true {
+            break line;
+        }
+    };
+    assert_eq!((&held["ok"], &held["no_lock"]), (&json!(true), &json!(true)), "{held}");
+    assert!(held.get("point").is_none(), "{held}");
+    assert!(held["headroom"].is_u64(), "the line is a whole snapshot: {held}");
+    // Off: the hold ends, and that line reads the switch off.
+    let r = ipc_once(&svc, home.path(), json!({"cmd":"set_no_lock","on":false})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let off = tokio::time::timeout(soon, ipc.next()).await.expect("a line once the hold ends");
+    assert_eq!((&off["no_lock"], &off["no_lock_held"]), (&json!(false), &json!(false)), "{off}");
 }

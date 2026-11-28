@@ -13,6 +13,7 @@ mod ipc;
 mod labels;
 pub mod load;
 mod maps;
+mod no_lock;
 mod numbers;
 mod outbox;
 mod own;
@@ -221,6 +222,7 @@ impl Service {
             perms_lost: Mutex::new(false),
             workers: workers::Workers::new(opts.worker_idle),
             changed: tokio::sync::watch::channel(0).0,
+            no_lock: no_lock::NoLock::default(),
             cm: Mutex::new(None),
             log: log.clone(),
             log_dir: opts.log_dir,
@@ -268,6 +270,8 @@ impl Service {
         // Numbered shares listen at once; the ones that still lack a number are numbered after.
         sharing::sync_own(&state);
         update::on_start(&state).await;
+        // Not in `tasks`: `stop` lets it close the child's stdin instead of aborting it; it ends by itself then.
+        drop(no_lock::spawn(state.clone()));
         let mut tasks = vec![
             tokio::spawn(numbers::on_start(state.clone())),
             tokio::spawn(peer::accept_loop(state.clone(), endpoint)),
@@ -319,6 +323,8 @@ impl Service {
         self.state.forward_log.flush();
         self.state.log.event(Lvl::Info, "service_stop", json!({}));
         self.state.log.flush();
+        self.state.no_lock.stop();
+        self.state.notify();
         for t in &self.tasks {
             t.abort();
         }

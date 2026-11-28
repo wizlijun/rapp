@@ -9,6 +9,7 @@ import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/term/term_session_port.dart';
 import 'package:rapp/embed/traffic_label.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/load_model.dart';
 import 'package:rapp/ui/device_os.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/os_mark.dart';
@@ -25,6 +26,7 @@ import 'package:rapp/ui/terms_entry.dart';
 import 'package:rapp/ui/tokens.dart';
 
 import '../fakes.dart';
+import '../service_client_test.dart' show FakeService, until;
 import 'helpers.dart';
 
 void main() {
@@ -1613,6 +1615,103 @@ void main() {
       await tester.pump();
       expect(find.byKey(const Key('column-local-folded')), findsOneWidget);
     }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
+    Map<String, dynamic> noLockLine(String id, bool on) =>
+        {'event': 'load', 'id': id, 'at': 1764100000, 'headroom': 30, 'tightest': 'cpu', 'term': true, 'no_lock': on, 'no_lock_held': true};
+
+    testWidgets('no_lock_card_in_local_and_remote_columns', (tester) async {
+      await boot(tester);
+      final m = await showPc(tester);
+      m.load = DeviceLoad.fromJson(noLockLine('local', true));
+      m.notifyListeners();
+      t.emit(noLockLine('m1', false));
+      await tester.pump();
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      for (final id in ['local', 'm1']) {
+        final card = find.byKey(Key('no-lock-card-$id'));
+        expect(find.descendant(of: find.byKey(Key('column-$id')), matching: card), findsOneWidget, reason: id);
+        expect(tester.getTopLeft(card).dy, greaterThanOrEqualTo(tester.getBottomLeft(find.byKey(Key('load-row-$id'))).dy),
+            reason: id);
+      }
+      expect(tester.widget<Switch>(find.byKey(const Key('no-lock-switch-local'))).value, isTrue);
+      expect(tester.widget<Switch>(find.byKey(const Key('no-lock-switch-m1'))).value, isFalse);
+      // The remote one goes through the hub.
+      await tester.tap(find.byKey(const Key('no-lock-switch-m1')));
+      await tester.pump();
+      expect(t.sent.where((x) => x['cmd'] == 'no_lock').map((x) => (x['id'], x['on'])), [('m1', true)]);
+      t.emit({'event': 'load', 'id': 'm1', 'gone': true});
+      await tester.pump();
+    });
+
+    testWidgets('the local switch asks this column\'s service, not the hub', (tester) async {
+      final svc = FakeService('tok')
+        ..loadLines = [
+          {'ok': true, 'at': 1764100000, 'headroom': 30, 'tightest': 'cpu', 'term': true, 'no_lock': false, 'no_lock_held': false, 'history': []},
+        ];
+      late ServiceMonitor m;
+      await tester.runAsync(() async {
+        await svc.start();
+        m = ServiceMonitor(readToken: () async => 'tok', port: svc.port, retry: const Duration(milliseconds: 50));
+        m.start();
+        await until(() => m.status != null && m.load?.noLock == false);
+      });
+      addTearDown(() async {
+        m.dispose();
+        await tester.runAsync(svc.stop);
+      });
+      await boot(tester);
+      s.toggleOverview();
+      await tester.pumpWidget(wrap(SizedBox(width: 1194, height: 700, child: Overview(state: s, monitor: m))));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      expect(tester.widget<Switch>(find.byKey(const Key('no-lock-switch-local'))).value, isFalse);
+      await tester.tap(find.byKey(const Key('no-lock-switch-local')));
+      await tester.pump();
+      await tester.runAsync(() => until(() => svc.received.any((x) => x['cmd'] == 'set_no_lock')));
+      expect(svc.received.where((x) => x['cmd'] == 'set_no_lock').toList(), [
+        {'cmd': 'set_no_lock', 'on': true},
+      ]);
+      expect(t.sent.where((x) => x['cmd'] == 'no_lock'), isEmpty);
+      await tester.pump();
+    });
+
+    testWidgets('no card where the snapshot has no no_lock key', (tester) async {
+      await boot(tester);
+      await showPc(tester);
+      t.emit({'event': 'load', 'id': 'm1', 'at': 1764100000, 'headroom': 30, 'tightest': 'cpu', 'term': true});
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const Key('load-row-m1')), findsOneWidget);
+      expect(find.byKey(const Key('no-lock-card-m1')), findsNothing);
+      t.emit({'event': 'load', 'id': 'm1', 'gone': true});
+      await tester.pump();
+    });
+
+    testWidgets('folded_local_strip_shows_no_lock', (tester) async {
+      await boot(tester);
+      final m = await showPc(tester);
+      m.load = DeviceLoad.fromJson(noLockLine('local', true));
+      m.notifyListeners();
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-folded')), findsOneWidget);
+      expect(find.byKey(const Key('column-local-no-lock')), findsOneWidget);
+      expect(find.bySemanticsLabel('展开 本机，不锁屏开着'), findsOneWidget);
+      m.load = DeviceLoad.fromJson(noLockLine('local', false));
+      m.notifyListeners();
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-no-lock')), findsNothing);
+      expect(find.bySemanticsLabel('展开 本机'), findsOneWidget);
+      // A tap still opens it.
+      m.load = DeviceLoad.fromJson(noLockLine('local', true));
+      m.notifyListeners();
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      expect(find.byKey(const Key('column-local-fold')), findsOneWidget);
+    });
   });
 }
 

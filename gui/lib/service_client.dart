@@ -60,6 +60,8 @@ class ServiceStatus {
     this.update,
     this.permissionsLostAfterUpdate = false,
     this.autoLock = true,
+    this.noLock = false,
+    this.noLockHeld = false,
     this.relayAddr,
     this.relay = 'off',
     this.relayError,
@@ -91,6 +93,10 @@ class ServiceStatus {
 
   /// Lock the screen after the last remote app closes (macOS); on when the service does not say.
   final bool autoLock;
+
+  /// 「不锁屏」 is on, and whether the stay-awake hold is in place.
+  final bool noLock;
+  final bool noLockHeld;
 
   /// `host:port` of the rapp-relay access point; null when none is set.
   final String? relayAddr;
@@ -129,6 +135,8 @@ class ServiceStatus {
       update: UpdateInfo.fromJson(m['update']),
       permissionsLostAfterUpdate: m['permissions_lost_after_update'] == true,
       autoLock: m['auto_lock'] != false,
+      noLock: m['no_lock'] == true,
+      noLockHeld: m['no_lock_held'] == true,
       relayAddr: (m['relay_addr']?.toString() ?? '').isEmpty ? null : m['relay_addr'].toString(),
       relay: m['relay']?.toString() ?? 'off',
       relayError: (m['relay_error']?.toString() ?? '').isEmpty ? null : m['relay_error'].toString(),
@@ -256,6 +264,7 @@ class ServiceConnection {
   Future<Map<String, Object?>> setUpdate({bool? autoUpdate, bool? checkUpdates}) =>
       request({'cmd': 'set_update', 'auto_update': ?autoUpdate, 'check_updates': ?checkUpdates});
   Future<Map<String, Object?>> setAutoLock(bool on) => request({'cmd': 'set_auto_lock', 'on': on});
+  Future<Map<String, Object?>> setNoLock(bool on) => request({'cmd': 'set_no_lock', 'on': on});
 
   /// How many remote windows other than text terminals this GUI has open (cli-update §5.1).
   Future<Map<String, Object?>> guiWindows(int n) => request({'cmd': 'gui_windows', 'count': n});
@@ -636,6 +645,7 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi, ServiceSwitchA
   Future<Map<String, Object?>> setUpdate({bool? autoUpdate, bool? checkUpdates}) =>
       _then((c) => c.setUpdate(autoUpdate: autoUpdate, checkUpdates: checkUpdates));
   Future<Map<String, Object?>> setAutoLock(bool on) => _then((c) => c.setAutoLock(on));
+  Future<Map<String, Object?>> setNoLock(bool on) => _then((c) => c.setNoLock(on));
   Future<Map<String, Object?>> permissionsReset() => _then((c) => c.permissionsReset());
 
   /// A call to another device can wait seconds for it, so these commands get a connection of their own,

@@ -39,6 +39,7 @@ public enum HostCommand: Equatable {
     case check(json: Bool, prompt: Bool)
     case version(json: Bool)
     case lock(json: Bool)
+    case stayAwake(json: Bool)
 }
 
 public enum ClientCommand: Equatable {
@@ -98,7 +99,7 @@ private func parsePort(_ text: String?, allowZero: Bool) throws -> UInt16 {
 public func parseHostArguments(_ args: [String], environment: [String: String]) throws -> HostCommand {
     let subcommand = args.first ?? ""
     switch subcommand {
-    case "list-apps", "check", "version", "lock":
+    case "list-apps", "check", "version", "lock", "stay-awake":
         let parsed = try Arguments(Array(args.dropFirst()), valued: [],
                                    bare: subcommand == "check" ? ["--prompt"] : [])
         try parsed.noPositional()
@@ -106,6 +107,7 @@ public func parseHostArguments(_ args: [String], environment: [String: String]) 
         case "list-apps": return .listApps(json: parsed.json)
         case "check": return .check(json: parsed.json, prompt: parsed.flags.contains("--prompt"))
         case "lock": return .lock(json: parsed.json)
+        case "stay-awake": return .stayAwake(json: parsed.json)
         default: return .version(json: parsed.json)
         }
     case "serve":
