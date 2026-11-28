@@ -9,6 +9,8 @@ import 'devices_page.dart';
 import 'enter_when_open.dart';
 import 'home_model.dart';
 import 'phone_nav.dart';
+import 'reply_card.dart';
+import 'reply_model.dart';
 import 'sheet.dart';
 import 'widgets.dart';
 
@@ -124,6 +126,14 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _viaService(HomeItem i) {
     final p = i.id.split('\n');
     return p.length == 3 && p[0] == 'term' && _s.stateSync != null && !(_s.hub?.termLists.containsKey(p[1]) ?? false);
+  }
+
+  CardReply _replyOf(HomeItem card) {
+    final p = card.id.split('\n');
+    final row = p.length == 3 && p[0] == 'term'
+        ? _s.hub?.termLists[p[1]]?.terms.where((r) => r.id == p[2]).firstOrNull
+        : null;
+    return replyOf(card, row: row, deviceReply: p.length == 3 && deviceCanReply(_s.probes, p[1]));
   }
 
   VoidCallback? _buttonOf(HomeItem item) {
@@ -252,7 +262,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         : Padding(
                             key: ValueKey(card.gotItKey),
                             padding: const EdgeInsets.only(bottom: 12),
-                            child: PhoneCard(item: card, onOpen: null, onButton: _buttonOf(card)),
+                            child: _focusCard(card),
                           ),
                   ),
                 ],
@@ -292,6 +302,26 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  /// The focus card: with reply buttons when it has any, else today's single button.
+  Widget _focusCard(HomeItem card) {
+    final reply = _replyOf(card);
+    if (reply.kind == ReplyKind.none) return PhoneCard(item: card, onOpen: null, onButton: _buttonOf(card));
+    return PhoneCard(
+      item: card,
+      // The review points are cut short: the text opens the session for the full plan.
+      onOpen: reply.kind == ReplyKind.review ? () => _goLook(card) : null,
+      onButton: _buttonOf(card),
+      actions: ReplyActions(
+        item: card,
+        reply: reply,
+        replies: _nav.replies,
+        voice: null, // Task 12 puts the hold-to-talk button here
+        onGotIt: reply.kind == ReplyKind.done ? _buttonOf(card) : null,
+        onGoLook: () => _goLook(card),
+      ),
     );
   }
 

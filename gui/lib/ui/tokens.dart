@@ -75,6 +75,9 @@ class RappTokens extends ThemeExtension<RappTokens> {
   /// Body text in the monospace font (MATRIX only).
   final bool monoBody;
 
+  /// [base] in the monospace font.
+  TextStyle monoOf(TextStyle base) => base.copyWith(fontFamily: mono, fontFamilyFallback: monoFallback);
+
   /// Letter spacing (em) for small headings.
   final double labelSpacing;
 

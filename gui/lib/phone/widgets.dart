@@ -184,10 +184,13 @@ class PhoneRow extends StatelessWidget {
 
 /// One thing that needs a look: source line (C1), the line, at most one button (C3).
 class PhoneCard extends StatelessWidget {
-  const PhoneCard({super.key, required this.item, required this.onOpen, required this.onButton});
+  const PhoneCard({super.key, required this.item, required this.onOpen, required this.onButton, this.actions});
   final HomeItem item;
   final VoidCallback? onOpen;
   final VoidCallback? onButton;
+
+  /// Replaces the single button (the reply area); null keeps it.
+  final Widget? actions;
 
   @override
   Widget build(BuildContext context) {
@@ -244,7 +247,7 @@ class PhoneCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 12),
-              PhoneButton(label: buttonLabel(item.button), onPressed: onButton, tall: true),
+              actions ?? PhoneButton(label: buttonLabel(item.button), onPressed: onButton, tall: true),
             ],
           ),
         ),
