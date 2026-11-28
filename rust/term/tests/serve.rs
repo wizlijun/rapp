@@ -1238,3 +1238,47 @@ async fn front_with_terminals_off_is_refused() {
     assert!(v[0]["error"].is_string() && v[0]["error"] != "not-found", "{v:?}");
     w.stop().await;
 }
+
+/// A reply goes through serve to the run with no view; the session row says it takes one.
+#[tokio::test]
+async fn reply_reaches_the_program_with_no_view() {
+    let w = Worker::start(None).await;
+    let win = Window::start(&w.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
+    let id = id_of(&w.pty_dir(), "t").await;
+    let l = w.ask(json!({"op": "list"})).await;
+    assert_eq!(l[0]["terms"][0]["reply"], true, "{l:?}");
+    let r = w.ask(json!({"op": "reply", "term": id, "text": "secret-word-3", "enter": true})).await;
+    assert_eq!(r, [json!({"ok": true})]);
+    win.wait_output("secret-word-3\r\n");
+    // No status yet, so any seq is stale.
+    let r = w.ask(json!({"op": "reply", "term": id, "seq": 1, "keys": ["Enter"]})).await;
+    assert_eq!(r, [json!({"error": "changed"})]);
+    let r = w.ask(json!({"op": "reply", "term": "term:pty:0123456789abcdef", "keys": ["Enter"]})).await;
+    assert_eq!(r, [json!({"error": "no such text terminal"})]);
+    assert!(!win.output().contains("\x1b[8;"));
+    let (rest, err, _) = w.stop().await;
+    assert!(!rest.iter().any(|l| l.contains("secret-word-3")) && !err.contains("secret-word-3"), "{rest:?} {err}");
+}
+
+/// Neither the words nor the session id reach any log line.
+#[tokio::test]
+async fn reply_text_not_logged() {
+    let w = Worker::start(None).await;
+    let win = Window::start(&w.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
+    let id = id_of(&w.pty_dir(), "t").await;
+    let key = id.strip_prefix("term:pty:").unwrap().to_string();
+    for req in [
+        json!({"op": "reply", "term": id, "text": "hush-phrase-91", "enter": true}),
+        json!({"op": "reply", "term": id, "seq": 9, "text": "hush-phrase-92"}),
+        json!({"op": "reply", "term": id, "keys": ["Nope-Nope"], "text": "hush-phrase-93"}),
+    ] {
+        w.ask(req).await;
+    }
+    win.wait_output("hush-phrase-91");
+    let (rest, err, _) = w.stop().await;
+    // The only stdout lines are serve's own status lines (none carry the text or the id).
+    for bad in ["hush-phrase", key.as_str()] {
+        assert!(!err.contains(bad), "{err}");
+        assert!(!rest.iter().any(|l| l.contains(bad)), "{rest:?}");
+    }
+}

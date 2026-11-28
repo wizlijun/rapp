@@ -12,6 +12,7 @@ pub mod local;
 #[cfg(unix)]
 pub mod saved;
 pub mod ps;
+pub mod reply;
 pub mod resume;
 pub mod shell;
 pub mod sweep;
@@ -114,6 +115,7 @@ impl Shared {
             shell: fg.probed.then_some(fg.shell),
             tty: self.tty.clone(),
             input: self.input_at.load(Ordering::Relaxed),
+            reply: true,
         }
     }
 }

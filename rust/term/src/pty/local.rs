@@ -130,6 +130,9 @@ pub struct Status {
     /// The Unix second of the last input; absent when there was none.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub input: u64,
+    /// Whether the run takes a `reply` with no view; a run without the field is an old one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reply: bool,
 }
 
 fn is_zero(n: &u64) -> bool {
@@ -234,6 +237,27 @@ pub async fn end(path: &Path, token: &str) -> Result<(), Probe> {
     tokio::time::timeout(STATUS_WAIT, ask).await.unwrap_or(Err(Probe::Busy))
 }
 
+/// Sends `r` (a `pty::reply::Reply` as JSON) to the run at `path` with no view. The refusal is the run's reason
+/// (`changed`, `typed`, `empty`…); a run without the op refuses with `unsupported`.
+pub async fn reply(path: &Path, token: &str, r: &serde_json::Value) -> Result<(), Probe> {
+    let ask = async {
+        let mut s = UnixStream::connect(path).await.map_err(|e| if gone(&e) { Probe::Gone } else { Probe::Busy })?;
+        let req = serde_json::json!({ "op": "reply", "v": LOCAL_V, "reply": r });
+        send_head_with(&mut s, req, token).await.map_err(|_| Probe::Busy)?;
+        let got = Lines::new(BufReader::new(s), MAX_IN_LINE).next().await;
+        let Ok(Got::Line(line)) = got else {
+            return Err(Probe::Refused("bad reply".into()));
+        };
+        let v: serde_json::Value = serde_json::from_slice(&line).map_err(|_| Probe::Refused("bad reply".into()))?;
+        match (v.get("ok"), v.get("error")) {
+            (Some(serde_json::Value::Bool(true)), _) => Ok(()),
+            (_, Some(e)) => Err(Probe::Refused(e.as_str().unwrap_or("error").to_string())),
+            _ => Err(Probe::Refused("bad reply".into())),
+        }
+    };
+    tokio::time::timeout(STATUS_WAIT, ask).await.unwrap_or(Err(Probe::Busy))
+}
+
 /// The statuses of the live sockets in `pty/`, by name. A leftover socket file is removed; a busy or refusing
 /// socket is skipped.
 pub async fn scan(term_dir: &Path, token: &str) -> Vec<Status> {
@@ -274,6 +298,8 @@ pub struct Head {
     pub v: u32,
     /// The new name of a `rename`.
     pub name: Option<String>,
+    /// What a `reply` sends.
+    pub reply: Option<super::reply::Reply>,
 }
 
 #[derive(Deserialize)]
@@ -281,6 +307,8 @@ struct Request {
     op: String,
     v: u32,
     name: Option<String>,
+    #[serde(default)]
+    reply: Option<super::reply::Reply>,
 }
 
 /// Reads the request line and the token line, both within `HEAD_WAIT`. The error is what to tell the client.
@@ -293,7 +321,7 @@ pub async fn read_head<R: AsyncBufRead + Unpin>(r: &mut R, token: &str) -> Resul
         if sent.strip_suffix(b"\r").unwrap_or(&sent) != token.as_bytes() {
             return Err("bad token");
         }
-        Ok(Head { op: req.op, v: req.v, name: req.name })
+        Ok(Head { op: req.op, v: req.v, name: req.name, reply: req.reply })
     };
     tokio::time::timeout(HEAD_WAIT, both).await.unwrap_or(Err("timeout"))
 }
@@ -456,6 +484,7 @@ mod tests {
                     shell: None,
                     tty: None,
                     input: 0,
+                    reply: false,
                 };
                 w.write_all(format!("{}\n", serde_json::to_string(&st).unwrap()).as_bytes()).await.unwrap();
             }

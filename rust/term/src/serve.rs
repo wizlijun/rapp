@@ -47,6 +47,7 @@ const TERM_BUSY: &str = "text terminal busy";
 const ACTIVITY_EVERY: Duration = Duration::from_secs(5);
 const OLD_RUN_END: &str = "this window was opened by an older version and cannot be ended";
 const OLD_RUN: &str = "this window was opened by an older version and cannot be renamed";
+const OLD_RUN_REPLY: &str = "this window was opened by an older version and cannot take a reply";
 const INVALID_NAME: &str = "invalid name";
 const UNKNOWN_APP: &str = "unknown terminal app";
 const NOT_STARTED: &str = "the terminal window did not start in 10 s";
@@ -93,6 +94,18 @@ enum Req {
         from: Option<String>,
     },
     End { term: String },
+    /// Send text and keys to `term` with no view; with `seq`, only while its status is that one.
+    Reply {
+        term: String,
+        #[serde(default)]
+        seq: Option<u64>,
+        #[serde(default)]
+        text: Option<String>,
+        #[serde(default)]
+        enter: bool,
+        #[serde(default)]
+        keys: Vec<String>,
+    },
     Rename { term: String, name: String },
     /// Restore these saved terminals (all there are when none is named), one tab beside the other, in `app`.
     Restore {
@@ -295,6 +308,17 @@ impl Worker {
             Req::Rename { term, name } => {
                 let v = match cfg {
                     Ok(_) => match self.rename(&term, &name).await {
+                        Ok(()) => json!({ "ok": true }),
+                        Err(e) => json!({ "error": e }),
+                    },
+                    Err(e) => json!({ "error": e }),
+                };
+                reply(&mut w, &v).await
+            }
+            Req::Reply { term, seq, text, enter, keys } => {
+                let r = json!({ "seq": seq, "text": text, "enter": enter, "keys": keys });
+                let v = match cfg {
+                    Ok(_) => match self.reply(&term, &r).await {
                         Ok(()) => json!({ "ok": true }),
                         Err(e) => json!({ "error": e }),
                     },
@@ -531,6 +555,28 @@ impl Worker {
             Err(local::Probe::Refused(e)) if e == INVALID_NAME => Err(INVALID_NAME.into()),
             Err(local::Probe::Busy) => Err(TERM_BUSY.into()),
             Err(_) => Err(NO_TEXT_TERMINAL.into()),
+        }
+    }
+
+    /// The reply `r` to the session `term`, straight to its run. The run's own refusals (`changed`, `typed`…)
+    /// come back as they are.
+    async fn reply(&self, term: &str, r: &Value) -> Result<(), String> {
+        let id = match TermId::parse(term) {
+            Ok(id) if id.backend == PTY && id.host.is_none() => id,
+            _ => return Err(BAD_ID.into()),
+        };
+        let st = self.find_pty(&id.name).await?;
+        if st.key.is_none() || !st.reply {
+            return Err(OLD_RUN_REPLY.into());
+        }
+        let path = local::socket_path(&self.opts.pty_dir, st.pid).map_err(|_| NO_TEXT_TERMINAL)?;
+        let token = local::token(&self.opts.pty_dir).map_err(|_| TERM_BUSY)?;
+        match local::reply(&path, &token, r).await {
+            Ok(()) => Ok(()),
+            Err(local::Probe::Refused(e)) if e == "unsupported" => Err(OLD_RUN_REPLY.into()),
+            Err(local::Probe::Refused(e)) => Err(e),
+            Err(local::Probe::Busy) => Err(TERM_BUSY.into()),
+            Err(local::Probe::Gone) => Err(NO_TEXT_TERMINAL.into()),
         }
     }
 
@@ -1007,6 +1053,7 @@ fn status_rows(unread: &Mutex<Unread>, statuses: &[Status], now: u64) -> Vec<Ter
             title: s.title.clone(),
             fg: s.fg.clone(),
             shell: s.shell,
+            reply: s.reply,
         })
         .collect()
 }
@@ -1258,7 +1305,24 @@ mod tests {
             shell: None,
             tty: None,
             input: 0,
+            reply: false,
         }
+    }
+
+    #[test]
+    fn status_rows_carry_reply_bit() {
+        let u = Mutex::new(Unread::default());
+        let mut new = status_with(None);
+        new.reply = true;
+        // An old holder's status has no `reply` key at all.
+        let mut old: serde_json::Value = serde_json::to_value(status_with(None)).unwrap();
+        old.as_object_mut().unwrap().remove("reply");
+        let old: Status = serde_json::from_value(old).unwrap();
+        let rows = status_rows(&u, &[new, old], 1100);
+        assert!(rows[0].reply && !rows[1].reply);
+        let j = serde_json::to_value(&rows).unwrap();
+        assert_eq!(j[0]["reply"], true);
+        assert!(j[1].get("reply").is_none(), "{j}");
     }
 
     #[test]
@@ -1351,7 +1415,7 @@ mod tests {
             ps: None,
             title: Some("t".repeat(64)),
             fg: None,
-            shell: None,
+            shell: None,            reply: false,
         };
         let hosts = vec![HostRow { host: None, launchers: Vec::new(), shells: installed_shells(), saved: Vec::new() }];
         let list = TermList { terms: (0..1000).map(row).collect(), hosts };

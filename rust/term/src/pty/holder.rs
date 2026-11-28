@@ -809,6 +809,17 @@ async fn client(s: UnixStream, shared: Arc<Shared>, token: Arc<str>) {
             };
             let _ = w.write_all(format!("{reply}\n").as_bytes()).await;
         }
+        // Bytes with no view, so no fit and no resize. Nothing about the text is logged.
+        "reply" => {
+            let reply = match head.reply.as_ref() {
+                Some(r) => match super::reply::apply(&shared, r) {
+                    Ok(()) => serde_json::json!({ "ok": true }),
+                    Err(e) => e,
+                },
+                None => serde_json::json!({ "error": "empty" }),
+            };
+            let _ = w.write_all(format!("{reply}\n").as_bytes()).await;
+        }
         "end" => {
             // The answer goes first; only then does the run begin to end.
             let _ = w.write_all(b"{\"ok\":true}\n").await;

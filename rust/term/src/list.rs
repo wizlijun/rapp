@@ -26,4 +26,7 @@ pub struct TermRow {
     /// Whether the foreground program is the shell the holder started; none when unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shell: Option<bool>,
+    /// Whether the session takes a reply with no view open; false for a run that predates it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reply: bool,
 }
