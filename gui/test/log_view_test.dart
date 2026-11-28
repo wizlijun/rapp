@@ -134,6 +134,12 @@ void main() {
       expect(sum({'ev': 'opened', 'sid': 3, 'id': '111', 'app': 'Safari', 'path': 'relay', 'host_name': 'mac'}), '已打开 mac · Safari · 中继');
       expect(sum({'ev': 'closed', 'sid': 3, 'id': '111', 'app': 'Safari', 'secs': 9, 'reason': 'user'}), '已关闭 mini · Safari · user');
     });
+    test('不锁屏 events use the access-log wording', () {
+      expect(sum({'ev': 'no_lock_set', 'lvl': 'info', 'by': 'local', 'on': true}), '打开了「不锁屏」');
+      expect(sum({'ev': 'no_lock_set', 'lvl': 'info', 'by': '1a2b3c4d', 'peer': 'p', 'on': false}), '关掉了「不锁屏」');
+      expect(sum({'ev': 'no_lock_refused', 'lvl': 'warn', 'reason': 'not supported'}), '拒绝改「不锁屏」：not supported');
+      expect(sum({'ev': 'no_lock_hold_failed', 'lvl': 'warn', 'code': null, 'stderr': 'boom'}), '没能保持唤醒：boom');
+    });
     test('map_refused', () {
       expect(sum({'ev': 'map_refused', 'id': '111', 'port': 8080, 'local': 29350, 'reason': 'unreachable'}, kind: LogKind.refused),
           '端口映射被拒绝 mini · 端口 8080 · unreachable');

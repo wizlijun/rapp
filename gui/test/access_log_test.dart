@@ -73,6 +73,22 @@ void main() {
       expect(bad.warn, isTrue);
     });
 
+    test('不锁屏 rows', () {
+      final on = historyRow({'ts': ts, 'ev': 'no_lock_set', 'by': 'local', 'on': true});
+      expect(on.result, '打开了「不锁屏」');
+      expect(on.warn, isFalse);
+      final off = historyRow({'ts': ts, 'ev': 'no_lock_set', 'by': '1a2b3c4d', 'peer': 'p', 'name': 'mini', 'on': false});
+      expect(off.result, '关掉了「不锁屏」');
+      expect(off.who, 'mini（自称）· p');
+      expect(off.warn, isFalse);
+      final refused = historyRow({'ts': ts, 'ev': 'no_lock_refused', 'peer': 'p', 'reason': 'not supported', 'on': true});
+      expect(refused.result, '拒绝改「不锁屏」：not supported');
+      expect(refused.warn, isTrue);
+      final failed = historyRow({'ts': ts, 'ev': 'no_lock_hold_failed', 'code': 1, 'stderr': 'no display'});
+      expect(failed.result, '没能保持唤醒：no display');
+      expect(failed.warn, isTrue);
+    });
+
     test('desktop sessions and typed system passwords', () {
       final base = {'ts': ts, 'peer': 'p', 'path': 'lan', 'sid': 3};
       expect(historyRow({...base, 'ev': 'session_start', 'app': 'desktop:'}).app, '桌面');

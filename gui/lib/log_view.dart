@@ -204,7 +204,14 @@ LogLine logLine(LogEntry e, {DateTime? now, String? Function(String id)? nameOf}
         s('peer'),
         historyRow(f).result,
       ].where((x) => x != '开始')),
-    'input_blocked' || 'unlock' || 'auto_lock' || 'auto_lock_failed' => historyRow(f).result,
+    'input_blocked' ||
+    'unlock' ||
+    'auto_lock' ||
+    'auto_lock_failed' ||
+    'no_lock_set' ||
+    'no_lock_refused' ||
+    'no_lock_hold_failed' =>
+      historyRow(f).result,
     'term_inputs' => head('终端输入', [s('inputs').isEmpty ? '' : '${s('inputs')} 次']),
     'service_start' => '服务启动',
     'service_stop' => '服务停止',
