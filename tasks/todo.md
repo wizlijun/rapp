@@ -1802,3 +1802,13 @@ iOS 上短边 <600 用手机外壳（首页 / 会话里面 / 设备 / 设置）�
 - [ ] 回复条在会话等选项时会拒绝，但这个保护只在手机这一侧。手机还没看到新提示的亚秒窗口里，回复条发的回车仍可能选中第 1 项
 - [ ] 回复条的「先点上面卡片的按钮」，在没画卡片时也会出现（需求还没到，或短舞台上卡片被藏了）
 - [ ] 「它已经不在等这一问了」显示 3 秒，这期间新问题的按钮是藏着的；真机上看手感对不对
+
+## 语音换成微信离线模型（验证用，`RAPP_SPEECH=wx`；设计 `docs/superpowers/specs/2026-11-28-rapp-wx-offline-asr-design.md`）
+
+默认构建（apple）没有微信的东西；wx 版只在本机自己编。模型在 `~/rapp/local/wx-asr`（Mac 已放好），不进仓库、不进包。
+
+- [ ] 默认版手测和以前一样：Mac 和 Duo 各按住说一句，松手出定稿；新装时先问语音识别、再问麦克风
+- [ ] Mac wx 版（`RAPP_SPEECH=wx scripts/package-macos.sh`，或 `cd rust && cargo build --release -p rapp-speech-wx` 后 `FLUTTER_XCODE_RAPP_SPEECH=wx flutter build macos`）：边说边出字；松手出定稿；关 Wi-Fi 也行；说话时界面不卡；日志有 `voice wx: model loaded`、`voice: first … final …`、`voice wx: … final decoded`
+- [ ] Mac wx 版挪走 `local/wx-asr`：按住提示「没有找到离线语音模型，要放在 …」；拷回去，再按就能用，不用重启
+- [ ] iPhone wx 版（`RAPP_SPEECH=wx scripts/build-ios.sh device --install <udid>`，装包前和发版 session 打招呼）：模型拷进 app 的 `Application Support/rapp/local/wx-asr`；同上几条，另记 10 秒、30 秒各一段的定稿等待、内存峰值、连续说 5 分钟后是否发烫
+- [ ] A12 及更早的 iPhone 跑不了 wx 版（`sdot`），只有验证用，暂不处理
