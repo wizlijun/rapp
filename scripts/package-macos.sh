@@ -63,8 +63,10 @@ if [ "$KIND" != adhoc ]; then
     "${SIGN[@]}" "$APP"/Contents/Frameworks/*.framework
 fi
 # Identifiers: -i com.rapp.service / com.rapp.hub / com.rapp.term / com.rapp.center / com.rapp.cli / com.rapp.host / com.rapp.client (EXPECTED_IDS).
+# rapp-service and rapp-term also get the Apple Events entitlement (sign-check.sh).
 for pair in $EXPECTED_IDS; do
-    "${SIGN[@]}" -i "${pair#*:}" "$APP/Contents/MacOS/${pair%%:*}"
+    ent=$(apple_events_entitlements "${pair%%:*}" "$ROOT")
+    "${SIGN[@]}" ${ent:+--entitlements "$ent"} -i "${pair#*:}" "$APP/Contents/MacOS/${pair%%:*}"
 done
 "${SIGN[@]}" --preserve-metadata=entitlements "$APP"
 codesign --verify --deep --strict "$APP"

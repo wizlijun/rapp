@@ -3,6 +3,9 @@
 //! for the answer) and the new terminal is refused straight away, instead of the script hanging on the prompt
 //! until it is cut off — which may take the prompt with it, so the next 新建 hangs the same way.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
 pub const TERMINAL: &str = "com.apple.Terminal";
 pub const SYSTEM_EVENTS: &str = "com.apple.systemevents";
 /// `errAEEventWouldRequireUserConsent`: macOS would ask.
@@ -78,12 +81,33 @@ pub fn asking() -> bool {
     }
 }
 
+/// How long macOS gets to answer before its prompt counts as up. No one answers a prompt this fast; macOS refuses
+/// this fast when it will not ask at all (the hardened runtime without the Apple Events entitlement).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub const SHOWN_AFTER: Duration = Duration::from_millis(800);
+
+/// Runs `ask` (it puts the prompts up and waits for the answers) on a thread, unless one already is (`flag`).
+/// True when a prompt is up: one already was, or `ask` is still waiting after `shown_after`. False when it came
+/// back sooner, so no prompt was ever up and no one should be told to answer one.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn put_up(flag: &'static AtomicBool, shown_after: Duration, ask: impl FnOnce() + Send + 'static) -> bool {
+    if flag.swap(true, Ordering::SeqCst) {
+        return true;
+    }
+    let (done, answered) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        ask();
+        flag.store(false, Ordering::SeqCst);
+        let _ = done.send(());
+    });
+    answered.recv_timeout(shown_after).is_err()
+}
+
 #[cfg(target_os = "macos")]
 mod mac {
     use super::*;
     use std::ffi::c_void;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     #[repr(C)]
     struct AEDesc {
@@ -145,40 +169,62 @@ mod mac {
             return true;
         }
         let ask = to_ask(&mut |b| determine(b, false), &mut start_events);
-        if ask.is_empty() {
-            return false;
-        }
-        prompt(ask);
-        true
+        // No prompt came up: the script runs, fails at once, and a window opens instead.
+        !ask.is_empty() && prompt(ask)
     }
 
     pub fn front() -> Front {
         if PROMPTING.load(Ordering::SeqCst) {
             return Front::Ask;
         }
-        let v = front_verdict(determine(TERMINAL, false));
-        if v == Front::Ask {
-            prompt(vec![TERMINAL]);
+        match front_verdict(determine(TERMINAL, false)) {
+            // macOS refused without asking: as good as no.
+            Front::Ask if !prompt(vec![TERMINAL]) => Front::Denied,
+            v => v,
         }
-        v
     }
 
     /// Puts the prompts for `ask` up, one after another, on a thread that waits for the answers (none while one is).
-    fn prompt(ask: Vec<&'static str>) {
-        if !PROMPTING.swap(true, Ordering::SeqCst) {
-            std::thread::spawn(move || {
-                for b in ask {
-                    determine(b, true);
-                }
-                PROMPTING.store(false, Ordering::SeqCst);
-            });
-        }
+    /// True when one is up ([`put_up`]).
+    fn prompt(ask: Vec<&'static str>) -> bool {
+        put_up(&PROMPTING, SHOWN_AFTER, move || {
+            for b in ask {
+                determine(b, true);
+            }
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn a_prompt_answered_at_once_was_never_up() {
+        // Under the hardened runtime without the Apple Events entitlement macOS refuses at once and shows nothing.
+        static FLAG: AtomicBool = AtomicBool::new(false);
+        assert!(!put_up(&FLAG, Duration::from_millis(500), || {}));
+        assert!(!FLAG.load(Ordering::SeqCst), "nothing left waiting");
+    }
+
+    #[test]
+    fn a_prompt_still_waiting_is_up() {
+        static FLAG: AtomicBool = AtomicBool::new(false);
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        assert!(put_up(&FLAG, Duration::from_millis(50), move || {
+            let _ = rx.recv();
+        }));
+        // While it waits, no second prompt is put up, and it still counts as up.
+        assert!(put_up(&FLAG, Duration::from_millis(50), || panic!("asked twice")));
+        drop(tx);
+        let end = std::time::Instant::now() + Duration::from_secs(2);
+        while FLAG.load(Ordering::SeqCst) && std::time::Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!FLAG.load(Ordering::SeqCst), "answered: the flag is down again");
+    }
 
     fn run(terminal: i32, events: i32, after_start: Option<i32>) -> (Vec<&'static str>, bool) {
         let mut started = false;

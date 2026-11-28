@@ -1440,6 +1440,20 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 6 「恢复所选」碰到授权框也是同样的提示和切桌面
 - [ ] 7 多屏 Mac（用户截图里框在屏幕 2）：画面上正开着它的屏幕 2 时新建，不被切回主屏，提示「不在这块屏上就换一块屏看看」
 
+## 新建文本终端说有授权框，其实没有（分支 `fix/term-consent-entitlement`，2026-11-28）
+
+用户：「在文本终端那里点新建时会报错，说有警告要去点，然后自动切到桌面，但实际上并没有警告。」原因：正式包用 Developer ID 签名、开了 hardened runtime，但所有程序都没有 `com.apple.security.automation.apple-events`。macOS 对 Apple Events 看的是「负责进程」rapp-service（rapp-term 由它启动），缺这条就**不弹框**直接拒：tccd 日志里一直是 `Prompting policy for hardened runtime; ... requires entitlement com.apple.security.automation.apple-events but it is missing for responsible=com.rapp.service, accessing=com.rapp.term`。探针（同样 hardened、无 entitlement、用 disclaim 让它自己当负责进程）实测：不弹框地问 → -1744（会问），真问 → 立刻 -1743、什么都不显示；所以 rapp-term 每次都说「弹出了授权框」。加上 entitlement 的探针真问 → 弹了框（用户点「不允许」，14 秒后回 -1743）。
+
+改法：
+- 打包时 rapp-service、rapp-term 签上 `scripts/apple-events.entitlements`；app 的 Info.plist 加 `NSAppleEventsUsageDescription`（授权框上的理由）
+- 兜底：`consent::put_up` 等 0.8 秒，macOS 这么快就回了说明没弹框，不再叫用户去点：新建照常跑脚本（失败就开新窗口），「到前面」当作被拒
+
+- [x] `test-package.sh` 新增检查（签名循环那条在旧脚本上确实失败）；`consent` 单测 8 条；rapp-term 全量、clippy 通过
+- [ ] 1 装上新包的被控 Mac 上点新建：弹出「“rApp”想要控制“终端”」（理由一行写着开新标签页），点「允许」后新建开成新标签；以后不再问
+- [ ] 2 `codesign -d --entitlements - /Applications/rapp.app/Contents/MacOS/rapp-service`（rapp-term 同样）看得到 apple-events
+- [ ] 3 rapp-service 有了这条后，rapp-host 打开应用（打开应用菜单、共享窗口时拉起应用）不多出授权框
+- [ ] 4 点「不允许」后新建：开成新窗口；「到前面」提示去系统设置打开
+
 ## Linux 0.15.45 与 0.15.50 版本跟随对齐与发布（2026-11-26）
 
 - [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），依次将 Linux / Omarchy `x86_64` 产物构建并挂载至已发布的 `v0.15.45` 与 `v0.15.50` GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
