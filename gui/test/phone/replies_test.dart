@@ -105,8 +105,8 @@ void main() {
       r.keys(_id, _t, 4, ['1'], doneWord: '已允许');
       a.flushMicrotasks();
       expect(calls, isEmpty);
-      expect(r.outcomeOf(_id)!.word, '它已经不在等这一问了');
-      expect(r.outcomeOf(_id)!.failed, isTrue);
+      // The word is about #4, which #5 has replaced: #5's card keeps its buttons (F-9).
+      expect(r.outcomeOf(_id), isNull);
     });
   });
 
@@ -256,24 +256,65 @@ void main() {
     });
   });
 
-  test('the settle failure and the not-waiting word also go with the next question', () {
+  test('the settle failure also goes with the next question', () {
     run((a, r) {
       r.keys(_id, _t, 4, ['1'], doneWord: '已允许');
       a.flushMicrotasks();
       a.elapse(const Duration(seconds: 4));
       expect(r.outcomeOf(_id)!.word, '没成功，进去看看');
+      push('blocked', 4);
+      a.flushMicrotasks();
+      expect(r.outcomeOf(_id)!.word, '没成功，进去看看');
       push('blocked', 5);
       a.flushMicrotasks();
       expect(r.outcomeOf(_id), isNull);
+      // A press on the replaced #4 sends nothing and puts no word on #5's card.
       r.keys(_id, _t, 4, ['1'], doneWord: '已允许');
       a.flushMicrotasks();
-      expect(r.outcomeOf(_id)!.word, '它已经不在等这一问了');
+      expect(calls.length, 1);
+      expect(r.outcomeOf(_id), isNull);
+    });
+  });
+
+  test('a refusal for #4 that comes after the push of #5 leaves #5 its buttons', () {
+    fakeAsync((a) {
+      push('blocked', 4);
+      a.flushMicrotasks();
+      final answer = <Completer<void>>[];
+      final r = PhoneReplies(s, send: (t, {seq, text, enter = false, keys = const []}) {
+        calls.add({'seq': seq, 'text': text, 'keys': keys});
+        final c = Completer<void>();
+        answer.add(c);
+        return c.future;
+      });
+      // The 同意 of #4 and a done say of #7, each overtaken by the push of the next one before the refusal.
+      r.keys(_id, _t, 4, ['1'], doneWord: '已允许');
+      a.flushMicrotasks();
+      expect(r.outcomeOf(_id)!.pending, isTrue);
       push('blocked', 5);
       a.flushMicrotasks();
-      expect(r.outcomeOf(_id)!.word, '它已经不在等这一问了');
-      push('working', 6);
+      answer.single.completeError(HubException('changed'));
       a.flushMicrotasks();
       expect(r.outcomeOf(_id), isNull);
+      // #5 can be answered.
+      r.keys(_id, _t, 5, ['1'], doneWord: '已允许');
+      a.flushMicrotasks();
+      expect(calls.last['seq'], 5);
+      answer.last.completeError(HubException('boom'));
+      a.flushMicrotasks();
+      // A failure about the question still on screen stays.
+      expect(r.outcomeOf(_id)!.word, '没成功，进去看看');
+
+      push('done', 7);
+      a.flushMicrotasks();
+      r.say('d', _t, '好的', seq: 7);
+      a.flushMicrotasks();
+      push('done', 8);
+      a.flushMicrotasks();
+      answer.last.completeError(HubException('changed'));
+      a.flushMicrotasks();
+      expect(r.outcomeOf('d'), isNull);
+      r.dispose();
     });
   });
 
@@ -303,7 +344,7 @@ void main() {
     });
   });
 
-  test('a done say carries its seq; a moved snapshot says the question is gone', () {
+  test('a done say carries its seq; a refusal from the holder says the question is gone', () {
     run((a, r) {
       push('done', 7);
       a.flushMicrotasks();
@@ -321,7 +362,8 @@ void main() {
       r.say(_id, _t, '好的', seq: 7);
       a.flushMicrotasks();
       expect(calls.length, 1);
-      expect(r.outcomeOf(_id)!.word, '它已经不在等这一问了');
+      // About #7, which #8 replaced: no word on #8's card.
+      expect(r.outcomeOf(_id), isNull);
     });
   });
 

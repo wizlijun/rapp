@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -45,6 +46,8 @@ void main() {
   late _Sync sync;
   late List<Map<String, Object?>> sent;
   var failSend = false;
+  // Set: a send waits on it, so a test can land a push before the answer.
+  Completer<void>? hang;
 
   Future<void> flush() => Future<void>.delayed(Duration.zero);
 
@@ -90,6 +93,7 @@ void main() {
     sync = _Sync(tmp.path)..status = StateStatus.connected;
     sent = [];
     failSend = false;
+    hang = null;
     s = MainState(
         hub: hub,
         data: DataDir(tmp.path),
@@ -102,6 +106,7 @@ void main() {
     s.probes['m1'] = DeviceProbe(Lamp.active, '在线', apps: const AppList('m1', 'lan', [], capabilities: {'reply': true}));
     nav = PhoneNav(s, send: (target, {seq, text, enter = false, keys = const []}) async {
       sent.add({'seq': seq, 'text': text, 'enter': enter, 'keys': keys});
+      if (hang != null) await hang!.future;
       if (failSend) throw Exception('x');
     });
     t.onSend = (m) {
@@ -436,5 +441,22 @@ void main() {
     s.voiceSends.remove('card');
     rs.secureFocus = false;
     await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('a refusal for the old question that comes after the new one leaves the new card its buttons', (tester) async {
+    await boot(tester, card: true);
+    final h = hang = Completer<void>();
+    await tester.tap(find.text('同意'));
+    await tester.pump();
+    expect(sent, hasLength(1));
+    expect(find.text('同意'), findsNothing);
+    await pushQuestion(tester, 5);
+    h.completeError(HubException('changed'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('它已经不在等这一问了'), findsNothing);
+    expect(find.text('同意'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 4));
+    expect(find.text('同意'), findsOneWidget);
   });
 }

@@ -38,7 +38,8 @@ class _Kept {
   final ReplyOutcome o;
   final ReplyTarget? t;
 
-  /// The row's `(state, seq)` when the word was set.
+  /// The row's `(state, seq)` the word is about: for a failure, the question the person pressed on (F-9), else the
+  /// row when the word was set.
   final (String, int)? base;
 
   /// The row itself, for 连不上 A: the next row update takes that word away.
@@ -91,12 +92,20 @@ class PhoneReplies extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// A failure word about the question [pressed] (the `(state, seq)` the person pressed on), not the row now: the
+  /// push of a newer question may land before the error of the older send, and the word must not cover its buttons.
+  void _fail(String id, ReplyOutcome o, ReplyTarget t, (String, int)? pressed) {
+    if (_disposed) return;
+    _outcomes[id] = _Kept(o, t, pressed, _row(t));
+    notifyListeners();
+  }
+
   /// A button of the card: [keys] go with the question's [seq]; [doneWord] says it went.
   /// Returns true only when the keys were sent (not refused up front, not failed).
   Future<bool> keys(String itemId, ReplyTarget t, int? seq, List<String> keys, {required String doneWord}) async {
-    if (!_ready(itemId, t, seq)) return false;
+    if (!_ready(itemId, t, seq, 'blocked')) return false;
     final base = _base(t);
-    if (!await _sendOnce(itemId, t, doneWord, () => _go(t, seq: seq, keys: keys))) return false;
+    if (!await _sendOnce(itemId, t, base, doneWord, () => _go(t, seq: seq, keys: keys))) return false;
     _watch(itemId, t, base, doneWord);
     return true;
   }
@@ -106,9 +115,9 @@ class PhoneReplies extends ChangeNotifier {
   /// Said to a working or idle session it went when the hub took it (the program may queue it and stay as it is);
   /// only a waiting or done one is watched for 3 s.
   Future<bool> say(String itemId, ReplyTarget t, String text, {int? seq}) async {
-    if (text.trim().isEmpty || !_ready(itemId, t, seq, blocked: false)) return false;
+    if (text.trim().isEmpty || !_ready(itemId, t, seq, 'done')) return false;
     final base = _base(t);
-    if (!await _sendOnce(itemId, t, '已发出', () => _go(t, seq: seq, text: text, enter: true))) return false;
+    if (!await _sendOnce(itemId, t, base, '已发出', () => _go(t, seq: seq, text: text, enter: true))) return false;
     _record(t, text);
     if (base != null && (base.$1 == 'blocked' || base.$1 == 'done')) {
       _watch(itemId, t, base, '已发出');
@@ -132,9 +141,9 @@ class PhoneReplies extends ChangeNotifier {
   /// 「要改」: the key that opens the program's edit box (with the seq), a short gap, then the words and Enter.
   /// Blank text sends nothing. Returns true only when it was sent.
   Future<bool> revise(String itemId, ReplyTarget t, int seq, List<String> keys, String text) async {
-    if (text.trim().isEmpty || !_ready(itemId, t, seq)) return false;
+    if (text.trim().isEmpty || !_ready(itemId, t, seq, 'blocked')) return false;
     final base = _base(t);
-    final ok = await _sendOnce(itemId, t, '已发出', () async {
+    final ok = await _sendOnce(itemId, t, base, '已发出', () async {
       await _go(t, seq: seq, keys: keys);
       await Future<void>.delayed(reviseGap);
       await _go(t, text: text, enter: true);
@@ -148,17 +157,18 @@ class PhoneReplies extends ChangeNotifier {
   /// After 「同意」 or 「要改」 went: the queue row [eid] is handled.
   void markEid(String eid) => unawaited(state.stateSync?.markHandled(eid));
 
-  /// Offline, or the question is gone locally: the word, and nothing is sent. [blocked]: a [seq] is a waiting
-  /// question's (else any snapshot's, a done card's).
-  bool _ready(String id, ReplyTarget t, int? seq, {bool blocked = true}) {
+  /// Offline, or the question is gone locally: the word, and nothing is sent. [card] is the state of the card that
+  /// was pressed: 'blocked' (a [seq] must be a waiting question's) or 'done' (any snapshot's, a done card's).
+  bool _ready(String id, ReplyTarget t, int? seq, String card) {
     if (_watches.containsKey(id) || _outcomes[id]?.o.pending == true) return false;
     if (!state.hubUsable || state.offlineWord(t.device, t.term) == '设备离线') {
       _set(id, const ReplyOutcome(_noLink, failed: true), t);
       return false;
     }
     final ps = _row(t)?.ps;
-    if (seq != null && (ps == null || (blocked && ps.state != 'blocked') || ps.seq != seq)) {
-      _set(id, const ReplyOutcome(_gone, failed: true), t);
+    if (seq != null && (ps == null || (card == 'blocked' && ps.state != 'blocked') || ps.seq != seq)) {
+      // About the pressed card, which the newer row has already replaced: the word goes once the card catches up.
+      _fail(id, const ReplyOutcome(_gone, failed: true), t, (card, seq));
       return false;
     }
     return true;
@@ -169,7 +179,8 @@ class PhoneReplies extends ChangeNotifier {
     return ps == null ? null : (ps.state, ps.seq);
   }
 
-  Future<bool> _sendOnce(String id, ReplyTarget t, String word, Future<void> Function() go) async {
+  /// [pressed]: the row's `(state, seq)` at the press; a failure word is kept against it.
+  Future<bool> _sendOnce(String id, ReplyTarget t, (String, int)? pressed, String word, Future<void> Function() go) async {
     _set(id, ReplyOutcome(word, pending: true));
     try {
       await go();
@@ -179,9 +190,9 @@ class PhoneReplies extends ChangeNotifier {
       final word = m.contains('older version')
           ? _oldRun
           : (m == 'changed' || m == 'typed' ? _gone : _goLook);
-      _set(id, ReplyOutcome(word, failed: true), t);
+      _fail(id, ReplyOutcome(word, failed: true), t, pressed);
     } catch (_) {
-      _set(id, const ReplyOutcome(_goLook, failed: true), t);
+      _fail(id, const ReplyOutcome(_goLook, failed: true), t, pressed);
     }
     return false;
   }
