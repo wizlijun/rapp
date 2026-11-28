@@ -305,6 +305,14 @@ class _PhraseStripState extends State<PhraseStrip> {
       builder: (context, _) {
         final blocked = phraseBlock(widget.state, widget.session) != null;
         final hint = _hint;
+        final label13 = TextStyle(fontSize: 13, color: t.text);
+        // The narrowest a chip gets: three characters in its own font, so 「用量」 is as easy to hit as 「搜历史」.
+        final minLabel = (TextPainter(
+          text: TextSpan(text: '常用语', style: DefaultTextStyle.of(context).style.merge(label13)),
+          textDirection: TextDirection.ltr,
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout())
+            .width;
         Widget chip(Key key, String label, {required VoidCallback onTap, GestureLongPressStartCallback? onLong,
             bool ticked = false, bool put = false, bool cmd = false, bool grey = false}) {
           final color = ticked ? t.on : (cmd ? t.accent : t.line);
@@ -317,6 +325,7 @@ class _PhraseStripState extends State<PhraseStrip> {
               onLongPressStart: onLong,
               child: Container(
                 height: phraseStripChip,
+                constraints: BoxConstraints(minWidth: minLabel + 2 * (10 + 1)), // padding + border
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
@@ -326,7 +335,7 @@ class _PhraseStripState extends State<PhraseStrip> {
                 ),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   if (ticked) ...[Icon(Icons.check, size: 14, color: t.on), const SizedBox(width: 3)],
-                  Text(label, maxLines: 1, style: TextStyle(fontSize: 13, color: t.text)),
+                  Text(label, maxLines: 1, textAlign: TextAlign.center, style: label13),
                   if (put) ...[const SizedBox(width: 3), Icon(Icons.keyboard_return, size: 12, color: t.muted)],
                 ]),
               ),

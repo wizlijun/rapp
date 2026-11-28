@@ -46,7 +46,7 @@ const barKeys = <String, BarKey>{
   'pgup': (id: 'pgup', label: 'PgUp', spoken: 'Page Up', kind: BarKind.send, wire: 'PageUp', code: 116, mods: 0, bit: null, repeats: false),
   'pgdn': (id: 'pgdn', label: 'PgDn', spoken: 'Page Down', kind: BarKind.send, wire: 'PageDown', code: 121, mods: 0, bit: null, repeats: false),
   'bksp': (id: 'bksp', label: '⌫', spoken: '删除', kind: BarKind.send, wire: 'Backspace', code: 51, mods: 0, bit: null, repeats: true),
-  'ctrl': (id: 'ctrl', label: '⌃', spoken: 'Control', kind: BarKind.mod, wire: null, code: null, mods: 0, bit: latchCtrl, repeats: false),
+  'ctrl': (id: 'ctrl', label: 'Ctrl', spoken: 'Control', kind: BarKind.mod, wire: null, code: null, mods: 0, bit: latchCtrl, repeats: false),
   'opt': (id: 'opt', label: '⌥', spoken: 'Option', kind: BarKind.mod, wire: null, code: null, mods: 0, bit: latchOpt, repeats: false),
   'cmd': (id: 'cmd', label: '⌘', spoken: 'Command', kind: BarKind.mod, wire: null, code: null, mods: 0, bit: latchCmd, repeats: false),
   'copy': (id: 'copy', label: '⌘C', spoken: '复制', kind: BarKind.copy, wire: null, code: null, mods: 0, bit: null, repeats: false),

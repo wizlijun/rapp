@@ -1643,6 +1643,16 @@ macOS、Linux、Duo、iPad 各一遍。
 - [ ] 4. Linux：⌫ ⏎ 方向键不是方框（缺字体就装 `fonts-dejavu` 或 Noto）。
 - [ ] 5. Windows / Android（以后）：⌫ ⏎ 方向键能显示，不是方框。
 
+### 回车、方向键改画图标；常用语按钮至少三字宽；⌃ 写成 Ctrl（分支 `feat/key-icons`）
+
+⏎ 和 ↑↓←→ 不再用字体符号，改成自己画的粗线箭头（24×24 格、线宽 2.8、显示 23px，圆头圆角，`lib/embed/key_glyph.dart`），各平台一样；读屏仍读原符号。常用语条里每个按钮（命令、常用语、两个菜单）最窄是「三个字 + 内边距 + 边框」，按当前字体实测，两个字的「用量」和三个字的「搜历史」一样宽。单独的控制键键面从 ⌃ 改成 Ctrl；⌃C、⌃R 这些组合键保持原样（用户选的）。flutter analyze 通过；全量只剩 `linux_detach_test` 2 条。实机检查：
+
+- [ ] 1. Mac / iPad / Duo：⏎ ↑↓←→ 是粗线箭头，和旁边的字一样粗，居中不偏。
+- [ ] 2. 换主题（浅色、深色、matrix）：箭头颜色跟着键面文字变。
+- [ ] 3. 常用语条：两个字的按钮和三个字的一样宽，好按；字在按钮正中。
+- [ ] 4. 控制键写着 Ctrl；⌃C、⌃R 还是原样；全局设置 → 键盘布局里也一样。
+- [ ] 5. 读屏（VoiceOver）点 ⏎ 和方向键能读出按键名。
+
 ## Linux 0.15.61 与 0.15.62 版本跟随对齐与发布（2026-11-27）
 
 - [x] 严格遵循版本号跟随规则（不抢先递增版本号、不新建 tag），依次构建并将 Linux / Omarchy `x86_64` 双格式包及 `SHA256SUMS` 挂载至已发布的 [v0.15.61](https://github.com/wizlijun/rapp/releases/tag/v0.15.61) 与 [v0.15.62](https://github.com/wizlijun/rapp/releases/tag/v0.15.62) GitHub Release（保留原有 macOS `.pkg`、`.zip`、`latest.json` 及 `Latest` 标记）。
