@@ -537,8 +537,13 @@ class MainState extends ChangeNotifier {
         revealMax: tidyRevealMax,
         endpoint: () => llm,
         api: llmApi,
+        // A session's key keeps its secure-field check even when a phone page sends for it (the reply bar); a key
+        // with no session behind it (a card, the assistant) has none.
         allowed: (s) =>
-            prefs.voiceAiTidy && llm.configured && !voiceNoTidy.contains(s) && (voiceSends.containsKey(s) || !(remote[s]?.secureFocus ?? true)),
+            prefs.voiceAiTidy &&
+            llm.configured &&
+            !voiceNoTidy.contains(s) &&
+            (remote.containsKey(s) ? !remote[s]!.secureFocus : voiceSends.containsKey(s)),
         think: () => prefs.voiceAiThink,
         mode: (s) {
           for (final r in _records.values) {
