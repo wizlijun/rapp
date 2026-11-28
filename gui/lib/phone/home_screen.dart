@@ -1,6 +1,8 @@
 /// The phone home page, read-only: what waits for you, what is working, what finished (V1b Task 6, H1-H11).
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../ui/main_state.dart';
@@ -9,6 +11,7 @@ import 'devices_page.dart';
 import 'enter_when_open.dart';
 import 'home_model.dart';
 import 'phone_nav.dart';
+import 'phone_voice.dart';
 import 'reply_card.dart';
 import 'reply_model.dart';
 import 'sheet.dart';
@@ -318,11 +321,61 @@ class _HomeScreenState extends State<HomeScreen> {
         item: card,
         reply: reply,
         replies: _nav.replies,
-        voice: null, // Task 12 puts the hold-to-talk button here
+        voice: _s.voice == null ? null : (label, use) => _voiceFor(card, reply, label, use),
         onGotIt: reply.kind == ReplyKind.done ? _buttonOf(card) : null,
         onGoLook: () => _goLook(card),
       ),
     );
+  }
+
+  /// 「说一句」 / 「要改」: hold to talk; the words go through the reply path, no view (V4). 「编辑」 goes in.
+  Widget _voiceFor(HomeItem item, CardReply reply, String label, ReplyVoiceUse use) {
+    final t = reply.target;
+    final seq = reply.seq;
+    final keys = reply.planRevise;
+    final revise = use == ReplyVoiceUse.revise;
+    final replies = _nav.replies;
+    return PhoneVoice(
+      state: _s,
+      key2: '${item.gotItKey}\n${use.name}',
+      send: (text, voice) {
+        if (t == null) return null;
+        if (revise) {
+          if (seq == null || keys == null) return null;
+          unawaited(_revised(item, replies.revise(item.id, t, seq, keys, text)));
+        } else {
+          unawaited(replies.say(item.id, t, text));
+        }
+        return null;
+      },
+      edit: (text) {
+        if (revise && t != null && seq != null && keys != null) {
+          unawaited(_reviseEdit(item, t, seq, keys, text));
+        } else {
+          _editIn(item, text);
+        }
+      },
+      builder: (context, hold) => phoneVoiceButton(hold, label),
+    );
+  }
+
+  Future<void> _revised(HomeItem item, Future<void> sent) async {
+    await sent;
+    final eid = item.pointsEid;
+    if (eid != null && _nav.replies.outcomeOf(item.id)?.failed != true) _nav.replies.markEid(eid);
+  }
+
+  Future<void> _reviseEdit(HomeItem item, ReplyTarget t, int seq, List<String> keys, String text) async {
+    await _nav.replies.keys(item.id, t, seq, keys, doneWord: '已发出');
+    if (_nav.replies.outcomeOf(item.id)?.failed == true) return;
+    final eid = item.pointsEid;
+    if (eid != null) _nav.replies.markEid(eid);
+    if (mounted) _editIn(item, text);
+  }
+
+  void _editIn(HomeItem item, String text) {
+    _nav.pendingDraft = text;
+    _goLook(item);
   }
 
   Widget _heading(String s, TextStyle style, RappTokens t) => Padding(

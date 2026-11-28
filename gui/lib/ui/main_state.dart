@@ -185,6 +185,10 @@ const loadSnoozeFor = Duration(hours: 1);
 /// A screen was plugged into A while its desktop is open: it is not opened by itself.
 const screenAddedHint = 'A 多了一块屏，在顶栏的屏幕菜单里切过去';
 
+/// Where a spoken sentence goes for a key that is not an embedded session (the phone card's reply path): returns a
+/// hint to show, or null when it went.
+typedef VoiceSend = String? Function(String text, VoiceOrigin voice);
+
 class MainState extends ChangeNotifier {
   MainState({
     required this.hub,
@@ -471,6 +475,19 @@ class MainState extends ChangeNotifier {
   /// Embedded sessions by hub sid.
   final Map<Object, RemoteSession> remote = {};
 
+  /// Voice keys that go somewhere other than a session's composer (a phone card's reply). A key in here has its
+  /// own [VoiceSend] (and [voiceEdits] for the tidy's 编辑) and its own tidy, with no session behind it. Empty on
+  /// the Pad and the Mac: every path is then the session's.
+  final Map<Object, VoiceSend> voiceSends = {};
+  final Map<Object, void Function(String text, VoiceAi? ai)> voiceEdits = {};
+
+  /// Takes [key] out of [voiceSends] and [voiceEdits] and ends its tidy.
+  void removeVoiceSend(Object key) {
+    voiceSends.remove(key);
+    voiceEdits.remove(key);
+    if (!remote.containsKey(key)) _endTidy(key);
+  }
+
   // 长语音先让 AI 整理: one per session, keyed by sid like [remote]; a reconnect's swap moves it ([_dropOld]).
   final Map<Object, VoiceTidy> _tidies = {};
 
@@ -482,7 +499,7 @@ class MainState extends ChangeNotifier {
     final t = _tidies[sid];
     if (t != null) return t;
     final made = _makeTidy(sid);
-    if (!_disposed && remote.containsKey(sid)) _tidies[sid] = made;
+    if (!_disposed && (remote.containsKey(sid) || voiceSends.containsKey(sid))) _tidies[sid] = made;
     return made;
   }
 
@@ -515,7 +532,8 @@ class MainState extends ChangeNotifier {
         revealMax: tidyRevealMax,
         endpoint: () => llm,
         api: llmApi,
-        allowed: (s) => prefs.voiceAiTidy && llm.configured && !(remote[s]?.secureFocus ?? true),
+        allowed: (s) =>
+            prefs.voiceAiTidy && llm.configured && (voiceSends.containsKey(s) || !(remote[s]?.secureFocus ?? true)),
         think: () => prefs.voiceAiThink,
         mode: (s) {
           for (final r in _records.values) {
@@ -542,6 +560,8 @@ class MainState extends ChangeNotifier {
         // The rules as they are now, not as they were when the tidy was made (spec D9).
         fromVocabulary: (heard, observed) => voiceRules.fromVocabulary(heard, observed),
         send: (s, text, voice) {
+          final vs = voiceSends[s];
+          if (vs != null) return vs(text, voice);
           final rs = remote[s], p = portOf(s);
           if (rs == null || p == null) {
             if (rs != null) {
@@ -560,6 +580,11 @@ class MainState extends ChangeNotifier {
           return hint;
         },
         edit: (s, text, ai) {
+          final ve = voiceEdits[s];
+          if (ve != null) {
+            ve(text, ai);
+            return;
+          }
           final c = remote[s]?.composer;
           if (c == null) return;
           // The AI's text over the original: one ⌘Z gives the original back (§8.2) — the fixed words, as 还原

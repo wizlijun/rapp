@@ -71,6 +71,9 @@ String? sendVoice({
 }) {
   final t = text.trim();
   if (t.isEmpty) return voiceBlank;
+  // A key with its own destination (a phone card's reply path) takes the words as they are.
+  final own = state.voiceSends[session.sid];
+  if (own != null) return own(t, voice);
   final c = session.composer;
   String keep(String hint) {
     unawaited(c.keep(t));
@@ -492,7 +495,25 @@ class VoiceHold extends ChangeNotifier {
 }
 
 /// The square voice button ([stageButtonSize]) at the bottom of the stage stack. It feeds [hold] and fades out while the disc grows from it.
-Widget voiceButton(VoiceHold hold) => Builder(
+Widget voiceButton(VoiceHold hold) => voiceHoldArea(
+  hold,
+  child: ValueListenableBuilder<double>(
+    valueListenable: hold.buttonOpacity,
+    builder: (context, o, child) => Opacity(opacity: o, child: child),
+    child: RappButton.stage(
+      key: const Key('voice-hold'),
+      label: '语音',
+      icon: Icons.mic_none,
+      size: stageButtonSize,
+      // A no-op keeps the enabled look; the Listener above does the work.
+      onPressed: () {},
+    ),
+  ),
+);
+
+/// The pointer handling of a voice button, around [child]: a press starts [hold], a slide moves its pick, a release
+/// or a cancel ends it. Points are taken in the stage's coordinates; the button's own centre is the thumb.
+Widget voiceHoldArea(VoiceHold hold, {required Widget child}) => Builder(
   builder: (context) {
     RenderBox? stage() => hold.stageKey.currentContext?.findRenderObject() as RenderBox?;
     return Listener(
@@ -519,18 +540,7 @@ Widget voiceButton(VoiceHold hold) => Builder(
         hold._pointer = null;
         hold.cancel();
       },
-      child: ValueListenableBuilder<double>(
-        valueListenable: hold.buttonOpacity,
-        builder: (context, o, child) => Opacity(opacity: o, child: child),
-        child: RappButton.stage(
-          key: const Key('voice-hold'),
-          label: '语音',
-          icon: Icons.mic_none,
-          size: stageButtonSize,
-          // A no-op keeps the enabled look; the Listener above does the work.
-          onPressed: () {},
-        ),
-      ),
+      child: child,
     );
   },
 );
