@@ -54,6 +54,8 @@ impl NoLock {
 enum Report {
     Held(bool),
     Failed { code: Option<i32>, stderr: String },
+    /// The switch went off and any child is let go: not held, and the failure streak is over.
+    Off,
 }
 
 /// Whether this device can keep itself awake here: the Mac, or Linux under Hyprland.
@@ -146,6 +148,11 @@ pub fn spawn(state: Arc<State>) -> JoinHandle<()> {
                         st.notify();
                     }
                 }
+                Report::Off => {
+                    if st.no_lock.held.swap(false, Ordering::SeqCst) {
+                        st.notify();
+                    }
+                }
                 Report::Failed { code, stderr } if log => {
                     st.log.event(Lvl::Warn, "no_lock_hold_failed", json!({"code": code, "stderr": stderr}));
                 }
@@ -160,31 +167,29 @@ pub fn spawn(state: Arc<State>) -> JoinHandle<()> {
     })
 }
 
-/// The child that holds the device awake here; None where there is none.
-async fn command(state: &State) -> Option<Command> {
+/// The child that holds the device awake here; None where this platform cannot hold. A helper that cannot be
+/// found is an `Err`: a failure like a child that exits, so it is retried with the backoff.
+async fn command(state: &State) -> Option<Result<Command, String>> {
     if cfg!(target_os = "macos") {
         let Ok(mut c) = crate::workers::host_command(state).await else {
-            // Called once each time the switch goes on: one line, no retry until it goes off and on.
-            let stderr = "could not start the keep-awake helper";
-            state.log.event(Lvl::Warn, "no_lock_hold_failed", json!({"code": null, "stderr": stderr}));
-            return None;
+            return Some(Err("could not start the keep-awake helper".into()));
         };
         c.args(["stay-awake", "--json"]);
-        Some(c)
+        Some(Ok(c))
     } else if cfg!(target_os = "linux") {
         let mut c = rapp_net::proc::tokio_command("systemd-inhibit");
         c.args(["--what=idle:sleep", "--mode=block", "--who=rapp", "--why=不锁屏", "cat"]);
-        Some(c)
+        Some(Ok(c))
     } else {
         None
     }
 }
 
 /// Whether `r` is the first failure of a streak, the only one logged so the retries do not fill
-/// 访问记录. A real hold (`Held(true)`, after the settle) ends the streak.
+/// 访问记录. A real hold (`Held(true)`, after the settle) or the switch going off ends the streak.
 fn first_of_streak(failing: &AtomicBool, r: &Report) -> bool {
     match r {
-        Report::Held(true) => {
+        Report::Held(true) | Report::Off => {
             failing.store(false, Ordering::SeqCst);
             false
         }
@@ -199,14 +204,16 @@ fn backoff(base: Duration, failures: u32) -> Duration {
     base.saturating_mul(factor).min(MAX_BACKOFF)
 }
 
-/// Runs `make()`'s child while `want` is true, restarting it with a backoff when it exits on its own.
-/// `Held(true)` comes once the child has stayed up for `settle`, and `Held(false)` only after it.
-/// Letting go closes the child's stdin, waits `RELEASE_WAIT`, then kills it. Returns once `want` closes,
-/// after letting go. `make()` giving None holds nothing and reports nothing.
+/// Runs `make()`'s child while `want` is true, restarting it with a backoff when it exits on its own, or
+/// when `make()` gives an `Err` (reported as a failure with that text). `Held(true)` comes once the child
+/// has stayed up for `settle` after it started, and `Held(false)` only after it. Letting go closes the
+/// child's stdin, waits `RELEASE_WAIT`, then kills it; each time `want` goes false, `Off` is reported.
+/// Returns once `want` closes, after letting go. `make()` giving None (this platform cannot hold) holds
+/// nothing and reports nothing.
 async fn supervise<F, Fut, R>(mut want: watch::Receiver<bool>, make: F, base: Duration, settle: Duration, report: R)
 where
     F: Fn() -> Fut,
-    Fut: Future<Output = Option<Command>>,
+    Fut: Future<Output = Option<Result<Command, String>>>,
     R: Fn(Report),
 {
     let mut failures = 0u32;
@@ -214,17 +221,22 @@ where
         if !wait_for(&mut want, true).await {
             return;
         }
-        let Some(mut cmd) = make().await else {
+        let Some(made) = make().await else {
             if !wait_for(&mut want, false).await {
                 return;
             }
             continue;
         };
-        cmd.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(true);
         let started = Instant::now();
-        match cmd.spawn() {
-            Err(e) => report(Report::Failed { code: None, stderr: clip(&e.to_string()) }),
+        let spawned = made.and_then(|mut cmd| {
+            cmd.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(true);
+            cmd.spawn().map_err(|e| clip(&e.to_string()))
+        });
+        match spawned {
+            Err(stderr) => report(Report::Failed { code: None, stderr }),
             Ok(mut child) => {
+                // Counted from here, not from before the spawn: a loaded machine's slow start is not a hold.
+                let up = Instant::now();
                 let stdin = child.stdin.take();
                 let mut last = tokio::spawn(last_line(child.stderr.take()));
                 let mut held = false;
@@ -232,7 +244,7 @@ where
                     tokio::select! {
                         st = child.wait() => break Some(st),
                         r = want.changed() => if r.is_err() || !*want.borrow_and_update() { break None },
-                        _ = tokio::time::sleep_until(started + settle), if !held => {
+                        _ = tokio::time::sleep_until(up + settle), if !held => {
                             held = true;
                             report(Report::Held(true));
                         }
@@ -244,9 +256,7 @@ where
                         let _ = child.kill().await;
                     }
                     last.abort();
-                    if held {
-                        report(Report::Held(false));
-                    }
+                    report(Report::Off);
                     failures = 0;
                     continue;
                 };
@@ -275,6 +285,7 @@ where
                         return;
                     }
                     if !*want.borrow_and_update() {
+                        report(Report::Off);
                         failures = 0;
                         break;
                     }
@@ -342,16 +353,20 @@ mod tests {
         assert_eq!(backoff(Duration::from_secs(1), 100), Duration::from_secs(60));
     }
 
-    fn sh(script: &'static str) -> impl Fn() -> std::future::Ready<Option<tokio::process::Command>> {
+    type Made = std::future::Ready<Option<Result<tokio::process::Command, String>>>;
+
+    fn sh(script: &'static str) -> impl Fn() -> Made {
         move || {
             let mut c = tokio::process::Command::new("sh");
             c.args(["-c", script]);
-            std::future::ready(Some(c))
+            std::future::ready(Some(Ok(c)))
         }
     }
 
-    /// A settle short enough for tests.
+    /// A settle short enough for tests whose child is meant to hold.
     const SHORT: Duration = Duration::from_millis(50);
+    /// A settle far beyond a failing child's life, even on a loaded machine: for tests that must never hold.
+    const NEVER: Duration = Duration::from_secs(5);
 
     type Seen = Arc<Mutex<Vec<Report>>>;
 
@@ -377,7 +392,7 @@ mod tests {
         tx.send(true).unwrap();
         wait_for(&seen, Duration::from_secs(1), |r| r == [Report::Held(true)]).await;
         tx.send(false).unwrap();
-        wait_for(&seen, Duration::from_secs(3), |r| r == [Report::Held(true), Report::Held(false)]).await;
+        wait_for(&seen, Duration::from_secs(3), |r| r == [Report::Held(true), Report::Off]).await;
         drop(tx);
         tokio::time::timeout(Duration::from_secs(3), task).await.expect("ends once want closes").unwrap();
     }
@@ -386,9 +401,9 @@ mod tests {
     async fn supervise_restarts_a_failing_child() {
         let (_tx, rx) = watch::channel(true);
         let (seen, report) = recorder();
-        tokio::spawn(supervise(rx, sh("echo boom >&2; exit 3"), Duration::from_millis(10), SHORT, report));
+        tokio::spawn(supervise(rx, sh("echo boom >&2; exit 3"), Duration::from_millis(10), NEVER, report));
         let boom = Report::Failed { code: Some(3), stderr: "boom".into() };
-        wait_for(&seen, Duration::from_secs(1), |r| r.iter().filter(|x| **x == boom).count() >= 2).await;
+        wait_for(&seen, Duration::from_secs(4), |r| r.iter().filter(|x| **x == boom).count() >= 2).await;
         let r = seen.lock().unwrap().clone();
         assert!(r.iter().all(|x| *x == boom), "never held: {r:?}");
     }
@@ -397,10 +412,9 @@ mod tests {
     async fn supervise_child_gone_before_the_settle_is_never_held() {
         let (_tx, rx) = watch::channel(true);
         let (seen, report) = recorder();
-        let settle = Duration::from_millis(300);
-        tokio::spawn(supervise(rx, sh("sleep 0.05; exit 1"), Duration::from_millis(10), settle, report));
+        tokio::spawn(supervise(rx, sh("sleep 0.05; exit 1"), Duration::from_millis(10), NEVER, report));
         let gone = Report::Failed { code: Some(1), stderr: String::new() };
-        wait_for(&seen, Duration::from_secs(2), |r| r.iter().filter(|x| **x == gone).count() >= 2).await;
+        wait_for(&seen, Duration::from_secs(4), |r| r.iter().filter(|x| **x == gone).count() >= 2).await;
         let r = seen.lock().unwrap().clone();
         assert!(!r.iter().any(|x| matches!(x, Report::Held(_))), "{r:?}");
     }
@@ -409,11 +423,34 @@ mod tests {
     fn only_the_first_failure_of_a_streak_is_logged() {
         let failing = AtomicBool::new(false);
         let fail = Report::Failed { code: Some(1), stderr: String::new() };
-        let logged: Vec<bool> = [&fail, &fail, &Report::Held(false), &fail, &Report::Held(true), &fail, &fail]
-            .into_iter()
-            .map(|r| first_of_streak(&failing, r))
-            .collect();
-        assert_eq!(logged, [true, false, false, false, false, true, false]);
+        let logged: Vec<bool> =
+            [&fail, &fail, &Report::Held(false), &fail, &Report::Held(true), &fail, &fail, &Report::Off, &fail, &fail]
+                .into_iter()
+                .map(|r| first_of_streak(&failing, r))
+                .collect();
+        assert_eq!(logged, [true, false, false, false, false, true, false, false, true, false]);
+    }
+
+    #[tokio::test]
+    async fn supervise_retries_a_missing_helper() {
+        let (_tx, rx) = watch::channel(true);
+        let (seen, report) = recorder();
+        let missing = || std::future::ready(Some(Err("no helper".to_string())));
+        tokio::spawn(supervise(rx, missing, Duration::from_millis(10), SHORT, report));
+        let failed = Report::Failed { code: None, stderr: "no helper".into() };
+        wait_for(&seen, Duration::from_secs(2), |r| r.len() >= 3 && r.iter().all(|x| *x == failed)).await;
+    }
+
+    #[tokio::test]
+    async fn supervise_reports_off_while_failing() {
+        let (tx, rx) = watch::channel(true);
+        let (seen, report) = recorder();
+        tokio::spawn(supervise(rx, sh("exit 2"), Duration::from_secs(30), NEVER, report));
+        let failed = Report::Failed { code: Some(2), stderr: String::new() };
+        wait_for(&seen, Duration::from_secs(4), |r| r == [failed.clone()]).await;
+        // In the backoff: going off ends the streak.
+        tx.send(false).unwrap();
+        wait_for(&seen, Duration::from_secs(2), |r| r == [failed.clone(), Report::Off]).await;
     }
 
     #[tokio::test]

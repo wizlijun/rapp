@@ -1337,10 +1337,17 @@ async fn no_lock_flip_flop_keeps_one_child() {
     }
     let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
     wait_status(&mut ipc, |s| s["no_lock_held"] == true).await;
-    tokio::time::sleep(Duration::from_secs(2)).await;
-    let (starts, exits) = (awake_count(bins, "start"), awake_count(bins, "exit"));
-    assert!(starts >= 1 && exits == starts - 1, "{:?}", awake_log(bins));
+    // One child left running: every start but one has its exit (an earlier child may still be on its way out).
+    let one_left = || {
+        let (starts, exits) = (awake_count(bins, "start"), awake_count(bins, "exit"));
+        starts >= 1 && exits == starts - 1
+    };
+    wait_until("one child left", one_left).await;
     assert_eq!(ipc.call(json!({"cmd":"status"})).await["no_lock_held"], true);
+    // And none leaked: off, every child that started has exited.
+    set_no_lock(&a, false).await;
+    wait_until("every child exited", || awake_count(bins, "start") == awake_count(bins, "exit")).await;
+    wait_status(&mut ipc, |s| s["no_lock_held"] == false).await;
 }
 
 #[tokio::test]
@@ -1389,10 +1396,15 @@ async fn stay_awake_failure_is_logged() {
     let fails = log.iter().filter(|v| v["ev"] == "no_lock_hold_failed").count();
     assert_eq!(fails, 1, "{log:?}");
     assert!(!log.iter().any(|v| v["ev"] == "repeat"), "{log:?}");
+    // Switching off ends the streak: on again, the first failure is logged afresh.
+    set_no_lock(&a, true).await;
+    wait_until("a fresh failure line", || log_events(home).iter().filter(|v| v["ev"] == "no_lock_hold_failed").count() == 2).await;
 }
 
+/// A missing helper is a failure like any other: retried with the backoff, one line per streak, and a fresh
+/// line when the user switches off and on again.
 #[tokio::test]
-async fn no_lock_without_rapp_host_logs_once_per_switch_on() {
+async fn no_lock_without_rapp_host_retries_and_logs_once_per_streak() {
     if !MAC {
         return;
     }
@@ -1412,12 +1424,17 @@ async fn no_lock_without_rapp_host_logs_once_per_switch_on() {
     let fail = wait_log(home.path(), "no_lock_hold_failed", |_| true).await;
     assert_eq!((&fail["code"], &fail["stderr"]), (&Value::Null, &json!("could not start the keep-awake helper")), "{fail}");
     tokio::time::sleep(Duration::from_millis(1500)).await;
-    assert_eq!(fails().len(), 1, "no retries: {:?}", fails());
+    assert_eq!(fails().len(), 1, "the retry is not logged: {:?}", fails());
     set(false).await;
     set(true).await;
     wait_until("a second line", || fails().len() == 2).await;
-    let st = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await;
+    let mut ipc = Ipc::open(&svc, home.path()).await;
+    let st = ipc.call(json!({"cmd":"status"})).await;
     assert_eq!((&st["no_lock"], &st["no_lock_held"]), (&json!(true), &json!(false)), "{st}");
+    // The helper comes back: a retry holds, without the switch going off and on.
+    std::fs::copy(env!("CARGO_BIN_EXE_fake-rapp-host"), bins.path().join("rapp-host")).unwrap();
+    wait_status(&mut ipc, |s| s["no_lock_held"] == true).await;
+    assert_eq!(fails().len(), 2, "{:?}", fails());
 }
 
 /// A client-only Linux package still serves terminals and shared ports. Missing a
