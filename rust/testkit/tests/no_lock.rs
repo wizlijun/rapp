@@ -42,7 +42,10 @@ async fn b_turns_a_no_lock_on_and_off() {
         assert!(tokio::time::Instant::now() < deadline, "load never answered: {l}");
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    wait_log(a.home.path(), "no_lock_set", |v| v["on"] == true).await;
+    let set = wait_log(a.home.path(), "no_lock_set", |v| v["on"] == true).await;
+    // Put down to B, not to this device.
+    assert!(set["by"].is_string() && set["by"] != "local", "{set}");
+    assert!(!set["peer"].as_str().unwrap_or_default().is_empty(), "{set}");
     let r = say(&a, &key, &b, json!({"op":"no_lock"})).await;
     assert_eq!(r["no_lock"], true, "{r}");
     let r = say(&a, &key, &b, json!({"op":"no_lock","on":false})).await;
