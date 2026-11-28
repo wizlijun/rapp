@@ -28,7 +28,15 @@ esac
 # Flutter hands FLUTTER_XCODE_<name> to xcodebuild as the build setting <name> (gui/Speech.xcconfig).
 export FLUTTER_XCODE_RAPP_SPEECH=$speech
 
-hub() { (cd "$repo/rust" && cargo build --release -p rapp-hub-ffi --target "$1"); }
+# wx: the speech engine rides inside the hub's library (its speech-wx feature; iOS links one Rust static
+# library), built with dotprod so the model's int8 kernels inline `sdot` (design §7.4: A13 / iPhone 11 or later).
+hub_args=()
+if [ "$speech" = wx ]; then
+  hub_args=(--features speech-wx)
+  export CARGO_TARGET_AARCH64_APPLE_IOS_RUSTFLAGS="-Ctarget-feature=+dotprod"
+  export CARGO_TARGET_AARCH64_APPLE_IOS_SIM_RUSTFLAGS="-Ctarget-feature=+dotprod"
+fi
+hub() { (cd "$repo/rust" && cargo build --release -p rapp-hub-ffi --target "$1" ${hub_args[@]+"${hub_args[@]}"}); }
 
 case $mode in
 sim)

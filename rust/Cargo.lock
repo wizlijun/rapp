@@ -1762,6 +1762,7 @@ dependencies = [
  "rapp-hub",
  "rapp-net",
  "rapp-ports",
+ "rapp-speech-wx",
  "tempfile",
  "tokio",
 ]

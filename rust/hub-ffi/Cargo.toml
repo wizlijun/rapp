@@ -13,6 +13,12 @@ rapp-hub.workspace = true
 rapp-net.workspace = true
 rapp-ports.workspace = true
 tokio.workspace = true
+# The wx speech engine (wx offline ASR design §5.6): iOS can link only one Rust static library, so with
+# RAPP_SPEECH=wx scripts/build-ios.sh builds this one with the engine inside. Off by default.
+rapp-speech-wx = { path = "../speech-wx", optional = true }
+
+[features]
+speech-wx = ["dep:rapp-speech-wx"]
 
 [dev-dependencies]
 tempfile.workspace = true

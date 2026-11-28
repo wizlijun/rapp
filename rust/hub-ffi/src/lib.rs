@@ -1,6 +1,11 @@
 //! The hub in-process for iOS (spec 2026-11-17-rapp-ipad-duo-design §6.1): `rapp_hub::run` on an in-memory
 //! pipe pair behind C functions (`include/rapp_hub.h`). The hub's own code is unchanged.
 
+// With the `speech-wx` feature this library also carries the speech engine's C functions (`wx_*`, called by
+// the app's SpeechEngineWx.swift), since iOS links a single Rust static library (wx offline ASR design §5.6).
+#[cfg(feature = "speech-wx")]
+pub use rapp_speech_wx;
+
 use std::ffi::{c_char, CStr};
 use std::path::PathBuf;
 use std::ptr;
