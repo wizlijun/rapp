@@ -197,11 +197,10 @@ pub async fn status(path: &Path, token: &str) -> Result<Status, Probe> {
     tokio::time::timeout(STATUS_WAIT, ask).await.unwrap_or(Err(Probe::Busy))
 }
 
-/// Asks the run at `path` to be called `name`. A run of version 1 refuses with `unsupported`.
-pub async fn rename(path: &Path, token: &str, name: &str) -> Result<(), Probe> {
+/// Sends `req` with the token and reads one `{"ok":true}` or `{"error":…}` line; the error is the run's reason.
+async fn ask_ok(path: &Path, token: &str, req: serde_json::Value) -> Result<(), Probe> {
     let ask = async {
         let mut s = UnixStream::connect(path).await.map_err(|e| if gone(&e) { Probe::Gone } else { Probe::Busy })?;
-        let req = serde_json::json!({ "op": "rename", "v": LOCAL_V, "name": name });
         send_head_with(&mut s, req, token).await.map_err(|_| Probe::Busy)?;
         let got = Lines::new(BufReader::new(s), MAX_IN_LINE).next().await;
         let Ok(Got::Line(line)) = got else {
@@ -217,45 +216,20 @@ pub async fn rename(path: &Path, token: &str, name: &str) -> Result<(), Probe> {
     tokio::time::timeout(STATUS_WAIT, ask).await.unwrap_or(Err(Probe::Busy))
 }
 
+/// Asks the run at `path` to be called `name`. A run of version 1 refuses with `unsupported`.
+pub async fn rename(path: &Path, token: &str, name: &str) -> Result<(), Probe> {
+    ask_ok(path, token, serde_json::json!({ "op": "rename", "v": LOCAL_V, "name": name })).await
+}
+
 /// Asks the run at `path` to end: it answers first, then ends as if its window were closed. An old run refuses with `unsupported`.
 pub async fn end(path: &Path, token: &str) -> Result<(), Probe> {
-    let ask = async {
-        let mut s = UnixStream::connect(path).await.map_err(|e| if gone(&e) { Probe::Gone } else { Probe::Busy })?;
-        let req = serde_json::json!({ "op": "end", "v": LOCAL_V });
-        send_head_with(&mut s, req, token).await.map_err(|_| Probe::Busy)?;
-        let got = Lines::new(BufReader::new(s), MAX_IN_LINE).next().await;
-        let Ok(Got::Line(line)) = got else {
-            return Err(Probe::Refused("bad reply".into()));
-        };
-        let v: serde_json::Value = serde_json::from_slice(&line).map_err(|_| Probe::Refused("bad reply".into()))?;
-        match (v.get("ok"), v.get("error")) {
-            (Some(serde_json::Value::Bool(true)), _) => Ok(()),
-            (_, Some(e)) => Err(Probe::Refused(e.as_str().unwrap_or("error").to_string())),
-            _ => Err(Probe::Refused("bad reply".into())),
-        }
-    };
-    tokio::time::timeout(STATUS_WAIT, ask).await.unwrap_or(Err(Probe::Busy))
+    ask_ok(path, token, serde_json::json!({ "op": "end", "v": LOCAL_V })).await
 }
 
 /// Sends `r` (a `pty::reply::Reply` as JSON) to the run at `path` with no view. The refusal is the run's reason
 /// (`changed`, `typed`, `empty`…); a run without the op refuses with `unsupported`.
 pub async fn reply(path: &Path, token: &str, r: &serde_json::Value) -> Result<(), Probe> {
-    let ask = async {
-        let mut s = UnixStream::connect(path).await.map_err(|e| if gone(&e) { Probe::Gone } else { Probe::Busy })?;
-        let req = serde_json::json!({ "op": "reply", "v": LOCAL_V, "reply": r });
-        send_head_with(&mut s, req, token).await.map_err(|_| Probe::Busy)?;
-        let got = Lines::new(BufReader::new(s), MAX_IN_LINE).next().await;
-        let Ok(Got::Line(line)) = got else {
-            return Err(Probe::Refused("bad reply".into()));
-        };
-        let v: serde_json::Value = serde_json::from_slice(&line).map_err(|_| Probe::Refused("bad reply".into()))?;
-        match (v.get("ok"), v.get("error")) {
-            (Some(serde_json::Value::Bool(true)), _) => Ok(()),
-            (_, Some(e)) => Err(Probe::Refused(e.as_str().unwrap_or("error").to_string())),
-            _ => Err(Probe::Refused("bad reply".into())),
-        }
-    };
-    tokio::time::timeout(STATUS_WAIT, ask).await.unwrap_or(Err(Probe::Busy))
+    ask_ok(path, token, serde_json::json!({ "op": "reply", "v": LOCAL_V, "reply": r })).await
 }
 
 /// The statuses of the live sockets in `pty/`, by name. A leftover socket file is removed; a busy or refusing

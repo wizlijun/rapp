@@ -172,3 +172,28 @@ async fn old_holder_says_old_run() {
     tokio::io::BufReader::new(c).read_line(&mut line).await.unwrap();
     assert_eq!(serde_json::from_str::<serde_json::Value>(&line).unwrap()["error"], "unsupported");
 }
+
+/// Two questions in the same state (so `since` stays): the second still takes a reply after the first was answered.
+const ASKS_TWICE: &str = r#"printf '\033]7501;state=blocked:kind=permission:msg=b25l\007'; read a; printf 'got1[%s]\n' "$a"; printf '\033]7501;state=blocked:kind=permission:msg=dHdv\007'; read b; printf 'got2[%s]\n' "$b"; exec cat"#;
+
+#[tokio::test]
+async fn a_second_blocked_question_takes_a_reply_after_the_first_was_answered() {
+    let d = short_dir();
+    let w = Window::start(d.path(), &["--name", "t", "--", "/bin/sh", "-c", ASKS_TWICE]);
+    let seq1 = wait_ps(d.path(), "blocked").await;
+    let pid = w.pid();
+    reply(d.path(), pid, json!({"seq": seq1, "keys":["y","Enter"]})).await.unwrap();
+    w.wait_output("got1[y]");
+    let end = Instant::now() + WAIT;
+    let seq2 = loop {
+        let p = wait_status(d.path(), "t").await.ps;
+        if let Some(p) = p.filter(|p| p.seq > seq1) {
+            break p.seq;
+        }
+        assert!(Instant::now() < end, "no second question");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    reply(d.path(), pid, json!({"seq": seq2, "keys":["z","Enter"]})).await.unwrap();
+    w.wait_output("got2[z]");
+}

@@ -65,6 +65,10 @@ pub struct Shared {
     pub shell: Mutex<shell::ShellState>,
     /// The Unix second of the last input (keyboard or viewer); 0 for never.
     pub input_at: AtomicU64,
+    /// The Unix millisecond of the last input, for `reply`'s typed check (`input_at` is whole seconds).
+    pub input_ms: AtomicU64,
+    /// The Unix millisecond at which the current `ps.seq` was set; 0 when there is no status.
+    pub seq_ms: AtomicU64,
     /// Bumped whenever anything a snapshot holds changes: shell state, name, foreground program or directory.
     pub dirty: watch::Sender<u64>,
     /// The holder's own window tty (`ttyname(0)`, read once at start); none when not a tty.
@@ -84,8 +88,26 @@ impl Meta {
 impl Shared {
     /// Notes that input just went to the program.
     pub fn note_input(&self) {
-        let t = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        self.input_at.store(t, Ordering::Relaxed);
+        let d = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+        self.input_at.store(d.as_secs(), Ordering::Relaxed);
+        self.input_ms.store(d.as_millis() as u64, Ordering::Relaxed);
+    }
+
+    /// Replaces the program's status; when its `seq` moved, notes the millisecond the new question began.
+    pub fn set_ps(&self, new: Option<ps::Ps>) {
+        let mut ps = self.ps.lock().unwrap_or_else(|e| e.into_inner());
+        let ms = match &new {
+            None => 0,
+            Some(n) if ps.as_ref().is_some_and(|o| o.seq == n.seq) => self.seq_ms.load(Ordering::Relaxed),
+            // Never at or before the last input: that input came earlier, so it must not count as typed over this
+            // question even when both land in one millisecond.
+            Some(_) => {
+                let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+                now.max(self.input_ms.load(Ordering::Relaxed) + 1)
+            }
+        };
+        self.seq_ms.store(ms, Ordering::Relaxed);
+        *ps = new;
     }
 
     /// Tells snapshot writers something changed.

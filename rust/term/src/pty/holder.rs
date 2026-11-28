@@ -184,6 +184,8 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
         fg_rev: watch::channel(0).0,
         shell: Mutex::default(),
         input_at: AtomicU64::new(0),
+            input_ms: AtomicU64::new(0),
+            seq_ms: AtomicU64::new(0),
         dirty: watch::channel(0).0,
         tty: tty_name(),
         end: tokio::sync::Notify::new(),
@@ -643,11 +645,11 @@ fn pump_output<W: Write>(
                         let _ = shared.input.send(PROBE_REPLY.repeat(fed.probes.min(MAX_REPLIES)));
                     }
                     if fed.changed {
-                        *shared.ps.lock().unwrap_or_else(|e| e.into_inner()) = tracker.as_ref().and_then(|t| t.ps().cloned());
+                        shared.set_ps(tracker.as_ref().and_then(|t| t.ps().cloned()));
                     }
                 }
                 // The tracker panicked and is gone: the status stops, the output keeps flowing.
-                None if tracker.is_none() => *shared.ps.lock().unwrap_or_else(|e| e.into_inner()) = None,
+                None if tracker.is_none() => shared.set_ps(None),
                 None => {}
             }
         }
@@ -1136,6 +1138,8 @@ mod tests {
             fg_rev: watch::channel(0).0,
             shell: Mutex::default(),
             input_at: AtomicU64::new(0),
+            input_ms: AtomicU64::new(0),
+            seq_ms: AtomicU64::new(0),
             dirty: watch::channel(0).0,
             tty: None,
             end: tokio::sync::Notify::new(),

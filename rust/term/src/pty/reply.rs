@@ -64,16 +64,18 @@ pub fn apply(shared: &Shared, r: &Reply) -> Result<(), Value> {
         if p.seq != want {
             return Err(json!({ "error": "changed", "seq": p.seq, "state": p.state }));
         }
-        let typed = shared.input_at.load(Ordering::Relaxed);
-        if p.since != 0 && typed >= p.since {
+        // Only typing since this very question began counts (`since` outlives a same-state question).
+        if shared.input_ms.load(Ordering::Relaxed) >= shared.seq_ms.load(Ordering::Relaxed) {
             return Err(json!({ "error": "typed", "seq": p.seq }));
         }
     }
+    // Noted before the bytes go, still under the lock: a program that asks again at once cannot set its new
+    // question's time before this reply's.
+    shared.note_input();
     if shared.input.send(b).is_err() {
         return Err(json!({ "error": "ended" }));
     }
     drop(ps);
-    shared.note_input();
     Ok(())
 }
 
@@ -111,6 +113,8 @@ mod tests {
             fg_rev: watch::channel(0).0,
             shell: Mutex::default(),
             input_at: AtomicU64::new(0),
+            input_ms: AtomicU64::new(0),
+            seq_ms: AtomicU64::new(0),
             dirty: watch::channel(0).0,
             tty: None,
             end: tokio::sync::Notify::new(),
@@ -164,7 +168,7 @@ mod tests {
     #[test]
     fn a_stale_seq_is_refused_with_the_current_one() {
         let (sh, mut rx) = shared();
-        *sh.ps.lock().unwrap() = Some(blocked(4, 100));
+        sh.set_ps(Some(blocked(4, 100)));
         let r = Reply { seq: Some(3), keys: vec!["Enter".into()], ..Default::default() };
         assert_eq!(apply(&sh, &r), Err(json!({ "error": "changed", "seq": 4, "state": "blocked" })));
         assert!(rx.try_recv().is_err());
@@ -180,19 +184,51 @@ mod tests {
         assert!(rx.try_recv().is_err());
     }
 
+    fn tick() {
+        std::thread::sleep(std::time::Duration::from_millis(3));
+    }
+
     #[test]
     fn typing_since_the_question_refuses_a_seq_reply() {
         let (sh, mut rx) = shared();
-        *sh.ps.lock().unwrap() = Some(blocked(2, 100));
-        sh.input_at.store(100, Ordering::Relaxed);
+        sh.set_ps(Some(blocked(2, 100)));
+        tick();
+        sh.note_input();
         let r = Reply { seq: Some(2), keys: vec!["Enter".into()], ..Default::default() };
         assert_eq!(apply(&sh, &r), Err(json!({ "error": "typed", "seq": 2 })));
         assert!(rx.try_recv().is_err());
-        // Typing before the question began does not count.
-        sh.input_at.store(99, Ordering::Relaxed);
+    }
+
+    #[test]
+    fn typing_before_the_question_does_not_count_and_the_reply_counts_as_typing() {
+        let (sh, _rx) = shared();
+        sh.note_input();
+        tick();
+        sh.set_ps(Some(blocked(2, 100)));
+        tick();
+        let r = Reply { seq: Some(2), keys: vec!["Enter".into()], ..Default::default() };
         assert_eq!(apply(&sh, &r), Ok(()));
-        // And the reply itself counts as typing: a second click on the same question is refused.
+        // A second click on the same question is refused.
         assert_eq!(apply(&sh, &r).unwrap_err()["error"], "typed");
+    }
+
+    #[test]
+    fn a_second_blocked_question_after_a_reply_takes_a_reply() {
+        let (sh, _rx) = shared();
+        sh.set_ps(Some(blocked(1, 100)));
+        tick();
+        assert_eq!(apply(&sh, &Reply { seq: Some(1), keys: vec!["Enter".into()], ..Default::default() }), Ok(()));
+        tick();
+        // blocked -> blocked with a new message: a new seq, the same `since`.
+        let mut next = blocked(2, 100);
+        next.msg = Some("another".into());
+        sh.set_ps(Some(next));
+        tick();
+        assert_eq!(apply(&sh, &Reply { seq: Some(2), keys: vec!["Enter".into()], ..Default::default() }), Ok(()));
+        // The same seq set again (an update that kept the question) does not move the question's start.
+        let again = blocked(2, 100);
+        sh.set_ps(Some(again));
+        assert_eq!(apply(&sh, &Reply { seq: Some(2), keys: vec!["y".into()], ..Default::default() }).unwrap_err()["error"], "typed");
     }
 
     #[test]
