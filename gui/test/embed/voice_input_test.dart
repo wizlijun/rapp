@@ -44,6 +44,49 @@ void main() {
     ]);
   });
 
+  test('loadEngine takes the wait and the hints native reports, and hands it the local dir', () async {
+    final args = <Object?>[];
+    messenger.setMockMethodCallHandler(channel, (c) async {
+      args.add(c.arguments);
+      return c.method == 'engine'
+          ? {'name': 'wx', 'final_wait_ms': 5100, 'denied': '需要麦克风权限', 'unavailable': '没有找到离线语音模型'}
+          : null;
+    });
+    final v = VoiceInput();
+    addTearDown(v.dispose);
+    expect(v.finalWait, const Duration(seconds: 1));
+    await v.loadEngine(localDir: '/d/local');
+    expect(args, [
+      {'local_dir': '/d/local'}
+    ]);
+    expect(v.engineName, 'wx');
+    expect(v.finalWait, const Duration(milliseconds: 5100));
+    expect(v.deniedText, '需要麦克风权限');
+    expect(v.unavailableText, '没有找到离线语音模型');
+  });
+
+  test('loadEngine keeps the defaults without an answer', () async {
+    mock((c) async => null);
+    final v = VoiceInput(finalWait: const Duration(milliseconds: 700));
+    addTearDown(v.dispose);
+    await v.loadEngine();
+    expect(v.finalWait, const Duration(milliseconds: 700));
+    expect(v.engineName, isNull);
+    expect(v.unavailableText, isNull);
+    messenger.setMockMethodCallHandler(channel, (c) async => throw PlatformException(code: 'x'));
+    await v.loadEngine();
+    expect(v.finalWait, const Duration(milliseconds: 700));
+  });
+
+  test('native log lines reach onLog, even while idle', () async {
+    final v = VoiceInput();
+    addTearDown(v.dispose);
+    final lines = <String>[];
+    v.onLog = lines.add;
+    await v.handle(const MethodCall('log', {'line': 'voice: model loaded in 5ms'}));
+    expect(lines, ['voice: model loaded in 5ms']);
+  });
+
   test('start ok -> listening; partials update text', () async {
     mock(ok);
     final v = VoiceInput();

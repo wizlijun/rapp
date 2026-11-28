@@ -12,10 +12,22 @@
 # Sub-programs get fixed identifiers (com.rapp.service/hub/term/cli/host/client) so the
 # designated requirement stays stable. An ad-hoc result (cdhash requirement)
 # fails the build unless RAPP_ALLOW_ADHOC=1 (local builds only).
+# RAPP_SPEECH=apple (default) or wx picks the speech engine built in (wx offline ASR design §5.3); the wx model
+# files are never packaged.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$PWD
 export PATH="$HOME/.cargo/bin:$HOME/development/flutter/bin:$PATH"
+SPEECH=${RAPP_SPEECH:-apple}
+case $SPEECH in
+apple | wx) ;;
+*)
+    echo "RAPP_SPEECH is apple or wx, not '$SPEECH'" >&2
+    exit 2
+    ;;
+esac
+# Flutter hands FLUTTER_XCODE_<name> to xcodebuild as the build setting <name> (gui/Speech.xcconfig).
+export FLUTTER_XCODE_RAPP_SPEECH=$SPEECH
 DIST=$ROOT/dist
 source "$ROOT/scripts/lib/sign-check.sh"
 source "$ROOT/scripts/lib/release.sh"

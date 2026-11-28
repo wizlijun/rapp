@@ -1,6 +1,4 @@
 import AVFoundation
-import RappSession
-import Speech
 #if os(iOS)
 import Flutter
 import UIKit
@@ -10,37 +8,29 @@ import FlutterMacOS
 #endif
 
 /// The `rapp/speech` channel: hold-to-talk speech recognition for the voice button.
-/// Dart calls `start` (replies `ok` / `asked` / `denied` / `unavailable` / `preparing`, or `cancelled` when a
-/// cancel, another start or an interruption overtook it while it set up), `stop` and `cancel`;
-/// this side sends `partial` / `final` {text} and `error` {code}, and `timing` {first_partial_ms, final_ms}
-/// (milliseconds, or null) just before each `final`. Everything runs on the main thread except
-/// the audio tap, which only hands buffers to the recogniser. On iOS this plugin owns the app's AVAudioSession; macOS has no shared session, so it only owns its audio engine.
-/// iOS 26+ uses SpeechAnalyzer + DictationTranscriber; older systems (or no transcriber for the locale) use
-/// SFSpeechRecognizer.
+/// Dart calls `engine` {local_dir} (replies {name, final_wait_ms, denied, unavailable}: the compiled-in engine,
+/// how long Dart waits for a final, and the hints for those two starts), `start` (replies `ok` / `asked` /
+/// `denied` / `unavailable` / `preparing`, or `cancelled` when a cancel, another start or an interruption overtook
+/// it while it set up), `stop` and `cancel`; this side sends `partial` / `final` {text} and `error` {code},
+/// `timing` {first_partial_ms, final_ms} (milliseconds, or null) just before each `final`, and `log` {line}.
+/// Everything runs on the main thread except the audio tap, which only hands buffers to the recogniser. On iOS
+/// this plugin owns the app's AVAudioSession; macOS has no shared session, so it only owns its audio engine.
+/// The recogniser is the one `SpeechEngine` compiled in (SpeechEngine.swift); this file knows none by name.
 final class SpeechPlugin: NSObject, FlutterPlugin {
-  /// How long after `stop` this side gives up on the recogniser and sends `final` with what it has.
-  /// Dart waits 1 s, so this lands just before.
-  private static let finalGrace: TimeInterval = 0.9
-  /// The language to recognise, from the system's preferred languages (not `Locale.current`, which is English
-  /// here): a Chinese entry anywhere in the list comes first, on iOS and macOS alike (user, 2026-11-25).
-  private static var locale: Locale { speechLocale(preferred: Locale.preferredLanguages, chineseFirst: true) }
-
   private let channel: FlutterMethodChannel
-  /// The recording in progress: live, or stopped and waiting for its final text.
-  private var run: Run?
+  private let recognizer: SpeechEngine
+  /// The recording in progress: live, or stopped and waiting for its final text. Engines set it once they record.
+  var run: SpeechRun?
   /// Bumped by every start, stop, cancel and interruption, so a start still awaiting its setup knows it was overtaken.
-  private var generation = 0
+  private(set) var generation = 0
   private var engine: AVAudioEngine?
   private var sessionActive = false
-  /// A speech model download is under way (iOS 26+); starts reply `preparing` until it ends.
-  private var assetsInstalling = false
-  /// What the last analyzer start learned about `key` (a `Self.locale.identifier`), so the next press skips
-  /// those lookups (iOS 26+). Replaced when the language changes; dropped when the assets turn out missing.
-  private var analyzerCache: AnalyzerCache?
 
   init(channel: FlutterMethodChannel) {
     self.channel = channel
+    recognizer = makeSpeechEngine()
     super.init()
+    recognizer.plugin = self
     #if os(iOS)
     NotificationCenter.default.addObserver(
       self, selector: #selector(audioInterrupted(_:)),
@@ -83,6 +73,14 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
 
   func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
+    case "engine":
+      recognizer.prepare(localDir: (call.arguments as? [String: Any])?["local_dir"] as? String)
+      result([
+        "name": recognizer.name,
+        "final_wait_ms": Int((recognizer.dartWait * 1000).rounded()),
+        "denied": recognizer.deniedText,
+        "unavailable": recognizer.unavailableText,
+      ])
     case "start":
       // Words to expect (the gateway's hotwords): names and products said often and heard wrong.
       let words = ((call.arguments as? [String: Any])?["hotwords"] as? [String])?.filter { !$0.isEmpty } ?? []
@@ -106,25 +104,16 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
     generation += 1
     let gen = generation
     end()  // A second start cancels the first, silently: Dart has already moved on.
-    switch Self.access() {
+    switch access() {
     case .denied:
       return result("denied")
     case .ask:
-      Self.askAccess()
+      askAccess()
       return result("asked")  // This hold does not record.
     case .granted:
       break
     }
-    if #available(iOS 26, macOS 26, *) {
-      Task { @MainActor [weak self] in
-        guard let self else { return result("cancelled") }
-        if let reply = await self.startAnalyzer(gen, hotwords: hotwords, pressedAt: pressedAt) { return result(reply) }
-        // No transcriber for this device or locale: the older recogniser may still work.
-        result(gen == self.generation ? self.startRecognizer(hotwords: hotwords, pressedAt: pressedAt) : "cancelled")
-      }
-    } else {
-      result(startRecognizer(hotwords: hotwords, pressedAt: pressedAt))
-    }
+    recognizer.start(gen, hotwords: hotwords, pressedAt: pressedAt, reply: result)
   }
 
   /// Ends the audio; the recogniser delivers its final text, or `finalGrace` later this side sends what it has.
@@ -137,8 +126,12 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
     run.stoppedAt = Self.now()
     stopAudio()
     run.finish()
-    DispatchQueue.main.asyncAfter(deadline: .now() + Self.finalGrace) { [weak self, weak run] in
+    let grace = recognizer.finalGrace
+    DispatchQueue.main.asyncAfter(deadline: .now() + grace) { [weak self, weak run] in
       guard let self, let run else { return }
+      if run === self.run {
+        self.log("voice: no final \(Int((grace * 1000).rounded()))ms after release, sent the last partial")
+      }
       self.final(run, run.text)
     }
   }
@@ -153,14 +146,14 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
 
   // MARK: - Events to Dart (main thread; events from a recording that is no longer current are dropped)
 
-  private func partial(_ run: Run, _ text: String) {
+  func partial(_ run: SpeechRun, _ text: String) {
     guard run === self.run else { return }
     run.text = text
     if run.firstPartialAt == nil, !text.isEmpty { run.firstPartialAt = Self.now() }
     channel.invokeMethod("partial", arguments: ["text": text])
   }
 
-  private func final(_ run: Run, _ text: String) {
+  func final(_ run: SpeechRun, _ text: String) {
     guard run === self.run else { return }
     let at = Self.now()
     end()
@@ -169,6 +162,11 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
       "final_ms": Self.ms(from: run.stoppedAt, to: at),
     ])
     channel.invokeMethod("final", arguments: ["text": text])
+  }
+
+  /// A line for the app's log.
+  func log(_ line: String) {
+    channel.invokeMethod("log", arguments: ["line": line])
   }
 
   /// Monotonic seconds, for the timing event.
@@ -181,7 +179,7 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
   }
 
   /// A recogniser error. After `stop` it only means no more text is coming (for example, no speech).
-  private func failed(_ run: Run) {
+  func failed(_ run: SpeechRun) {
     guard run === self.run else { return }
     if run.stopped { return final(run, run.text) }
     end()
@@ -212,12 +210,10 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
     channel.invokeMethod("error", arguments: ["code": "interrupted"])
   }
 
-  // MARK: - Permissions
+  // MARK: - Permissions: the microphone here, the rest the engine's
 
-  private enum Access { case granted, denied, ask }
-
-  private static func access() -> Access {
-    let speech = SFSpeechRecognizer.authorizationStatus()
+  private func access() -> SpeechAccess {
+    let own = recognizer.access()
     #if os(iOS)
     let mic = AVAudioApplication.shared.recordPermission
     let micDenied = mic == .denied
@@ -227,13 +223,13 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
     let micDenied = mic == .denied || mic == .restricted
     let micUndecided = mic == .notDetermined
     #endif
-    if speech == .denied || speech == .restricted || micDenied { return .denied }
-    if speech == .notDetermined || micUndecided { return .ask }
+    if own == .denied || micDenied { return .denied }
+    if own == .ask || micUndecided { return .ask }
     return .granted
   }
 
-  /// Asks for whatever is not yet decided: speech recognition first, then the microphone.
-  private static func askAccess() {
+  /// Asks for whatever is not yet decided: the engine's own permissions first, then the microphone.
+  private func askAccess() {
     let askMic = {
       #if os(iOS)
       if AVAudioApplication.shared.recordPermission == .undetermined {
@@ -245,18 +241,14 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
       }
       #endif
     }
-    if SFSpeechRecognizer.authorizationStatus() == .notDetermined {
-      SFSpeechRecognizer.requestAuthorization { _ in DispatchQueue.main.async(execute: askMic) }
-    } else {
-      askMic()
-    }
+    recognizer.askAccess(then: askMic)
   }
 
   // MARK: - Audio
 
   /// Activates the session and starts the engine. `makeFeed` gets the microphone's format and returns what
   /// each tapped buffer is handed to (on the audio thread), or nil to give up.
-  private func startAudio(_ makeFeed: (AVAudioFormat) -> ((AVAudioPCMBuffer) -> Void)?) -> Bool {
+  func startAudio(_ makeFeed: (AVAudioFormat) -> ((AVAudioPCMBuffer) -> Void)?) -> Bool {
     #if os(iOS)
     let session = AVAudioSession.sharedInstance()
     do {
@@ -330,212 +322,4 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
       #endif
     }
   }
-
-  // MARK: - iOS 26+: SpeechAnalyzer
-
-  /// The reply for Dart, or nil when the transcriber cannot serve this device or locale.
-  @available(iOS 26, macOS 26, *)
-  @MainActor
-  private func startAnalyzer(_ gen: Int, hotwords: [String], pressedAt: TimeInterval) async -> String? {
-    let key = Self.locale.identifier
-    if analyzerCache?.key != key { analyzerCache = nil }
-    let supported: Locale?
-    if let cache = analyzerCache {
-      supported = cache.locale
-    } else {
-      supported = await DictationTranscriber.supportedLocale(equivalentTo: Self.locale)
-      analyzerCache = AnalyzerCache(key: key, locale: supported)
-    }
-    guard let locale = supported else { return nil }
-    // DictationTranscriber, not SpeechTranscriber: with the hotwords it got the names and products right in
-    // 17 of 30 probe clips against 4, at a lower error rate and no later first word (voice local fix spec §8,
-    // D13). The progressive preset shows words while they are being said; the finalised text still corrects them.
-    let preset = DictationTranscriber.Preset.progressiveLongDictation
-    let transcriber = DictationTranscriber(
-      locale: locale, contentHints: preset.contentHints, transcriptionOptions: preset.transcriptionOptions,
-      reportingOptions: preset.reportingOptions, attributeOptions: preset.attributeOptions)
-
-    if assetsInstalling { return "preparing" }
-    if analyzerCache?.key == key, analyzerCache?.assetsInstalled == true {
-      // Installed at an earlier press for this language: no need to ask again.
-    } else {
-      do {
-        if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
-          analyzerCache = nil
-          assetsInstalling = true
-          let download = Task.detached { try? await request.downloadAndInstall() }
-          Task { @MainActor [weak self] in
-            await download.value
-            self?.assetsInstalling = false
-          }
-          return "preparing"
-        }
-        if analyzerCache?.key == key { analyzerCache?.assetsInstalled = true }
-      } catch {
-        analyzerCache = nil
-        return nil
-      }
-    }
-    let format: AVAudioFormat
-    if analyzerCache?.key == key, let cached = analyzerCache?.format {
-      format = cached
-    } else {
-      guard let found = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
-        return nil
-      }
-      format = found
-      if analyzerCache?.key == key { analyzerCache?.format = found }
-    }
-
-    let run = Run(startedAt: pressedAt)
-    let analyzer = SpeechAnalyzer(modules: [transcriber])
-    let (stream, input) = AsyncStream.makeStream(of: AnalyzerInput.self)
-    run.finish = {
-      input.finish()
-      Task { try? await analyzer.finalizeAndFinishThroughEndOfInput() }
-    }
-    run.abort = {
-      input.finish()
-      Task { await analyzer.cancelAndFinishNow() }
-    }
-    // Volatile results replace each other; finalised ones accumulate. Ends when the analyzer finishes.
-    Task { @MainActor [weak self] in
-      var done = ""
-      do {
-        for try await result in transcriber.results {
-          let text = String(result.text.characters)
-          if result.isFinal { done += text }
-          self?.partial(run, result.isFinal ? done : done + text)
-        }
-        self?.final(run, done)
-      } catch {
-        // A live run failing (not one cancelled or replaced): maybe the cached assets went away, so look
-        // them up again next time.
-        if let self, run === self.run { self.analyzerCache = nil }
-        self?.failed(run)
-      }
-    }
-    // The hotwords as the analysis context: DictationTranscriber leans toward them (probe P1/P2, voice local fix
-    // spec §8: SpeechTranscriber ignored them, 4/30 clips right either way). Without them it still runs.
-    if !hotwords.isEmpty {
-      let context = AnalysisContext()
-      context.contextualStrings[.general] = hotwords
-      try? await analyzer.setContext(context)
-    }
-    do {
-      try await analyzer.start(inputSequence: stream)
-    } catch {
-      analyzerCache = nil
-      run.abort()
-      return nil
-    }
-    guard gen == generation else {
-      run.abort()
-      return "cancelled"
-    }
-    let started = startAudio { mic in
-      if mic == format { return { input.yield(AnalyzerInput(buffer: $0)) } }
-      guard let converter = AVAudioConverter(from: mic, to: format) else { return nil }
-      return { buffer in
-        if let converted = Self.convert(buffer, with: converter) { input.yield(AnalyzerInput(buffer: converted)) }
-      }
-    }
-    guard started else {
-      run.abort()
-      return "unavailable"
-    }
-    self.run = run
-    return "ok"
-  }
-
-  /// Converts one tapped buffer to the analyzer's format (audio thread; the converter keeps resampling state).
-  private static func convert(_ buffer: AVAudioPCMBuffer, with converter: AVAudioConverter) -> AVAudioPCMBuffer? {
-    let format = converter.outputFormat
-    let frames = (Double(buffer.frameLength) * format.sampleRate / buffer.format.sampleRate).rounded(.up)
-    guard frames > 0, let out = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)) else {
-      return nil
-    }
-    var handed = false
-    var error: NSError?
-    let status = converter.convert(to: out, error: &error) { _, inputStatus in
-      if handed {
-        inputStatus.pointee = .noDataNow
-        return nil
-      }
-      handed = true
-      inputStatus.pointee = .haveData
-      return buffer
-    }
-    return status == .error || out.frameLength == 0 ? nil : out
-  }
-
-  // MARK: - Below iOS 26: SFSpeechRecognizer
-
-  private func startRecognizer(hotwords: [String], pressedAt: TimeInterval) -> String {
-    guard let recognizer = SFSpeechRecognizer(locale: Self.locale), recognizer.isAvailable else { return "unavailable" }
-    let request = SFSpeechAudioBufferRecognitionRequest()
-    request.shouldReportPartialResults = true
-    // Dictation: partials come per word, not held for a whole query.
-    request.taskHint = .dictation
-    request.contextualStrings = hotwords
-    request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
-    guard startAudio({ _ in { request.append($0) } }) else { return "unavailable" }
-
-    let run = Run(startedAt: pressedAt)
-    let task = recognizer.recognitionTask(with: request) { [weak self, weak run] result, error in
-      let text = result?.bestTranscription.formattedString
-      let isFinal = result?.isFinal ?? false
-      let failed = error != nil
-      DispatchQueue.main.async {
-        guard let self, let run else { return }
-        if let text, isFinal {
-          self.final(run, text)
-        } else if failed {
-          self.failed(run)
-        } else if let text {
-          self.partial(run, text)
-        }
-      }
-    }
-    run.recognizer = recognizer
-    run.finish = { request.endAudio() }
-    run.abort = {
-      request.endAudio()
-      task.cancel()
-    }
-    self.run = run
-    return "ok"
-  }
-}
-
-/// The analyzer lookups for one language (`key`, a `Locale.identifier`); main thread only.
-private struct AnalyzerCache {
-  let key: String
-  /// `DictationTranscriber.supportedLocale(equivalentTo:)`; nil = no transcriber for this language.
-  let locale: Locale?
-  /// `assetInstallationRequest` said nothing needs installing.
-  var assetsInstalled = false
-  /// `SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith:)`.
-  var format: AVAudioFormat?
-}
-
-/// One recording: how to end its recogniser, and what Dart has seen of it. Main thread only.
-private final class Run {
-  init(startedAt: TimeInterval) { self.startedAt = startedAt }
-
-  /// When `start` was called (`SpeechPlugin.now()`), and when the first non-empty partial and `stop` came.
-  let startedAt: TimeInterval
-  var firstPartialAt: TimeInterval?
-  var stoppedAt: TimeInterval?
-
-  /// The audio has ended: the recogniser should deliver its final text.
-  var finish: () -> Void = {}
-  /// Drop the recogniser without a result. Safe to call more than once, and after it finished.
-  var abort: () -> Void = {}
-  /// Kept alive while the recognition runs.
-  var recognizer: AnyObject?
-  /// The latest transcript sent as `partial`.
-  var text = ""
-  /// `stop` came: no more audio, a `final` is due.
-  var stopped = false
 }

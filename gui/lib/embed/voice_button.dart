@@ -97,11 +97,16 @@ String? sendVoice({
 
 /// How long each hint stays once it shows (plan Global Constraints; the preparing and unavailable ones as long
 /// as a put-back).
-Duration _life(String hint) => switch (hint) {
+/// An engine's own hints ([VoiceInput.deniedText] / [VoiceInput.unavailableText]) stay like the denied one and
+/// like a language hint, unless they are the system engine's, which keep their times.
+Duration _life(String hint, VoiceInput voice) => switch (hint) {
   voiceBlank => const Duration(milliseconds: 1500),
   voiceDenied => const Duration(seconds: 4),
   voiceLanguageHint || linuxVoiceLanguageHint => const Duration(seconds: 6),
   linuxVoicePreparing || linuxVoiceUnavailable => const Duration(seconds: 4),
+  voiceUnavailable => const Duration(seconds: 2),
+  _ when hint == voice.deniedText => const Duration(seconds: 4),
+  _ when hint == voice.unavailableText => const Duration(seconds: 6),
   _ => const Duration(seconds: 2),
 };
 
@@ -236,7 +241,7 @@ class VoiceHold extends ChangeNotifier {
     _showing = v;
     // A hint set during the release starts its time now, as the stack fades back in with it.
     final h = hint;
-    if (!active && h != null && _hintTimer == null) _hintTimer = Timer(_life(h) + _stackFadeIn, _clearHint);
+    if (!active && h != null && _hintTimer == null) _hintTimer = Timer(_life(h, voice) + _stackFadeIn, _clearHint);
     notifyListeners();
   }
 
@@ -283,7 +288,7 @@ class VoiceHold extends ChangeNotifier {
         _end(null);
       case VoiceStart.denied:
         _pressed = false;
-        _setHint(voiceDenied, settings: VoiceSettings.privacy);
+        _setHint(voice.deniedText ?? voiceDenied, settings: VoiceSettings.privacy);
         _end(null);
       case VoiceStart.preparing:
         _pressed = false;
@@ -291,7 +296,7 @@ class VoiceHold extends ChangeNotifier {
         _end(null);
       case VoiceStart.unavailable:
         _pressed = false;
-        _setHint(_linux ? linuxVoiceUnavailable : voiceUnavailable);
+        _setHint(voice.unavailableText ?? (_linux ? linuxVoiceUnavailable : voiceUnavailable));
         _end(null);
     }
   }
@@ -471,7 +476,7 @@ class VoiceHold extends ChangeNotifier {
     if (h == null && hint == null) return;
     hint = h;
     this.settings = h != null ? settings : VoiceSettings.none;
-    if (h != null && !active) _hintTimer = Timer(_life(h), _clearHint);
+    if (h != null && !active) _hintTimer = Timer(_life(h, voice), _clearHint);
     notifyListeners();
   }
 

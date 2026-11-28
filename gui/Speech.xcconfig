@@ -1,0 +1,10 @@
+// Which speech engine the app is built with (wx offline ASR design §5.3): `apple`, the system's recognisers
+// (the default), or `wx`, WeChat IME's offline model (rust/speech-wx). Only that one engine goes into the
+// binary. Scripts take RAPP_SPEECH=wx and hand it to Xcode (FLUTTER_XCODE_RAPP_SPEECH); to try it straight
+// from Xcode, change the line below. Included by gui/macos/Runner/Configs/AppInfo.xcconfig and
+// gui/ios/Flutter/Rapp.xcconfig.
+RAPP_SPEECH = apple
+
+RAPP_SPEECH_SWIFT_apple =
+RAPP_SPEECH_SWIFT_wx = RAPP_SPEECH_WX
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(RAPP_SPEECH_SWIFT_$(RAPP_SPEECH))

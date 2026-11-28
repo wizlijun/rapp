@@ -31,6 +31,8 @@
 		78A318202AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage in Frameworks */ = {isa = PBXBuildFile; productRef = 78A3181F2AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage */; };
 		A5E5510000000000000000A2 /* SessionPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E5510000000000000000A1 /* SessionPlugin.swift */; };
 		A5E5510000000000000000C2 /* SpeechPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E5510000000000000000C1 /* SpeechPlugin.swift */; };
+		A5E5510000000000000000C6 /* SpeechEngineApple.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E5510000000000000000C5 /* SpeechEngineApple.swift */; };
+		A5E5510000000000000000C4 /* SpeechEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E5510000000000000000C3 /* SpeechEngine.swift */; };
 		A5E551000000000000000F12 /* UnlockPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E551000000000000000F11 /* UnlockPlugin.swift */; };
 		A5E551000000000000000F14 /* SecureInputPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E551000000000000000F13 /* SecureInputPlugin.swift */; };
 		A5E5510000000000000000B2 /* DetachedWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E5510000000000000000B1 /* DetachedWindow.swift */; };
@@ -93,6 +95,8 @@
 		9740EEB21CF90195004384FC /* Debug.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		A5E5510000000000000000A1 /* SessionPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionPlugin.swift; sourceTree = "<group>"; };
 		A5E5510000000000000000C1 /* SpeechPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechPlugin.swift; sourceTree = "<group>"; };
+		A5E5510000000000000000C5 /* SpeechEngineApple.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechEngineApple.swift; sourceTree = "<group>"; };
+		A5E5510000000000000000C3 /* SpeechEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechEngine.swift; sourceTree = "<group>"; };
 		A5E551000000000000000F11 /* UnlockPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnlockPlugin.swift; sourceTree = "<group>"; };
 		A5E551000000000000000F13 /* SecureInputPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureInputPlugin.swift; sourceTree = "<group>"; };
 		A5E5510000000000000000B1 /* DetachedWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetachedWindow.swift; sourceTree = "<group>"; };
@@ -191,6 +195,8 @@
 				33CC11122044BFA00003C045 /* MainFlutterWindow.swift */,
 				A5E5510000000000000000A1 /* SessionPlugin.swift */,
 				A5E5510000000000000000C1 /* SpeechPlugin.swift */,
+				A5E5510000000000000000C5 /* SpeechEngineApple.swift */,
+				A5E5510000000000000000C3 /* SpeechEngine.swift */,
 				A5E552000000000000000011 /* ComposerNative.m */,
 				A5E552000000000000000001 /* ComposerPlugin.swift */,
 				D0C3E1000000000000000001 /* DockMenu.swift */,
@@ -389,6 +395,8 @@
 				33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */,
 				A5E5510000000000000000A2 /* SessionPlugin.swift in Sources */,
 				A5E5510000000000000000C2 /* SpeechPlugin.swift in Sources */,
+				A5E5510000000000000000C6 /* SpeechEngineApple.swift in Sources */,
+				A5E5510000000000000000C4 /* SpeechEngine.swift in Sources */,
 				A5E552000000000000000012 /* ComposerNative.m in Sources */,
 				A5E552000000000000000002 /* ComposerPlugin.swift in Sources */,
 				D0C3E1000000000000000002 /* DockMenu.swift in Sources */,

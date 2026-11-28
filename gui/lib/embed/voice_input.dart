@@ -1,6 +1,8 @@
-// The Dart side of the `rapp/speech` channel (gui/ios/Runner, a later task): hold-to-talk speech recognition.
-// Dart calls `start` ({hotwords} when there are any) / `stop` / `cancel`; native answers with `partial` / `final` {text} and `error` {code} calls,
-// and `timing` {first_partial_ms, final_ms} just before `final`.
+// The Dart side of the `rapp/speech` channel (gui/macos/Runner/SpeechPlugin.swift): hold-to-talk speech recognition.
+// Dart calls `engine` {local_dir} once ([VoiceInput.loadEngine]: native replies {name, final_wait_ms, denied,
+// unavailable}), then `start` ({hotwords} when there are any) / `stop` / `cancel`; native answers with
+// `partial` / `final` {text} and `error` {code} calls, `timing` {first_partial_ms, final_ms} just before `final`,
+// and `log` {line}.
 // `start` replies `cancelled` when a cancel or an interruption overtook it natively.
 import 'dart:async';
 
@@ -34,8 +36,37 @@ class VoiceInput extends ChangeNotifier {
 
   final MethodChannel _channel;
 
-  /// How long `stop` waits for the final transcript before settling for the last partial.
-  final Duration finalWait;
+  /// How long `stop` waits for the final transcript before settling for the last partial; [loadEngine] takes
+  /// the native engine's.
+  Duration finalWait;
+
+  /// The native engine's name and its hints for a `denied` / `unavailable` start, from [loadEngine]; null
+  /// until it answered (or where there is no `engine` method, as on Linux).
+  String? engineName, deniedText, unavailableText;
+
+  /// Native `log` {line}: a line for the app's log.
+  void Function(String line)? onLog;
+
+  /// Asks native which engine it was built with (wx offline ASR design §5.3) and lets it get ready; [localDir]
+  /// is the data directory's `local` folder. Dart keeps no engine's wait or wording of its own: they come from
+  /// here. Without an answer the defaults stay.
+  Future<void> loadEngine({String? localDir}) async {
+    Object? reply;
+    try {
+      reply = await _channel.invokeMethod<Object?>('engine', localDir == null ? null : {'local_dir': localDir});
+    } on PlatformException {
+      return;
+    } on MissingPluginException {
+      return;
+    }
+    if (reply is! Map) return;
+    String? text(Object? v) => v is String && v.isNotEmpty ? v : null;
+    engineName = text(reply['name']);
+    deniedText = text(reply['denied']);
+    unavailableText = text(reply['unavailable']);
+    final ms = reply['final_wait_ms'];
+    if (ms is num && ms > 0) finalWait = Duration(milliseconds: ms.toInt());
+  }
 
   /// Recording ends by itself this long after it began (`onMaxLength` fires once).
   final Duration maxLength;
@@ -188,8 +219,12 @@ class VoiceInput extends ChangeNotifier {
   /// starting: native sends nothing for a run before its `ok`, so anything then is a late one from the last run.
   @visibleForTesting
   Future<Object?> handle(MethodCall call) async {
-    if (_phase == VoicePhase.idle || _phase == VoicePhase.starting) return null;
     final args = call.arguments is Map ? call.arguments as Map : const {};
+    if (call.method == 'log') {
+      onLog?.call('${args['line'] ?? ''}');
+      return null;
+    }
+    if (_phase == VoicePhase.idle || _phase == VoicePhase.starting) return null;
     switch (call.method) {
       case 'partial':
         _set(text: '${args['text'] ?? ''}');

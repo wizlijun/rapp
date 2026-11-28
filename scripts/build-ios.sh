@@ -1,5 +1,7 @@
 #!/bin/bash
-# Build the iOS app. Usage: build-ios.sh [sim|device|ipa] [--install <udid>]
+# Build the iOS app. Usage: [RAPP_SPEECH=apple|wx] build-ios.sh [sim|device|ipa] [--install <udid>]
+#   RAPP_SPEECH picks the speech engine built in (wx offline ASR design §5.3): apple (default, the system's)
+#   or wx (WeChat IME's offline model; its model files are copied to the phone separately, never bundled).
 #   sim     arm64 simulator app            -> gui/build/ios/iphonesimulator/Runner.app
 #   device  development-signed ipa         -> gui/build/ios/ipa/ (with --install: installed and launched on <udid>)
 #   ipa     app-store ipa for TestFlight   -> gui/build/ios/ipa/
@@ -15,6 +17,16 @@ fi
 flutter=${FLUTTER:-$HOME/development/flutter/bin/flutter}
 bundle=com.rapphub.rapp
 export PATH=$HOME/.cargo/bin:$PATH
+speech=${RAPP_SPEECH:-apple}
+case $speech in
+apple | wx) ;;
+*)
+  echo "RAPP_SPEECH is apple or wx, not '$speech'" >&2
+  exit 2
+  ;;
+esac
+# Flutter hands FLUTTER_XCODE_<name> to xcodebuild as the build setting <name> (gui/Speech.xcconfig).
+export FLUTTER_XCODE_RAPP_SPEECH=$speech
 
 hub() { (cd "$repo/rust" && cargo build --release -p rapp-hub-ffi --target "$1"); }
 
