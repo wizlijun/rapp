@@ -66,9 +66,23 @@ signs_with_ids() {
     local code
     code=$(grep -v '^[[:space:]]*#' "$1")
     printf '%s\n' "$code" | grep -q 'for pair in \$EXPECTED_IDS' &&
-        printf '%s\n' "$code" | grep -q -- '"\${SIGN\[@\]}" -i "\${pair#\*:}"'
+        printf '%s\n' "$code" | grep -q -- '"\${SIGN\[@\]}" .*-i "\${pair#\*:}"'
 }
 check "signing loop passes -i from EXPECTED_IDS" signs_with_ids scripts/package-macos.sh
+# Hardened runtime refuses Apple Events, without even a prompt, unless the responsible program (rapp-service, which
+# starts rapp-term) carries this entitlement; the app's Info.plist gives the prompt its reason.
+check "apple events entitlement file grants it" bash -c \
+    '[ "$(/usr/libexec/PlistBuddy -c "Print :com.apple.security.automation.apple-events" scripts/apple-events.entitlements)" = true ]'
+for b in rapp-service rapp-term; do
+    check "$b gets apple events" eq "$(apple_events_entitlements "$b" /r)" "/r/scripts/apple-events.entitlements"
+done
+for b in rapp-hub rapp-center rapp-cli rapp-host rapp-client; do
+    check "$b gets no apple events" eq "$(apple_events_entitlements "$b" /r)" ""
+done
+check "signing loop passes the apple events entitlement" bash -c \
+    'code=$(grep -v "^[[:space:]]*#" scripts/package-macos.sh); grep -q "ent=\$(apple_events_entitlements \"\${pair%%:\*}\" \"\$ROOT\")" <<<"$code" && grep -qF "\${ent:+--entitlements \"\$ent\"} -i" <<<"$code"'
+check "app says why it controls Terminal" bash -c \
+    'plutil -extract NSAppleEventsUsageDescription raw -o - gui/macos/Runner/Info.plist | grep -q 终端'
 check "postinstall waits for the old agent to leave" grep -q 'while launchctl print "gui/$USER_ID/$LABEL"' scripts/pkg/postinstall
 check "package script builds and bundles rapp-cli" bash -c 'grep -q -- "-p rapp-cli" scripts/package-macos.sh && grep -q "release/rapp-cli \"\$APP/Contents/MacOS/\"" scripts/package-macos.sh'
 check "postinstall links the rapp command" bash -c 'grep -q "^CLI=/usr/local/bin/rapp$" scripts/pkg/postinstall && grep -q "ln -sfn \"\$APP/Contents/MacOS/rapp-cli\" \"\$CLI\"" scripts/pkg/postinstall'

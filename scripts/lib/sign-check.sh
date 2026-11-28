@@ -28,6 +28,15 @@ pick_identity() {
     echo "adhoc -"
 }
 
+# apple_events_entitlements <program> <repo root>: the entitlements file that lets <program> send Apple Events under
+# the hardened runtime, or nothing. rapp-term sends them (Terminal tabs) and rapp-service starts it, so macOS checks
+# the entitlement on rapp-service; without it macOS refuses at once, and no prompt ever shows.
+apple_events_entitlements() {
+    case $1 in
+    rapp-service | rapp-term) echo "$2/scripts/apple-events.entitlements" ;;
+    esac
+}
+
 # runtime_flags <kind>: hardened runtime + timestamp only for Developer ID.
 runtime_flags() { [ "${1-}" = devid ] && echo "--options runtime --timestamp" || true; }
 
