@@ -557,7 +557,8 @@ List<Widget> composerLayer(
     required RemoteSession session,
     required SessionPort port,
     double keyboard = 0,
-    ComposerEditor Function()? editor}) {
+    ComposerEditor Function()? editor,
+    Widget Function(BuildContext context, VoiceHold? hold, double bottom)? phoneStack}) {
   final both = Listenable.merge([session, session.composer, state.composerZoom, state.stageSide]);
   const rowRight = 12.0;
   final ios = defaultTargetPlatform == TargetPlatform.iOS;
@@ -587,7 +588,9 @@ List<Widget> composerLayer(
             port: port,
             maxHeight: maxHeight,
           ),
-          stack: (context, bottom, stage, upright) => ios
+          stack: (context, bottom, stage, upright) => phoneStack != null
+              ? phoneStack(context, hold, bottom)
+              : ios
               ? _iosStack(context, state, session, port, hold, bottom, stage, upright)
               : _cornerRow(context, state, session, port, keyboard, rowRight, stage),
         ),

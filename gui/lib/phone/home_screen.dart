@@ -1,8 +1,6 @@
 /// The phone home page, read-only: what waits for you, what is working, what finished (V1b Task 6, H1-H11).
 library;
 
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../ui/main_state.dart';
@@ -11,7 +9,7 @@ import 'devices_page.dart';
 import 'enter_when_open.dart';
 import 'home_model.dart';
 import 'phone_nav.dart';
-import 'phone_voice.dart';
+import 'card_kit.dart';
 import 'reply_card.dart';
 import 'reply_model.dart';
 import 'sheet.dart';
@@ -54,6 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final _workKey = GlobalKey();
 
   late final EnterWhenOpen _enter;
+  late final PhoneCardKit _kit = PhoneCardKit(_s, _nav);
 
   MainState get _s => widget.state;
   PhoneNav get _nav => widget.nav;
@@ -110,35 +109,13 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _canOpen(NeedItem n) => n.greyWord == null && (n.kind != NeedKind.terminal || _s.hubUsable);
 
   void _gotIt(HomeItem item) {
-    final sync = _s.stateSync;
     setState(() {
       _nav.cameFrom = null;
-      _nav.gotIt.add(item.gotItKey);
+      _kit.gotIt(item);
     });
-    if (item.kind == HomeKind.resource && item.need != null) {
-      _s.snoozeNeed(item.need!);
-    }
-    final eid = item.eid;
-    if (eid != null) sync?.markHandled(eid);
-    if (item.kind == HomeKind.done && _viaService(item)) {
-      final p = item.id.split('\n');
-      sync?.markSeen(p[1], p[2]);
-    }
   }
 
-  /// A done terminal of a device this machine has no terminal list for: only the service can clear it.
-  bool _viaService(HomeItem i) {
-    final p = i.id.split('\n');
-    return p.length == 3 && p[0] == 'term' && _s.stateSync != null && !(_s.hub?.termLists.containsKey(p[1]) ?? false);
-  }
-
-  CardReply _replyOf(HomeItem card) {
-    final p = card.id.split('\n');
-    final row = p.length == 3 && p[0] == 'term'
-        ? _s.hub?.termLists[p[1]]?.terms.where((r) => r.id == p[2]).firstOrNull
-        : null;
-    return replyOf(card, row: row, deviceReply: p.length == 3 && deviceCanReply(_s.probes, p[1]));
-  }
+  CardReply _replyOf(HomeItem card) => _kit.cardReply(card);
 
   VoidCallback? _buttonOf(HomeItem item) {
     switch (item.button) {
@@ -155,7 +132,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _s.reconnect(item.need!.target);
         };
       case HomeButton.gotIt:
-        if (_offline && (item.eid != null || _viaService(item))) return null;
+        if (_offline && (item.eid != null || _kit.viaService(item))) return null;
         return () => _gotIt(item);
     }
   }
@@ -322,63 +299,13 @@ class _HomeScreenState extends State<HomeScreen> {
         item: card,
         reply: reply,
         replies: _nav.replies,
-        voice: _canVoice(card, reply) ? (label, use) => _voiceFor(card, reply, label, use) : null,
+        voice: _kit.canVoice(card, reply)
+            ? (label, use) => _kit.voiceFor(card, reply, label, use, editIn: _editIn, mounted: () => mounted)
+            : null,
         onGotIt: reply.kind == ReplyKind.done ? _buttonOf(card) : null,
         onGoLook: () => _goLook(card),
       ),
     );
-  }
-
-  /// Hold to talk needs a recogniser, a target, the session to go into, and for 「要改」 the seq and its keys:
-  /// without any of them the words would have nowhere to go.
-  bool _canVoice(HomeItem item, CardReply reply) {
-    if (_s.voice == null || reply.target == null || item.sessionKey == null) return false;
-    if (reply.kind == ReplyKind.review) return reply.seq != null && reply.planRevise != null;
-    return true;
-  }
-
-  /// 「说一句」 / 「要改」: hold to talk; the words go through the reply path, no view (V4). 「编辑」 goes in.
-  Widget _voiceFor(HomeItem item, CardReply reply, String label, ReplyVoiceUse use) {
-    final t = reply.target!;
-    final seq = reply.seq;
-    final keys = reply.planRevise;
-    final revise = use == ReplyVoiceUse.revise && seq != null && keys != null;
-    final replies = _nav.replies;
-    return PhoneVoice(
-      state: _s,
-      key2: '${item.gotItKey}\n${use.name}',
-      send: (text, voice) {
-        if (revise) {
-          unawaited(_revised(item, replies.revise(item.id, t, seq, keys, text)));
-        } else {
-          unawaited(replies.say(item.id, t, text));
-        }
-        return null;
-      },
-      edit: (text) {
-        if (revise) {
-          unawaited(_reviseEdit(item, t, seq, keys, text));
-        } else {
-          _editIn(item, text);
-        }
-      },
-      builder: (context, hold) => phoneVoiceButton(hold, label),
-    );
-  }
-
-  Future<void> _revised(HomeItem item, Future<bool> sent) async {
-    final ok = await sent;
-    final eid = item.pointsEid;
-    if (ok && eid != null) _nav.replies.markEid(eid);
-  }
-
-  /// 要改 → 编辑: the edit key goes first; only if it went does the session open with the words in its draft.
-  Future<void> _reviseEdit(HomeItem item, ReplyTarget t, int seq, List<String> keys, String text) async {
-    final ok = await _nav.replies.keys(item.id, t, seq, keys, doneWord: '已发出');
-    if (!ok) return;
-    final eid = item.pointsEid;
-    if (eid != null) _nav.replies.markEid(eid);
-    if (mounted) _editIn(item, text);
   }
 
   void _editIn(HomeItem item, String text) {
