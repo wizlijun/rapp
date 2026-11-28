@@ -45,9 +45,9 @@ class ReplyActions extends StatelessWidget {
   Future<void> _keys(List<String> keys, String word, {bool plan = false}) async {
     final t = reply.target;
     if (t == null) return;
-    await replies.keys(item.id, t, reply.seq, keys, doneWord: word);
+    final sent = await replies.keys(item.id, t, reply.seq, keys, doneWord: word);
     final eid = item.pointsEid;
-    if (plan && eid != null && replies.outcomeOf(item.id)?.failed != true) replies.markEid(eid);
+    if (plan && eid != null && sent) replies.markEid(eid);
   }
 
   @override

@@ -30,9 +30,10 @@ class _Replies extends PhoneReplies {
   ReplyOutcome? outcomeOf(String itemId) => outcomes[itemId];
 
   @override
-  Future<void> keys(String itemId, ReplyTarget t, int? seq, List<String> keys, {required String doneWord}) async {
+  Future<bool> keys(String itemId, ReplyTarget t, int? seq, List<String> keys, {required String doneWord}) async {
     calls.add((id: itemId, seq: seq, keys: keys, word: doneWord));
     if (failNext) outcomes[itemId] = const ReplyOutcome('没成功，进去看看', failed: true);
+    return !failNext;
   }
 
   @override

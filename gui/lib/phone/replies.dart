@@ -64,34 +64,40 @@ class PhoneReplies extends ChangeNotifier {
   }
 
   /// A button of the card: [keys] go with the question's [seq]; [doneWord] says it went.
-  Future<void> keys(String itemId, ReplyTarget t, int? seq, List<String> keys, {required String doneWord}) async {
-    if (!_ready(itemId, t, seq)) return;
+  /// Returns true only when the keys were sent (not refused up front, not failed).
+  Future<bool> keys(String itemId, ReplyTarget t, int? seq, List<String> keys, {required String doneWord}) async {
+    if (!_ready(itemId, t, seq)) return false;
     final base = _base(t);
-    if (!await _sendOnce(itemId, doneWord, () => _go(t, seq: seq, keys: keys))) return;
+    if (!await _sendOnce(itemId, doneWord, () => _go(t, seq: seq, keys: keys))) return false;
     _watch(itemId, t, base, doneWord);
+    return true;
   }
 
   /// A spoken or typed reply: the text and Enter, with no seq.
-  Future<void> say(String itemId, ReplyTarget t, String text) async {
-    if (!_ready(itemId, t, null)) return;
+  /// Blank text sends nothing. Returns true only when it was sent.
+  Future<bool> say(String itemId, ReplyTarget t, String text) async {
+    if (text.trim().isEmpty || !_ready(itemId, t, null)) return false;
     final base = _base(t);
-    if (!await _sendOnce(itemId, '已发出', () => _go(t, text: text, enter: true))) return;
+    if (!await _sendOnce(itemId, '已发出', () => _go(t, text: text, enter: true))) return false;
     _record(t, text);
     _watch(itemId, t, base, '已发出');
+    return true;
   }
 
   /// 「要改」: the key that opens the program's edit box (with the seq), a short gap, then the words and Enter.
-  Future<void> revise(String itemId, ReplyTarget t, int seq, List<String> keys, String text) async {
-    if (!_ready(itemId, t, seq)) return;
+  /// Blank text sends nothing. Returns true only when it was sent.
+  Future<bool> revise(String itemId, ReplyTarget t, int seq, List<String> keys, String text) async {
+    if (text.trim().isEmpty || !_ready(itemId, t, seq)) return false;
     final base = _base(t);
     final ok = await _sendOnce(itemId, '已发出', () async {
       await _go(t, seq: seq, keys: keys);
       await Future<void>.delayed(reviseGap);
       await _go(t, text: text, enter: true);
     });
-    if (!ok) return;
+    if (!ok) return false;
     _record(t, text);
     _watch(itemId, t, base, '已发出');
+    return true;
   }
 
   /// After 「同意」 or 「要改」 went: the queue row [eid] is handled.

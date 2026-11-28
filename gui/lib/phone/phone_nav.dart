@@ -25,7 +25,7 @@ class PhoneNav extends ChangeNotifier {
   final Set<String> gotIt = {};
 
   /// Words for the draft of the session the user is about to go into (a spoken reply they chose to 编辑).
-  String? pendingDraft;
+  ({String key, String text})? pendingDraft;
 
   /// Into a session ("会话里面").
   void enter(String key) {
@@ -34,8 +34,8 @@ class PhoneNav extends ChangeNotifier {
     final d = pendingDraft;
     pendingDraft = null;
     final rs = state.currentRemote;
-    if (d != null && rs != null) {
-      rs.composer.keep(d);
+    if (d != null && d.key == key && rs != null) {
+      rs.composer.keep(d.text);
       rs.composer.open = true;
     }
     entered = key;
@@ -54,6 +54,7 @@ class PhoneNav extends ChangeNotifier {
 
   /// The devices or the settings page.
   void open(PhoneView v) {
+    pendingDraft = null;
     cameFrom = null;
     _now = v;
     notifyListeners();

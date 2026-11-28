@@ -76,6 +76,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _onNav() {
     if (_nav.now != PhoneView.home) {
       _enter.cancel();
+      _nav.pendingDraft = null;
       _all = false;
       _allWorking = false;
     }
@@ -321,27 +322,33 @@ class _HomeScreenState extends State<HomeScreen> {
         item: card,
         reply: reply,
         replies: _nav.replies,
-        voice: _s.voice == null ? null : (label, use) => _voiceFor(card, reply, label, use),
+        voice: _canVoice(card, reply) ? (label, use) => _voiceFor(card, reply, label, use) : null,
         onGotIt: reply.kind == ReplyKind.done ? _buttonOf(card) : null,
         onGoLook: () => _goLook(card),
       ),
     );
   }
 
+  /// Hold to talk needs a recogniser, a target, the session to go into, and for 「要改」 the seq and its keys:
+  /// without any of them the words would have nowhere to go.
+  bool _canVoice(HomeItem item, CardReply reply) {
+    if (_s.voice == null || reply.target == null || item.sessionKey == null) return false;
+    if (reply.kind == ReplyKind.review) return reply.seq != null && reply.planRevise != null;
+    return true;
+  }
+
   /// 「说一句」 / 「要改」: hold to talk; the words go through the reply path, no view (V4). 「编辑」 goes in.
   Widget _voiceFor(HomeItem item, CardReply reply, String label, ReplyVoiceUse use) {
-    final t = reply.target;
+    final t = reply.target!;
     final seq = reply.seq;
     final keys = reply.planRevise;
-    final revise = use == ReplyVoiceUse.revise;
+    final revise = use == ReplyVoiceUse.revise && seq != null && keys != null;
     final replies = _nav.replies;
     return PhoneVoice(
       state: _s,
       key2: '${item.gotItKey}\n${use.name}',
       send: (text, voice) {
-        if (t == null) return null;
         if (revise) {
-          if (seq == null || keys == null) return null;
           unawaited(_revised(item, replies.revise(item.id, t, seq, keys, text)));
         } else {
           unawaited(replies.say(item.id, t, text));
@@ -349,7 +356,7 @@ class _HomeScreenState extends State<HomeScreen> {
         return null;
       },
       edit: (text) {
-        if (revise && t != null && seq != null && keys != null) {
+        if (revise) {
           unawaited(_reviseEdit(item, t, seq, keys, text));
         } else {
           _editIn(item, text);
@@ -359,22 +366,25 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _revised(HomeItem item, Future<void> sent) async {
-    await sent;
+  Future<void> _revised(HomeItem item, Future<bool> sent) async {
+    final ok = await sent;
     final eid = item.pointsEid;
-    if (eid != null && _nav.replies.outcomeOf(item.id)?.failed != true) _nav.replies.markEid(eid);
+    if (ok && eid != null) _nav.replies.markEid(eid);
   }
 
+  /// 要改 → 编辑: the edit key goes first; only if it went does the session open with the words in its draft.
   Future<void> _reviseEdit(HomeItem item, ReplyTarget t, int seq, List<String> keys, String text) async {
-    await _nav.replies.keys(item.id, t, seq, keys, doneWord: '已发出');
-    if (_nav.replies.outcomeOf(item.id)?.failed == true) return;
+    final ok = await _nav.replies.keys(item.id, t, seq, keys, doneWord: '已发出');
+    if (!ok) return;
     final eid = item.pointsEid;
     if (eid != null) _nav.replies.markEid(eid);
     if (mounted) _editIn(item, text);
   }
 
   void _editIn(HomeItem item, String text) {
-    _nav.pendingDraft = text;
+    final key = item.sessionKey;
+    if (key == null) return;
+    _nav.pendingDraft = (key: key, text: text);
     _goLook(item);
   }
 

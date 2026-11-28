@@ -54,11 +54,17 @@ class _PhoneVoiceState extends State<PhoneVoice> {
     if (voice == null) return;
     final k = widget.key2;
     // The widget at call time: a rebuild may bring a new card's closures under the same key.
-    _s.voiceSends[k] = (text, origin) => widget.send(text, origin);
+    _s.voiceSends[k] = (text, origin) {
+      final t = text.trim();
+      return t.isEmpty ? voiceBlank : widget.send(t, origin);
+    };
     _s.voiceEdits[k] = (text, ai) => widget.edit(text);
     _hold = VoiceHold(
       voice: voice,
-      send: (text, heard) => widget.send(text.trim(), VoiceOrigin(heard: heard)),
+      send: (text, heard) {
+        final t = text.trim();
+        return t.isEmpty ? voiceBlank : widget.send(t, VoiceOrigin(heard: heard));
+      },
       edit: (text, heard) => widget.edit(text),
       composer: () => _composer,
       tidy: (text, pick, at, heard) => _s.tidyOf(k).begin(text, pick, at: at, heard: heard.heard),
@@ -94,6 +100,12 @@ class _PhoneVoiceState extends State<PhoneVoice> {
         final tidy = _s.tidyOf(widget.key2);
         return Stack(children: [
           Positioned.fill(child: VoiceOverlay(hold: hold, voice: voice)),
+          ListenableBuilder(
+            listenable: hold,
+            builder: (context, _) => hold.hint == null || hold.active
+                ? const SizedBox.shrink()
+                : Positioned(left: 12, right: 12, bottom: 96, child: Center(child: voiceHint(hold))),
+          ),
           ListenableBuilder(
             listenable: tidy,
             builder: (context, _) {
