@@ -1,7 +1,11 @@
 //! 不锁屏 (spec 2026-11-28): while the switch is on, a child holds this device awake, and auto-lock waits.
 //! macOS: `rapp-host stay-awake --json`; Linux: `systemd-inhibit … cat`. Either lets go once its stdin closes.
 
-use crate::state::State;
+use crate::forward::{admit, Caller};
+use crate::sharing::By;
+use crate::state::{Peer, State};
+use rapp_net::line::err;
+use rapp_net::msg::Op;
 use rapp_net::log::Lvl;
 use serde_json::{json, Value};
 use std::future::Future;
@@ -54,7 +58,6 @@ enum Report {
 
 /// Whether this device can keep itself awake here: the Mac, or Linux under Hyprland.
 /// Gates the snapshot keys, which come with the remote op.
-#[allow(dead_code)] // until the snapshot uses it
 pub fn supported() -> bool {
     let os = std::env::consts::OS;
     let hypr_dir = os == "linux"
@@ -64,7 +67,6 @@ pub fn supported() -> bool {
 
 /// `hypr_dir`: `$XDG_RUNTIME_DIR/hypr` is a directory. A systemd user service may not carry the
 /// Hyprland environment, but Hyprland's runtime directory is there.
-#[allow(dead_code)] // until the snapshot uses `supported`
 fn supported_in(os: &str, env: impl Fn(&str) -> Option<String>, hypr_dir: bool) -> bool {
     match os {
         "macos" => true,
@@ -91,6 +93,29 @@ pub fn set(state: &State, on: bool, by: Value) -> Result<(), String> {
     fields["on"] = json!(on);
     state.log.event(Lvl::Info, "no_lock_set", fields);
     Ok(())
+}
+
+/// Answers `no_lock` from another device with one JSON line, then closes the stream. Only a key-trusted device
+/// may. The reply is `{"ok":true,"no_lock","no_lock_held"}`, after the change when `on` is given.
+pub async fn serve(state: &Arc<State>, mut s: rapp_conn::Pipe, op: Op, peer: Peer) -> anyhow::Result<()> {
+    let reply = answer(state, &op, &peer);
+    rapp_net::line::write_json(&mut s, &reply).await?;
+    tokio::io::AsyncWriteExt::shutdown(&mut s).await?;
+    Ok(())
+}
+
+fn answer(state: &State, op: &Op, peer: &Peer) -> Value {
+    let Op::NoLock { on } = op else { return err("unknown op") };
+    if let Err(d) = admit(&Caller { fp: peer.fp.as_ref(), server: false }, true) {
+        state.log.event(Lvl::Warn, "no_lock_refused", By::Remote(peer).fields(json!({"reason": d.as_str(), "on": on})));
+        return err(d.as_str());
+    }
+    if let Some(on) = on {
+        if let Err(e) = set(state, *on, By::Remote(peer).fields(json!({}))) {
+            return err(&e);
+        }
+    }
+    json!({"ok": true, "no_lock": state.cfg.lock().unwrap().no_lock(), "no_lock_held": state.no_lock.held()})
 }
 
 /// Keeps a child running while the switch is on; ends after `NoLock::stop` once the child is let go.

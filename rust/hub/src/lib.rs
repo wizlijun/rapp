@@ -453,6 +453,7 @@ impl Hub {
             }
             Some(c @ ("set_label" | "reset_label")) => labels::command(self, c, v).await?,
             Some("set_service") => services::command(self, v).await?,
+            Some("no_lock") => services::no_lock(self, v).await?,
             _ => bail!("unknown cmd"),
         }))
     }

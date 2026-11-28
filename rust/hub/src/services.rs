@@ -25,6 +25,20 @@ pub(crate) async fn command(hub: &Arc<Hub>, v: &Value) -> Result<Value> {
     Ok(event(id, reply))
 }
 
+/// `no_lock {id, on?}`: asks a device to turn 不锁屏 on or off, or, with no `on`, where it stands. The device's
+/// own `error` text travels in the reply.
+pub(crate) async fn no_lock(hub: &Arc<Hub>, v: &Value) -> Result<Value> {
+    let id = v.get("id").and_then(Value::as_str).context("missing id")?;
+    let host = hub.host(id)?;
+    let on = match v.get("on") {
+        None | Some(Value::Null) => None,
+        Some(Value::Bool(b)) => Some(*b),
+        Some(_) => anyhow::bail!("bad on"),
+    };
+    let (_, reply, _) = hub.request(&host, &Op::NoLock { on }).await?;
+    Ok(json!({"event":"no_lock","id":id,"reply":reply}))
+}
+
 fn event(id: &str, reply: Value) -> Value {
     json!({"event":"service","id":id,"reply":reply})
 }

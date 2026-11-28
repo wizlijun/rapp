@@ -247,6 +247,7 @@ pub async fn serve_value(state: &Arc<State>, mut s: Pipe, v: Value, peer: Peer) 
         Ok(Op::Forward { port }) => crate::forward::serve_forward(state, s, port, peer).await,
         Ok(op @ Op::StateSink { .. }) => crate::sink::serve(state, s, op, peer).await,
         Ok(op @ Op::SetService { .. }) => crate::companion::serve(state, s, op, peer).await,
+        Ok(op @ Op::NoLock { .. }) => crate::no_lock::serve(state, s, op, peer).await,
         _ => reply_and_finish(&mut s, err("unknown op")).await,
     }
 }

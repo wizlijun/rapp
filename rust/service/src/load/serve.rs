@@ -28,8 +28,10 @@ pub fn reply(state: &State, history: bool, _top: bool) -> Value {
     if !has_data(load) {
         return err("no data");
     }
+    let keys = no_lock_keys(state);
     let hist = load.hist.lock().unwrap();
     let mut o = with_ok(hist.snapshot(term));
+    o.extend(keys);
     if history {
         o.insert("history".into(), hist.history_json());
     }
@@ -40,10 +42,27 @@ pub fn reply(state: &State, history: bool, _top: bool) -> Value {
 fn line(state: &State) -> Value {
     let Some(load) = &state.load else { return err("unknown op") };
     let term = term(state);
+    let keys = no_lock_keys(state);
     let hist = load.hist.lock().unwrap();
     let mut o = with_ok(hist.snapshot(term));
+    o.extend(keys);
     o.insert("point".into(), hist.point_json());
     o.into()
+}
+
+/// `no_lock` and `no_lock_held`, live, only on a device that can keep itself awake (the GUI shows the card by the key).
+fn no_lock_keys(state: &State) -> Map<String, Value> {
+    let on = state.cfg.lock().unwrap().no_lock();
+    let mut m = Map::new();
+    add_no_lock_keys(&mut m, crate::no_lock::supported(), on, state.no_lock.held());
+    m
+}
+
+fn add_no_lock_keys(o: &mut Map<String, Value>, supported: bool, on: bool, held: bool) {
+    if supported {
+        o.insert("no_lock".into(), on.into());
+        o.insert("no_lock_held".into(), held.into());
+    }
 }
 
 /// `{"ok":true}` first, then the snapshot's keys.
@@ -102,4 +121,19 @@ pub async fn follow<S: AsyncRead + AsyncWrite + Unpin>(state: &State, s: &mut S)
     // The other side may be gone already.
     let _ = s.shutdown().await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::add_no_lock_keys;
+    use serde_json::{json, Map, Value};
+
+    #[test]
+    fn no_lock_keys_only_when_supported() {
+        let mut m = Map::new();
+        add_no_lock_keys(&mut m, false, true, true);
+        assert!(m.is_empty());
+        add_no_lock_keys(&mut m, true, true, true);
+        assert_eq!(Value::Object(m), json!({"no_lock":true,"no_lock_held":true}));
+    }
 }

@@ -83,6 +83,11 @@ fn disk_share(r: &Value) -> Option<f64> {
 fn without_machine(mut r: Value) -> Value {
     r["at"] = json!(0);
     r["disks"] = json!([]);
+    // The switch's keys depend on the platform: the test below looks at them.
+    if let Some(o) = r.as_object_mut() {
+        o.remove("no_lock");
+        o.remove("no_lock_held");
+    }
     if let Some(ws) = r["warnings"].as_array_mut() {
         ws.retain(|w| {
             let item = w["item"].as_str().unwrap_or("");
@@ -127,6 +132,11 @@ async fn load_answers_a_snapshot() {
     assert!(r.get("top").is_none(), "{r}");
     assert!(r["disks"].is_array(), "{r}");
     assert_eq!(without_machine(r.clone()), want_fake(&r));
+    // 不锁屏 shows only where the device can keep itself awake.
+    assert_eq!(r.get("no_lock").is_some(), r.get("no_lock_held").is_some(), "{r}");
+    if cfg!(target_os = "macos") {
+        assert_eq!((&r["no_lock"], &r["no_lock_held"]), (&json!(false), &json!(false)), "{r}");
+    }
     // `top` is accepted; the first version has nothing to give for it.
     let r = req_ok(&conn, json!({"op":"load","top":true})).await;
     assert!(r.get("top").is_none(), "{r}");
