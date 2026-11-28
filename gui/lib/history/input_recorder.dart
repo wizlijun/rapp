@@ -516,6 +516,17 @@ class InputRecorder {
         'text': text,
       };
 
+  /// A reply typed or spoken on a phone card, which answers without a view: one `sent` record with the text, then
+  /// [onSent] (the history's ↑ list). Nothing is written when the record is off.
+  Future<void> replied(SessionMeta m, String text, DateTime at) async {
+    if (!enabled() || text.isEmpty) return;
+    final o = Outgoing([text])
+      ..at = at
+      ..sent = 1;
+    await _write(null, _sentRecord(m, o, true, AfterSend.pressReturn, at), at);
+    onSent?.call(m.key, text, at);
+  }
+
   Map<String, Object?> _sentRecord(SessionMeta m, Outgoing o, bool all, AfterSend after, DateTime at) {
     final total = o.pieces().length;
     return {

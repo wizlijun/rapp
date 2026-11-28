@@ -3327,6 +3327,20 @@ class MainState extends ChangeNotifier {
     );
   }
 
+  /// The input record's session of terminal [row] on [device], for a reply sent without a view.
+  SessionMeta replyMeta(String device, TermRow row) {
+    final key = '$device/${row.id}';
+    return SessionMeta(
+      key: key,
+      hostId: device,
+      hostName: deviceName(device),
+      appId: row.id,
+      appName: row.shown,
+      run: '',
+      projects: [for (final p in projectsOf(key)) p.name],
+    );
+  }
+
   /// Opens the disconnected session [key] again, in the same place with the same choices.
   /// [auto]: the automatic retry's own try (it keeps the `retry` state); a manual one cancels it.
   Future<void> reconnect(String key, {bool auto = false}) async {
