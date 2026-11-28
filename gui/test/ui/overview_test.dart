@@ -26,6 +26,7 @@ import 'package:rapp/ui/terms_entry.dart';
 import 'package:rapp/ui/tokens.dart';
 
 import '../fakes.dart';
+import '../service_client_test.dart' show FakeService, until;
 import 'helpers.dart';
 
 void main() {
@@ -1641,6 +1642,39 @@ void main() {
       await tester.pump();
       expect(t.sent.where((x) => x['cmd'] == 'no_lock').map((x) => (x['id'], x['on'])), [('m1', true)]);
       t.emit({'event': 'load', 'id': 'm1', 'gone': true});
+      await tester.pump();
+    });
+
+    testWidgets('the local switch asks this column\'s service, not the hub', (tester) async {
+      final svc = FakeService('tok')
+        ..loadLines = [
+          {'ok': true, 'at': 1764100000, 'headroom': 30, 'tightest': 'cpu', 'term': true, 'no_lock': false, 'no_lock_held': false, 'history': []},
+        ];
+      late ServiceMonitor m;
+      await tester.runAsync(() async {
+        await svc.start();
+        m = ServiceMonitor(readToken: () async => 'tok', port: svc.port, retry: const Duration(milliseconds: 50));
+        m.start();
+        await until(() => m.status != null && m.load?.noLock == false);
+      });
+      addTearDown(() async {
+        m.dispose();
+        await tester.runAsync(svc.stop);
+      });
+      await boot(tester);
+      s.toggleOverview();
+      await tester.pumpWidget(wrap(SizedBox(width: 1194, height: 700, child: Overview(state: s, monitor: m))));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('column-local-folded')));
+      await tester.pump();
+      expect(tester.widget<Switch>(find.byKey(const Key('no-lock-switch-local'))).value, isFalse);
+      await tester.tap(find.byKey(const Key('no-lock-switch-local')));
+      await tester.pump();
+      await tester.runAsync(() => until(() => svc.received.any((x) => x['cmd'] == 'set_no_lock')));
+      expect(svc.received.where((x) => x['cmd'] == 'set_no_lock').toList(), [
+        {'cmd': 'set_no_lock', 'on': true},
+      ]);
+      expect(t.sent.where((x) => x['cmd'] == 'no_lock'), isEmpty);
       await tester.pump();
     });
 
