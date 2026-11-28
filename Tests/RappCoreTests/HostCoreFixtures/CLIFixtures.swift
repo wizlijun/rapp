@@ -6,7 +6,7 @@ import XCTest
 /// The worker command line for `rust/host-core/tests/cli.rs` (host half of WorkerCLITests).
 ///
 /// - `cli-args.json`: `in` = `{"fn":"host","args","env"}`, `out` = `{"ok": command}` or
-///   `{"error": text}`. A command is `{"cmd": "serve"|"list_apps"|"check"|"version"|"lock", …}`.
+///   `{"error": text}`. A command is `{"cmd": "serve"|"list_apps"|"check"|"version"|"lock"|"stay_awake", …}`.
 /// - `cli-events.json`: `fn == "event"`: `in.event` describes one `WorkerEvent` (`type` plus its
 ///   fields, absent optionals as null), `out` is Swift's `jsonLine`. `fn == "apps"`: `appsJSON`
 ///   inputs and its line. `fn == "shareable"`: `shareableApps` + `appsText`.
@@ -34,6 +34,7 @@ final class CLIFixtures: XCTestCase {
         case let .check(json, prompt): return ["cmd": "check", "json": json, "prompt": prompt]
         case let .version(json): return ["cmd": "version", "json": json]
         case let .lock(json): return ["cmd": "lock", "json": json]
+        case let .stayAwake(json): return ["cmd": "stay_awake", "json": json]
         }
     }
 
@@ -64,6 +65,7 @@ final class CLIFixtures: XCTestCase {
             ["version"], ["version", "--json"], ["check", "--json"], ["check", "--prompt", "--json"], ["check", "--prompt"],
             ["version", "--prompt"], ["list-apps"], ["check", "--token", "x"], ["list-apps", "extra"],
             ["lock", "--json"], ["lock"], ["lock", "extra"],
+            ["stay-awake", "--json"], ["stay-awake"], ["stay-awake", "extra"],
             // Extras: both token forms, empty --token beside a set variable, the port edges.
             ["serve", "--app", "a", "--token", "t", "--token-env", "RAPP_TOKEN"],
             ["serve", "--app", "a", "--token-env", "RAPP_TOKEN", "--token", ""],

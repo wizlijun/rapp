@@ -115,6 +115,25 @@ fn main() {
             emit(if dir.join("already-locked").exists() { r#"{"ok":true,"already":true}"# } else { r#"{"ok":true}"# });
             exit(0, "ok")
         }
+        Some("stay-awake") => {
+            // `stay-awake.log` next to argv[0] gets `start`, then `exit` once stdin closes;
+            // a `stay-awake-fail` file makes the hold fail.
+            let dir = bin_dir();
+            let log = |word: &str| {
+                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("stay-awake.log")) {
+                    let _ = writeln!(f, "{word}");
+                }
+            };
+            if dir.join("stay-awake-fail").exists() {
+                emit(r#"{"ok":false,"error":"forced"}"#);
+                exit(1, "error")
+            }
+            log("start");
+            emit(r#"{"ok":true}"#);
+            let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+            log("exit");
+            exit(0, "ok")
+        }
         Some("serve") => serve(&args[1..]),
         _ => {
             eprintln!("fake-rapp-host: usage: check|list-apps|serve");

@@ -7,9 +7,9 @@ import RappCore
 /// The display assertion stops display sleep; declaring user activity every 30 s resets the
 /// idle timer that starts the screen saver (and with it the lock).
 enum PowerHold {
-    private static let reason = "rapp: a remote session is open" as CFString
-
-    static func stayAwake(log: @escaping (String) -> Void) -> StayAwake {
+    static func stayAwake(reason text: String = "rapp: a remote session is open",
+                          log: @escaping (String) -> Void) -> StayAwake {
+        let reason = text as CFString
         let queue = DispatchQueue(label: "rapp.power")
         var timer: DispatchSourceTimer?
         var activity: IOPMAssertionID = 0
