@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["wire", "conn", "relay", "net", "service", "ports", "hub", "hub-ffi", "testkit", "update", "term", "client-core", "client-gtk", "cli", "host-linux", "host-core", "speech-linux", "host-windows", "svc-windows", "../services/center"]
+members = ["wire", "conn", "relay", "net", "service", "ports", "hub", "hub-ffi", "testkit", "update", "term", "client-core", "client-gtk", "cli", "host-linux", "host-core", "speech-linux", "speech-wx", "host-windows", "svc-windows", "../services/center"]
 
 [workspace.package]
 version = "0.15.72"
@@ -49,6 +49,10 @@ rapp-host-core = { path = "host-core" }
 
 [profile.release]
 lto = "thin"
+
+# The offline speech engine is unusably slow unoptimised, even in debug builds (as in voicekey).
+[profile.dev.package.rapp-speech-wx]
+opt-level = 3
 
 # The relay image: smallest and fastest binary; an abort on panic ends the process (the container restarts it).
 [profile.relay]

@@ -14,3 +14,6 @@ PRODUCT_BUNDLE_IDENTIFIER = com.rapp.rapp
 PRODUCT_COPYRIGHT = Copyright © 2026 com.rapp. All rights reserved.
 
 SWIFT_OBJC_BRIDGING_HEADER = $(PROJECT_DIR)/Runner/Runner-Bridging-Header.h
+
+// The speech engine switch (RAPP_SPEECH).
+#include "../../../Speech.xcconfig"

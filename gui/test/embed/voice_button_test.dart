@@ -929,6 +929,21 @@ void main() {
     expect(find.text(voiceUnavailable), findsOneWidget);
   });
 
+  iosTest('start unavailable: the engine\'s own copy when native gave one, kept 6 s', (tester) async {
+    voice.startResult = VoiceStart.unavailable;
+    voice.unavailableText = '没有找到离线语音模型，放在 /d/local/wx-asr';
+    await tester.pumpWidget(layer());
+    final g = await press(tester);
+    await g.up();
+    await tester.pump();
+    expect(find.text('没有找到离线语音模型，放在 /d/local/wx-asr'), findsOneWidget);
+    expect(find.text(voiceUnavailable), findsNothing);
+    await tester.pump(const Duration(seconds: 5));
+    expect(find.text('没有找到离线语音模型，放在 /d/local/wx-asr'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.text('没有找到离线语音模型，放在 /d/local/wx-asr'), findsNothing);
+  });
+
   iosTest('60 s: acts as release on the current pick', (tester) async {
     await tester.pumpWidget(layer());
     final r = ringOf(tester);
@@ -1398,6 +1413,14 @@ void main() {
       await h.start();
       expect(ends, [null]);
       expect(h.hint, voiceDenied);
+      expect(h.settings, VoiceSettings.privacy);
+    });
+
+    test('a refused start shows the engine\'s own denied copy when native gave one', () async {
+      voice.startResult = VoiceStart.denied;
+      voice.deniedText = '需要麦克风权限';
+      await h.start();
+      expect(h.hint, '需要麦克风权限');
       expect(h.settings, VoiceSettings.privacy);
     });
 

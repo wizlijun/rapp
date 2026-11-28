@@ -236,6 +236,9 @@ class MainState extends ChangeNotifier {
     _writtenSub = recorder.written.listen(history.add);
     recorder.onSent = history.remember;
     this.voice?.hotwords = voiceHotwords;
+    this.voice?.onLog = _log;
+    // Our own channel (tests bring theirs): which engine native was built with, and a head start on its model.
+    if (voice == null) unawaited(this.voice?.loadEngine(localDir: data.localDir));
     _refreshHotwords();
     _loadRules();
     resources.addListener(notifyListeners);

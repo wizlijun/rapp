@@ -9,3 +9,6 @@ OTHER_LDFLAGS = $(inherited) -force_load $(RAPP_HUB_LIB) $(RAPP_HUB_ROOTS) -lc++
 ARCHS[sdk=iphonesimulator*] = arm64
 // Release strips global symbols by default, and Dart looks the hub's C functions up by name (dlsym).
 STRIP_STYLE = non-global
+
+// The speech engine switch (RAPP_SPEECH).
+#include "../../Speech.xcconfig"
