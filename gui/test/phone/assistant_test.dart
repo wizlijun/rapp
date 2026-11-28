@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -97,6 +98,22 @@ void main() {
     // a damaged file is an empty list
     File('${tmp.path}/assistant.json').writeAsStringSync('{');
     expect(AssistantStore(tmp.path).notes, isEmpty);
+    nav = PhoneNav(MainState(hub: HubClient(FakeTransport()), data: DataDir(tmp.path), prefs: UiPrefs(), port: FakeSessionPort()));
+    s = nav.state;
+  });
+
+  test('a note with a bad project field keeps every note', () {
+    tmp = Directory.systemTemp.createTempSync('assistant_store');
+    File('${tmp.path}/assistant.json').writeAsStringSync(jsonEncode({
+      'notes': [
+        {'id': 'a', 'text': '一', 'at': 3, 'project': 'p1'},
+        {'id': 'b', 'text': '二', 'at': 2, 'project': 7},
+        {'id': 'c', 'text': '三', 'at': 1},
+      ]
+    }));
+    final st = AssistantStore(tmp.path);
+    expect(st.notes.map((n) => n.text), ['一', '二', '三']);
+    expect(st.notes.map((n) => n.project), ['p1', null, null]);
     nav = PhoneNav(MainState(hub: HubClient(FakeTransport()), data: DataDir(tmp.path), prefs: UiPrefs(), port: FakeSessionPort()));
     s = nav.state;
   });

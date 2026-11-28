@@ -32,7 +32,7 @@ class AssistantStore extends ChangeNotifier {
         for (final n in v['notes'] as List) {
           if (n is Map && n['id'] is String && n['text'] is String && n['at'] is int) {
             _notes.add(AssistantNote(
-                id: n['id'] as String, text: n['text'] as String, at: n['at'] as int, project: n['project'] as String?));
+                id: n['id'] as String, text: n['text'] as String, at: n['at'] as int, project: n['project'] is String ? n['project'] as String : null));
           }
         }
       }
