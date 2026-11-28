@@ -25,6 +25,7 @@
 		A1000000000000000000F00D /* UnlockPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F00C /* UnlockPlugin.swift */; };
 		A1000000000000000000F00F /* SpeechPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F00E /* SpeechPlugin.swift */; };
 		A1000000000000000000F013 /* SpeechEngineApple.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F012 /* SpeechEngineApple.swift */; };
+		A1000000000000000000F015 /* SpeechEngineWx.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F014 /* SpeechEngineWx.swift */; };
 		A1000000000000000000F011 /* SpeechEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F010 /* SpeechEngine.swift */; };
 /* End PBXBuildFile section */
 
@@ -76,6 +77,7 @@
 		A1000000000000000000F00C /* UnlockPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UnlockPlugin.swift; path = ../macos/Runner/UnlockPlugin.swift; sourceTree = SOURCE_ROOT; };
 		A1000000000000000000F00E /* SpeechPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SpeechPlugin.swift; path = ../macos/Runner/SpeechPlugin.swift; sourceTree = SOURCE_ROOT; };
 		A1000000000000000000F012 /* SpeechEngineApple.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SpeechEngineApple.swift; path = ../macos/Runner/SpeechEngineApple.swift; sourceTree = SOURCE_ROOT; };
+		A1000000000000000000F014 /* SpeechEngineWx.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SpeechEngineWx.swift; path = ../macos/Runner/SpeechEngineWx.swift; sourceTree = SOURCE_ROOT; };
 		A1000000000000000000F010 /* SpeechEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SpeechEngine.swift; path = ../macos/Runner/SpeechEngine.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
@@ -150,6 +152,7 @@
 				A1000000000000000000F00C /* UnlockPlugin.swift */,
 				A1000000000000000000F00E /* SpeechPlugin.swift */,
 				A1000000000000000000F012 /* SpeechEngineApple.swift */,
+				A1000000000000000000F014 /* SpeechEngineWx.swift */,
 				A1000000000000000000F010 /* SpeechEngine.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 			);
@@ -322,6 +325,7 @@
 				A1000000000000000000F00D /* UnlockPlugin.swift in Sources */,
 				A1000000000000000000F00F /* SpeechPlugin.swift in Sources */,
 				A1000000000000000000F013 /* SpeechEngineApple.swift in Sources */,
+				A1000000000000000000F015 /* SpeechEngineWx.swift in Sources */,
 				A1000000000000000000F011 /* SpeechEngine.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

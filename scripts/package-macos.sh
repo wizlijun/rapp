@@ -44,6 +44,8 @@ swift build -c release
 
 echo "== rust (rapp-service, rapp-hub, rapp-term, rapp-center, rapp-cli)"
 (cd rust && cargo build --release -p rapp-service -p rapp-hub -p rapp-term -p rapp-center -p rapp-cli)
+# The wx speech engine's static library, which the Runner links (gui/Speech.xcconfig).
+if [ "$SPEECH" = wx ]; then (cd rust && cargo build --release -p rapp-speech-wx); fi
 
 echo "== flutter (rapp.app)"
 # Universal builds fail in lipo with this Xcode; the GUI ships arm64 only.

@@ -8,3 +8,14 @@ RAPP_SPEECH = apple
 RAPP_SPEECH_SWIFT_apple =
 RAPP_SPEECH_SWIFT_wx = RAPP_SPEECH_WX
 SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(RAPP_SPEECH_SWIFT_$(RAPP_SPEECH))
+
+// wx: the bridging headers' C declarations (Runner/SpeechWx.h) are seen only with this define.
+RAPP_SPEECH_SWIFT_FLAGS_apple =
+RAPP_SPEECH_SWIFT_FLAGS_wx = -Xcc -DRAPP_SPEECH_WX
+OTHER_SWIFT_FLAGS = $(inherited) $(RAPP_SPEECH_SWIFT_FLAGS_$(RAPP_SPEECH))
+// wx on macOS links rust/speech-wx's static library (`cargo build --release -p rapp-speech-wx`, which
+// scripts/package-macos.sh runs). iOS takes the engine inside rapp-hub-ffi's library instead (its speech-wx
+// feature, scripts/build-ios.sh): two Rust static libraries in one app clash (design §5.6).
+RAPP_SPEECH_LD_apple =
+RAPP_SPEECH_LD_wx[sdk=macosx*] = $(SRCROOT)/../../rust/target/release/librapp_speech_wx.a -liconv
+OTHER_LDFLAGS = $(inherited) $(RAPP_SPEECH_LD_$(RAPP_SPEECH))
