@@ -1628,7 +1628,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-center"
-version = "0.15.72"
+version = "0.15.73"
 dependencies = [
  "anyhow",
  "http-body-util",
@@ -1642,7 +1642,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-cli"
-version = "0.15.72"
+version = "0.15.73"
 dependencies = [
  "anyhow",
  "rapp-net",
@@ -1653,7 +1653,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-client-core"
-version = "0.15.72"
+version = "0.15.73"
 dependencies = [
  "anyhow",
  "flate2",
@@ -1664,7 +1664,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-client-gtk"
-version = "0.15.72"
+version = "0.15.73"
 dependencies = [
  "anyhow",
  "gtk4",
@@ -1675,7 +1675,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-conn"
-version = "0.15.72"
+version = "0.15.73"
 dependencies = [
  "anyhow",
  "data-encoding",
@@ -1694,7 +1694,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-host-core"
-version = "0.15.72"
+version = "0.15.73"
 dependencies = [
  "anyhow",
  "icu_normalizer",
@@ -1710,7 +1710,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-host-linux"
-version = "0.15.72"
+version = "0.15.73"
 dependencies = [
  "anyhow",
  "bitflags 2.13.2",
@@ -1734,11 +1734,11 @@ dependencies = [
 
 [[package]]
 name = "rapp-host-windows"
-version = "0.15.72"
+version = "0.15.73"
 
 [[package]]
 name = "rapp-hub"
-version = "0.15.72"
+version = "0.15.73"
 dependencies = [
  "anyhow",
  "quinn",
@@ -1757,7 +1757,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-hub-ffi"
-version = "0.15.72"
+version = "0.15.73"
 dependencies = [
  "rapp-hub",
  "rapp-net",
@@ -1769,7 +1769,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-net"
-version = "0.15.72"
+version = "0.15.73"
 dependencies = [
  "anyhow",
  "if-addrs",
@@ -1790,7 +1790,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-ports"
-version = "0.15.72"
+version = "0.15.73"
 dependencies = [
  "rapp-conn",
  "rapp-net",
@@ -1803,7 +1803,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-relay"
-version = "0.15.72"
+version = "0.15.73"
 dependencies = [
  "anyhow",
  "data-encoding",
@@ -1820,7 +1820,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-service"
-version = "0.15.72"
+version = "0.15.73"
 dependencies = [
  "anyhow",
  "http-body-util",
@@ -1844,7 +1844,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-speech-linux"
-version = "0.15.72"
+version = "0.15.73"
 dependencies = [
  "anyhow",
  "libc",
@@ -1854,7 +1854,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-speech-wx"
-version = "0.15.72"
+version = "0.15.73"
 dependencies = [
  "anyhow",
  "hound",
@@ -1865,11 +1865,11 @@ dependencies = [
 
 [[package]]
 name = "rapp-svc-windows"
-version = "0.15.72"
+version = "0.15.73"
 
 [[package]]
 name = "rapp-term"
-version = "0.15.72"
+version = "0.15.73"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -1885,7 +1885,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-testkit"
-version = "0.15.72"
+version = "0.15.73"
 dependencies = [
  "anyhow",
  "quinn",
@@ -1910,7 +1910,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-update"
-version = "0.15.72"
+version = "0.15.73"
 dependencies = [
  "anyhow",
  "rapp-net",
@@ -1922,7 +1922,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-wire"
-version = "0.15.72"
+version = "0.15.73"
 dependencies = [
  "anyhow",
  "data-encoding",
