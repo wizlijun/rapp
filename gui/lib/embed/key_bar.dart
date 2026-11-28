@@ -11,12 +11,12 @@ import '../term/term_session_port.dart';
 import '../ui/main_state.dart';
 import '../ui/terms_entry.dart' show terminalApps;
 import '../ui/tokens.dart';
+import 'input_metrics.dart';
 import 'key_bar_keys.dart';
 import 'key_glyph.dart';
 import 'modifier_latch.dart';
 import 'phrase_strip.dart';
 import 'composer_panel.dart' show seeThroughBox;
-import 'phrases.dart';
 import 'remote_session.dart';
 import 'session_port.dart';
 
@@ -58,8 +58,8 @@ bool phraseStripShown(MainState state, RemoteSession session) =>
     state.prefs.phraseStrip && (_isTerm(state, session) || session.profile.phrases);
 
 /// How high the bar is, with the modes now on (the 常用语条 included).
-double keyBarHeightOf(MainState state, RemoteSession session) =>
-    keyBarHeight(_rowsOf(state, session).length) + (phraseStripShown(state, session) ? phraseStripHeight : 0);
+double keyBarHeightOf(MainState state, RemoteSession session, [InputMetrics m = InputMetrics.standard]) =>
+    keyBarHeightFor(m, _rowsOf(state, session).length) + (phraseStripShown(state, session) ? stripHeightFor(m) : 0);
 
 /// A terminal's wire name for [wire] with the latch's ⌃ and ⌥ added, in the wire's order `[Ctrl-][Alt-][Shift-]base`.
 String termWire(String wire, int flags) {
@@ -352,8 +352,9 @@ class _KeyBarState extends State<KeyBar> {
         builder: (context, _) {
           final rows = _rowsOf(widget.state, widget.session);
           final strip = phraseStripShown(widget.state, widget.session);
+          final m = InputMetrics.of(context);
           return Container(
-            height: keyBarHeightOf(widget.state, widget.session),
+            height: keyBarHeightOf(widget.state, widget.session, m),
             width: double.infinity,
             padding: const EdgeInsets.all(keyBarPad),
             decoration: seeThroughBox(t),
@@ -361,10 +362,10 @@ class _KeyBarState extends State<KeyBar> {
               children: [
                 if (strip) ...[
                   PhraseStrip(state: widget.state, session: widget.session, port: widget.port),
-                  const SizedBox(height: phraseStripGap),
+                  SizedBox(height: stripGapOf(m)),
                 ],
                 for (final (i, row) in rows.indexed) ...[
-                  if (i > 0) const SizedBox(height: keyBarGap),
+                  if (i > 0) SizedBox(height: m.gap),
                   Expanded(child: _rowOf(row)),
                 ],
               ],
@@ -401,15 +402,16 @@ class KeyBarRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final gap = InputMetrics.of(context).gap;
     return LayoutBuilder(builder: (context, c) {
-      final column = ((c.maxWidth - (keyBarColumns - 1) * keyBarGap) / keyBarColumns).clamp(0.0, double.infinity);
+      final column = ((c.maxWidth - (keyBarColumns - 1) * gap) / keyBarColumns).clamp(0.0, double.infinity);
       final tail = keyBarTail(ids);
       // A row made of the arrow block alone has nothing to share the rest: an empty cell holds the columns at the right.
       final children = <Widget>[if (ids.isNotEmpty && tail == ids.length) const Expanded(child: SizedBox())];
       for (final (i, id) in ids.indexed) {
         final view = cell(id);
         if (view == null) continue;
-        if (children.isNotEmpty) children.add(const SizedBox(width: keyBarGap));
+        if (children.isNotEmpty) children.add(SizedBox(width: gap));
         children.add(i >= ids.length - tail ? SizedBox(width: column, child: view) : Expanded(child: view));
       }
       return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: children);

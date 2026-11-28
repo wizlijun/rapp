@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../term/term_session_port.dart';
+import 'input_metrics.dart';
 import '../ui/controls.dart';
 import '../ui/main_state.dart';
 import '../ui/prefs.dart' show StageSide;
@@ -46,8 +47,9 @@ const _border = 2.0;
 /// ＋ and 发送's margin to the box (they are 40 square): one line is 40 + 2 × 8 = 56 inside the border.
 const _edge = 8.0;
 
-/// The editor's extra room above and below, so its one line (48) fills those 56.
-const _pad = (40 + 2 * _edge - _line) / 2;
+/// The editor's extra room above and below, so its one line (48) fills the button plus its margins
+/// (for a button of [button] points; today's 40 gives 4, the phone's 56 gives 12)
+double _padFor(double button) => (button + 2 * _edge - _line) / 2;
 
 /// The text's least width in the box when the zoom makes the keys big (a phone at the top zoom step).
 const _minText = 120.0;
@@ -56,7 +58,7 @@ const _minText = 120.0;
 const _fixed = _border + 2 * 8;
 
 /// The box row's key width per unit of zoom: ＋ and 发送 (40 each), and [_edge] on both sides of each.
-const _keysPerScale = 2 * 40 + 4 * _edge;
+double _keysPerScaleFor(double button) => 2 * button + 4 * _edge;
 
 /// The panel's boxes let the picture behind show through: the float fill 30% transparent.
 const composerFillOpacity = 0.7;
@@ -411,7 +413,9 @@ class _ComposerPanelState extends State<ComposerPanel> {
           data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(_k)),
           child: Builder(builder: (context) {
           final t = RappTokens.of(context);
-          final k = _k, line = _line * k, pad = _pad * k;
+          final m = InputMetrics.of(context);
+          final k = _k, line = _line * k, pad = _padFor(m.panelButton) * k;
+          final unit = m.panelButton / 40; // the buttons' size against today's 40
           final style = EditorStyle(
             text: TextStyle(
               fontSize: t.textSize * k, height: 22 / 15, fontFamily: t.font,
@@ -447,7 +451,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
               LayoutBuilder(builder: (context, c) {
               // The keys zoom with the text, but give way on a narrow panel so the text keeps [_minText] wide
               // (never under their default 40); the text itself keeps the zoom.
-              final kk = math.min(k, math.max(1.0, (c.maxWidth - _fixed - _minText) / _keysPerScale));
+              final kk = math.min(k, math.max(1.0, (c.maxWidth - _fixed - _minText) / _keysPerScaleFor(m.panelButton)));
               final edge = _edge * kk;
               return Container(
                 key: const Key('composer-box'),
@@ -475,7 +479,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
                             : (on) => widget.state.setAfterSend(_s, on ? AfterSend.pressReturn : AfterSend.none),
                         terminal: _terminal,
                         blocked: _blocked,
-                        scale: kk,
+                        scale: kk * unit,
                         zoom: widget.state.composerZoom.value,
                         onZoom: widget.state.setComposerZoom,
                       ),
@@ -526,7 +530,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
                             label: '发送',
                             semanticLabel: '发送',
                             icon: Icons.arrow_upward,
-                            size: 40 * kk,
+                            size: 40 * kk * unit,
                             onPressed: _m.sending || _blocked ? null : _submit,
                           ),
                         ],

@@ -18,6 +18,7 @@ import '../ui/star_button.dart';
 import '../ui/tokens.dart';
 import 'composer_plus.dart';
 import 'phrase_send.dart';
+import 'input_metrics.dart';
 import 'phrases.dart';
 import 'remote_session.dart';
 import 'session_port.dart';
@@ -300,6 +301,7 @@ class _PhraseStripState extends State<PhraseStrip> {
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
+    final m = InputMetrics.of(context);
     return ListenableBuilder(
       listenable: Listenable.merge([widget.state, widget.session.composer]),
       builder: (context, _) {
@@ -317,20 +319,20 @@ class _PhraseStripState extends State<PhraseStrip> {
             bool ticked = false, bool put = false, bool cmd = false, bool grey = false}) {
           final color = ticked ? t.on : (cmd ? t.accent : t.line);
           Widget c = Padding(
-            padding: const EdgeInsets.only(right: 6),
+            padding: EdgeInsets.only(right: stripGapOf(m)),
             child: GestureDetector(
               key: key,
               behavior: HitTestBehavior.opaque,
               onTap: onTap,
               onLongPressStart: onLong,
               child: Container(
-                height: phraseStripChip,
+                height: m.chip,
                 constraints: BoxConstraints(minWidth: minLabel + 2 * (10 + 1)), // padding + border
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: ticked ? Color.alphaBlend(t.on.withValues(alpha: .18), t.raise.first) : t.raise.first,
-                  borderRadius: BorderRadius.circular(phraseStripChip / 2),
+                  borderRadius: BorderRadius.circular(m.chip / 2),
                   border: Border.all(color: color, width: ticked ? 2 : 1),
                 ),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -375,7 +377,7 @@ class _PhraseStripState extends State<PhraseStrip> {
           }
         }
         return SizedBox(
-          height: phraseStripChip,
+          height: m.chip,
           child: Row(children: [
             Expanded(
               child: hint != null

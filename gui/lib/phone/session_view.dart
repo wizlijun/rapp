@@ -18,6 +18,7 @@ import '../term/term_stage.dart';
 import '../ui/disconnected_stage.dart';
 import '../ui/lifecycle.dart';
 import '../ui/controls.dart' show RappButton;
+import '../embed/input_metrics.dart';
 import '../ui/main_state.dart';
 import '../ui/stage.dart' show PixelSnap, keyboardLift, stageOverlays;
 import '../ui/tokens.dart';
@@ -196,7 +197,7 @@ class _PhoneSessionViewState extends State<PhoneSessionView> {
     }
     // The Pad's own composer layer, offline bar, lock banner and host notice over the body (R34). They float over
     // it and never resize anything: only the Pad's Stage calls stageSize (S4, F11).
-    return Stack(
+    return InputMetrics.phone.wrap(Stack(
       children: [
         Positioned.fill(child: body),
         // Back by a swipe from the left edge: the reading view only (S7). The overlays are laid after it and win.
@@ -229,7 +230,7 @@ class _PhoneSessionViewState extends State<PhoneSessionView> {
           phoneStack: term && rs != null ? (context, hold, bottom) => _stack(context, rs, hold, bottom, reading) : null,
         ),
       ],
-    );
+    ));
   }
 
   /// The ReplyTarget of the session on show, when it can take replies without a view (T14-1).
