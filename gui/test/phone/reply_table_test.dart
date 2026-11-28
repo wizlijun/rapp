@@ -108,6 +108,27 @@ void main() {
       expect(riskOf('firmware --rm'), isNull);
       expect(riskOf('cargo test'), isNull);
     });
+    test('wrappers and prefixes', () {
+      expect(riskOf('sudo rm -rf x')!.why, '删掉的找不回来');
+      expect(riskOf('sudo -u bob rm x')!.why, '删掉的找不回来');
+      expect(riskOf('xargs rm')!.why, '删掉的找不回来');
+      expect(riskOf('FOO=1 git push')!.why, '推上去以后收不回来');
+      expect(riskOf('git -C dir push')!.why, '推上去以后收不回来');
+      expect(riskOf('git -c a=b push')!.why, '推上去以后收不回来');
+      expect(riskOf('env X=1 npm publish')!.why, '发布出去就收不回来');
+      expect(riskOf('nohup time sudo rm x'), isNotNull);
+    });
+    test('wrapper negatives', () {
+      expect(riskOf('rmdir x'), isNull);
+      expect(riskOf('git rm --cached a'), isNull);
+      expect(riskOf('drop_table'), isNull);
+      expect(riskOf('sudo ls'), isNull);
+    });
+    test('newline and single ampersand split', () {
+      expect(riskOf('ls\nrm -rf x')!.why, '删掉的找不回来');
+      expect(riskOf('a & rm x')!.why, '删掉的找不回来');
+      expect(riskOf('cargo test && git push')!.why, '推上去以后收不回来');
+    });
     test('first hit in segment order', () {
       expect(riskOf('git push && rm x')!.why, '推上去以后收不回来');
     });
@@ -123,6 +144,8 @@ void main() {
       expect(plainWords('pip install x'), '想装依赖');
       expect(plainWords('ls'), isNull);
       expect(plainWords('ls && cargo test'), '想跑测试');
+      expect(plainWords('sudo cargo test'), '想跑测试');
+      expect(plainWords('git -C d push'), '想把改动推到远端');
     });
     test('tool names', () {
       expect(plainWordsForTool('Write'), '想改文件');

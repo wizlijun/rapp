@@ -89,10 +89,42 @@ ParsedAsk? parseAsk(AgentTool tool, String? kind, String msg) {
   }
 }
 
-final _split = RegExp(r'&&|\|\||;|\|');
+final _split = RegExp(r'&&|\|\||;|\||\n|&');
+final _assign = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*=');
+const _wrappers = {'sudo', 'env', 'xargs', 'time', 'nohup', 'command'};
+const _sudoArgFlags = {'-u', '-g', '-h', '-p', '-C', '-U', '-r', '-t'};
+
+/// Drops `NAME=value` words, wrappers (`sudo`, `env`, `xargs`, ...) with their flags, and git's global options, so
+/// the program word comes first.
+String _normalise(String seg) {
+  final t = seg.split(RegExp(r'\s+')).where((e) => e.isNotEmpty).toList();
+  var i = 0;
+  while (i < t.length) {
+    if (_assign.hasMatch(t[i])) {
+      i++;
+    } else if (_wrappers.contains(t[i])) {
+      final w = t[i++];
+      while (i < t.length && t[i].startsWith('-')) {
+        final f = t[i++];
+        if (w == 'sudo' && _sudoArgFlags.contains(f) && i < t.length) i++;
+      }
+    } else {
+      break;
+    }
+  }
+  final rest = t.sublist(i);
+  if (rest.isNotEmpty && rest[0] == 'git') {
+    var j = 1;
+    while (j < rest.length && rest[j].startsWith('-')) {
+      j += (rest[j] == '-C' || rest[j] == '-c') ? 2 : 1;
+    }
+    return ['git', ...rest.sublist(j > rest.length ? rest.length : j)].join(' ');
+  }
+  return rest.join(' ');
+}
 
 List<String> _segments(String command) =>
-    command.split(_split).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    command.split(_split).map((e) => _normalise(e.trim())).where((e) => e.isNotEmpty).toList();
 
 bool _starts(String seg, String prefix) => seg == prefix || seg.startsWith('$prefix ');
 
