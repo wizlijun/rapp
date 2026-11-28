@@ -12,11 +12,12 @@ import 'package:flutter/material.dart';
 import '../embed/picture.dart';
 import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
-import '../embed/stage_buttons.dart' show stageButtonsUp;
+import '../embed/stage_buttons.dart' show stageButtonSize, stageButtonsUp;
 import '../embed/voice_button.dart';
 import '../term/term_stage.dart';
 import '../ui/disconnected_stage.dart';
 import '../ui/lifecycle.dart';
+import '../ui/controls.dart' show RappButton;
 import '../ui/main_state.dart';
 import '../ui/stage.dart' show PixelSnap, keyboardLift, stageOverlays;
 import '../ui/tokens.dart';
@@ -160,19 +161,17 @@ class _PhoneSessionViewState extends State<PhoneSessionView> {
           ),
         ),
       );
-      body = reading
-          ? Stack(
-              children: [
-                Positioned.fill(child: stage),
-                Positioned.fill(
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: _readingLift),
-                    child: PhoneReadingView(model: model),
-                  ),
-                ),
-              ],
-            )
-          : stage;
+      // One tree shape either way, so the stage's State survives every toggle.
+      body = Stack(children: [
+        Positioned.fill(child: stage),
+        if (reading)
+          Positioned.fill(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: _readingLift),
+              child: PhoneReadingView(model: model),
+            ),
+          ),
+      ]);
     } else if (rec != null && (rec.phase == Phase.disconnected || rec.lastSid != null)) {
       full = true;
       body = DisconnectedStage(
@@ -227,7 +226,7 @@ class _PhoneSessionViewState extends State<PhoneSessionView> {
           picture: picture,
           full: full,
           keyboard: keyboard,
-          phoneStack: term && rs != null ? (context, hold, bottom) => _stack(context, rs, hold, bottom) : null,
+          phoneStack: term && rs != null ? (context, hold, bottom) => _stack(context, rs, hold, bottom, reading) : null,
         ),
       ],
     );
@@ -256,7 +255,7 @@ class _PhoneSessionViewState extends State<PhoneSessionView> {
 
   /// What stands over the dock: the pinned card, the outcome line, the reply bar. [bottom] is where the stack of the
   /// Pad would stand (8 above the dock, or above the keyboard).
-  Widget _stack(BuildContext context, RemoteSession rs, VoiceHold? hold, double bottom) {
+  Widget _stack(BuildContext context, RemoteSession rs, VoiceHold? hold, double bottom, bool reading) {
     final key = _s.currentKey;
     final target = _replyTarget(key);
     final pinned = _pinned(key);
@@ -271,6 +270,8 @@ class _PhoneSessionViewState extends State<PhoneSessionView> {
         key: ValueKey(('reply-voice', rs.sid)),
         state: _s,
         key2: rs.sid,
+        // The composer layer draws this key's tidy card already.
+        ownTidyCard: false,
         send: (text, voice) {
           unawaited(replies.say(itemId, target, text));
           return null;
@@ -318,6 +319,19 @@ class _PhoneSessionViewState extends State<PhoneSessionView> {
                     );
                   },
                 ),
+              if (!reading && rs.currentZoomed) ...[
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: RappButton.stage(
+                    key: const Key('zoom-reset'),
+                    label: '还原',
+                    icon: Icons.zoom_in_map,
+                    size: stageButtonSize,
+                    onPressed: rs.restoreCurrent,
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
               barWidget,
               if (hold != null && target == null)
                 ListenableBuilder(

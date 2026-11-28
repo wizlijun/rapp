@@ -26,6 +26,7 @@ class PhoneVoice extends StatefulWidget {
     required this.send,
     required this.edit,
     required this.builder,
+    this.ownTidyCard = true,
   });
   final MainState state;
   final Object key2;
@@ -35,6 +36,9 @@ class PhoneVoice extends StatefulWidget {
   final void Function(String text) edit;
   final Widget Function(BuildContext context, VoiceHold hold) builder;
 
+  /// Draws the tidy card in its own overlay. False where another layer already draws that key's card.
+  final bool ownTidyCard;
+
   @override
   State<PhoneVoice> createState() => _PhoneVoiceState();
 }
@@ -42,6 +46,7 @@ class PhoneVoice extends StatefulWidget {
 class _PhoneVoiceState extends State<PhoneVoice> {
   VoiceHold? _hold;
   final _portal = OverlayPortalController();
+  VoiceSend? _mine;
   // The hold needs a composer to keep words in when it is cut short; a card has none, so this one is thrown away.
   final _composer = ComposerModel();
 
@@ -54,10 +59,11 @@ class _PhoneVoiceState extends State<PhoneVoice> {
     if (voice == null) return;
     final k = widget.key2;
     // The widget at call time: a rebuild may bring a new card's closures under the same key.
-    _s.voiceSends[k] = (text, origin) {
+    final mine = _mine = (text, origin) {
       final t = text.trim();
       return t.isEmpty ? voiceBlank : widget.send(t, origin);
     };
+    _s.voiceSends[k] = mine;
     _s.voiceEdits[k] = (text, ai) => widget.edit(text);
     _hold = VoiceHold(
       voice: voice,
@@ -83,7 +89,7 @@ class _PhoneVoiceState extends State<PhoneVoice> {
     final h = _hold;
     if (h != null) {
       h.dispose();
-      _s.removeVoiceSend(widget.key2);
+      _s.removeVoiceSend(widget.key2, only: _mine);
     }
     _composer.dispose();
     super.dispose();
@@ -106,21 +112,22 @@ class _PhoneVoiceState extends State<PhoneVoice> {
                 ? const SizedBox.shrink()
                 : Positioned(left: 12, right: 12, bottom: 96, child: Center(child: voiceHint(hold))),
           ),
-          ListenableBuilder(
-            listenable: tidy,
-            builder: (context, _) {
-              final at = tidy.at;
-              final size = MediaQuery.sizeOf(context);
-              final w = (at?.width ?? size.width - 24).clamp(0.0, size.width - 24);
-              return Positioned(
-                left: (at?.left ?? 12).clamp(12.0, size.width - 12 - w),
-                top: at?.top,
-                bottom: at == null ? 24 : null,
-                width: w,
-                child: VoiceTidyCard(tidy: tidy, tail: true),
-              );
-            },
-          ),
+          if (widget.ownTidyCard)
+            ListenableBuilder(
+              listenable: tidy,
+              builder: (context, _) {
+                final at = tidy.at;
+                final size = MediaQuery.sizeOf(context);
+                final w = (at?.width ?? size.width - 24).clamp(0.0, size.width - 24);
+                return Positioned(
+                  left: (at?.left ?? 12).clamp(12.0, size.width - 12 - w),
+                  top: at?.top,
+                  bottom: at == null ? 24 : null,
+                  width: w,
+                  child: VoiceTidyCard(tidy: tidy, tail: true),
+                );
+              },
+            ),
         ]);
       },
       child: widget.builder(context, hold),

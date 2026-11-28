@@ -481,8 +481,10 @@ class MainState extends ChangeNotifier {
   final Map<Object, VoiceSend> voiceSends = {};
   final Map<Object, void Function(String text, VoiceAi? ai)> voiceEdits = {};
 
-  /// Takes [key] out of [voiceSends] and [voiceEdits] and ends its tidy.
-  void removeVoiceSend(Object key) {
+  /// Takes [key] out of [voiceSends] and [voiceEdits] and ends its tidy. With [only], nothing happens unless that is
+  /// still the send installed under [key] (a page that took the key over keeps it).
+  void removeVoiceSend(Object key, {VoiceSend? only}) {
+    if (only != null && !identical(voiceSends[key], only)) return;
     voiceSends.remove(key);
     voiceEdits.remove(key);
     if (!remote.containsKey(key)) _endTidy(key);

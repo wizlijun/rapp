@@ -2,7 +2,12 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/geometry.dart';
 import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/embed/composer_model.dart' show VoiceOrigin;
+import 'package:rapp/embed/voice_tidy_card.dart';
+import 'package:rapp/embed/voice_ring.dart' show VoicePick;
+import 'package:rapp/phone/phone_voice.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/phone/phone_nav.dart';
@@ -163,18 +168,79 @@ void main() {
   testWidgets('看原样 toggles to the stage', (tester) async {
     await boot(tester);
     expect(views(), isNotEmpty);
+    final stageState = tester.state(find.byType(TermStage, skipOffstage: false));
+    final nViews = views().length;
     await tester.tap(raw);
     await tester.pump();
     expect(find.byType(TermStage), findsOneWidget);
     expect(find.byType(PhoneReadingView), findsNothing);
     expect(back, findsOneWidget);
+    expect(identical(tester.state(find.byType(TermStage)), stageState), isTrue);
     await tester.tap(back);
     await tester.pump();
     expect(find.byType(PhoneReadingView), findsOneWidget);
-    expect(find.byType(TermStage, skipOffstage: false), findsOneWidget);
+    await tester.tap(raw);
+    await tester.pump();
+    await tester.tap(back);
+    await tester.pump();
+    // The same State all along: nothing was remounted, so no fresh view went out.
+    expect(identical(tester.state(find.byType(TermStage, skipOffstage: false)), stageState), isTrue);
+    expect(views().length, nViews);
     expect(views().every((v) => v['fit'] == false), isTrue);
     expect(term.calls.where((c) => c.$1 == 'resize'), isEmpty);
     expect(t.sent.where((m) => m['cmd'] == 'resize'), isEmpty);
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('one tidy card for the session, not two', (tester) async {
+    await boot(tester);
+    s.tidyOf(s.currentRemote!.sid).begin('嗯那个我们明天开会', VoicePick.send);
+    await tester.pump();
+    expect(find.byType(VoiceTidyCard, skipOffstage: false), findsOneWidget);
+    await tester.pump(const Duration(seconds: 4));
+  });
+
+  testWidgets('a key taken over by a new PhoneVoice survives the old one disposing', (tester) async {
+    await boot(tester);
+    Widget pv(Key k, String tag) => PhoneVoice(
+          key: k,
+          state: s,
+          key2: 'K',
+          send: (text, v) {
+            sent.add({'text': tag});
+            return null;
+          },
+          edit: (_) {},
+          builder: (context, hold) => const SizedBox(),
+        );
+    await tester.pumpWidget(MaterialApp(home: pv(const Key('a'), 'a')));
+    final a = s.voiceSends['K'];
+    await tester.pumpWidget(MaterialApp(home: pv(const Key('b'), 'b')));
+    expect(s.voiceSends['K'], isNotNull);
+    expect(identical(s.voiceSends['K'], a), isFalse);
+    s.voiceSends['K']!('x', const VoiceOrigin());
+    expect(sent.last, {'text': 'b'});
+    await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+    expect(s.voiceSends.containsKey('K'), isFalse);
+  });
+
+  testWidgets('看原样 with a zoomed terminal shows 还原, reading does not', (tester) async {
+    await boot(tester);
+    final rs = s.currentRemote!;
+    const stage = Size(390, 700);
+    rs.zoomOf(3).zoomTo(2, const Offset(200, 300), fitRect(const Size(100, 100), stage), stage);
+    await tester.pump();
+    expect(find.byKey(const Key('zoom-reset')), findsNothing);
+    await tester.tap(raw);
+    await tester.pump();
+    final reset = find.byKey(const Key('zoom-reset'));
+    expect(reset, findsOneWidget);
+    expect(tester.getSize(reset).shortestSide, greaterThanOrEqualTo(56));
+    await tester.tap(reset);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(rs.currentZoomed, isFalse);
+    expect(reset, findsNothing);
     await tester.pump(const Duration(seconds: 1));
   });
 
