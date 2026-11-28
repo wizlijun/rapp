@@ -38,16 +38,24 @@ pub fn reply(state: &State, history: bool, _top: bool) -> Value {
     o.into()
 }
 
-/// One line after a tick: the snapshot and the newest point.
-fn line(state: &State) -> Value {
+/// One line after a tick: the snapshot and the newest point. Without `point` (no sample was taken) when 不锁屏
+/// changed in between.
+fn line(state: &State, point: bool) -> Value {
     let Some(load) = &state.load else { return err("unknown op") };
     let term = term(state);
     let keys = no_lock_keys(state);
     let hist = load.hist.lock().unwrap();
     let mut o = with_ok(hist.snapshot(term));
     o.extend(keys);
-    o.insert("point".into(), hist.point_json());
+    if point {
+        o.insert("point".into(), hist.point_json());
+    }
     o.into()
+}
+
+/// `(no_lock, no_lock_held)` where the snapshot carries them; None elsewhere, so nothing is pushed for them.
+fn no_lock_now(state: &State, supported: bool) -> Option<(bool, bool)> {
+    supported.then(|| (state.cfg.lock().unwrap().no_lock(), state.no_lock.held()))
 }
 
 /// `no_lock` and `no_lock_held`, live, only on a device that can keep itself awake (the GUI shows the card by the key).
@@ -75,8 +83,8 @@ fn with_ok(snapshot: Value) -> Map<String, Value> {
     o
 }
 
-/// The first line is `reply(true, false)`; then one line per sample, until the other side closes (what it writes
-/// is ignored). Before the first sample it waits for one, so a watch opened as the service starts gets data, not
+/// The first line is `reply(true, false)`; then one line per sample, and one more (without `point`) as soon as
+/// 不锁屏 is switched or its hold comes or goes, until the other side closes (what it writes is ignored). Before the first sample it waits for one, so a watch opened as the service starts gets data, not
 /// `no data`; the other side closing meanwhile still ends it. A first line that is an error ends the stream.
 pub async fn follow<S: AsyncRead + AsyncWrite + Unpin>(state: &State, s: &mut S) -> Result<()> {
     let Some(load) = &state.load else {
@@ -84,9 +92,12 @@ pub async fn follow<S: AsyncRead + AsyncWrite + Unpin>(state: &State, s: &mut S)
         s.shutdown().await?;
         return Ok(());
     };
-    // Subscribed before the first line is made, so no sample falls between the two.
+    // Subscribed before the first line is made, so no sample (or switch) falls between the two.
     let mut tick = load.tick.subscribe();
     tick.mark_unchanged();
+    let mut changed = state.changed.subscribe();
+    changed.mark_unchanged();
+    let supported = crate::no_lock::supported();
     let mut buf = [0u8; 256];
     while !has_data(load) {
         tokio::select! {
@@ -100,6 +111,7 @@ pub async fn follow<S: AsyncRead + AsyncWrite + Unpin>(state: &State, s: &mut S)
             }
         }
     }
+    let mut sent = no_lock_now(state, supported);
     let first = reply(state, true, false);
     write_json(s, &first).await?;
     if first["ok"] != true {
@@ -111,9 +123,23 @@ pub async fn follow<S: AsyncRead + AsyncWrite + Unpin>(state: &State, s: &mut S)
             n = s.read(&mut buf) => if !matches!(n, Ok(1..)) {
                 break;
             },
-            changed = tick.changed() => {
-                if changed.is_err() || write_json(s, &line(state)).await.is_err() {
+            r = tick.changed() => {
+                sent = no_lock_now(state, supported);
+                if r.is_err() || write_json(s, &line(state, true)).await.is_err() {
                     break;
+                }
+            }
+            // Wakes for any change of the service's state; a line goes out only when 不锁屏's keys moved.
+            r = changed.changed(), if supported => {
+                if r.is_err() {
+                    break;
+                }
+                let now = no_lock_now(state, supported);
+                if now != sent {
+                    sent = now;
+                    if write_json(s, &line(state, false)).await.is_err() {
+                        break;
+                    }
                 }
             }
         }

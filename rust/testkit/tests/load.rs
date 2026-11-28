@@ -405,3 +405,35 @@ async fn a_broken_term_json_does_not_fill_the_log() {
     let after = &evs[warned[0] + 1];
     assert_eq!((&after["ev"], &after["op"]), (&json!("request"), &json!("list_terms")), "{evs:#?}");
 }
+
+/// 不锁屏 (spec 2026-11-28 §6): flipping the switch pushes a line at once, not at the next sample, so the card
+/// does not say 「没能保持唤醒」 for a whole sample after the switch goes on. The line has no `point`: no sample
+/// was taken.
+#[tokio::test]
+async fn watch_load_pushes_a_line_when_no_lock_changes() {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let (home, bins) = (tempfile::tempdir().unwrap(), bins());
+    service_json(home.path());
+    let mut slow = fake_load();
+    slow.every = Duration::from_secs(60);
+    let svc = service_with_load(home.path(), bins.path(), Some(slow)).await;
+    let mut ipc = Ipc::open(&svc, home.path()).await;
+    ipc.send(json!({"cmd":"watch_load"})).await;
+    let first = ipc.next().await;
+    assert_eq!((&first["ok"], &first["no_lock"], &first["no_lock_held"]), (&json!(true), &json!(false), &json!(false)), "{first}");
+    let r = ipc_once(&svc, home.path(), json!({"cmd":"set_no_lock","on":true})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let soon = Duration::from_secs(3);
+    let line = tokio::time::timeout(soon, ipc.next()).await.expect("a line soon after the switch goes on");
+    assert_eq!((&line["ok"], &line["no_lock"]), (&json!(true), &json!(true)), "{line}");
+    assert!(line.get("point").is_none(), "{line}");
+    assert!(line["headroom"].is_u64(), "the line is a whole snapshot: {line}");
+    // And once the child has settled, another line says it holds.
+    let mut held = line;
+    while held["no_lock_held"] != true {
+        held = tokio::time::timeout(soon, ipc.next()).await.expect("a line once the hold settles");
+        assert_eq!(held["no_lock"], true, "{held}");
+    }
+}
