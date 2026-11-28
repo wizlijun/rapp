@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/input_dock.dart';
 import 'package:rapp/embed/input_metrics.dart';
@@ -428,6 +429,38 @@ void main() {
       testWidgets('v1c done card $n', (tester) => homeCard(tester, size, th, 'r4', 'done card', ['知道了']));
       testWidgets('v1c reading view with pinned card and reply bar $n', (tester) => readingView(tester, size, th));
       testWidgets('v1c composer open (R36) $n', (tester) => readingView(tester, size, th, open: true));
+      // The shortest closed state there is: the composer was open on a short landscape stage and is closing, so the
+      // block under the stack is still tall. (The soft keyboard cannot be up with the composer closed: closing
+      // releases its focus, see InputDock._changed.) The stack must stay, one widget all the way (a hold in progress
+      // would be lost otherwise), and what it draws must be what a finger hits.
+      if (size.width > size.height) {
+        testWidgets('v1c closing keeps the bar $n', (tester) async {
+          await boot(tester, size, th, v1c: 'r3');
+          nav.enter('m1/term:pty:r3');
+          await settle(tester);
+          final where = '$n closing';
+          await tester.tap(find.byKey(const Key('composer-open')));
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 400));
+          await settle(tester);
+          s.currentRemote!.composer.collapse();
+          Object? first;
+          for (var i = 0; i < 12; i++) {
+            await tester.pump(const Duration(milliseconds: 40));
+            expect(tester.takeException(), isNull, reason: '$where frame $i');
+            if (i == 0) first = tester.element(find.byType(PhoneReplyBar));
+            // Mid-closing the still-tall block may sit over the bar: painted and hit alike, so nothing is half-visible.
+            expect(find.byType(PhoneReplyBar), findsOneWidget, reason: '$where frame $i');
+          }
+          expect(find.byType(PhoneReplyBar), findsOneWidget, reason: where);
+          if (first != null) expect(identical(first, tester.element(find.byType(PhoneReplyBar))), isTrue, reason: '$where: not remounted');
+          await settle(tester);
+          expect(tester.takeException(), isNull, reason: where);
+          final type = find.byKey(const Key('composer-open'));
+          expect(type.hitTestable(), findsOneWidget, reason: '$where: settled, the type square is hit');
+          expect(tester.getSize(type).height, greaterThanOrEqualTo(phonePrimaryTap), reason: where);
+        });
+      }
       testWidgets('v1c assistant page $n', (tester) async {
         await boot(tester, size, th, v1c: 'r1');
         nav.open(PhoneView.assistant);
