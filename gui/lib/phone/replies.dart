@@ -1,5 +1,6 @@
 /// The phone's reply controller: the local "is the question still current" check, the send through the hub, the 3 s
-/// watch of the terms push that judges success, and the per-card outcome word. It never resends.
+/// watch of the terms push that judges success, and the per-card outcome word (which a later question takes away).
+/// It never resends.
 library;
 
 import 'dart:async';
@@ -17,6 +18,7 @@ const _gone = '它已经不在等这一问了';
 const _goLook = '没成功，进去看看';
 const _oldRun = '这个会话是升级前开的，进去看看';
 const _noLink = '连不上 A，没发';
+const _cardFirst = '先点上面卡片的按钮';
 
 /// What a card says about the reply it just sent.
 class ReplyOutcome {
@@ -30,6 +32,19 @@ class ReplyOutcome {
   final bool failed;
 }
 
+/// A word kept on a card, with what the session looked like when it was set: a later question shows its buttons.
+class _Kept {
+  const _Kept(this.o, this.t, this.base, this.row);
+  final ReplyOutcome o;
+  final ReplyTarget? t;
+
+  /// The row's `(state, seq)` when the word was set.
+  final (String, int)? base;
+
+  /// The row itself, for 连不上 A: the next row update takes that word away.
+  final TermRow? row;
+}
+
 typedef ReplySender = Future<void> Function(ReplyTarget t, {int? seq, String? text, bool enter, List<String> keys});
 
 class PhoneReplies extends ChangeNotifier {
@@ -39,11 +54,24 @@ class PhoneReplies extends ChangeNotifier {
   final MainState state;
   final Duration settle, reviseGap;
   final ReplySender? _send;
-  final Map<String, ReplyOutcome> _outcomes = {};
+  final Map<String, _Kept> _outcomes = {};
   final Map<String, ({Timer timer, VoidCallback off})> _watches = {};
   bool _disposed = false;
 
-  ReplyOutcome? outcomeOf(String itemId) => _outcomes[itemId];
+  /// The word on card [itemId]. A word that is not pending lasts only while the session is where it was when the
+  /// word was set: a new state or seq (a new question) drops it, and 连不上 A goes with the next row update.
+  ReplyOutcome? outcomeOf(String itemId) {
+    final k = _outcomes[itemId];
+    if (k == null) return null;
+    final t = k.t;
+    if (k.o.pending || t == null) return k.o;
+    final moved = k.o.word == _noLink ? !identical(_row(t), k.row) : _base(t) != k.base;
+    if (moved) {
+      _outcomes.remove(itemId);
+      return null;
+    }
+    return k.o;
+  }
 
   Future<void> _go(ReplyTarget t, {int? seq, String? text, bool enter = false, List<String> keys = const []}) {
     final s = _send;
@@ -53,12 +81,12 @@ class PhoneReplies extends ChangeNotifier {
 
   TermRow? _row(ReplyTarget t) => state.hub?.termLists[t.device]?.terms.where((r) => r.id == t.term).firstOrNull;
 
-  void _set(String id, ReplyOutcome? o) {
+  void _set(String id, ReplyOutcome? o, [ReplyTarget? t]) {
     if (_disposed) return;
     if (o == null) {
       _outcomes.remove(id);
     } else {
-      _outcomes[id] = o;
+      _outcomes[id] = _Kept(o, t, t == null ? null : _base(t), t == null ? null : _row(t));
     }
     notifyListeners();
   }
@@ -68,20 +96,37 @@ class PhoneReplies extends ChangeNotifier {
   Future<bool> keys(String itemId, ReplyTarget t, int? seq, List<String> keys, {required String doneWord}) async {
     if (!_ready(itemId, t, seq)) return false;
     final base = _base(t);
-    if (!await _sendOnce(itemId, doneWord, () => _go(t, seq: seq, keys: keys))) return false;
+    if (!await _sendOnce(itemId, t, doneWord, () => _go(t, seq: seq, keys: keys))) return false;
     _watch(itemId, t, base, doneWord);
     return true;
   }
 
-  /// A spoken or typed reply: the text and Enter, with no seq.
-  /// Blank text sends nothing. Returns true only when it was sent.
-  Future<bool> say(String itemId, ReplyTarget t, String text) async {
-    if (text.trim().isEmpty || !_ready(itemId, t, null)) return false;
+  /// A spoken or typed reply: the text and Enter. With [seq] (a done card's) it is for that status snapshot only:
+  /// the holder refuses a moved one. Blank text sends nothing. Returns true only when it was sent.
+  /// Said to a working or idle session it went when the hub took it (the program may queue it and stay as it is);
+  /// only a waiting or done one is watched for 3 s.
+  Future<bool> say(String itemId, ReplyTarget t, String text, {int? seq}) async {
+    if (text.trim().isEmpty || !_ready(itemId, t, seq, blocked: false)) return false;
     final base = _base(t);
-    if (!await _sendOnce(itemId, '已发出', () => _go(t, text: text, enter: true))) return false;
+    if (!await _sendOnce(itemId, t, '已发出', () => _go(t, seq: seq, text: text, enter: true))) return false;
     _record(t, text);
-    _watch(itemId, t, base, '已发出');
+    if (base != null && (base.$1 == 'blocked' || base.$1 == 'done')) {
+      _watch(itemId, t, base, '已发出');
+    } else {
+      _set(itemId, null);
+    }
     return true;
+  }
+
+  /// The session's reply bar. While the session waits on a question nothing goes (Enter would pick its first
+  /// item): [barId] says to use the card. Otherwise as [say] on [itemId].
+  Future<bool> sayFromBar(String barId, String itemId, ReplyTarget t, String text) async {
+    if (text.trim().isEmpty) return false;
+    if (_row(t)?.ps?.state == 'blocked') {
+      _set(barId, const ReplyOutcome(_cardFirst), t);
+      return false;
+    }
+    return say(itemId, t, text);
   }
 
   /// 「要改」: the key that opens the program's edit box (with the seq), a short gap, then the words and Enter.
@@ -89,7 +134,7 @@ class PhoneReplies extends ChangeNotifier {
   Future<bool> revise(String itemId, ReplyTarget t, int seq, List<String> keys, String text) async {
     if (text.trim().isEmpty || !_ready(itemId, t, seq)) return false;
     final base = _base(t);
-    final ok = await _sendOnce(itemId, '已发出', () async {
+    final ok = await _sendOnce(itemId, t, '已发出', () async {
       await _go(t, seq: seq, keys: keys);
       await Future<void>.delayed(reviseGap);
       await _go(t, text: text, enter: true);
@@ -103,16 +148,17 @@ class PhoneReplies extends ChangeNotifier {
   /// After 「同意」 or 「要改」 went: the queue row [eid] is handled.
   void markEid(String eid) => unawaited(state.stateSync?.markHandled(eid));
 
-  /// Offline, or the question is gone locally: the word, and nothing is sent.
-  bool _ready(String id, ReplyTarget t, int? seq) {
-    if (_watches.containsKey(id) || _outcomes[id]?.pending == true) return false;
+  /// Offline, or the question is gone locally: the word, and nothing is sent. [blocked]: a [seq] is a waiting
+  /// question's (else any snapshot's, a done card's).
+  bool _ready(String id, ReplyTarget t, int? seq, {bool blocked = true}) {
+    if (_watches.containsKey(id) || _outcomes[id]?.o.pending == true) return false;
     if (!state.hubUsable || state.offlineWord(t.device, t.term) == '设备离线') {
-      _set(id, const ReplyOutcome(_noLink, failed: true));
+      _set(id, const ReplyOutcome(_noLink, failed: true), t);
       return false;
     }
     final ps = _row(t)?.ps;
-    if (seq != null && (ps == null || ps.state != 'blocked' || ps.seq != seq)) {
-      _set(id, const ReplyOutcome(_gone, failed: true));
+    if (seq != null && (ps == null || (blocked && ps.state != 'blocked') || ps.seq != seq)) {
+      _set(id, const ReplyOutcome(_gone, failed: true), t);
       return false;
     }
     return true;
@@ -123,7 +169,7 @@ class PhoneReplies extends ChangeNotifier {
     return ps == null ? null : (ps.state, ps.seq);
   }
 
-  Future<bool> _sendOnce(String id, String word, Future<void> Function() go) async {
+  Future<bool> _sendOnce(String id, ReplyTarget t, String word, Future<void> Function() go) async {
     _set(id, ReplyOutcome(word, pending: true));
     try {
       await go();
@@ -133,9 +179,9 @@ class PhoneReplies extends ChangeNotifier {
       final word = m.contains('older version')
           ? _oldRun
           : (m == 'changed' || m == 'typed' ? _gone : _goLook);
-      _set(id, ReplyOutcome(word, failed: true));
+      _set(id, ReplyOutcome(word, failed: true), t);
     } catch (_) {
-      _set(id, const ReplyOutcome(_goLook, failed: true));
+      _set(id, const ReplyOutcome(_goLook, failed: true), t);
     }
     return false;
   }
@@ -159,7 +205,7 @@ class PhoneReplies extends ChangeNotifier {
       final w = _watches.remove(id);
       w?.timer.cancel();
       w?.off();
-      _set(id, o);
+      _set(id, o, t);
     }
 
     if (hub == null || left()) {

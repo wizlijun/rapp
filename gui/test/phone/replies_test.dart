@@ -234,6 +234,131 @@ void main() {
     });
   });
 
+  test('a failure word goes when a new question comes, and stays while the question is the same', () {
+    run((a, r) {
+      fail = HubException('boom');
+      r.keys(_id, _t, 4, ['1'], doneWord: '已允许');
+      a.flushMicrotasks();
+      expect(r.outcomeOf(_id)!.word, '没成功，进去看看');
+      // The same question pushed again keeps the word.
+      push('blocked', 4);
+      a.flushMicrotasks();
+      expect(r.outcomeOf(_id)!.word, '没成功，进去看看');
+      // A new question on the same session: the word goes, so the card shows its buttons again.
+      push('blocked', 5);
+      a.flushMicrotasks();
+      expect(r.outcomeOf(_id), isNull);
+      fail = null;
+      r.keys(_id, _t, 5, ['1'], doneWord: '已允许');
+      a.flushMicrotasks();
+      expect(calls.length, 2);
+      expect(calls.last['seq'], 5);
+    });
+  });
+
+  test('the settle failure and the not-waiting word also go with the next question', () {
+    run((a, r) {
+      r.keys(_id, _t, 4, ['1'], doneWord: '已允许');
+      a.flushMicrotasks();
+      a.elapse(const Duration(seconds: 4));
+      expect(r.outcomeOf(_id)!.word, '没成功，进去看看');
+      push('blocked', 5);
+      a.flushMicrotasks();
+      expect(r.outcomeOf(_id), isNull);
+      r.keys(_id, _t, 4, ['1'], doneWord: '已允许');
+      a.flushMicrotasks();
+      expect(r.outcomeOf(_id)!.word, '它已经不在等这一问了');
+      push('blocked', 5);
+      a.flushMicrotasks();
+      expect(r.outcomeOf(_id)!.word, '它已经不在等这一问了');
+      push('working', 6);
+      a.flushMicrotasks();
+      expect(r.outcomeOf(_id), isNull);
+    });
+  });
+
+  test('the connection word goes with the next row update', () {
+    final s2 = _Offline(
+        hub: s.hub,
+        data: DataDir(tmp.path),
+        prefs: UiPrefs(),
+        port: FakeSessionPort(),
+        unlockStore: UnlockStore(supported: false, memory: false),
+        termPort: FakeTermSessionPort());
+    fakeAsync((a) {
+      push('blocked', 4);
+      a.flushMicrotasks();
+      final r = PhoneReplies(s2, send: (t, {seq, text, enter = false, keys = const []}) async => calls.add({'k': keys}));
+      s2.word = '设备离线';
+      r.keys(_id, _t, 4, ['1'], doneWord: '已允许');
+      a.flushMicrotasks();
+      expect(calls, isEmpty);
+      expect(r.outcomeOf(_id)!.word, '连不上 A，没发');
+      expect(r.outcomeOf(_id)!.word, '连不上 A，没发');
+      s2.word = null;
+      push('blocked', 4);
+      a.flushMicrotasks();
+      expect(r.outcomeOf(_id), isNull);
+      r.dispose();
+    });
+  });
+
+  test('a done say carries its seq; a moved snapshot says the question is gone', () {
+    run((a, r) {
+      push('done', 7);
+      a.flushMicrotasks();
+      fail = HubException('changed');
+      r.say(_id, _t, '好的', seq: 7);
+      a.flushMicrotasks();
+      expect(calls.single['seq'], 7);
+      expect(calls.single['text'], '好的');
+      expect(calls.single['enter'], isTrue);
+      expect(r.outcomeOf(_id)!.word, '它已经不在等这一问了');
+      // Locally stale: nothing goes.
+      push('done', 8);
+      a.flushMicrotasks();
+      expect(r.outcomeOf(_id), isNull);
+      r.say(_id, _t, '好的', seq: 7);
+      a.flushMicrotasks();
+      expect(calls.length, 1);
+      expect(r.outcomeOf(_id)!.word, '它已经不在等这一问了');
+    });
+  });
+
+  test('a say to a working or idle session goes on the ack, with no failure word', () {
+    run((a, r) {
+      for (final st in ['working', 'idle']) {
+        push(st, 9);
+        a.flushMicrotasks();
+        r.say(_id, _t, '继续');
+        a.flushMicrotasks();
+        expect(r.outcomeOf(_id), isNull);
+        a.elapse(const Duration(seconds: 5));
+        expect(r.outcomeOf(_id), isNull);
+      }
+      expect(calls.length, 2);
+      expect(calls.every((c) => c['seq'] == null), isTrue);
+    });
+  });
+
+  test('the reply bar sends nothing while the session waits on a question', () {
+    run((a, r) {
+      r.sayFromBar('bar', _id, _t, '好的');
+      a.flushMicrotasks();
+      expect(calls, isEmpty);
+      expect(r.outcomeOf('bar')!.word, '先点上面卡片的按钮');
+      // The card's own words are untouched.
+      expect(r.outcomeOf(_id), isNull);
+      push('working', 5);
+      a.flushMicrotasks();
+      expect(r.outcomeOf('bar'), isNull);
+      r.sayFromBar('bar', _id, _t, '好的');
+      a.flushMicrotasks();
+      expect(calls.single['text'], '好的');
+      expect(calls.single['seq'], isNull);
+    });
+  });
+
   group('form switch', () {
     testWidgets('outcome survives a form switch', (tester) async {
       tester.view.physicalSize = const Size(1194, 834);
@@ -275,4 +400,12 @@ class _ViewDown extends MainState {
   _ViewDown({super.hub, required super.data, required super.prefs, required super.port, required super.unlockStore, required super.termPort});
   @override
   String? offlineWord(String device, String termId) => '已断开';
+}
+
+/// A state whose device can be taken offline.
+class _Offline extends MainState {
+  _Offline({super.hub, required super.data, required super.prefs, required super.port, required super.unlockStore, required super.termPort});
+  String? word;
+  @override
+  String? offlineWord(String device, String termId) => word ?? super.offlineWord(device, termId);
 }

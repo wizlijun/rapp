@@ -262,6 +262,8 @@ class _PhoneSessionViewState extends State<PhoneSessionView> {
     final target = _replyTarget(key);
     final pinned = _pinned(key);
     final itemId = pinned?.id ?? 'session\n$key';
+    // The bar's own word (refused while the session waits): never on the card, whose buttons it points to.
+    final barId = 'bar\n$key';
     final replies = _nav.replies;
     final open = rs.composer.open;
     final onType = rs.composerAllowed ? (open ? rs.composer.collapse : () => rs.composer.open = true) : null;
@@ -275,7 +277,7 @@ class _PhoneSessionViewState extends State<PhoneSessionView> {
         // The composer layer draws this key's tidy card already.
         ownTidyCard: false,
         send: (text, voice) {
-          unawaited(replies.say(itemId, target, text));
+          unawaited(replies.sayFromBar(barId, itemId, target, text));
           return null;
         },
         edit: (text) => _toDraft(rs, text),
@@ -310,31 +312,36 @@ class _PhoneSessionViewState extends State<PhoneSessionView> {
                     // controls; it waits until the composer closes.
                     builder: (context, room) => open && room.maxHeight < _pinnedMinRoom
                         ? const SizedBox.shrink()
-                        : Padding(padding: const EdgeInsets.only(bottom: 12), child: SingleChildScrollView(child: _pinnedCard(rs, pinned))),
-                  ),
-                )
-              else
-                ListenableBuilder(
-                  listenable: replies,
-                  builder: (context, _) {
-                    final o = replies.outcomeOf(itemId);
-                    if (o == null) return const SizedBox.shrink();
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(o.word, style: style.copyWith(color: t.muted)),
+                        : Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            // A new question is a new card: a press or hold on the old one goes with it (C6).
+                            child: SingleChildScrollView(
+                                child: KeyedSubtree(key: ValueKey(pinned.gotItKey), child: _pinnedCard(rs, pinned))),
                           ),
-                          if (o.failed) ...[
-                            const SizedBox(width: 12),
-                            PhoneButton(label: '进去看', tall: true, onPressed: () => setState(() => _raw = true)),
-                          ],
-                        ],
-                      ),
-                    );
-                  },
+                  ),
                 ),
+              ListenableBuilder(
+                listenable: replies,
+                builder: (context, _) {
+                  // With a card pinned its own words are on it; the bar's refusal shows here either way.
+                  final o = replies.outcomeOf(barId) ?? (pinned == null ? replies.outcomeOf(itemId) : null);
+                  if (o == null) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(o.word, style: style.copyWith(color: t.muted)),
+                        ),
+                        if (o.failed) ...[
+                          const SizedBox(width: 12),
+                          PhoneButton(label: '进去看', tall: true, onPressed: () => setState(() => _raw = true)),
+                        ],
+                      ],
+                    ),
+                  );
+                },
+              ),
               if (!reading && rs.currentZoomed) ...[
                 Align(
                   alignment: Alignment.centerRight,

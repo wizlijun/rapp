@@ -97,6 +97,9 @@ class _PhoneVoiceState extends State<PhoneVoice> {
   void dispose() {
     final h = _hold;
     if (h != null) {
+      // A hold still going ends here as 取消 (a new card took this one's place, C6): the finger's later lift finds
+      // nothing to release, and nothing is sent.
+      h.cancel();
       h.dispose();
       if (identical(_s.voiceSends[widget.key2], _mine)) _s.voiceNoTidy.remove(widget.key2);
       _s.removeVoiceSend(widget.key2, only: _mine);

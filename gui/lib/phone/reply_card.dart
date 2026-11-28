@@ -12,7 +12,6 @@ import 'replies.dart';
 import 'reply_model.dart';
 import 'widgets.dart';
 
-const _hintOptions = '选项都不合适？按住说话，回一句。';
 const _sourceAgent = '它自己写的要点 · 点上面的字看全文';
 const _sourceRule = '取自计划原文 · 点上面的字看全文';
 
@@ -129,14 +128,7 @@ class ReplyActions extends StatelessWidget {
             onSend: () => _keys(keys, '已回复 ${i + 1}'),
           ));
         }
-        if (voice != null) {
-          children.add(Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: Text(_hintOptions, style: style.copyWith(color: t.muted)),
-          ));
-          children.add(const SizedBox(height: 12));
-          children.add(voice!('说一句', ReplyVoiceUse.say));
-        }
+        // No 「说一句」 here: Enter on the question picks its first item, and a free answer is not probed yet.
       case ReplyKind.review:
         final ok = reply.planOk;
         children.add(_pair(

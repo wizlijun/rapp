@@ -250,10 +250,14 @@ void main() {
     });
   }
 
-  testWidgets('with a voice builder the question card shows its hint and 说一句', (tester) async {
+  testWidgets('the question card has no hint and no 说一句 even with a voice builder; the done card keeps its 说一句', (tester) async {
     final c = CardReply(ReplyKind.options, target: _target, seq: 1, options: const ['甲']);
     await tester.pumpWidget(host(RappTheme.values.first, actions(item(), c, voice: (l, u) => Text('$l-${u.name}'))));
-    expect(find.text('选项都不合适？按住说话，回一句。'), findsOneWidget);
+    expect(find.text('选项都不合适？按住说话，回一句。'), findsNothing);
+    expect(find.text('说一句-say'), findsNothing);
+    expect(find.text('甲'), findsOneWidget);
+    final d = CardReply(ReplyKind.done, target: _target, seq: 1, voice: true);
+    await tester.pumpWidget(host(RappTheme.values.first, actions(item(kind: HomeKind.done), d, voice: (l, u) => Text('$l-${u.name}'))));
     expect(find.text('说一句-say'), findsOneWidget);
   });
 }

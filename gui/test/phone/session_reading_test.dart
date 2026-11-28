@@ -9,7 +9,9 @@ import 'package:rapp/embed/voice_tidy_card.dart';
 import 'package:rapp/embed/voice_ring.dart' show VoicePick;
 import 'package:rapp/phone/phone_voice.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/llm_api.dart';
 import 'package:rapp/paths.dart';
+import 'package:rapp/phone/home_screen.dart';
 import 'package:rapp/phone/phone_nav.dart';
 import 'package:rapp/phone/reading_view.dart';
 import 'package:rapp/phone/reply_card.dart';
@@ -25,6 +27,8 @@ import 'package:rapp/ui/unlock.dart';
 
 import '../embed/voice_button_test.dart' show FakeVoice;
 import '../fakes.dart';
+
+const _long = '这是一段比较长的中性测试文字';
 
 class _Sync extends FakeStateSync {
   _Sync(super.localDir);
@@ -148,6 +152,24 @@ void main() {
     });
     if (card) sync.push();
     await tester.pump();
+    await tester.pump();
+  }
+
+  /// The waiting plan question again, as number [seq].
+  Future<void> pushQuestion(WidgetTester tester, int seq) async {
+    await tester.runAsync(() async {
+      t.emit({
+        'event': 'terms', 'id': 'm1', 'path': 'lan', 'hosts': [],
+        'terms': [
+          {
+            'id': 'term:pty:a', 'name': 'a', 'command': 'zsh', 'activity': 1, 'unread': false, 'reply': true,
+            'fg': 'claude',
+            'ps': {'state': 'blocked', 'seq': seq, 'kind': 'permission', 'msg': 'approve plan', 'app': 'claude-code', 'since': 10},
+          }
+        ],
+      });
+      await flush();
+    });
     await tester.pump();
   }
 
@@ -341,6 +363,78 @@ void main() {
     expect(find.text('按住说话，回一句'), findsNothing);
     expect(find.byKey(const Key('composer-open')), findsOneWidget);
     expect(s.voiceSends, isEmpty);
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('the reply bar refuses while the session waits; the card keeps its buttons', (tester) async {
+    await boot(tester, card: true);
+    expect(find.text('同意'), findsOneWidget);
+    final before = t.sent.length;
+    await hold(tester, find.text('按住说话，回一句'), '好的');
+    expect(sent, isEmpty);
+    expect(t.sent.skip(before).where((m) => m['cmd'] == 'reply_term'), isEmpty);
+    expect(find.text('先点上面卡片的按钮'), findsOneWidget);
+    expect(find.text('同意'), findsOneWidget);
+    // A new question takes the word away.
+    await pushQuestion(tester, 5);
+    expect(find.text('先点上面卡片的按钮'), findsNothing);
+    await tester.pump(const Duration(seconds: 4));
+  });
+
+  testWidgets('a 要改 hold across a new question sends nothing', (tester) async {
+    await boot(tester, card: true);
+    voice.stopResult = '改一下';
+    final g = await tester.startGesture(tester.getCenter(find.text('要改')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 240));
+    await pushQuestion(tester, 5);
+    // The card of the new question is there, and the hold went with the old one.
+    expect(find.text('要改'), findsOneWidget);
+    await g.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(sent, isEmpty);
+    await tester.pump(const Duration(seconds: 4));
+  });
+
+  testWidgets('a failure word on the pinned card is the home card\'s too, and a new question takes it from both', (tester) async {
+    await boot(tester, card: true);
+    failSend = true;
+    await tester.tap(find.text('同意'));
+    await tester.pump();
+    expect(sent, hasLength(1));
+    expect(find.text('没成功，进去看看'), findsOneWidget);
+    expect(find.text('同意'), findsNothing);
+    Widget home() => MaterialApp(theme: themeDataFor(RappTheme.matrix), home: Scaffold(resizeToAvoidBottomInset: false, body: HomeScreen(state: s, nav: nav)));
+    Widget inSession() => MaterialApp(theme: themeDataFor(RappTheme.matrix), home: PhoneSessionView(state: s, nav: nav));
+    await tester.pumpWidget(home());
+    await tester.pump();
+    expect(find.text('没成功，进去看看'), findsOneWidget);
+    expect(find.text('同意'), findsNothing);
+    await pushQuestion(tester, 5);
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('没成功，进去看看'), findsNothing);
+    expect(find.text('同意'), findsOneWidget);
+    await tester.pumpWidget(inSession());
+    await tester.pump();
+    expect(find.text('没成功，进去看看'), findsNothing);
+    expect(find.text('同意'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 4));
+  });
+
+  testWidgets('the reply bar keeps its session\'s secure-field check for the tidy', (tester) async {
+    await boot(tester);
+    s.setLlm(const LlmEndpoint(url: 'localhost:1', key: 'k'));
+    final rs = s.currentRemote!;
+    expect(s.voiceSends.containsKey(rs.sid), isTrue);
+    expect(s.tidyOf(rs.sid).would(_long), isTrue);
+    rs.secureFocus = true;
+    expect(s.tidyOf(rs.sid).would(_long), isFalse);
+    // A key with no session behind it (a card) tidies as before.
+    s.voiceSends['card'] = (text, o) => null;
+    expect(s.tidyOf('card').would(_long), isTrue);
+    s.voiceSends.remove('card');
+    rs.secureFocus = false;
     await tester.pump(const Duration(seconds: 1));
   });
 }

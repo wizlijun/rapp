@@ -72,14 +72,19 @@ class PhoneCardKit {
     final keys = reply.planRevise;
     final revise = use == ReplyVoiceUse.revise && seq != null && keys != null;
     final replies = nav.replies;
+    // A done card's words are for the snapshot it shows: the holder refuses them once it moved.
+    final saySeq = reply.kind == ReplyKind.done ? seq : null;
+    final key2 = '${item.gotItKey}\n${use.name}';
     return PhoneVoice(
+      // A new question (a new seq in gotItKey) is a new hold: one in progress is dropped, never sent (C6).
+      key: ValueKey(key2),
       state: state,
-      key2: '${item.gotItKey}\n${use.name}',
+      key2: key2,
       send: (text, voice) {
         if (revise) {
           unawaited(_revised(item, replies.revise(item.id, t, seq, keys, text)));
         } else {
-          unawaited(replies.say(item.id, t, text));
+          unawaited(replies.say(item.id, t, text, seq: saySeq));
         }
         return null;
       },
