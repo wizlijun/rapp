@@ -141,7 +141,7 @@ class AppList {
 /// One terminal session of a device (`terms` event, spec §6). [host] is null on the device itself.
 class TermRow {
   const TermRow(this.id, this.name, this.command, this.host, this.panes, this.attached, this.activity, this.dead,
-      this.unread, {this.ps, this.title, this.fg, this.shell});
+      this.unread, {this.ps, this.title, this.fg, this.shell, this.reply = false});
   final String id, name, command;
   final String? host;
   final int panes, attached;
@@ -162,6 +162,9 @@ class TermRow {
   /// Whether the program in front is the shell the session started; null from an old device, which cannot end the
   /// session either (the gate for 「结束终端」).
   final bool? shell;
+
+  /// Whether the device can answer this session without a view (`reply_term`); false from an old device.
+  final bool reply;
 
   /// What to show for the session: the program's title, else its name.
   String get shown => title ?? name;
@@ -257,7 +260,8 @@ TermList termListFromJson(Map<String, dynamic> m, String fallbackId) {
           TermRow('${r['id']}', '${r['name'] ?? ''}', '${r['command'] ?? ''}', _str(r['host']), _int(r['panes']),
             _int(r['attached']), _int(r['activity']), r['dead'] == true, r['unread'] == true,
             ps: termPs(r['ps']), title: switch (r['title']) { String s when s.isNotEmpty => s, _ => null },
-            fg: switch (r['fg']) { String s when s.isNotEmpty => s, _ => null }, shell: switch (r['shell']) { bool b => b, _ => null }),
+            fg: switch (r['fg']) { String s when s.isNotEmpty => s, _ => null }, shell: switch (r['shell']) { bool b => b, _ => null },
+            reply: r['reply'] == true),
     ],
     hosts: [
       for (final h in (m['hosts'] as List? ?? const []).whereType<Map>())
@@ -537,6 +541,21 @@ class HubClient extends ChangeNotifier implements ServiceSwitchApi {
     _labelsAfresh.remove(id);
     labelsUnsupported.remove(id);
     labels[id] = t;
+  }
+
+  /// Answers session [term] of device [id] without opening a view: [seq] is the question's number, [text] and [keys]
+  /// are typed, [enter] presses Enter. The refusal is thrown with its word (`changed`, `typed`, `empty`...).
+  Future<void> replyTerm(String id, String term,
+      {int? seq, String? text, bool enter = false, List<String> keys = const []}) async {
+    await _request({
+      'cmd': 'reply_term',
+      'id': id,
+      'term': term,
+      'seq': ?seq,
+      'text': ?text,
+      if (enter) 'enter': true,
+      if (keys.isNotEmpty) 'keys': keys,
+    }, 'term_replied');
   }
 
   /// Ends text terminal [term] of device [id] for good (its program too); the refusal is thrown with its words.
