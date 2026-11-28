@@ -9,3 +9,8 @@ gui/build/
 gui/.dart_tool/
 dist/
 .claude/worktrees/
+
+# The WeChat offline speech model (wx offline ASR design §5.5): only ever in the data directory, never here.
+wx-asr/
+*.xnet
+dict.decoder.utf8.txt
