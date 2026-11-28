@@ -481,6 +481,9 @@ class MainState extends ChangeNotifier {
   final Map<Object, VoiceSend> voiceSends = {};
   final Map<Object, void Function(String text, VoiceAi? ai)> voiceEdits = {};
 
+  /// Voice keys whose words never go to the AI tidy (the phone's assistant keeps notes as they were said).
+  final Set<Object> voiceNoTidy = {};
+
   /// Takes [key] out of [voiceSends] and [voiceEdits] and ends its tidy. With [only], nothing happens unless that is
   /// still the send installed under [key] (a page that took the key over keeps it).
   void removeVoiceSend(Object key, {VoiceSend? only}) {
@@ -535,7 +538,7 @@ class MainState extends ChangeNotifier {
         endpoint: () => llm,
         api: llmApi,
         allowed: (s) =>
-            prefs.voiceAiTidy && llm.configured && (voiceSends.containsKey(s) || !(remote[s]?.secureFocus ?? true)),
+            prefs.voiceAiTidy && llm.configured && !voiceNoTidy.contains(s) && (voiceSends.containsKey(s) || !(remote[s]?.secureFocus ?? true)),
         think: () => prefs.voiceAiThink,
         mode: (s) {
           for (final r in _records.values) {

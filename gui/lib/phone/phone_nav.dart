@@ -4,9 +4,10 @@ library;
 import 'package:flutter/foundation.dart';
 
 import '../ui/main_state.dart';
+import 'assistant_store.dart';
 import 'replies.dart';
 
-enum PhoneView { home, session, devices, settings }
+enum PhoneView { home, session, devices, settings, assistant }
 
 class PhoneNav extends ChangeNotifier {
   /// [send]: a test hook for the replies' sender; null sends through the hub.
@@ -16,6 +17,12 @@ class PhoneNav extends ChangeNotifier {
 
   /// The replies sent from phone cards, and their outcome words (they outlive a form switch).
   late final PhoneReplies replies = PhoneReplies(state, send: _send);
+
+  /// The notes of the 助理, on this phone only. One per nav, so they outlive a form switch.
+  late final AssistantStore assistant = AssistantStore(state.data.localDir);
+
+  /// Words 「编辑」 puts in the input of the 助理 page; the page takes them when it opens.
+  String? assistantDraft;
 
   PhoneView _now = PhoneView.home;
   PhoneView get now => _now;
@@ -46,6 +53,7 @@ class PhoneNav extends ChangeNotifier {
 
   void home() {
     pendingDraft = null;
+    assistantDraft = null;
     state.setPhone(form: true, inSession: false);
     cameFrom = null;
     _now = PhoneView.home;

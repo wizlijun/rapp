@@ -1,4 +1,4 @@
-/// The bottom sheet of the phone shell: 设备, 设置 (V1b Task 7). No project section (P5).
+/// The bottom sheet of the phone shell: 助理, 设备, 设置 (V1b Task 7). No project section (P5).
 library;
 
 import 'package:flutter/material.dart';
@@ -37,7 +37,13 @@ Future<void> showPhoneSheet(BuildContext context, PhoneNav nav) {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [row('设备', PhoneView.devices), const SizedBox(height: 12), row('设置', PhoneView.settings)], // Q2
+                children: [
+                  row('助理', PhoneView.assistant),
+                  const SizedBox(height: 12), // Q2
+                  row('设备', PhoneView.devices),
+                  const SizedBox(height: 12),
+                  row('设置', PhoneView.settings),
+                ],
               ),
             ),
           ),

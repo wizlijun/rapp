@@ -27,6 +27,7 @@ class PhoneVoice extends StatefulWidget {
     required this.edit,
     required this.builder,
     this.ownTidyCard = true,
+    this.tidy = true,
   });
   final MainState state;
   final Object key2;
@@ -38,6 +39,9 @@ class PhoneVoice extends StatefulWidget {
 
   /// Draws the tidy card in its own overlay. False where another layer already draws that key's card.
   final bool ownTidyCard;
+
+  /// False: the key's words never go to the AI tidy.
+  final bool tidy;
 
   @override
   State<PhoneVoice> createState() => _PhoneVoiceState();
@@ -64,7 +68,12 @@ class _PhoneVoiceState extends State<PhoneVoice> {
       return t.isEmpty ? voiceBlank : widget.send(t, origin);
     };
     _s.voiceSends[k] = mine;
-    _s.voiceEdits[k] = (text, ai) => widget.edit(text);
+    // Only a tidy card's 编辑 reads voiceEdits; a key with no tidy has none.
+    if (widget.tidy) {
+      _s.voiceEdits[k] = (text, ai) => widget.edit(text);
+    } else {
+      _s.voiceNoTidy.add(k);
+    }
     _hold = VoiceHold(
       voice: voice,
       send: (text, heard) {
@@ -89,6 +98,7 @@ class _PhoneVoiceState extends State<PhoneVoice> {
     final h = _hold;
     if (h != null) {
       h.dispose();
+      if (identical(_s.voiceSends[widget.key2], _mine)) _s.voiceNoTidy.remove(widget.key2);
       _s.removeVoiceSend(widget.key2, only: _mine);
     }
     _composer.dispose();
@@ -136,7 +146,7 @@ class _PhoneVoiceState extends State<PhoneVoice> {
 }
 
 /// The wide hold-to-talk button of a card: 64 high, the microphone on the left, the label.
-Widget phoneVoiceButton(VoiceHold hold, String label) => voiceHoldArea(
+Widget phoneVoiceButton(VoiceHold hold, String label, {Key? key}) => voiceHoldArea(
       hold,
       child: ValueListenableBuilder<double>(
         valueListenable: hold.buttonOpacity,
@@ -149,7 +159,7 @@ Widget phoneVoiceButton(VoiceHold hold, String label) => voiceHoldArea(
             label: label,
             excludeSemantics: true,
             child: Container(
-              key: const Key('phone-voice'),
+              key: key ?? const Key('phone-voice'),
               constraints: const BoxConstraints(minHeight: phonePrimaryTap),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: t.raiseBox(),

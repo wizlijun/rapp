@@ -117,17 +117,17 @@ void main() {
 
   for (final th in RappTheme.values) {
     group(th.name, () {
-      testWidgets('sheet has two rows', (tester) async {
+      testWidgets('sheet has three rows', (tester) async {
         size(tester);
         await boot(tester);
         await tester.pumpWidget(app(th, Builder(builder: (c) => TextButton(onPressed: () => showPhoneSheet(c, nav), child: const Text('go')))));
         await tester.tap(find.text('go'));
         await tester.pumpAndSettle();
-        for (final w in ['设备', '设置']) {
+        for (final w in ['助理', '设备', '设置']) {
           expect(find.text(w), findsOneWidget);
           expect(tester.getSize(find.ancestor(of: find.text(w), matching: find.byType(InkWell)).first).height, greaterThanOrEqualTo(56));
         }
-        for (final w in ['项目', '助理', '已处理']) {
+        for (final w in ['项目', '已处理']) {
           expect(find.text(w), findsNothing);
         }
         await tester.tap(find.text('设置'));

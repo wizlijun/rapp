@@ -5,10 +5,12 @@ import 'package:flutter/material.dart';
 
 import '../ui/main_state.dart';
 import '../ui/tokens.dart';
+import '../embed/voice_button.dart' show voiceBlank;
 import 'devices_page.dart';
 import 'enter_when_open.dart';
 import 'home_model.dart';
 import 'phone_nav.dart';
+import 'phone_voice.dart';
 import 'card_kit.dart';
 import 'reply_card.dart';
 import 'reply_model.dart';
@@ -280,6 +282,25 @@ class _HomeScreenState extends State<HomeScreen> {
                 SizedBox(height: 480, child: DeviceList(state: _s, nav: _nav)),
               ],
             ],
+          ),
+        ),
+        // H12: hold to talk to the 助理. The words become a note on this phone, never a terminal's input.
+        PhoneVoice(
+          state: _s,
+          key2: 'assistant',
+          tidy: false,
+          send: (text, origin) {
+            if (text.trim().isEmpty) return voiceBlank;
+            _nav.assistant.add(text);
+            return null;
+          },
+          edit: (text) {
+            _nav.assistantDraft = text;
+            _nav.open(PhoneView.assistant);
+          },
+          builder: (context, hold) => Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            child: phoneVoiceButton(hold, '按住说话，跟助理说', key: const Key('assistant-voice')),
           ),
         ),
       ],
