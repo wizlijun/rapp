@@ -347,6 +347,8 @@ mod tests {
             fg_rev: watch::channel(0).0,
             shell: Mutex::default(),
             input_at: AtomicU64::new(0),
+            input_ms: AtomicU64::new(0),
+            seq_ms: AtomicU64::new(0),
             dirty: watch::channel(0).0,
             tty: None,
             end: tokio::sync::Notify::new(),

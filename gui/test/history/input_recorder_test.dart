@@ -935,4 +935,32 @@ void main() {
       expect(r.containsKey('ai'), isFalse);
     });
   });
+
+  group('replied', () {
+    List<Map<String, Object?>> files() => [
+          for (final f in Directory(data.inputsDir('dev1')).existsSync() ? Directory(data.inputsDir('dev1')).listSync(recursive: true).whereType<File>() : <File>[])
+            ...f.readAsLinesSync().where((l) => l.trim().isNotEmpty).map((l) => jsonDecode(l) as Map<String, Object?>)
+        ];
+
+    test('app switch off writes no record but the up list still hears it', () async {
+      final r = InputRecorder(data: () => data, enabled: () => true, recordsApp: (a) => false, log: logs.add);
+      final got = <String>[];
+      r.onSent = (k, t, at) => got.add(t);
+      await r.replied(meta('h1', 'com.a'), '好的', DateTime(2026, 11, 28));
+      expect(files(), isEmpty);
+      expect(got, ['好的']);
+    });
+
+    test('history off still fires onSent, on writes one record', () async {
+      final got = <String>[];
+      enabled = false;
+      final r = recorder()..onSent = (k, t, at) => got.add(t);
+      await r.replied(meta('h1', 'com.a'), '一', DateTime(2026, 11, 28));
+      expect(files(), isEmpty);
+      enabled = true;
+      await r.replied(meta('h1', 'com.a'), '二', DateTime(2026, 11, 28));
+      expect(files().map((x) => x['text']), ['二']);
+      expect(got, ['一', '二']);
+    });
+  });
 }

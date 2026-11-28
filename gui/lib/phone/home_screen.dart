@@ -5,10 +5,15 @@ import 'package:flutter/material.dart';
 
 import '../ui/main_state.dart';
 import '../ui/tokens.dart';
+import '../embed/voice_button.dart' show voiceBlank;
 import 'devices_page.dart';
 import 'enter_when_open.dart';
 import 'home_model.dart';
 import 'phone_nav.dart';
+import 'phone_voice.dart';
+import 'card_kit.dart';
+import 'reply_card.dart';
+import 'reply_model.dart';
 import 'sheet.dart';
 import 'widgets.dart';
 
@@ -49,6 +54,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final _workKey = GlobalKey();
 
   late final EnterWhenOpen _enter;
+  late final PhoneCardKit _kit = PhoneCardKit(_s, _nav);
 
   MainState get _s => widget.state;
   PhoneNav get _nav => widget.nav;
@@ -71,6 +77,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _onNav() {
     if (_nav.now != PhoneView.home) {
       _enter.cancel();
+      _nav.pendingDraft = null;
       _all = false;
       _allWorking = false;
     }
@@ -104,27 +111,13 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _canOpen(NeedItem n) => n.greyWord == null && (n.kind != NeedKind.terminal || _s.hubUsable);
 
   void _gotIt(HomeItem item) {
-    final sync = _s.stateSync;
     setState(() {
       _nav.cameFrom = null;
-      _nav.gotIt.add(item.gotItKey);
+      _kit.gotIt(item);
     });
-    if (item.kind == HomeKind.resource && item.need != null) {
-      _s.snoozeNeed(item.need!);
-    }
-    final eid = item.eid;
-    if (eid != null) sync?.markHandled(eid);
-    if (item.kind == HomeKind.done && _viaService(item)) {
-      final p = item.id.split('\n');
-      sync?.markSeen(p[1], p[2]);
-    }
   }
 
-  /// A done terminal of a device this machine has no terminal list for: only the service can clear it.
-  bool _viaService(HomeItem i) {
-    final p = i.id.split('\n');
-    return p.length == 3 && p[0] == 'term' && _s.stateSync != null && !(_s.hub?.termLists.containsKey(p[1]) ?? false);
-  }
+  CardReply _replyOf(HomeItem card) => _kit.cardReply(card);
 
   VoidCallback? _buttonOf(HomeItem item) {
     switch (item.button) {
@@ -141,7 +134,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _s.reconnect(item.need!.target);
         };
       case HomeButton.gotIt:
-        if (_offline && (item.eid != null || _viaService(item))) return null;
+        if (_offline && (item.eid != null || _kit.viaService(item))) return null;
         return () => _gotIt(item);
     }
   }
@@ -252,7 +245,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         : Padding(
                             key: ValueKey(card.gotItKey),
                             padding: const EdgeInsets.only(bottom: 12),
-                            child: PhoneCard(item: card, onOpen: null, onButton: _buttonOf(card)),
+                            child: _focusCard(card),
                           ),
                   ),
                 ],
@@ -291,8 +284,56 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
+        // H12: hold to talk to the 助理. The words become a note on this phone, never a terminal's input.
+        PhoneVoice(
+          state: _s,
+          key2: 'assistant',
+          tidy: false,
+          send: (text, origin) {
+            if (text.trim().isEmpty) return voiceBlank;
+            _nav.assistant.add(text);
+            return null;
+          },
+          edit: (text) {
+            _nav.assistantDraft = text;
+            _nav.open(PhoneView.assistant);
+          },
+          builder: (context, hold) => Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            child: phoneVoiceButton(hold, '按住说话，跟助理说', key: const Key('assistant-voice')),
+          ),
+        ),
       ],
     );
+  }
+
+  /// The focus card: with reply buttons when it has any, else today's single button.
+  Widget _focusCard(HomeItem card) {
+    final reply = _replyOf(card);
+    if (reply.kind == ReplyKind.none) return PhoneCard(item: card, onOpen: null, onButton: _buttonOf(card));
+    return PhoneCard(
+      item: card,
+      // The review points are cut short: the text opens the session for the full plan.
+      onOpen: reply.kind == ReplyKind.review ? () => _goLook(card) : null,
+      onButton: _buttonOf(card),
+      actions: ReplyActions(
+        item: card,
+        reply: reply,
+        replies: _nav.replies,
+        voice: _kit.canVoice(card, reply)
+            ? (label, use) => _kit.voiceFor(card, reply, label, use, editIn: _editIn, mounted: () => mounted)
+            : null,
+        onGotIt: reply.kind == ReplyKind.done ? _buttonOf(card) : null,
+        onGoLook: () => _goLook(card),
+      ),
+    );
+  }
+
+  void _editIn(HomeItem item, String text) {
+    final key = item.sessionKey;
+    if (key == null) return;
+    _nav.pendingDraft = (key: key, text: text);
+    _goLook(item);
   }
 
   Widget _heading(String s, TextStyle style, RappTokens t) => Padding(

@@ -86,6 +86,11 @@ fn host_bin(state: &State) -> Result<PathBuf> {
     rapp_net::bins::find("rapp-host", state.bin_dir.as_deref()).ok_or_else(|| anyhow!("rapp-host not found"))
 }
 
+/// Whether replies without a view work here: `rapp-term` is there and replying is unix-only so far.
+fn reply_capable(terminal: bool) -> bool {
+    terminal && cfg!(unix)
+}
+
 /// Installed capabilities, independent of whether a particular session is enabled.
 /// Linux can serve terminals and ports without a graphical host worker.
 pub fn capabilities(state: &State) -> Value {
@@ -94,6 +99,10 @@ pub fn capabilities(state: &State) -> Value {
         "terminal": rapp_net::bins::find("rapp-term", state.bin_dir.as_deref()).is_some(),
         "ports": true,
     });
+    // Only where it works: a missing bit means no.
+    if reply_capable(caps["terminal"] == true) {
+        caps["reply"] = json!(true);
+    }
     // Additional fields are advertised only by the new Linux desktop worker;
     // older/native workers retain their existing capability contract.
     if state.permissions.lock().unwrap()["platform"] == "linux" {
@@ -415,6 +424,17 @@ fn transcribe(state: &State, app: &str, ev: &str, v: &Value) {
     }
     let lvl = if ev == "rejected" { Lvl::Warn } else { Lvl::Info };
     state.log.event(lvl, ev, fields);
+}
+
+#[cfg(test)]
+mod reply_cap_tests {
+    use super::reply_capable;
+
+    #[test]
+    fn capabilities_has_reply_when_terminal() {
+        assert_eq!(reply_capable(true), cfg!(unix));
+        assert!(!reply_capable(false));
+    }
 }
 
 #[cfg(test)]

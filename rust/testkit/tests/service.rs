@@ -11,6 +11,15 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
 const APPS: &str = r#"[{"app":"com.example.echo","name":"Echo"},{"app":"com.apple.Safari","name":"Safari"}]"#;
 
+/// What a service with the fake `rapp-term` says it can do; replying without a view is unix-only.
+fn caps(graphical: bool) -> Value {
+    let mut c = json!({"graphical":graphical,"terminal":true,"ports":true});
+    if cfg!(unix) {
+        c["reply"] = json!(true);
+    }
+    c
+}
+
 fn apps() -> Value {
     serde_json::from_str(APPS).unwrap()
 }
@@ -397,7 +406,7 @@ async fn list_apps_reports_and_stores_permissions() {
     // What this machine is: a dev box may be Omarchy, so any of the four a service reports.
     let os = r["os"].as_str().unwrap_or_default().to_owned();
     assert!(["macos", "windows", "linux", "omarchy"].contains(&os.as_str()), "{r}");
-    assert_eq!(r, json!({"ok":true,"apps":apps(),"permissions":perms(true, false),"capabilities":{"graphical":true,"terminal":true,"ports":true},"os":os,"version":env!("CARGO_PKG_VERSION")}));
+    assert_eq!(r, json!({"ok":true,"apps":apps(),"permissions":perms(true, false),"capabilities":caps(true),"os":os,"version":env!("CARGO_PKG_VERSION")}));
     assert_eq!(ipc_once(&a.svc, a.home.path(), json!({"cmd":"status"})).await["permissions"], perms(true, false));
 }
 
@@ -1239,7 +1248,7 @@ async fn linux_without_graphical_host_lists_capabilities_and_still_serves_terms_
     let svc = start_service(home.path(), bins.path(), Duration::from_secs(60)).await;
     let st = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await;
     assert_eq!(st["permissions"], Value::Null);
-    assert_eq!(st["capabilities"], json!({"graphical":false,"terminal":true,"ports":true}));
+    assert_eq!(st["capabilities"], caps(false));
     let ep = b_endpoint();
     let (c, auth) = direct(&ep, a_addr(&svc), json!({"op":"auth","password":PASSWORD})).await;
     assert_eq!(auth["ok"], true);

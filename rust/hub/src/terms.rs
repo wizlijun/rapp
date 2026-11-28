@@ -81,7 +81,7 @@ pub(crate) fn due(w: Option<&Watch>, now: Instant) -> Option<Option<Duration>> {
     }
 }
 
-/// The terminal commands; `cmd` is one of `terms`, `open_term`, `rename_term`, `end_term`, `restore_terms`,
+/// The terminal commands; `cmd` is one of `terms`, `open_term`, `rename_term`, `end_term`, `reply_term`, `restore_terms`,
 /// `forget_terms`, whose fields (other than `cmd`, `id`, `req`) are the device request's.
 pub(crate) async fn command(hub: &Arc<Hub>, cmd: &str, v: &Value) -> Result<Value> {
     let id = v.get("id").and_then(Value::as_str).context("missing id")?;
@@ -117,6 +117,7 @@ fn event(op: &Op, id: &str, r: &Value) -> Value {
     match op {
         Op::RenameTerm { term, .. } => json!({"event":"term_renamed","id":id,"term":term}),
         Op::EndTerm { term } => json!({"event":"term_ended","id":id,"term":term}),
+        Op::ReplyTerm { term, .. } => json!({"event":"term_replied","id":id,"term":term}),
         Op::RestoreTerms { .. } => json!({"event":"terms_restored","id":id,"terms":r["ids"]}),
         Op::ForgetTerms { .. } => json!({"event":"terms_forgotten","id":id}),
         _ => json!({"event":"term_created","id":id,"term":r["id"]}),
@@ -247,6 +248,13 @@ mod tests {
         let op = Op::EndTerm { term: "term:pty:k".into() };
         let e = event(&op, "d1", &json!({"ok": true}));
         assert_eq!(e, json!({"event":"term_ended","id":"d1","term":"term:pty:k"}));
+    }
+
+    #[test]
+    fn reply_term_is_answered_with_term_replied() {
+        let op = Op::ReplyTerm { term: "term:pty:k".into(), seq: Some(1), text: None, enter: false, keys: vec!["Enter".into()] };
+        let e = event(&op, "d1", &json!({"ok": true}));
+        assert_eq!(e, json!({"event":"term_replied","id":"d1","term":"term:pty:k"}));
     }
 
     #[test]

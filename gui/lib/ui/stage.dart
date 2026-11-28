@@ -9,6 +9,7 @@ import '../embed/composer_editor.dart';
 import '../embed/composer_panel.dart';
 import '../embed/picture.dart';
 import '../embed/remote_session.dart';
+import '../embed/voice_button.dart' show VoiceHold;
 import '../embed/session_port.dart';
 import '../term/end_term_dialog.dart';
 import '../term/term_id.dart';
@@ -263,12 +264,13 @@ List<Widget> stageOverlays(
   required bool full,
   required double keyboard,
   ComposerEditor Function()? editor,
+  Widget Function(BuildContext context, VoiceHold? hold, double bottom)? phoneStack,
 }) {
   if (term && rs != null) {
     final bar = rec != null && rec.frozen ? offlineBarFor(state, rec) : null;
     return [
       if (bar != null) Positioned(top: 0, left: 0, right: 0, child: bar),
-      ...composerLayer(state: state, session: rs, port: state.portOf(rs.sid)!, keyboard: keyboard, editor: editor),
+      ...composerLayer(state: state, session: rs, port: state.portOf(rs.sid)!, keyboard: keyboard, editor: editor, phoneStack: phoneStack),
     ];
   }
   final port = state.port;
@@ -277,7 +279,7 @@ List<Widget> stageOverlays(
   final offline = rec != null && rec.frozen && picture ? offlineBarFor(state, rec) : null;
   final layer = !full && (picture || (rs != null && rs.detached)) && rs != null && port != null;
   return [
-    if (layer) ...composerLayer(state: state, session: rs, port: port, keyboard: keyboard, editor: editor),
+    if (layer) ...composerLayer(state: state, session: rs, port: port, keyboard: keyboard, editor: editor, phoneStack: phoneStack),
     if (offline != null || banner != null || notice != null)
       Positioned(
         top: 0, left: 0, right: 0,

@@ -147,9 +147,9 @@ fn link_kept(e: &anyhow::Error) -> bool {
 }
 
 /// Whether `op` may be sent again after a try that may have reached the host. Not when doing it twice does it twice:
-/// each `open_term` opens a terminal window, and a second `end_term` answers that the terminal is gone.
+/// each `open_term` opens a terminal window, and a second `end_term` answers that the terminal is gone, and a second `reply_term` types the answer twice.
 fn repeatable(op: &Op) -> bool {
-    !matches!(op, Op::OpenTerm { .. } | Op::RestoreTerms { .. } | Op::EndTerm { .. })
+    !matches!(op, Op::OpenTerm { .. } | Op::RestoreTerms { .. } | Op::EndTerm { .. } | Op::ReplyTerm { .. })
 }
 
 /// One request/reply on a new stream; the stream stays open for `open`.
@@ -1001,6 +1001,12 @@ mod tests {
     use rapp_net::line::{LineTooLong, HISTORY_LINE, MAX_LINE};
 
     /// One tap on 新建 opened two windows: the hub sent `open_term` again on a new link after a slow answer.
+    #[test]
+    fn reply_term_is_not_repeatable() {
+        // A second one would type the answer twice.
+        assert!(!repeatable(&Op::ReplyTerm { term: "term:pty:k".into(), seq: None, text: Some("y".into()), enter: true, keys: vec![] }));
+    }
+
     #[test]
     fn opening_and_ending_a_terminal_are_never_sent_twice() {
         assert!(!repeatable(&Op::OpenTerm { shell: None, from: None, app: "Terminal".into(), label_from: None }));

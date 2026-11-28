@@ -9,6 +9,7 @@ import '../platform_caps.dart';
 import '../ui/access_setup.dart';
 import '../ui/main_state.dart';
 import '../ui/stage.dart' show UnlockAsks;
+import 'assistant_page.dart';
 import 'devices_page.dart';
 import 'form.dart';
 import 'home_model.dart';
@@ -94,6 +95,7 @@ class _PhoneShellState extends State<PhoneShell> with UnlockAsks<PhoneShell> {
         PhoneView.session => PhoneSessionView(state: _s, nav: widget.nav),
         PhoneView.devices => _page(DevicesPage(state: _s, nav: widget.nav)),
         PhoneView.settings => _page(SettingsPage(state: _s, nav: widget.nav)),
+        PhoneView.assistant => _page(AssistantPage(store: widget.nav.assistant, nav: widget.nav)),
       },
     );
   }

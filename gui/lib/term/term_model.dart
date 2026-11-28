@@ -61,6 +61,9 @@ class TermModel extends ChangeNotifier {
 
   List<TermLine> get screen => _screen;
 
+  /// Screen rows the next row continues.
+  Set<int> get wrapped => Set.unmodifiable(_wrapped);
+
   /// The stage sent `view`: only this pane's screens are used from now on. Also sent again for a new size of the
   /// same pane, so any history request in flight is given up even for the same pane.
   void expect(String pane) {

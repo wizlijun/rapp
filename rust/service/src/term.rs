@@ -126,6 +126,10 @@ pub async fn request<S: AsyncRead + AsyncWrite + Unpin + Send>(
             }
             Op::ForgetTerms { keys } => answer(ask(state, &json!({"op": "forget", "keys": keys})).await),
             Op::EndTerm { term } => answer(ask(state, &json!({"op": "end", "term": term})).await),
+            Op::ReplyTerm { term, seq, text, enter, keys } => answer(
+                ask(state, &json!({"op": "reply", "term": term, "seq": seq, "text": text, "enter": enter, "keys": keys}))
+                    .await,
+            ),
             Op::RenameTerm { term, name } => answer(ask(state, &json!({"op": "rename", "term": term, "name": name})).await),
             _ => err("unknown op"),
         },
@@ -158,6 +162,10 @@ fn log_fields(op: &Op) -> Value {
         Op::RestoreTerms { keys, .. } => json!({"op": "restore_terms", "keys": keys.len()}),
         Op::ForgetTerms { keys } => json!({"op": "forget_terms", "keys": keys.len()}),
         Op::EndTerm { .. } => json!({"op": "end_term"}),
+        // Never the text or the keys: only that there were some.
+        Op::ReplyTerm { seq, text, keys, .. } => {
+            json!({"op": "reply_term", "seq": seq.is_some(), "text": text.is_some(), "keys": keys.len()})
+        }
         Op::RenameTerm { .. } => json!({"op": "rename_term"}),
         _ => json!({}),
     }
@@ -602,6 +610,22 @@ mod tests {
         let f = log_fields(&op);
         assert_eq!(f, json!({"op":"end_term"}));
         assert!(!f.to_string().contains("secret"));
+    }
+
+    #[test]
+    fn reply_log_fields_count_only() {
+        let op = Op::ReplyTerm {
+            term: "term:pty:secret".into(),
+            seq: Some(7),
+            text: Some("secret-text".into()),
+            enter: true,
+            keys: vec!["secret-key".into(), "Enter".into()],
+        };
+        let f = log_fields(&op);
+        assert_eq!(f, json!({"op":"reply_term","seq":true,"text":true,"keys":2}));
+        assert!(!f.to_string().contains("secret"));
+        let op = Op::ReplyTerm { term: "t".into(), seq: None, text: None, enter: false, keys: vec![] };
+        assert_eq!(log_fields(&op), json!({"op":"reply_term","seq":false,"text":false,"keys":0}));
     }
 
     #[test]
