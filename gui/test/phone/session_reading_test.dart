@@ -443,7 +443,7 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
   });
 
-  testWidgets('a refusal for the old question that comes after the new one leaves the new card its buttons', (tester) async {
+  testWidgets('a refusal for the old question that comes after the new one says so for 3 s, then shows the new card', (tester) async {
     await boot(tester, card: true);
     final h = hang = Completer<void>();
     await tester.tap(find.text('同意'));
@@ -453,6 +453,10 @@ void main() {
     await pushQuestion(tester, 5);
     h.completeError(HubException('changed'));
     await tester.pump();
+    await tester.pump();
+    expect(find.text('它已经不在等这一问了'), findsOneWidget);
+    expect(find.text('同意'), findsNothing);
+    await tester.pump(const Duration(seconds: 3));
     await tester.pump();
     expect(find.text('它已经不在等这一问了'), findsNothing);
     expect(find.text('同意'), findsOneWidget);

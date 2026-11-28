@@ -14,6 +14,9 @@ import 'reply_model.dart';
 /// How long the terms push gets to show the session left the question.
 const replySettle = Duration(seconds: 3);
 
+/// How long 「它已经不在等这一问了」 stays on the card before the card shows the session as it is now (C12, F-11).
+const replyGoneFor = Duration(seconds: 3);
+
 const _gone = '它已经不在等这一问了';
 const _goLook = '没成功，进去看看';
 const _oldRun = '这个会话是升级前开的，进去看看';
@@ -34,7 +37,7 @@ class ReplyOutcome {
 
 /// A word kept on a card, with what the session looked like when it was set: a later question shows its buttons.
 class _Kept {
-  const _Kept(this.o, this.t, this.base, this.row);
+  const _Kept(this.o, this.t, this.base, this.row, {this.timed = false});
   final ReplyOutcome o;
   final ReplyTarget? t;
 
@@ -44,6 +47,9 @@ class _Kept {
 
   /// The row itself, for 连不上 A: the next row update takes that word away.
   final TermRow? row;
+
+  /// 「它已经不在等这一问了」: shown for [replyGoneFor] whatever the row does, then gone.
+  final bool timed;
 }
 
 typedef ReplySender = Future<void> Function(ReplyTarget t, {int? seq, String? text, bool enter, List<String> keys});
@@ -57,15 +63,17 @@ class PhoneReplies extends ChangeNotifier {
   final ReplySender? _send;
   final Map<String, _Kept> _outcomes = {};
   final Map<String, ({Timer timer, VoidCallback off})> _watches = {};
+  final Map<String, Timer> _goneTimers = {};
   bool _disposed = false;
 
   /// The word on card [itemId]. A word that is not pending lasts only while the session is where it was when the
   /// word was set: a new state or seq (a new question) drops it, and 连不上 A goes with the next row update.
+  /// 「它已经不在等这一问了」 is the exception: it shows for [replyGoneFor], then the card shows the new state.
   ReplyOutcome? outcomeOf(String itemId) {
     final k = _outcomes[itemId];
     if (k == null) return null;
     final t = k.t;
-    if (k.o.pending || t == null) return k.o;
+    if (k.o.pending || k.timed || t == null) return k.o;
     final moved = k.o.word == _noLink ? !identical(_row(t), k.row) : _base(t) != k.base;
     if (moved) {
       _outcomes.remove(itemId);
@@ -84,6 +92,7 @@ class PhoneReplies extends ChangeNotifier {
 
   void _set(String id, ReplyOutcome? o, [ReplyTarget? t]) {
     if (_disposed) return;
+    _goneTimers.remove(id)?.cancel();
     if (o == null) {
       _outcomes.remove(id);
     } else {
@@ -94,9 +103,20 @@ class PhoneReplies extends ChangeNotifier {
 
   /// A failure word about the question [pressed] (the `(state, seq)` the person pressed on), not the row now: the
   /// push of a newer question may land before the error of the older send, and the word must not cover its buttons.
+  /// 「它已经不在等这一问了」 instead stays [replyGoneFor] (C12): the card says so, then shows the new question.
   void _fail(String id, ReplyOutcome o, ReplyTarget t, (String, int)? pressed) {
     if (_disposed) return;
-    _outcomes[id] = _Kept(o, t, pressed, _row(t));
+    _goneTimers.remove(id)?.cancel();
+    final timed = o.word == _gone;
+    final k = _outcomes[id] = _Kept(o, t, pressed, _row(t), timed: timed);
+    if (timed) {
+      _goneTimers[id] = Timer(replyGoneFor, () {
+        _goneTimers.remove(id);
+        if (_disposed || !identical(_outcomes[id], k)) return;
+        _outcomes.remove(id);
+        notifyListeners();
+      });
+    }
     notifyListeners();
   }
 
@@ -167,7 +187,7 @@ class PhoneReplies extends ChangeNotifier {
     }
     final ps = _row(t)?.ps;
     if (seq != null && (ps == null || (card == 'blocked' && ps.state != 'blocked') || ps.seq != seq)) {
-      // About the pressed card, which the newer row has already replaced: the word goes once the card catches up.
+      // The pressed card is out of date: it says so for 3 s, then shows the session as it is now.
       _fail(id, const ReplyOutcome(_gone, failed: true), t, (card, seq));
       return false;
     }
@@ -243,6 +263,10 @@ class PhoneReplies extends ChangeNotifier {
       w.off();
     }
     _watches.clear();
+    for (final g in _goneTimers.values) {
+      g.cancel();
+    }
+    _goneTimers.clear();
     super.dispose();
   }
 }

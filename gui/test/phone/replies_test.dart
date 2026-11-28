@@ -105,7 +105,12 @@ void main() {
       r.keys(_id, _t, 4, ['1'], doneWord: '已允许');
       a.flushMicrotasks();
       expect(calls, isEmpty);
-      // The word is about #4, which #5 has replaced: #5's card keeps its buttons (F-9).
+      expect(r.outcomeOf(_id)!.word, '它已经不在等这一问了');
+      expect(r.outcomeOf(_id)!.failed, isTrue);
+      // It shows for 3 s, then #5's card shows its buttons.
+      a.elapse(const Duration(milliseconds: 2900));
+      expect(r.outcomeOf(_id)!.word, '它已经不在等这一问了');
+      a.elapse(const Duration(milliseconds: 100));
       expect(r.outcomeOf(_id), isNull);
     });
   });
@@ -256,7 +261,7 @@ void main() {
     });
   });
 
-  test('the settle failure also goes with the next question', () {
+  test('the settle failure goes with the next question; the not-waiting word goes after 3 s', () {
     run((a, r) {
       r.keys(_id, _t, 4, ['1'], doneWord: '已允许');
       a.flushMicrotasks();
@@ -268,15 +273,23 @@ void main() {
       push('blocked', 5);
       a.flushMicrotasks();
       expect(r.outcomeOf(_id), isNull);
-      // A press on the replaced #4 sends nothing and puts no word on #5's card.
       r.keys(_id, _t, 4, ['1'], doneWord: '已允许');
       a.flushMicrotasks();
       expect(calls.length, 1);
+      expect(r.outcomeOf(_id)!.word, '它已经不在等这一问了');
+      push('blocked', 5);
+      a.flushMicrotasks();
+      expect(r.outcomeOf(_id)!.word, '它已经不在等这一问了');
+      // Whatever the row does meanwhile, the word has its 3 s.
+      push('working', 6);
+      a.flushMicrotasks();
+      expect(r.outcomeOf(_id)!.word, '它已经不在等这一问了');
+      a.elapse(const Duration(seconds: 3));
       expect(r.outcomeOf(_id), isNull);
     });
   });
 
-  test('a refusal for #4 that comes after the push of #5 leaves #5 its buttons', () {
+  test('a refusal for #4 that comes after the push of #5 says so for 3 s, then leaves #5 its buttons', () {
     fakeAsync((a) {
       push('blocked', 4);
       a.flushMicrotasks();
@@ -295,11 +308,21 @@ void main() {
       a.flushMicrotasks();
       answer.single.completeError(HubException('changed'));
       a.flushMicrotasks();
+      expect(r.outcomeOf(_id)!.word, '它已经不在等这一问了');
+      a.elapse(const Duration(seconds: 3));
       expect(r.outcomeOf(_id), isNull);
       // #5 can be answered.
       r.keys(_id, _t, 5, ['1'], doneWord: '已允许');
       a.flushMicrotasks();
       expect(calls.last['seq'], 5);
+      // Any other failure for #5 that lands after #6: about #5, so #6's card keeps its buttons (F-9).
+      push('blocked', 6);
+      a.flushMicrotasks();
+      answer.last.completeError(HubException('boom'));
+      a.flushMicrotasks();
+      expect(r.outcomeOf(_id), isNull);
+      r.keys(_id, _t, 6, ['1'], doneWord: '已允许');
+      a.flushMicrotasks();
       answer.last.completeError(HubException('boom'));
       a.flushMicrotasks();
       // A failure about the question still on screen stays.
@@ -311,10 +334,25 @@ void main() {
       a.flushMicrotasks();
       push('done', 8);
       a.flushMicrotasks();
+      answer.last.completeError(HubException('typed'));
+      a.flushMicrotasks();
+      expect(r.outcomeOf('d')!.word, '它已经不在等这一问了');
+      a.elapse(const Duration(seconds: 3));
+      expect(r.outcomeOf('d'), isNull);
+      // A second word on the same card replaces the first, and its timer with it.
+      r.say('d', _t, '好的', seq: 8);
+      a.flushMicrotasks();
       answer.last.completeError(HubException('changed'));
       a.flushMicrotasks();
+      a.elapse(const Duration(seconds: 2));
+      r.say('d', _t, '好的', seq: 7);
+      a.flushMicrotasks();
+      a.elapse(const Duration(seconds: 2));
+      expect(r.outcomeOf('d')!.word, '它已经不在等这一问了');
+      a.elapse(const Duration(seconds: 1));
       expect(r.outcomeOf('d'), isNull);
       r.dispose();
+      expect(a.pendingTimers, isEmpty);
     });
   });
 
@@ -355,6 +393,8 @@ void main() {
       expect(calls.single['text'], '好的');
       expect(calls.single['enter'], isTrue);
       expect(r.outcomeOf(_id)!.word, '它已经不在等这一问了');
+      a.elapse(const Duration(seconds: 3));
+      expect(r.outcomeOf(_id), isNull);
       // Locally stale: nothing goes.
       push('done', 8);
       a.flushMicrotasks();
@@ -362,7 +402,8 @@ void main() {
       r.say(_id, _t, '好的', seq: 7);
       a.flushMicrotasks();
       expect(calls.length, 1);
-      // About #7, which #8 replaced: no word on #8's card.
+      expect(r.outcomeOf(_id)!.word, '它已经不在等这一问了');
+      a.elapse(const Duration(seconds: 3));
       expect(r.outcomeOf(_id), isNull);
     });
   });
