@@ -12,6 +12,7 @@ import '../ui/main_state.dart';
 import '../ui/terms_entry.dart' show terminalApps;
 import '../ui/tokens.dart';
 import 'key_bar_keys.dart';
+import 'key_glyph.dart';
 import 'modifier_latch.dart';
 import 'phrase_strip.dart';
 import 'composer_panel.dart' show seeThroughBox;
@@ -465,13 +466,17 @@ class KeyFace extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 2),
           child: Center(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(label,
-                  maxLines: 1,
-                  softWrap: false,
-                  style: keyFaceStyle(Theme.of(context).platform, label).copyWith(color: t.text)),
-            ),
+            child: switch (keyGlyphOf(label)) {
+              final g? => Semantics(
+                  label: label, excludeSemantics: true, child: KeyGlyphIcon(glyph: g, color: t.text)),
+              null => FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(label,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: keyFaceStyle(Theme.of(context).platform, label).copyWith(color: t.text)),
+                ),
+            },
           ),
         ),
       ),

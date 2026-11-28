@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/key_bar.dart';
 import 'package:rapp/embed/key_bar_keys.dart';
+import 'package:rapp/embed/key_glyph.dart';
 
 import '../ui/helpers.dart';
 
@@ -69,5 +70,35 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.descendant(of: find.byType(KeyFace), matching: find.byType(FittedBox)), findsOneWidget);
     expect(tester.widget<Text>(find.text('PgUp')).overflow, isNot(TextOverflow.ellipsis));
+  });
+
+  test('return and the four arrows are drawn glyphs; every other face stays text', () {
+    expect(keyGlyphOf('⏎'), KeyGlyph.enter);
+    expect(keyGlyphOf('↑'), KeyGlyph.up);
+    expect(keyGlyphOf('↓'), KeyGlyph.down);
+    expect(keyGlyphOf('←'), KeyGlyph.left);
+    expect(keyGlyphOf('→'), KeyGlyph.right);
+    for (final s in ['⌫', '⌘', '⋯', 'Tab', 'PgUp', '⌃C']) {
+      expect(keyGlyphOf(s), isNull, reason: s);
+    }
+  });
+
+  testWidgets('⏎ and the arrows draw the thick-line glyph instead of a font symbol, and still read as the key',
+      (tester) async {
+    for (final (label, g) in [('⏎', KeyGlyph.enter), ('↑', KeyGlyph.up), ('→', KeyGlyph.right)]) {
+      await tester.pumpWidget(wrap(SizedBox(width: 60, height: keyBarKeyHeight, child: KeyFace(label: label))));
+      expect(find.text(label), findsNothing, reason: label);
+      final icon = tester.widget<KeyGlyphIcon>(find.byType(KeyGlyphIcon));
+      expect(icon.glyph, g);
+      expect(icon.size, keyGlyphSize);
+      expect(find.bySemanticsLabel(label), findsOneWidget);
+    }
+    expect(keyGlyphStroke, 2.8);
+    expect(keyGlyphSize, 23);
+  });
+
+  test('the lone control key reads Ctrl; the ⌃C-style chords keep their symbol', () {
+    expect(barKeys['ctrl']!.label, 'Ctrl');
+    expect(barKeys['cc']!.label, '⌃C');
   });
 }

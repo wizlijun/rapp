@@ -96,6 +96,13 @@ void main() {
     expect(find.bySemanticsLabel('命令：搜历史'), findsOneWidget);
   });
 
+  iosTest('a two-character chip is as wide as a three-character one, so it is easy to hit', (tester) async {
+    await tester.pumpWidget(strip(tsess));
+    Size face(String id) => tester.getSize(find.descendant(of: ph(id), matching: find.byType(Container)).first);
+    expect(find.descendant(of: ph('phrase-5'), matching: find.text('用量')), findsOneWidget);
+    expect(face('phrase-5').width, closeTo(face('phrase-6').width, .5)); // 用量 vs 搜历史
+  });
+
   iosTest('back to the shell: commands go, the first is 继续, the bar is as high', (tester) async {
     final h = keyBarHeightOf(s, tsess);
     fg('zsh', shell: true);
