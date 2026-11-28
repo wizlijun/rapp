@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/input_dock.dart';
 import 'package:rapp/embed/input_metrics.dart';
