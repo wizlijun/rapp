@@ -7,6 +7,15 @@ use common::*;
 use serde_json::{json, Value};
 use std::time::Duration;
 
+/// What a service with the fake `rapp-term` says it can do; replying without a view is unix-only.
+fn caps(graphical: bool) -> Value {
+    let mut c = json!({"graphical":graphical,"terminal":true,"ports":true});
+    if cfg!(unix) {
+        c["reply"] = json!(true);
+    }
+    c
+}
+
 fn apps() -> Value {
     json!([{"app":"com.example.echo","name":"Echo"},{"app":"com.apple.Safari","name":"Safari"}])
 }
@@ -73,7 +82,7 @@ async fn add_host_hosts_apps_open_close_remove() {
     // What A is: a dev box may be Omarchy, so any of the four a service reports.
     let os = r["os"].as_str().unwrap_or_default().to_owned();
     assert!(["macos", "windows", "linux", "omarchy"].contains(&os.as_str()), "{r}");
-    assert_eq!(r, json!({"event":"apps","id":a.id,"path":"lan","apps":apps(),"permissions":perms,"capabilities":{"graphical":true,"terminal":true,"ports":true},"os":os,"req":"x","version":env!("CARGO_PKG_VERSION")}));
+    assert_eq!(r, json!({"event":"apps","id":a.id,"path":"lan","apps":apps(),"permissions":perms,"capabilities":caps(true),"os":os,"req":"x","version":env!("CARGO_PKG_VERSION")}));
     // The hub keeps it, for A's mark while A is offline.
     let r = hub.call(json!({"cmd":"hosts"})).await;
     assert_eq!(r["hosts"][0]["os"], json!(os), "{r}");

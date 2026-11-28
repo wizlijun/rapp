@@ -234,7 +234,8 @@ pub async fn serve_value(state: &Arc<State>, mut s: Pipe, v: Value, peer: Peer) 
             | Op::RenameTerm { .. }
             | Op::RestoreTerms { .. }
             | Op::ForgetTerms { .. }
-            | Op::EndTerm { .. }),
+            | Op::EndTerm { .. }
+            | Op::ReplyTerm { .. }),
         ) => crate::term::request(state, &mut s, &peer, op).await,
         Ok(op @ (Op::WatchLabels | Op::SetLabel { .. } | Op::ResetLabel { .. })) => {
             crate::labels::request(state, &mut s, &peer, op).await

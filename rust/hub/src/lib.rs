@@ -448,7 +448,7 @@ impl Hub {
                 return Ok(None);
             }
             Some("load") => load::command(self, v).await?,
-            Some(c @ ("terms" | "open_term" | "rename_term" | "end_term" | "restore_terms" | "forget_terms")) => {
+            Some(c @ ("terms" | "open_term" | "rename_term" | "end_term" | "reply_term" | "restore_terms" | "forget_terms")) => {
                 terms::command(self, c, v).await?
             }
             Some(c @ ("set_label" | "reset_label")) => labels::command(self, c, v).await?,

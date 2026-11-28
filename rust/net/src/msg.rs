@@ -45,6 +45,19 @@ pub enum Op {
     },
     /// End terminal session `term`.
     EndTerm { term: String },
+    /// Text, then Return, then keys into terminal session `term`, with no view (so no resize).
+    /// With `seq`, only while the session's program status is still that snapshot.
+    ReplyTerm {
+        term: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        seq: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        enter: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        keys: Vec<String>,
+    },
     /// Restore saved terminals (those of `keys`; none given: all of them), opened with `app`.
     RestoreTerms {
         #[serde(default)]
@@ -235,6 +248,23 @@ mod tests {
         let op = Op::EndTerm { term: "term:pty:k".into() };
         assert_eq!(serde_json::to_value(&op).unwrap(), json!({"op":"end_term","term":"term:pty:k"}));
         assert_eq!(serde_json::from_value::<Op>(json!({"op":"end_term","term":"term:pty:k"})).unwrap(), op);
+    }
+
+    #[test]
+    fn reply_term_roundtrip() {
+        let v = json!({"op":"reply_term","term":"term:pty:k","seq":3,"text":"y","enter":true,"keys":["Enter"]});
+        let op = Op::ReplyTerm { term: "term:pty:k".into(), seq: Some(3), text: Some("y".into()), enter: true, keys: vec!["Enter".into()] };
+        assert_eq!(serde_json::to_value(&op).unwrap(), v);
+        assert_eq!(serde_json::from_value::<Op>(v).unwrap(), op);
+        // The fewest fields: what is none, false or empty is not written.
+        let v = json!({"op":"reply_term","term":"term:pty:k","keys":["Enter"]});
+        let op = Op::ReplyTerm { term: "term:pty:k".into(), seq: None, text: None, enter: false, keys: vec!["Enter".into()] };
+        assert_eq!(serde_json::to_value(&op).unwrap(), v);
+        assert_eq!(serde_json::from_value::<Op>(v).unwrap(), op);
+        let v = json!({"op":"reply_term","term":"term:pty:k"});
+        let op = Op::ReplyTerm { term: "term:pty:k".into(), seq: None, text: None, enter: false, keys: vec![] };
+        assert_eq!(serde_json::to_value(&op).unwrap(), v);
+        assert_eq!(serde_json::from_value::<Op>(v).unwrap(), op);
     }
 
     #[test]
