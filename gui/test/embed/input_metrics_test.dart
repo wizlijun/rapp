@@ -118,6 +118,32 @@ void main() {
       expect(firstRow.top - cmds.bottom, greaterThanOrEqualTo(12));
     });
 
+    iosTest('phone: both rows, every key is 56 high and 12 from its neighbours', (tester) async {
+      await small(tester);
+      st.prefs.keyBarMore = true;
+      await tester.pumpWidget(bar(true));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      final rows = <double, List<Rect>>{};
+      for (final id in barKeys.keys) {
+        final f = find.byKey(Key('bar-$id'));
+        if (f.evaluate().isEmpty) continue;
+        final r = tester.getRect(f);
+        expect(r.height, greaterThanOrEqualTo(56), reason: id);
+        if (const bool.fromEnvironment('PRINT_WIDTHS')) debugPrint('width $id ${r.width}');
+        rows.putIfAbsent(r.top, () => []).add(r);
+      }
+      expect(rows.length, 2);
+      for (final r in rows.values) {
+        r.sort((x, y) => x.left.compareTo(y.left));
+        for (var i = 1; i < r.length; i++) {
+          expect(r[i].left - r[i - 1].right, greaterThanOrEqualTo(12));
+        }
+      }
+      final tops = rows.keys.toList()..sort();
+      expect(tops[1] - (tops[0] + rows[tops[0]]!.first.height), greaterThanOrEqualTo(12));
+    });
+
     iosTest('pad: no wrapper, the bar is today\'s height', (tester) async {
       await small(tester);
       await tester.pumpWidget(bar(false));
