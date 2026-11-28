@@ -14,6 +14,12 @@ pub fn counted(app: &str, side: bool) -> bool {
     !side && !app.starts_with("term:")
 }
 
+/// Auto-lock is on and 不锁屏 is off.
+fn armed(state: &State) -> bool {
+    let cfg = state.cfg.lock().unwrap();
+    cfg.auto_lock() && !cfg.no_lock()
+}
+
 pub fn spawn(state: Arc<State>, grace: Duration) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut rx = state.changed.subscribe();
@@ -26,7 +32,7 @@ pub fn spawn(state: Arc<State>, grace: Duration) -> tokio::task::JoinHandle<()> 
                         return;
                     }
                     let n = state.counted_sessions();
-                    let on = state.cfg.lock().unwrap().auto_lock();
+                    let on = armed(&state);
                     if n > 0 || !on {
                         deadline = None;
                     } else if prev > 0 {
@@ -36,7 +42,7 @@ pub fn spawn(state: Arc<State>, grace: Duration) -> tokio::task::JoinHandle<()> 
                 }
                 _ = tokio::time::sleep_until(deadline.unwrap_or_else(Instant::now)), if deadline.is_some() => {
                     deadline = None;
-                    if state.counted_sessions() == 0 && state.cfg.lock().unwrap().auto_lock() {
+                    if state.counted_sessions() == 0 && armed(&state) {
                         match crate::workers::lock(&state).await {
                             Ok(true) => state.log.event(Lvl::Info, "auto_lock", json!({})),
                             Ok(false) => state.log.msg(Lvl::Info, "auto-lock: already locked"),

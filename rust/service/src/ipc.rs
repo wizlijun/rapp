@@ -206,6 +206,13 @@ fn handle(state: &State, cmd: &Value) -> Value {
             Some(on) => update(state, |c| c.auto_lock = Some(on)),
             None => err("on required"),
         },
+        "set_no_lock" => match cmd["on"].as_bool() {
+            Some(on) => match crate::no_lock::set(state, on, json!({"by": "local"})) {
+                Ok(()) => ok(json!({})),
+                Err(e) => err(&e),
+            },
+            None => err("on required"),
+        },
         _ => err("unknown cmd"),
     }
 }
@@ -226,7 +233,8 @@ fn by(cmd: &Value) -> update::By {
 
 fn in_history(v: &Value) -> bool {
     let shown = match v["ev"].as_str() {
-        Some("session_start" | "session_end" | "term_inputs" | "auth_fail" | "rejected" | "input_blocked" | "unlock" | "auto_lock" | "auto_lock_failed") => true,
+        Some("session_start" | "session_end" | "term_inputs" | "auth_fail" | "rejected" | "input_blocked" | "unlock" | "auto_lock" | "auto_lock_failed"
+            | "no_lock_set" | "no_lock_refused" | "no_lock_hold_failed") => true,
         Some("request") => v["result"] != "ok" && !matches!(v["op"].as_str(), Some("watch_terms" | "watch_labels" | "load" | "watch_load")),
         _ => false,
     };

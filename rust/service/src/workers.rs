@@ -133,10 +133,16 @@ fn client_only_linux(state: &State) -> bool {
     cfg!(target_os = "linux") && host_bin(state).is_err()
 }
 
-/// Runs `rapp-host <args> --json` and returns its first non-event JSON line.
-async fn run_json(state: &State, args: &[&str]) -> Result<Value> {
+/// A `rapp-host` command with the desktop session's environment.
+pub(crate) async fn host_command(state: &State) -> Result<Command> {
     let mut command = rapp_net::proc::tokio_command(host_bin(state)?);
     desktop_environment(&mut command).await;
+    Ok(command)
+}
+
+/// Runs `rapp-host <args> --json` and returns its first non-event JSON line.
+async fn run_json(state: &State, args: &[&str]) -> Result<Value> {
+    let mut command = host_command(state).await?;
     let out = command.args(args).arg("--json").stdin(Stdio::null()).kill_on_drop(true).output();
     let out = tokio::time::timeout(RUN_WAIT, out).await.map_err(|_| anyhow!("rapp-host {} timed out", args[0]))??;
     String::from_utf8_lossy(&out.stdout)
