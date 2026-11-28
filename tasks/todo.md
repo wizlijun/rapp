@@ -1826,3 +1826,13 @@ iOS 上短边 <600 用手机外壳（首页 / 会话里面 / 设备 / 设置）�
 - [ ] Mac wx 版挪走 `local/wx-asr`：按住提示「没有找到离线语音模型，要放在 …」；拷回去，再按就能用，不用重启
 - [ ] iPhone wx 版（`RAPP_SPEECH=wx scripts/build-ios.sh device --install <udid>`，装包前和发版 session 打招呼）：模型拷进 app 的 `Application Support/rapp/local/wx-asr`；同上几条，另记 10 秒、30 秒各一段的定稿等待、内存峰值、连续说 5 分钟后是否发烫
 - [ ] A12 及更早的 iPhone 跑不了 wx 版（`sdot`），只有验证用，暂不处理
+
+## 不锁屏 实机检查（分支 `feat/no-lock`，规格 `docs/superpowers/specs/2026-11-28-rapp-no-lock-design.md` §9）
+
+- [ ] 1. Mac A 打开「不锁屏」，所有设备断开，等过系统设置的熄屏时间 + 屏保时间：A 不熄屏、不锁；`pmset -g assertions` 里看得到 rapp 的断言。
+- [ ] 2. 关掉后：不会马上锁；系统按自己的设置熄屏、锁屏；再连一次远程 app 并关掉，10 秒后自动锁屏（自动锁屏开着的话）。
+- [ ] 3. 从 iPhone 开关 Mac A 的「不锁屏」，Mac 本机总览几秒内跟着变；反过来也一样。
+- [ ] 4. 重启 A：开关还开着，开机登录后马上保持。
+- [ ] 5. Hyprland（Omarchy）电脑同 1–3：hypridle 不熄屏、不进 hyprlock。
+- [ ] 6. 老版本电脑、Windows 电脑、Hyprland 以外的 Linux：没有这张卡片。
+- [ ] 7. 本机栏折着时，竖条上看得到「不锁屏开着」的标记。

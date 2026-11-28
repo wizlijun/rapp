@@ -122,7 +122,7 @@ NoLock { #[serde(default, skip_serializing_if = "Option::is_none")] on: Option<b
 ## 9. 测试
 
 - `config.rs`：`no_lock` 默认关、存取往返。
-- `autolock.rs`：`no_lock` 开着时定时到了不锁；关掉后重新计 10 秒。
+- `autolock.rs`：`no_lock` 开着时定时到了不锁；关掉时不触发锁屏，下一次会话结束照常 10 秒后锁
 - `no_lock.rs`：用一个假的保持唤醒命令（可注入的命令路径，比如 `sleep 3600` / 立刻退出的 `false`），测起、关、意外退出退避重起、`held` 跟着变。
 - `msg.rs`：`Op::NoLock` 的 JSON 形状（带 / 不带 `on`）。
 - testkit：两台设备，B 通过 hub 开 A 的「不锁屏」，A 的配置和快照变；没钥匙的设备被拒并记日志。「有快照但没有 `no_lock` 键」（老版本、不支持的桌面）`Opts.load: None` 模拟不了（它让整个余力回 `unknown op`），所以用 service 的单测测「不支持时快照不带键」（判断函数可注入），GUI 的单测测「没键不出卡片」。
