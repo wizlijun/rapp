@@ -93,6 +93,7 @@ class FakeService {
               'update_rollback' ||
               'set_update' ||
               'set_auto_lock' ||
+              'set_no_lock' ||
               'gui_windows' ||
               'state' ||
               'permissions_reset':
@@ -432,6 +433,22 @@ void main() {
       await c.setAutoLock(false);
       expect(svc.received, [
         {'cmd': 'set_auto_lock', 'on': false},
+      ]);
+      await c.close();
+      await svc.stop();
+    });
+
+    test('status_reads_no_lock and setNoLock sends set_no_lock', () async {
+      expect(ServiceStatus.fromJson({'id': '1'}).noLock, isFalse);
+      final st = ServiceStatus.fromJson({'id': '1', 'no_lock': true, 'no_lock_held': true});
+      expect(st.noLock, isTrue);
+      expect(st.noLockHeld, isTrue);
+      final svc = FakeService('tok-nl');
+      await svc.start();
+      final c = await ServiceConnection.connect(token: 'tok-nl', port: svc.port);
+      await c.setNoLock(true);
+      expect(svc.received, [
+        {'cmd': 'set_no_lock', 'on': true},
       ]);
       await c.close();
       await svc.stop();

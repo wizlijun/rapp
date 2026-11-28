@@ -177,6 +177,18 @@ void main() {
       expect(() => hub.stateService(), throwsArgumentError);
     });
 
+    test('no_lock_request_and_refusal', () async {
+      final f = hub.noLock('111', on: true);
+      expect(t.sent.last['cmd'], 'no_lock');
+      expect(t.sent.last['on'], true);
+      t.emit({'event': 'no_lock', 'id': '111', 'req': t.sent.last['req'], 'reply': {'ok': false, 'error': 'not supported'}});
+      await expectLater(f, throwsA(isA<HubException>().having((e) => e.message, 'message', contains('not supported'))));
+      final g = hub.noLock('111');
+      expect(t.sent.last.containsKey('on'), isFalse);
+      t.emit({'event': 'no_lock', 'id': '111', 'req': t.sent.last['req'], 'reply': {'ok': true, 'no_lock': true, 'no_lock_held': true}});
+      expect((await g)['no_lock_held'], true);
+    });
+
     test('an old device\'s unknown op reaches the caller', () async {
       final f = hub.stateService(to: '111', on: true);
       t.emit({'event': 'error', 'req': t.sent.last['req'], 'error': 'unknown op'});

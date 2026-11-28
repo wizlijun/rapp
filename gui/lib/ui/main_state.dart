@@ -4808,6 +4808,15 @@ class MainState extends ChangeNotifier {
 
   bool forcedRelay(String id) => hub?.hosts.any((h) => h.id == id && h.forcedRelay) ?? false;
 
+  /// Turns 「不锁屏」 on or off: this machine when [id] is null, else that device. A refusal or failure is thrown.
+  Future<void> setNoLock(String? id, bool on) async {
+    if (id == null) {
+      await monitor!.setNoLock(on);
+    } else {
+      await hub!.noLock(id, on: on);
+    }
+  }
+
   /// Forces [id] onto the relay, or back to automatic. A failure goes to the hint.
   Future<void> setRoute(String id, bool forced) async {
     if (!hubUsable) return;
