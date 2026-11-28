@@ -100,7 +100,7 @@ class PhoneReplies extends ChangeNotifier {
   /// Offline, or the question is gone locally: the word, and nothing is sent.
   bool _ready(String id, ReplyTarget t, int? seq) {
     if (_watches.containsKey(id) || _outcomes[id]?.pending == true) return false;
-    if (!state.hubUsable || state.offlineWord(t.device, t.term) != null) {
+    if (!state.hubUsable || state.offlineWord(t.device, t.term) == '设备离线') {
       _set(id, const ReplyOutcome(_noLink, failed: true));
       return false;
     }

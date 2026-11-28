@@ -215,17 +215,35 @@ void main() {
     });
   });
 
+  test('a dead view with the device online still sends', () {
+    final s2 = _ViewDown(
+        hub: s.hub,
+        data: DataDir(tmp.path),
+        prefs: UiPrefs(),
+        port: FakeSessionPort(),
+        unlockStore: UnlockStore(supported: false, memory: false),
+        termPort: FakeTermSessionPort());
+    fakeAsync((a) {
+      push('blocked', 4);
+      a.flushMicrotasks();
+      final r = PhoneReplies(s2, send: (t, {seq, text, enter = false, keys = const []}) async => calls.add({'k': keys}));
+      r.keys(_id, _t, 4, ['1'], doneWord: '已允许');
+      a.flushMicrotasks();
+      expect(calls.length, 1);
+      r.dispose();
+    });
+  });
+
   group('form switch', () {
     testWidgets('outcome survives a form switch', (tester) async {
       tester.view.physicalSize = const Size(1194, 834);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
-      final nav = PhoneNav(s);
+      final nav = PhoneNav(s, send: (t, {seq, text, enter = false, keys = const []}) async {});
       addTearDown(nav.dispose);
       push('blocked', 4);
       await tester.runAsync(() => Future<void>.delayed(Duration.zero));
-      final r = PhoneReplies(s, send: (t, {seq, text, enter = false, keys = const []}) async {});
-      addTearDown(r.dispose);
+      final r = nav.replies;
       await tester.pumpWidget(MaterialApp(
         theme: themeDataFor(RappTheme.matrix),
         home: phoneFormSwitch(
@@ -250,4 +268,11 @@ void main() {
       expect(r.outcomeOf(_id)!.word, '没成功，进去看看');
     });
   });
+}
+
+/// A state whose view of every terminal is dropped while the device is online.
+class _ViewDown extends MainState {
+  _ViewDown({super.hub, required super.data, required super.prefs, required super.port, required super.unlockStore, required super.termPort});
+  @override
+  String? offlineWord(String device, String termId) => '已断开';
 }

@@ -9,11 +9,13 @@ import 'replies.dart';
 enum PhoneView { home, session, devices, settings }
 
 class PhoneNav extends ChangeNotifier {
-  PhoneNav(this.state);
+  /// [send]: a test hook for the replies' sender; null sends through the hub.
+  PhoneNav(this.state, {ReplySender? send}) : _send = send; // ignore: prefer_initializing_formals
+  final ReplySender? _send;
   final MainState state;
 
   /// The replies sent from phone cards, and their outcome words (they outlive a form switch).
-  late final PhoneReplies replies = PhoneReplies(state);
+  late final PhoneReplies replies = PhoneReplies(state, send: _send);
 
   PhoneView _now = PhoneView.home;
   PhoneView get now => _now;

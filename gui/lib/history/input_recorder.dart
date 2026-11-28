@@ -517,13 +517,16 @@ class InputRecorder {
       };
 
   /// A reply typed or spoken on a phone card, which answers without a view: one `sent` record with the text, then
-  /// [onSent] (the history's ↑ list). Nothing is written when the record is off.
+  /// [onSent] (the history's ↑ list, whatever the switches say). The record is written only when the history and the
+  /// app's 记录输入 are on.
   Future<void> replied(SessionMeta m, String text, DateTime at) async {
-    if (!enabled() || text.isEmpty) return;
-    final o = Outgoing([text])
-      ..at = at
-      ..sent = 1;
-    await _write(null, _sentRecord(m, o, true, AfterSend.pressReturn, at), at);
+    if (text.isEmpty) return;
+    if (enabled() && (recordsApp?.call(m.appId) ?? true)) {
+      final o = Outgoing([text])
+        ..at = at
+        ..sent = 1;
+      await _write(null, _sentRecord(m, o, true, AfterSend.pressReturn, at), at);
+    }
     onSent?.call(m.key, text, at);
   }
 
