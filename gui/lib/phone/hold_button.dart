@@ -39,6 +39,8 @@ class PhoneHoldButton extends StatefulWidget {
 }
 
 class _PhoneHoldButtonState extends State<PhoneHoldButton> {
+  /// The pointer of the live press; null when none (or voided). [_pressed] is only the look.
+  int? _pointer;
   bool _pressed = false;
   bool _armed = false;
   Timer? _timer;
@@ -46,14 +48,11 @@ class _PhoneHoldButtonState extends State<PhoneHoldButton> {
   @override
   void didUpdateWidget(PhoneHoldButton old) {
     super.didUpdateWidget(old);
-    if (old.armKey != widget.armKey) {
-      _pressed = false;
+    if (old.armKey != widget.armKey || (old.onSend == null) != (widget.onSend == null)) {
+      _endPress();
       _disarm();
     }
-    if (widget.onSend == null || !widget.risky) {
-      _pressed = _pressed && widget.onSend != null;
-      _disarm();
-    }
+    if (widget.onSend == null || !widget.risky) _disarm();
   }
 
   @override
@@ -89,27 +88,24 @@ class _PhoneHoldButtonState extends State<PhoneHoldButton> {
   }
 
   void _down(PointerDownEvent e) {
-    if (!mounted) return;
-    if (widget.onSend == null) return;
-    setState(() => _pressed = true);
+    if (!mounted || _pointer != null || widget.onSend == null) return;
+    setState(() {
+      _pointer = e.pointer;
+      _pressed = true;
+    });
   }
 
   void _move(PointerMoveEvent e) {
-    if (!mounted) return;
+    if (!mounted || e.pointer != _pointer) return;
     final inside = _inside(e.localPosition);
-    if (inside != _pressed && widget.onSend != null) setState(() => _pressed = inside);
-    // Once off the button a pending confirm is cancelled only on release (see _up).
+    if (inside != _pressed) setState(() => _pressed = inside);
   }
 
   void _up(PointerUpEvent e) {
-    if (!mounted) return;
-    if (!_pressed) {
-      // Released off the button, or voided: cancel, including a pending confirm.
-      if (_armed) setState(_disarm);
-      return;
-    }
-    setState(() => _pressed = false);
-    if (_inside(e.localPosition)) {
+    if (!mounted || e.pointer != _pointer) return;
+    final inside = _pressed && _inside(e.localPosition);
+    setState(_endPress);
+    if (inside) {
       _fire();
     } else if (_armed) {
       setState(_disarm);
@@ -117,13 +113,16 @@ class _PhoneHoldButtonState extends State<PhoneHoldButton> {
   }
 
   void _cancel(PointerCancelEvent e) {
-    if (!mounted) return;
-    if (_pressed || _armed) {
-      setState(() {
-        _pressed = false;
-        _disarm();
-      });
-    }
+    if (!mounted || e.pointer != _pointer) return;
+    setState(() {
+      _endPress();
+      _disarm();
+    });
+  }
+
+  void _endPress() {
+    _pointer = null;
+    _pressed = false;
   }
 
   void _semanticTap() => _fire();

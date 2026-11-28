@@ -81,6 +81,43 @@ void main() {
     expect(sent, 0);
   });
 
+  testWidgets('voided press stays void when the finger moves after the card changed', (tester) async {
+    await tester.pumpWidget(button());
+    final t = tokens(tester);
+    final c = tester.getCenter(find.byType(PhoneHoldButton));
+    final before = bg(tester);
+    final g = await tester.startGesture(c);
+    await tester.pumpWidget(button(key: 2));
+    await g.moveTo(c + const Offset(3, 2));
+    await tester.pump();
+    expect(bg(tester), isNot(t.accent));
+    await g.up();
+    await tester.pump();
+    expect(sent, 0);
+    expect(bg(tester), before);
+  });
+
+  testWidgets('press stays void when onSend appears mid-press', (tester) async {
+    await tester.pumpWidget(button(useDefault: false));
+    final c = tester.getCenter(find.byType(PhoneHoldButton));
+    final g = await tester.startGesture(c);
+    await tester.pumpWidget(button());
+    await g.moveTo(c + const Offset(3, 2));
+    await g.up();
+    expect(sent, 0);
+  });
+
+  testWidgets('pointer cancel sends nothing and restores the look', (tester) async {
+    await tester.pumpWidget(button());
+    final before = bg(tester);
+    final g = await tester.startGesture(tester.getCenter(find.byType(PhoneHoldButton)));
+    await tester.pump();
+    await g.cancel();
+    await tester.pump();
+    expect(sent, 0);
+    expect(bg(tester), before);
+  });
+
   testWidgets('voids when removed mid-press', (tester) async {
     await tester.pumpWidget(button());
     final c = tester.getCenter(find.byType(PhoneHoldButton));
