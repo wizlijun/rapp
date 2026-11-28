@@ -9,7 +9,9 @@ import '../embed/traffic_label.dart';
 import '../service_client.dart';
 import 'inbound.dart';
 import 'lamp.dart';
+import 'device_os.dart';
 import 'load_row.dart';
+import 'no_lock_card.dart';
 import 'local_services.dart';
 import 'local_terms.dart';
 import 'os_mark.dart';
@@ -304,16 +306,22 @@ class _LocalFold extends StatelessWidget {
           inbound: monitor?.status?.sessions.isNotEmpty ?? false,
           terms: MainState.localTermRows(monitor?.localTerms).isNotEmpty)
       ? _Column(state: state, col: col, monitor: monitor, onFold: () => state.openLocalColumn(false))
-      : _FoldedColumn(col: col, onOpen: () => state.openLocalColumn(true));
+      : _FoldedColumn(
+          col: col,
+          noLock: state.columnLoad(null, local: monitor)?.noLock == true,
+          onOpen: () => state.openLocalColumn(true));
 }
 
 const _foldedWidth = 56.0;
 
 /// A folded column: system mark, lamp and name, stacked in a narrow strip. One tap opens it.
 class _FoldedColumn extends StatelessWidget {
-  const _FoldedColumn({required this.col, required this.onOpen});
+  const _FoldedColumn({required this.col, required this.onOpen, this.noLock = false});
   final DeviceColumn col;
   final VoidCallback onOpen;
+
+  /// 「不锁屏」 is on there: the card is out of sight, so the strip carries a mark (no-lock spec §7).
+  final bool noLock;
 
   @override
   Widget build(BuildContext context) {
@@ -325,7 +333,7 @@ class _FoldedColumn extends StatelessWidget {
       width: _foldedWidth,
       child: Semantics(
         button: true,
-        label: '展开 ${col.name}',
+        label: noLock ? '展开 ${col.name}，不锁屏开着' : '展开 ${col.name}',
         excludeSemantics: true,
         onTap: onOpen,
         child: Material(
@@ -349,6 +357,13 @@ class _FoldedColumn extends StatelessWidget {
                   textAlign: TextAlign.center,
                   style: small?.copyWith(fontWeight: FontWeight.w600, color: col.offline ? t.muted : t.text),
                 ),
+                if (noLock) ...[
+                  const SizedBox(height: 6),
+                  Tooltip(
+                    message: '不锁屏开着',
+                    child: Icon(Icons.lock_open, key: Key('column-$key-no-lock'), size: 14, color: t.accent),
+                  ),
+                ],
               ]),
             ),
           ),
@@ -424,6 +439,15 @@ class _Column extends StatelessWidget {
               ),
             ]),
             LoadRow(id: id ?? 'local', load: load, loadNow: loadNow),
+            NoLockCard(
+              id: id ?? 'local',
+              load: load,
+              mac: col.os == DeviceOs.macos,
+              // 本机 goes to the service this column reads.
+              onSet: (on) => id == null && monitor != null ? monitor!.setNoLock(on) : state.setNoLock(id, on),
+              say: state.say,
+              margin: const EdgeInsets.only(top: 4),
+            ),
           ]),
         ),
         // The sessions, then this device's favourites that are not open (one tap opens one). The page scrolls,
