@@ -406,9 +406,9 @@ async fn a_broken_term_json_does_not_fill_the_log() {
     assert_eq!((&after["ev"], &after["op"]), (&json!("request"), &json!("list_terms")), "{evs:#?}");
 }
 
-/// 不锁屏 (spec 2026-11-28 §6): flipping the switch pushes a line at once, not at the next sample, so the card
-/// does not say 「没能保持唤醒」 for a whole sample after the switch goes on. The line has no `point`: no sample
-/// was taken.
+/// 不锁屏 (spec 2026-11-28 §6): once the hold comes, a line says so at once, not at the next sample. Only the hold
+/// is pushed: a line just after the switch goes on (before the settle) would flash 「没能保持唤醒」 everywhere.
+/// The pushed line has no `point`: no sample was taken.
 #[tokio::test]
 async fn watch_load_pushes_a_line_when_no_lock_changes() {
     if !cfg!(target_os = "macos") {
@@ -426,14 +426,19 @@ async fn watch_load_pushes_a_line_when_no_lock_changes() {
     let r = ipc_once(&svc, home.path(), json!({"cmd":"set_no_lock","on":true})).await;
     assert_eq!(r["ok"], true, "{r}");
     let soon = Duration::from_secs(3);
-    let line = tokio::time::timeout(soon, ipc.next()).await.expect("a line soon after the switch goes on");
-    assert_eq!((&line["ok"], &line["no_lock"]), (&json!(true), &json!(true)), "{line}");
-    assert!(line.get("point").is_none(), "{line}");
-    assert!(line["headroom"].is_u64(), "the line is a whole snapshot: {line}");
-    // And once the child has settled, another line says it holds.
-    let mut held = line;
-    while held["no_lock_held"] != true {
-        held = tokio::time::timeout(soon, ipc.next()).await.expect("a line once the hold settles");
-        assert_eq!(held["no_lock"], true, "{held}");
-    }
+    let held = loop {
+        let line = tokio::time::timeout(soon, ipc.next()).await.expect("a line once the hold settles");
+        assert!(!(line["no_lock"] == true && line["no_lock_held"] == false), "on but not held yet: {line}");
+        if line["no_lock_held"] == true {
+            break line;
+        }
+    };
+    assert_eq!((&held["ok"], &held["no_lock"]), (&json!(true), &json!(true)), "{held}");
+    assert!(held.get("point").is_none(), "{held}");
+    assert!(held["headroom"].is_u64(), "the line is a whole snapshot: {held}");
+    // Off: the hold ends, and that line reads the switch off.
+    let r = ipc_once(&svc, home.path(), json!({"cmd":"set_no_lock","on":false})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let off = tokio::time::timeout(soon, ipc.next()).await.expect("a line once the hold ends");
+    assert_eq!((&off["no_lock"], &off["no_lock_held"]), (&json!(false), &json!(false)), "{off}");
 }

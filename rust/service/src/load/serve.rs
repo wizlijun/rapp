@@ -53,9 +53,11 @@ fn line(state: &State, point: bool) -> Value {
     o.into()
 }
 
-/// `(no_lock, no_lock_held)` where the snapshot carries them; None elsewhere, so nothing is pushed for them.
-fn no_lock_now(state: &State, supported: bool) -> Option<(bool, bool)> {
-    supported.then(|| (state.cfg.lock().unwrap().no_lock(), state.no_lock.held()))
+/// `no_lock_held` where the snapshot carries it; None elsewhere, so nothing is pushed for it. The switch itself
+/// is not watched: just after it goes on the hold has not settled, and a push then would flash
+/// 「没能保持唤醒」 for the settle. Its line comes when the hold does (or, going off, when the hold ends).
+fn no_lock_now(state: &State, supported: bool) -> Option<bool> {
+    supported.then(|| state.no_lock.held())
 }
 
 /// `no_lock` and `no_lock_held`, live, only on a device that can keep itself awake (the GUI shows the card by the key).
@@ -84,8 +86,9 @@ fn with_ok(snapshot: Value) -> Map<String, Value> {
 }
 
 /// The first line is `reply(true, false)`; then one line per sample, and one more (without `point`) as soon as
-/// 不锁屏 is switched or its hold comes or goes, until the other side closes (what it writes is ignored). Before the first sample it waits for one, so a watch opened as the service starts gets data, not
-/// `no data`; the other side closing meanwhile still ends it. A first line that is an error ends the stream.
+/// the 不锁屏 hold comes or goes, until the other side closes (what it writes is ignored). Before the first
+/// sample it waits for one, so a watch opened as the service starts gets data, not `no data`; the other side
+/// closing meanwhile still ends it. A first line that is an error ends the stream.
 pub async fn follow<S: AsyncRead + AsyncWrite + Unpin>(state: &State, s: &mut S) -> Result<()> {
     let Some(load) = &state.load else {
         write_json(s, &err("unknown op")).await?;
@@ -129,7 +132,7 @@ pub async fn follow<S: AsyncRead + AsyncWrite + Unpin>(state: &State, s: &mut S)
                     break;
                 }
             }
-            // Wakes for any change of the service's state; a line goes out only when 不锁屏's keys moved.
+            // Wakes for any change of the service's state; a line goes out only when the hold came or went.
             r = changed.changed(), if supported => {
                 if r.is_err() {
                     break;
