@@ -289,14 +289,14 @@ class _PhoneSessionViewState extends State<PhoneSessionView> {
       alignment: Alignment.bottomCenter,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: phoneMaxWidth),
-        // A short landscape stage with the composer open leaves less than the 64 the bar needs: the stack then
-        // stands down rather than overflow (the composer's own close, its pull-down, is still there).
+        // Less than the 64 the bar needs: with the composer open (a short landscape stage) the stack stands down
+        // rather than overflow. Closed, it never hides (a hold in progress must not be lost); while the block is
+        // still closing its room is short for a moment, so the column lays out in an overflow box instead.
         child: LayoutBuilder(
-          builder: (context, box) => box.maxHeight - 8 - bottom < phonePrimaryTap
-              ? const SizedBox.shrink()
-              : Padding(
-          padding: EdgeInsets.fromLTRB(12, 8, 12, bottom),
-          child: Column(
+          builder: (context, box) {
+            final short = box.maxHeight - 8 - bottom < phonePrimaryTap;
+            if (open && short) return const SizedBox.shrink();
+            final column = Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -355,8 +355,12 @@ class _PhoneSessionViewState extends State<PhoneSessionView> {
                       : Padding(padding: const EdgeInsets.only(top: 8), child: voiceHint(hold)),
                 ),
             ],
-          ),
-        ),
+          );
+            return Padding(
+              padding: EdgeInsets.fromLTRB(12, 8, 12, bottom),
+              child: short ? OverflowBox(alignment: Alignment.bottomCenter, minHeight: 0, maxHeight: _shortStackRoom, child: column) : column,
+            );
+          },
         ),
       ),
     );
@@ -395,4 +399,7 @@ class _PhoneSessionViewState extends State<PhoneSessionView> {
 /// The reading view stops above the bar and the dock's rest place (a longer stack covers a little more).
 /// The room the pinned card needs while the composer is open: its text and two 64 buttons one above the other.
 const _pinnedMinRoom = 200.0;
+
+/// The room the stack lays out in while the block under it is still closing and the real room is short.
+const _shortStackRoom = 160.0;
 const _readingLift = stageButtonsUp + phonePrimaryTap + 12;
