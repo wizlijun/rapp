@@ -80,9 +80,9 @@ NoLock { #[serde(default, skip_serializing_if = "Option::is_none")] on: Option<b
   - 保持唤醒子进程没在跑就起一个：
     - macOS：`rapp-host stay-awake`，环境同 `workers::run_json`（`desktop_environment`），`kill_on_drop(true)`，stdin 用管道，服务退出、管道一断它就退出。
     - Linux：直接 `systemd-inhibit --what=idle:sleep --mode=block --who=rapp --why="不锁屏" cat`，stdin 用管道。
-  - 子进程意外退出：记 `no_lock_hold_failed`（带退出码和 stderr 末尾一行），按 1 s、2 s、4 s…封顶 60 s 退避重起；退出期间 `no_lock_held = false`。
+  - 子进程意外退出：记 `no_lock_hold_failed`（带退出码和 stderr 末尾一行），按 1 s、2 s、4 s…封顶 60 s 退避重起；退出期间 `no_lock_held = false`。找不到 `rapp-host`（起不来）也算一次失败，一样退避重试。一串连续失败只记第一条；保持住（起来满 500 ms）或开关关掉都算这一串结束，再开时的失败重新记一条。
 - **关了**：杀掉子进程（关 stdin，再 kill），`no_lock_held = false`。自动锁屏回到原来的规则，**关掉本身不触发锁屏**（我的决定）：原来的规则只在「会话数从大于 0 变成 0」时起定时，关掉时没有会话就不锁，下一次远程会话结束时照常 10 秒后锁；系统自己的熄屏、锁屏从此照常。这样人坐在电脑前关掉，屏幕不会 10 秒后突然锁上。
-- 每次开、关、子进程起落都 `state.changed` 通知一下，让 `watch_load` 的下一行和 `status` 带上新值。如果 `watch_load` 只在采样时出行（每几秒一次），GUI 最多晚一个采样周期看到，可以接受；能立刻多推一行更好，留给实现。
+- 每次开、关、子进程起落都 `state.changed` 通知一下，让 `watch_load` 的下一行和 `status` 带上新值。`watch_load` 在 `no_lock` 或 `no_lock_held` 变了时立刻多推一行（快照，不带 `point`），不等下一个采样。
 
 `rapp-host stay-awake`（`Sources/rapp-host/main.swift` 加子命令，走共用的 `parseHostArguments`（`Sources/RappCore/WorkerCLI.swift`））。按 CLAUDE.md，**同一个提交里改 host-core**（我的决定）：`rust/host-core/src/run.rs` 的 `USAGE_TEXT`、`cli-args.json` 样本（`tests/cli.rs` 的 `host_arguments_match_swift`）、`PORTING.md` 对照表的行号和摘要；host-core（Windows）对 `stay-awake` 回不支持的错误。子命令的行为：调 `PowerHold.stayAwake(...).hold`，打一行 `{"ok":true}`（`--json` 时），然后阻塞到 stdin 读到 EOF 或收到 SIGTERM，再 `release` 退出。断言建失败就打 `{"ok":false,"error":..}` 并以非 0 退出，服务按「意外退出」处理。
 
@@ -141,6 +141,6 @@ NoLock { #[serde(default, skip_serializing_if = "Option::is_none")] on: Option<b
 ## 10. 留给实现的
 
 - `no_lock_held` 是不是直接放进 `State`，还是放在 `no_lock` 模块里由快照去读。
-- 开关变化时让 `watch_load` 立刻多推一行，还是等下一个采样。
+- ~~开关变化时让 `watch_load` 立刻多推一行，还是等下一个采样。~~ 已定：立刻多推一行（§6）。
 - hub 的命令名、GUI `HubClient` / `ServiceClient` 方法名，照现有命名习惯。
 - 这次加 Op 要不要动协议版本号，按仓库现在加 Op（如 `SetService`、`Load`）时的做法。
