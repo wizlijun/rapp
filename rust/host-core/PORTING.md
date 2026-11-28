@@ -57,8 +57,8 @@ on the real platform) or "not on Windows".
 | `Sources/rapp-host/main.swift:66-77` | `list-apps`. | `run::run` (platform: `Platform::applications`) | `host_session::list_apps_check_version_lock_json` |
 | `Sources/rapp-host/main.swift:78-85` | `check`, `--prompt` accepted and ignored. | `run::run` | `cli::check_prompt_is_accepted_and_ignored` |
 | `Sources/rapp-host/main.swift:86-99` | `lock`: locks A, reports ok, already or failed. | `run::run`; `cli` `lock_json` (platform: `LockOps::lock`) | `host_session::lock_command_reports_ok_already_failed`, `cli::lock_json_lines` |
-| `Sources/rapp-host/main.swift:100-127` | `stay-awake`: holds the Mac awake (reason `rapp: 不锁屏`) until stdin closes or SIGTERM; Windows answers not supported. | `run::run` (prints not supported, exit 1) | `cli::host_arguments_match_swift` |
-| `Sources/rapp-host/main.swift:128-165` | `serve` and its stdin commands (`quit`, `kick`, `peer`, `yield`), exit on EOF. | `run::run`; `cli` `parse_worker_command`; `session::server` `Server` | `host_session::quit_exits_0`, `host_session::stdin_eof_exits_0`, `cli::worker_commands_match_swift` |
+| `Sources/rapp-host/main.swift:100-123` | `stay-awake`: holds the Mac awake (reason `rapp: 不锁屏`) until stdin closes or SIGTERM; Windows answers not supported. | `run::run` (prints not supported, exit 1) | `cli::host_arguments_match_swift` |
+| `Sources/rapp-host/main.swift:124-161` | `serve` and its stdin commands (`quit`, `kick`, `peer`, `yield`), exit on EOF. | `run::run`; `cli` `parse_worker_command`; `session::server` `Server` | `host_session::quit_exits_0`, `host_session::stdin_eof_exits_0`, `cli::worker_commands_match_swift` |
 | `Sources/rapp-host/MenuBarReader.swift:1-78` | Reads the app's menu bar for `menuBar` (17). | not on Windows: no menu mirror, `menuPick` ignored (spec §6.3, §6.8, §2.2) | `host_session::menu_pick_is_ignored` |
 | `Sources/rapp-host/Paster.swift:1-45` | The paster: one paste at a time, a queue behind it. | `session::clip` `paste`, paster `run` | `rules_clip::paste_session_matches_swift` |
 | `Sources/rapp-host/Paster.swift:46-75` | `paste` and `end`: text inline, an item from the store, a missing item refused. | `session::clip` `paste`, `paste_reply` | `host_session::paste_text_inline`, `host_session::paste_item_not_uploaded` |
@@ -215,7 +215,7 @@ fc9c28644fb89877d304e121b5d1356523cd85e74140da148142f35cdc0f1a00  Sources/RappCo
 eda09c4e90d814e62031d1066f0cdfa379dc75f2a2033bac67ecb2814c549038  Sources/RappCore/StateRules/RuleValue.swift
 ae529827aeee7608aa58726a3635e5d6608a07f4d17467457f1707c1e22df506  Sources/RappCore/StateRules/StateEngine.swift
 75c696ee929c497248a2e7e1e47afa82b7caf18a234e3a7e144800dc5bb8ca46  Sources/RappCore/StateRules/StateTable.swift
-9acfaa06ac0e85ae988b6a011f0e22ce08c99eead636cd98c3a63098cd38ce58  Sources/RappCore/StayAwake.swift
+4990c4a1e07c8a7d49f671e103f55ee9d63bf5925ee8729205ff95ba7ac57e9a  Sources/RappCore/StayAwake.swift
 6885204c71b13cc69d3444f86a489286a578a77ee3d123750ecb71daec3548f1  Sources/RappCore/TileCodec.swift
 38f814922111db6bf0baeae6c23df93d22311a451bc6e68afceca69805661bf3  Sources/RappCore/Timeout.swift
 10846fe7631fe1c6071b0e783d1d3429e4d0ef4318130bf4c0604a42c865fb67  Sources/RappCore/Transfers.swift
@@ -243,7 +243,7 @@ e669f56ff9a49750a9db2e17ea1f3b08f6a251488819d851d5573f0864a3a9d3  Sources/rapp-h
 400d898c40f7f68069db725ff6d707f43c4e17b24f45b4fa61c2cbcb71692877  Sources/rapp-host/WindowCapture.swift
 acf7c738941464c3588a4947609f9cd9c3921c0156a04fa94adb305fd503cb51  Sources/rapp-host/WindowResizer.swift
 89ec06578c09941aca07ce1652b2784b1f4194f8a44e5c4d4bdf521cf3203f02  Sources/rapp-host/WindowTracker.swift
-7365145f3c2475d8e2622dc56fc5b13fdd2a030bf7de021a0496c1c613907bd7  Sources/rapp-host/main.swift
+34fdcd0f4345b0e558beeeb86e6f84a4b6f8c0d1cf5b18a7e6451f50191a832a  Sources/rapp-host/main.swift
 ```
 
 ## 4. Not byte-exact

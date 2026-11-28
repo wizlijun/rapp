@@ -13,10 +13,13 @@ public final class StayAwake {
         self.release = release
     }
 
-    public func begin() {
-        guard !begun else { return }
+    /// True when a hold is in place after the call.
+    @discardableResult
+    public func begin() -> Bool {
+        guard !begun else { return held != nil }
         begun = true
         held = hold()
+        return held != nil
     }
 
     public func end() {

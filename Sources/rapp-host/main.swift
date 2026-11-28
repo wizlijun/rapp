@@ -100,12 +100,8 @@ case let .lock(json):
 case let .stayAwake(json):
     // Holds the Mac awake until stdin closes or SIGTERM, then lets go and exits 0.
     let output = WorkerOutput(json: json)
-    var failed = false
-    let awake = PowerHold.stayAwake(reason: "rapp: 不锁屏") { line in
-        if line.hasPrefix("could not keep") { failed = true }
-    }
-    awake.begin()
-    if failed {
+    let awake = PowerHold.stayAwake(reason: "rapp: 不锁屏") { output.log($0) }
+    if !awake.begin() {
         let reason = "could not keep this Mac awake"
         output.result(json ? jsonLine(["ok": false, "error": reason]) : "stay-awake: \(reason)")
         output.finish(ExitCode.runtime, reason)
