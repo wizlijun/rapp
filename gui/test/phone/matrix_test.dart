@@ -375,7 +375,8 @@ void main() {
         await settle(tester);
         expect(tester.takeException(), isNull, reason: '$where session');
         expect(find.byType(PhoneSessionView), findsOneWidget, reason: where);
-        if (!open) expect(find.byType(ReplyActions), findsOneWidget, reason: '$where: pinned card');
+        // Composer closed: a short stage never hides the card or the bar (T18-2).
+        expect(find.byType(ReplyActions), findsOneWidget, reason: '$where: pinned card');
         expect(find.byType(PhoneReplyBar), findsOneWidget, reason: '$where: reply bar');
         if (open) {
           await tester.tap(find.byKey(const Key('composer-open')));
@@ -385,6 +386,18 @@ void main() {
           expect(tester.takeException(), isNull, reason: '$where opened');
           expect(find.byKey(const Key('composer-field')), findsOneWidget, reason: where);
           checkTaps(tester, find.byType(PhoneShell), where);
+          // Composer open (T18-2): on the short landscape stages the card gives way (and at 844x390 the bar too).
+          final short = size == const Size(844, 390) || size == const Size(678, 466);
+          expect(find.byType(ReplyActions), short ? findsNothing : findsOneWidget, reason: '$where: card while open');
+          expect(find.byType(PhoneReplyBar), size == const Size(844, 390) ? findsNothing : findsOneWidget, reason: '$where: bar while open');
+          // Closing brings both back.
+          s.currentRemote!.composer.collapse();
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 400));
+          await settle(tester);
+          expect(tester.takeException(), isNull, reason: '$where closed again');
+          expect(find.byType(ReplyActions), findsOneWidget, reason: '$where: card back');
+          expect(find.byType(PhoneReplyBar), findsOneWidget, reason: '$where: bar back');
         } else {
           final before = sharedComposerTaps;
           checkTaps(tester, find.byType(PhoneShell), where, sharedComposer: true);
