@@ -289,16 +289,29 @@ class _PhoneSessionViewState extends State<PhoneSessionView> {
       alignment: Alignment.bottomCenter,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: phoneMaxWidth),
-        child: Padding(
+        // A short landscape stage with the composer open leaves less than the 64 the bar needs: the stack then
+        // stands down rather than overflow (the composer's own close, its pull-down, is still there).
+        child: LayoutBuilder(
+          builder: (context, box) => box.maxHeight - 8 - bottom < phonePrimaryTap
+              ? const SizedBox.shrink()
+              : Padding(
           padding: EdgeInsets.fromLTRB(12, 8, 12, bottom),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (pinned != null) ...[
-                Flexible(child: SingleChildScrollView(child: _pinnedCard(rs, pinned))),
-                const SizedBox(height: 12),
-              ] else
+              if (pinned != null)
+                // The gap is inside the flexible part, so it gives way with the card when there is no room.
+                Flexible(
+                  child: LayoutBuilder(
+                    // With the composer open on a short stage the card would scroll under the composer's own
+                    // controls; it waits until the composer closes.
+                    builder: (context, room) => open && room.maxHeight < _pinnedMinRoom
+                        ? const SizedBox.shrink()
+                        : Padding(padding: const EdgeInsets.only(bottom: 12), child: SingleChildScrollView(child: _pinnedCard(rs, pinned))),
+                  ),
+                )
+              else
                 ListenableBuilder(
                   listenable: replies,
                   builder: (context, _) {
@@ -344,6 +357,7 @@ class _PhoneSessionViewState extends State<PhoneSessionView> {
             ],
           ),
         ),
+        ),
       ),
     );
   }
@@ -379,4 +393,6 @@ class _PhoneSessionViewState extends State<PhoneSessionView> {
 }
 
 /// The reading view stops above the bar and the dock's rest place (a longer stack covers a little more).
+/// The room the pinned card needs while the composer is open: its text and two 64 buttons one above the other.
+const _pinnedMinRoom = 200.0;
 const _readingLift = stageButtonsUp + phonePrimaryTap + 12;
